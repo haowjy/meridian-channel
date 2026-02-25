@@ -1,0 +1,309 @@
+"""Slice 7 safety features: permissions, budgets, guardrails, and redaction."""
+
+from __future__ import annotations
+
+import sqlite3
+import stat
+import sys
+import textwrap
+from pathlib import Path
+
+import pytest
+
+from meridian.lib.adapters.sqlite import StateDB
+from meridian.lib.domain import RunCreateParams, TokenUsage, WorkspaceCreateParams
+from meridian.lib.exec.spawn import execute_with_finalization
+from meridian.lib.harness._common import (
+    extract_session_id_from_artifacts,
+    extract_usage_from_artifacts,
+)
+from meridian.lib.harness.adapter import (
+    ArtifactStore as HarnessArtifactStore,
+)
+from meridian.lib.harness.adapter import (
+    HarnessCapabilities,
+    PermissionResolver,
+    RunParams,
+    StreamEvent,
+)
+from meridian.lib.harness.registry import HarnessRegistry
+from meridian.lib.safety.budget import Budget
+from meridian.lib.safety.permissions import (
+    PermissionTier,
+    build_permission_config,
+    permission_flags_for_harness,
+)
+from meridian.lib.safety.redaction import SecretSpec
+from meridian.lib.state.artifact_store import LocalStore, make_artifact_key
+from meridian.lib.types import HarnessId, ModelId, RunId
+
+
+class ScriptHarnessAdapter:
+    def __init__(self, *, command: tuple[str, ...]) -> None:
+        self._command = command
+
+    @property
+    def id(self) -> HarnessId:
+        return HarnessId("slice7-script")
+
+    @property
+    def capabilities(self) -> HarnessCapabilities:
+        return HarnessCapabilities()
+
+    def build_command(self, run: RunParams, perms: PermissionResolver) -> list[str]:
+        return [*self._command, *perms.resolve_flags(self.id), *run.extra_args]
+
+    def parse_stream_event(self, line: str) -> StreamEvent | None:
+        _ = line
+        return None
+
+    def extract_usage(self, artifacts: HarnessArtifactStore, run_id: RunId) -> TokenUsage:
+        return extract_usage_from_artifacts(artifacts, run_id)
+
+    def extract_session_id(self, artifacts: HarnessArtifactStore, run_id: RunId) -> str | None:
+        return extract_session_id_from_artifacts(artifacts, run_id)
+
+
+def _fetch_run_row(state: StateDB, run_id: RunId) -> sqlite3.Row:
+    conn = sqlite3.connect(state.paths.db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute("SELECT * FROM runs WHERE id = ?", (str(run_id),)).fetchone()
+    finally:
+        conn.close()
+    assert row is not None
+    return row
+
+
+def _write_script(path: Path, source: str, *, executable: bool = False) -> None:
+    path.write_text(textwrap.dedent(source), encoding="utf-8")
+    if executable:
+        mode = path.stat().st_mode
+        path.chmod(mode | stat.S_IXUSR)
+
+
+def test_danger_permission_requires_unsafe() -> None:
+    with pytest.raises(ValueError, match="requires explicit --unsafe"):
+        build_permission_config("danger", unsafe=False)
+
+    config = build_permission_config("danger", unsafe=True)
+    assert config.tier is PermissionTier.DANGER
+    assert permission_flags_for_harness(HarnessId("claude"), config) == [
+        "--dangerously-skip-permissions"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_budget_breach_sigterms_process_and_marks_run_failed(tmp_path: Path) -> None:
+    state = StateDB(tmp_path)
+    run = state.create_run(
+        RunCreateParams(prompt="budget", model=ModelId("gpt-5.3-codex"))
+    )
+    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
+
+    script = tmp_path / "budget.py"
+    _write_script(
+        script,
+        """
+        import time
+
+        print('{"tokens": {"total_cost_usd": 0.8}}', flush=True)
+        time.sleep(20)
+        """,
+    )
+
+    adapter = ScriptHarnessAdapter(command=(sys.executable, str(script)))
+    registry = HarnessRegistry()
+    registry.register(adapter)
+
+    exit_code = await execute_with_finalization(
+        run,
+        state=state,
+        artifacts=artifacts,
+        registry=registry,
+        harness_id=adapter.id,
+        cwd=tmp_path,
+        budget=Budget(per_run_usd=0.2),
+    )
+
+    assert exit_code == 2
+    row = _fetch_run_row(state, run.run_id)
+    assert row["failure_reason"] == "budget_exceeded"
+
+
+@pytest.mark.asyncio
+async def test_workspace_totals_track_cost_across_runs(tmp_path: Path) -> None:
+    state = StateDB(tmp_path)
+    workspace = state.create_workspace(WorkspaceCreateParams(name="slice7"))
+    run = state.create_run(
+        RunCreateParams(
+            prompt="workspace-budget",
+            model=ModelId("gpt-5.3-codex"),
+            workspace_id=workspace.workspace_id,
+        )
+    )
+    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
+
+    script = tmp_path / "workspace-cost.py"
+    _write_script(
+        script,
+        """
+        print(
+            '{"tokens": {"input_tokens": 12, "output_tokens": 5, '
+            '"total_cost_usd": 0.33}}',
+            flush=True,
+        )
+        print('{"role":"assistant","content":"done"}', flush=True)
+        """,
+    )
+
+    adapter = ScriptHarnessAdapter(command=(sys.executable, str(script)))
+    registry = HarnessRegistry()
+    registry.register(adapter)
+
+    exit_code = await execute_with_finalization(
+        run,
+        state=state,
+        artifacts=artifacts,
+        registry=registry,
+        harness_id=adapter.id,
+        cwd=tmp_path,
+    )
+    assert exit_code == 0
+
+    conn = sqlite3.connect(state.paths.db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        workspace_row = conn.execute(
+            (
+                "SELECT total_cost_usd, total_input_tokens, total_output_tokens "
+                "FROM workspaces WHERE id = ?"
+            ),
+            (str(workspace.workspace_id),),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert workspace_row is not None
+    assert workspace_row["total_cost_usd"] == pytest.approx(0.33)
+    assert workspace_row["total_input_tokens"] == 12
+    assert workspace_row["total_output_tokens"] == 5
+
+
+@pytest.mark.asyncio
+async def test_guardrail_failure_triggers_retry(tmp_path: Path) -> None:
+    state = StateDB(tmp_path)
+    run = state.create_run(
+        RunCreateParams(prompt="guardrails", model=ModelId("gpt-5.3-codex"))
+    )
+    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
+
+    run_counter = tmp_path / "run-counter.txt"
+    harness_script = tmp_path / "guardrail-harness.py"
+    _write_script(
+        harness_script,
+        """
+        from pathlib import Path
+        import sys
+
+        counter = Path(sys.argv[1])
+        if counter.exists():
+            value = int(counter.read_text(encoding="utf-8"))
+        else:
+            value = 0
+        counter.write_text(str(value + 1), encoding="utf-8")
+        print('{"role":"assistant","content":"guardrail test output"}', flush=True)
+        """,
+    )
+
+    guardrail_counter = tmp_path / "guardrail-counter.txt"
+    guardrail_script = tmp_path / "guardrail.sh"
+    _write_script(
+        guardrail_script,
+        f"""
+        #!/usr/bin/env bash
+        set -euo pipefail
+        file={guardrail_counter.as_posix()!r}
+        count=0
+        if [[ -f "$file" ]]; then
+          count=$(cat "$file")
+        fi
+        count=$((count + 1))
+        echo "$count" > "$file"
+        if [[ "$count" -lt 2 ]]; then
+          echo "guardrail failed on first pass" >&2
+          exit 1
+        fi
+        """,
+        executable=True,
+    )
+
+    adapter = ScriptHarnessAdapter(command=(sys.executable, str(harness_script), str(run_counter)))
+    registry = HarnessRegistry()
+    registry.register(adapter)
+
+    exit_code = await execute_with_finalization(
+        run,
+        state=state,
+        artifacts=artifacts,
+        registry=registry,
+        harness_id=adapter.id,
+        cwd=tmp_path,
+        guardrails=(guardrail_script,),
+        max_retries=2,
+        retry_backoff_seconds=0.0,
+    )
+
+    assert exit_code == 0
+    assert run_counter.read_text(encoding="utf-8") == "2"
+
+
+@pytest.mark.asyncio
+async def test_secret_redaction_applies_to_output_stderr_and_report(tmp_path: Path) -> None:
+    secret_value = "SUPER-SECRET-123"
+
+    state = StateDB(tmp_path)
+    run = state.create_run(
+        RunCreateParams(prompt="redact", model=ModelId("gpt-5.3-codex"))
+    )
+    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
+
+    script = tmp_path / "redact.py"
+    _write_script(
+        script,
+        """
+        import os
+        import sys
+        
+        value = os.getenv("MERIDIAN_SECRET_API_KEY", "")
+        print(f'{{"role":"assistant","content":"value={value}"}}', flush=True)
+        print(f"stderr={value}", file=sys.stderr, flush=True)
+        """,
+    )
+
+    adapter = ScriptHarnessAdapter(command=(sys.executable, str(script)))
+    registry = HarnessRegistry()
+    registry.register(adapter)
+
+    exit_code = await execute_with_finalization(
+        run,
+        state=state,
+        artifacts=artifacts,
+        registry=registry,
+        harness_id=adapter.id,
+        cwd=tmp_path,
+        env_overrides={"MERIDIAN_SECRET_API_KEY": secret_value},
+        secrets=(SecretSpec(key="API_KEY", value=secret_value),),
+    )
+
+    assert exit_code == 0
+
+    output_text = artifacts.get(make_artifact_key(run.run_id, "output.jsonl")).decode("utf-8")
+    stderr_text = artifacts.get(make_artifact_key(run.run_id, "stderr.log")).decode("utf-8")
+    report_text = artifacts.get(make_artifact_key(run.run_id, "report.md")).decode("utf-8")
+
+    assert secret_value not in output_text
+    assert secret_value not in stderr_text
+    assert secret_value not in report_text
+    assert "[REDACTED:API_KEY]" in output_text
+    assert "[REDACTED:API_KEY]" in report_text

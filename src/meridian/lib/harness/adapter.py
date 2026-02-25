@@ -1,0 +1,82 @@
+"""Harness adapter protocol and shared data models."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Protocol
+
+from meridian.lib.domain import TokenUsage
+from meridian.lib.types import ArtifactKey, HarnessId, ModelId, RunId
+
+
+@dataclass(frozen=True, slots=True)
+class HarnessCapabilities:
+    """Feature flags for one harness implementation."""
+
+    supports_stream_events: bool = True
+    supports_session_resume: bool = False
+    supports_native_skills: bool = False
+    supports_programmatic_tools: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class RunParams:
+    """Inputs required to launch one harness run."""
+
+    prompt: str
+    model: ModelId
+    skills: tuple[str, ...] = ()
+    agent: str | None = None
+    extra_args: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class StreamEvent:
+    """Structured stream event parsed from harness output."""
+
+    event_type: str
+    raw_line: str
+    text: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RunResult:
+    """Result payload for one completed execution."""
+
+    status: str
+    output: str
+    usage: TokenUsage = field(default_factory=TokenUsage)
+    session_id: str | None = None
+    raw_response: dict[str, object] | None = None
+
+
+class PermissionResolver(Protocol):
+    """Permission resolver provided by execution layer."""
+
+    def resolve_flags(self, harness_id: HarnessId) -> list[str]: ...
+
+
+class ArtifactStore(Protocol):
+    """Artifact access used for usage/session extraction."""
+
+    def get(self, key: ArtifactKey) -> bytes: ...
+
+    def exists(self, key: ArtifactKey) -> bool: ...
+
+
+class HarnessAdapter(Protocol):
+    """Protocol for harness-specific launch/parsing/extraction behavior."""
+
+    @property
+    def id(self) -> HarnessId: ...
+
+    @property
+    def capabilities(self) -> HarnessCapabilities: ...
+
+    def build_command(self, run: RunParams, perms: PermissionResolver) -> list[str]: ...
+
+    def parse_stream_event(self, line: str) -> StreamEvent | None: ...
+
+    def extract_usage(self, artifacts: ArtifactStore, run_id: RunId) -> TokenUsage: ...
+
+    def extract_session_id(self, artifacts: ArtifactStore, run_id: RunId) -> str | None: ...

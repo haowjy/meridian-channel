@@ -1,0 +1,49 @@
+"""CLI command handlers for models.* operations."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from functools import partial
+from typing import Any
+
+from meridian.lib.ops.models import (
+    ModelsListInput,
+    ModelsShowInput,
+    models_list_sync,
+    models_show_sync,
+)
+from meridian.lib.ops.registry import get_all_operations
+
+Emitter = Callable[[Any], None]
+
+
+def _models_list(emit: Emitter) -> None:
+    emit(models_list_sync(ModelsListInput()))
+
+
+def _models_show(emit: Emitter, name: str) -> None:
+    emit(models_show_sync(ModelsShowInput(model=name)))
+
+
+def register_models_commands(app: Any, emit: Emitter) -> tuple[set[str], dict[str, str]]:
+    handlers: dict[str, Callable[[], Callable[..., None]]] = {
+        "models.list": lambda: partial(_models_list, emit),
+        "models.show": lambda: partial(_models_show, emit),
+    }
+
+    registered: set[str] = set()
+    descriptions: dict[str, str] = {}
+
+    for op in get_all_operations():
+        if op.cli_group != "models" or op.mcp_only:
+            continue
+        handler_factory = handlers.get(op.name)
+        if handler_factory is None:
+            raise ValueError(f"No CLI handler registered for operation '{op.name}'")
+        handler = handler_factory()
+        handler.__name__ = f"cmd_{op.cli_group}_{op.cli_name}"
+        app.command(handler, name=op.cli_name, help=op.description)
+        registered.add(f"{op.cli_group}.{op.cli_name}")
+        descriptions[op.name] = op.description
+
+    return registered, descriptions

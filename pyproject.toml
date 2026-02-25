@@ -1,0 +1,62 @@
+[project]
+name = "meridian-channel"
+version = "0.1.0"
+description = "Orchestrate CLI + MCP server for multi-model agent workflows"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+  "cyclopts>=3.0",
+  "mcp>=1.0",
+  "structlog>=25.0",
+]
+
+[project.scripts]
+meridian = "meridian.cli.main:main"
+
+[project.optional-dependencies]
+dev = [
+  "pyright>=1.1.400",
+  "pytest>=8.4.0",
+  "pytest-asyncio>=0.24.0",
+  "ruff>=0.12.0",
+]
+templates = [
+  "jinja2>=3.1",
+]
+
+[build-system]
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/meridian"]
+
+[tool.pyright]
+pythonVersion = "3.14"
+typeCheckingMode = "strict"
+reportMissingModuleSource = false
+include = ["src"]
+exclude = [".venv", "build", "dist"]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "TCH"]
+ignore = [
+  # PEP 695 TypeVar syntax rules are intentionally deferred until tooling support lands.
+  "UP046",
+  # PEP 695 TypeVar syntax rules are intentionally deferred until tooling support lands.
+  "UP047",
+  # Deferred while modules are still scaffold-level and heavily protocol-oriented.
+  "TC001",
+  # Deferred while modules are still scaffold-level and heavily protocol-oriented.
+  "TC003",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+asyncio_mode = "auto"
+pythonpath = ["src"]

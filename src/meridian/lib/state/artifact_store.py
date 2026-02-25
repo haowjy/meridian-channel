@@ -1,0 +1,108 @@
+"""ArtifactStore protocol and local/in-memory implementations."""
+
+from __future__ import annotations
+
+from collections.abc import MutableMapping
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Protocol, cast
+
+from meridian.lib.types import ArtifactKey, RunId
+
+
+class ArtifactStore(Protocol):
+    """Read/write interface for run artifacts."""
+
+    def put(self, key: ArtifactKey, data: bytes) -> None: ...
+
+    def get(self, key: ArtifactKey) -> bytes: ...
+
+    def exists(self, key: ArtifactKey) -> bool: ...
+
+    def delete(self, key: ArtifactKey) -> None: ...
+
+    def list_artifacts(self, run_id: str) -> list[ArtifactKey]: ...
+
+
+def make_artifact_key(run_id: RunId | str, name: str) -> ArtifactKey:
+    """Build an artifact key from run ID and artifact name/path."""
+
+    return ArtifactKey(f"{run_id}/{name}")
+
+
+def _normalize_key(key: ArtifactKey) -> Path:
+    rel = Path(str(key))
+    if rel.is_absolute() or ".." in rel.parts:
+        raise ValueError(f"Artifact key must be a safe relative path: {key}")
+    return rel
+
+
+def _empty_bytes_map() -> MutableMapping[ArtifactKey, bytes]:
+    return cast("MutableMapping[ArtifactKey, bytes]", {})
+
+
+@dataclass(slots=True)
+class LocalStore:
+    """Filesystem-backed artifact store rooted at one directory."""
+
+    root_dir: Path
+
+    def put(self, key: ArtifactKey, data: bytes) -> None:
+        rel = _normalize_key(key)
+        target = self.root_dir / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+
+    def get(self, key: ArtifactKey) -> bytes:
+        rel = _normalize_key(key)
+        return (self.root_dir / rel).read_bytes()
+
+    def exists(self, key: ArtifactKey) -> bool:
+        rel = _normalize_key(key)
+        return (self.root_dir / rel).exists()
+
+    def delete(self, key: ArtifactKey) -> None:
+        rel = _normalize_key(key)
+        target = self.root_dir / rel
+        if target.exists():
+            target.unlink()
+
+    def list_artifacts(self, run_id: str) -> list[ArtifactKey]:
+        base = self.root_dir / run_id
+        if not base.exists():
+            return []
+
+        artifacts: list[ArtifactKey] = []
+        for path in sorted(base.rglob("*")):
+            if not path.is_file():
+                continue
+            artifacts.append(ArtifactKey(path.relative_to(self.root_dir).as_posix()))
+        return artifacts
+
+
+@dataclass(slots=True)
+class InMemoryStore:
+    """Process-local in-memory artifact store."""
+
+    _data: MutableMapping[ArtifactKey, bytes] = field(default_factory=_empty_bytes_map)
+
+    def put(self, key: ArtifactKey, data: bytes) -> None:
+        _normalize_key(key)
+        self._data[key] = data
+
+    def get(self, key: ArtifactKey) -> bytes:
+        _normalize_key(key)
+        return self._data[key]
+
+    def exists(self, key: ArtifactKey) -> bool:
+        _normalize_key(key)
+        return key in self._data
+
+    def delete(self, key: ArtifactKey) -> None:
+        _normalize_key(key)
+        self._data.pop(key, None)
+
+    def list_artifacts(self, run_id: str) -> list[ArtifactKey]:
+        prefix = f"{run_id}/"
+        matches = [key for key in self._data if str(key).startswith(prefix)]
+        return sorted(matches, key=str)

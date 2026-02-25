@@ -1,0 +1,596 @@
+"""Async subprocess execution and finalization guarantees."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import signal
+import sys
+import time
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import cast
+
+import structlog
+
+from meridian.lib.adapters.sqlite import RunFinalizeRow, RunStartRow, StateDB
+from meridian.lib.domain import Run
+from meridian.lib.exec.errors import ErrorCategory, classify_error, should_retry
+from meridian.lib.exec.signals import SignalForwarder, map_process_exit_code
+from meridian.lib.exec.timeout import (
+    DEFAULT_KILL_GRACE_SECONDS,
+    RunTimeoutError,
+    terminate_process,
+    wait_for_process_exit,
+)
+from meridian.lib.extract.finalize import (
+    FinalizeExtraction,
+    enrich_finalize,
+    reset_finalize_attempt_artifacts,
+)
+from meridian.lib.harness.adapter import (
+    PermissionResolver,
+    RunParams,
+)
+from meridian.lib.harness.registry import HarnessRegistry
+from meridian.lib.safety.budget import Budget, BudgetBreach, LiveBudgetTracker
+from meridian.lib.safety.guardrails import GuardrailFailure, run_guardrails
+from meridian.lib.safety.redaction import SecretSpec, redact_secret_bytes
+from meridian.lib.state.artifact_store import ArtifactStore, make_artifact_key
+from meridian.lib.types import HarnessId, RunId, WorkspaceId
+
+OUTPUT_FILENAME = "output.jsonl"
+STDERR_FILENAME = "stderr.log"
+TOKENS_FILENAME = "tokens.json"
+REPORT_FILENAME = "report.md"
+DEFAULT_INFRA_EXIT_CODE = 2
+DEFAULT_MAX_RETRIES = 3
+logger = structlog.get_logger(__name__)
+
+
+class SafeDefaultPermissionResolver(PermissionResolver):
+    """Safe default resolver for run execution."""
+
+    def resolve_flags(self, harness_id: HarnessId) -> list[str]:
+        _ = harness_id
+        return []
+
+
+@dataclass(frozen=True, slots=True)
+class SpawnResult:
+    """Result from one spawned harness process."""
+
+    exit_code: int
+    raw_return_code: int
+    timed_out: bool
+    received_signal: signal.Signals | None
+    output_log_path: Path
+    stderr_log_path: Path
+    budget_breach: BudgetBreach | None = None
+
+
+def run_log_dir(repo_root: Path, run_id: RunId, workspace_id: WorkspaceId | None) -> Path:
+    """Resolve run artifact directory from run/workspace IDs."""
+
+    if workspace_id is None:
+        return repo_root / ".meridian" / "runs" / str(run_id)
+
+    local_id = str(run_id).split("/")[-1]
+    return repo_root / ".meridian" / "workspaces" / str(workspace_id) / "runs" / local_id
+
+
+def _extract_tokens_payload(raw_line: bytes) -> bytes | None:
+    try:
+        payload_obj = json.loads(raw_line.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+
+    if not isinstance(payload_obj, dict):
+        return None
+
+    payload = cast("dict[str, object]", payload_obj)
+    tokens = payload.get("tokens")
+    if not isinstance(tokens, dict):
+        return None
+    return json.dumps(tokens, sort_keys=True).encode("utf-8")
+
+
+async def _capture_stdout(
+    reader: asyncio.StreamReader,
+    output_file: Path,
+    *,
+    secrets: tuple[SecretSpec, ...],
+    line_observer: Callable[[bytes], None] | None,
+) -> tuple[bytes, bytes | None]:
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    buffer = bytearray()
+    last_tokens_payload: bytes | None = None
+    with output_file.open("wb") as handle:
+        while True:
+            chunk = await reader.readline()
+            if not chunk:
+                break
+
+            redacted_chunk = redact_secret_bytes(chunk, secrets)
+            if line_observer is not None:
+                line_observer(redacted_chunk)
+
+            parsed_tokens = _extract_tokens_payload(chunk)
+            if parsed_tokens is not None:
+                last_tokens_payload = redact_secret_bytes(parsed_tokens, secrets)
+
+            handle.write(redacted_chunk)
+            handle.flush()
+            buffer.extend(redacted_chunk)
+
+    return bytes(buffer), last_tokens_payload
+
+
+async def _capture_stderr(
+    reader: asyncio.StreamReader,
+    stderr_file: Path,
+    *,
+    secrets: tuple[SecretSpec, ...],
+    stream_to_terminal: bool = True,
+) -> bytes:
+    stderr_file.parent.mkdir(parents=True, exist_ok=True)
+    buffer = bytearray()
+    with stderr_file.open("wb") as handle:
+        while True:
+            chunk = await reader.readline()
+            if not chunk:
+                break
+            redacted_chunk = redact_secret_bytes(chunk, secrets)
+            handle.write(redacted_chunk)
+            handle.flush()
+            buffer.extend(redacted_chunk)
+            if stream_to_terminal:
+                sys.stderr.write(redacted_chunk.decode("utf-8", errors="replace"))
+                sys.stderr.flush()
+    return bytes(buffer)
+
+
+async def _terminate_after_cancellation(
+    process: asyncio.subprocess.Process,
+    *,
+    kill_grace_seconds: float,
+) -> None:
+    if process.returncode is not None:
+        return
+
+    # Task cancellation is usually driven by caller/user interruption, so we mirror
+    # Ctrl-C semantics and let children handle graceful SIGINT shutdown paths.
+    process.send_signal(signal.SIGINT)
+    try:
+        await asyncio.wait_for(process.wait(), timeout=kill_grace_seconds)
+    except TimeoutError:
+        if process.returncode is None:
+            process.kill()
+            await process.wait()
+
+
+async def spawn_and_stream(
+    *,
+    run_id: RunId,
+    command: tuple[str, ...],
+    cwd: Path,
+    artifacts: ArtifactStore,
+    output_log_path: Path,
+    stderr_log_path: Path,
+    timeout_seconds: float | None,
+    env: dict[str, str] | None = None,
+    kill_grace_seconds: float = DEFAULT_KILL_GRACE_SECONDS,
+    budget_tracker: LiveBudgetTracker | None = None,
+    secrets: tuple[SecretSpec, ...] = (),
+) -> SpawnResult:
+    """Spawn one process, stream/capture output, and return mapped exit metadata."""
+
+    if not command:
+        raise ValueError("Cannot spawn process: command is empty.")
+
+    process = await asyncio.create_subprocess_exec(
+        *command,
+        cwd=str(cwd),
+        env=env,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    if process.stdout is None or process.stderr is None:
+        raise RuntimeError("Subprocess did not expose stdout/stderr pipes.")
+
+    budget_breach: BudgetBreach | None = None
+    budget_termination_task: asyncio.Task[None] | None = None
+
+    def _on_stdout_line(chunk: bytes) -> None:
+        nonlocal budget_breach, budget_termination_task
+        if budget_tracker is None or budget_breach is not None:
+            return
+
+        breach = budget_tracker.observe_json_line(chunk)
+        if breach is None:
+            return
+
+        budget_breach = breach
+        if process.returncode is None:
+            # Budget breaches are infra-enforced limits; always escalate to SIGKILL
+            # if the child ignores SIGTERM.
+            budget_termination_task = asyncio.create_task(
+                terminate_process(process, grace_seconds=kill_grace_seconds)
+            )
+
+    stdout_task = asyncio.create_task(
+        _capture_stdout(
+            process.stdout,
+            output_log_path,
+            secrets=secrets,
+            line_observer=_on_stdout_line,
+        )
+    )
+    stderr_task = asyncio.create_task(
+        _capture_stderr(
+            process.stderr,
+            stderr_log_path,
+            secrets=secrets,
+        )
+    )
+
+    received_signal: signal.Signals | None = None
+    timed_out = False
+    raw_return_code = DEFAULT_INFRA_EXIT_CODE
+    try:
+        with SignalForwarder(process) as forwarder:
+            try:
+                raw_return_code = await wait_for_process_exit(
+                    process,
+                    timeout_seconds=timeout_seconds,
+                    kill_grace_seconds=kill_grace_seconds,
+                )
+            except RunTimeoutError:
+                timed_out = True
+                raw_return_code = process.returncode if process.returncode is not None else 1
+            received_signal = forwarder.received_signal
+    except asyncio.CancelledError:
+        await _terminate_after_cancellation(process, kill_grace_seconds=kill_grace_seconds)
+        raise
+    finally:
+        if budget_termination_task is not None:
+            await budget_termination_task
+
+        stdout_bytes, tokens_payload = await stdout_task
+        stderr_bytes = await stderr_task
+
+        artifacts.put(make_artifact_key(run_id, OUTPUT_FILENAME), stdout_bytes)
+        artifacts.put(make_artifact_key(run_id, STDERR_FILENAME), stderr_bytes)
+        if tokens_payload is not None:
+            artifacts.put(make_artifact_key(run_id, TOKENS_FILENAME), tokens_payload)
+
+    if budget_breach is not None:
+        mapped_exit_code = DEFAULT_INFRA_EXIT_CODE
+    elif timed_out:
+        mapped_exit_code = 3
+    else:
+        mapped_exit_code = map_process_exit_code(
+            raw_return_code=raw_return_code,
+            received_signal=received_signal,
+        )
+
+    return SpawnResult(
+        exit_code=mapped_exit_code,
+        raw_return_code=raw_return_code,
+        timed_out=timed_out,
+        received_signal=received_signal,
+        output_log_path=output_log_path,
+        stderr_log_path=stderr_log_path,
+        budget_breach=budget_breach,
+    )
+
+
+def _append_budget_exceeded_event(
+    *,
+    state: StateDB,
+    run: Run,
+    breach: BudgetBreach,
+) -> None:
+    if run.workspace_id is None:
+        return
+
+    state.append_workflow_event(
+        workspace_id=run.workspace_id,
+        event_type="budget_exceeded",
+        run_id=run.run_id,
+        payload={
+            "scope": breach.scope,
+            "observed_usd": breach.observed_usd,
+            "limit_usd": breach.limit_usd,
+        },
+    )
+
+
+def _guardrail_failure_text(failures: tuple[GuardrailFailure, ...]) -> str:
+    lines = ["Guardrail validation failed:"]
+    for failure in failures:
+        lines.append(
+            f"- {failure.script} (exit {failure.exit_code})"
+            + (f": {failure.stderr}" if failure.stderr else "")
+        )
+    return "\n".join(lines)
+
+
+def _append_text_to_stderr_artifact(
+    *,
+    artifacts: ArtifactStore,
+    run_id: RunId,
+    text: str,
+    secrets: tuple[SecretSpec, ...],
+) -> None:
+    key = make_artifact_key(run_id, STDERR_FILENAME)
+    existing = artifacts.get(key).decode("utf-8", errors="ignore") if artifacts.exists(key) else ""
+    prefix = "\n" if existing and not existing.endswith("\n") else ""
+    combined = f"{existing}{prefix}{text}\n"
+    artifacts.put(key, redact_secret_bytes(combined.encode("utf-8"), secrets))
+
+
+async def execute_with_finalization(
+    run: Run,
+    *,
+    state: StateDB,
+    artifacts: ArtifactStore,
+    registry: HarnessRegistry,
+    permission_resolver: PermissionResolver | None = None,
+    cwd: Path | None = None,
+    timeout_seconds: float | None = None,
+    kill_grace_seconds: float = DEFAULT_KILL_GRACE_SECONDS,
+    skills: tuple[str, ...] = (),
+    agent: str | None = None,
+    extra_args: tuple[str, ...] = (),
+    env_overrides: dict[str, str] | None = None,
+    harness_id: HarnessId | None = None,
+    max_retries: int = DEFAULT_MAX_RETRIES,
+    retry_backoff_seconds: float = 0.25,
+    budget: Budget | None = None,
+    workspace_spent_usd: float = 0.0,
+    guardrails: tuple[Path, ...] = (),
+    secrets: tuple[SecretSpec, ...] = (),
+) -> int:
+    """Execute one run and always append a finalize row via try/finally."""
+
+    execution_cwd = (cwd or Path.cwd()).resolve()
+    repo_root = state.paths.root_dir.parent
+    log_dir = run_log_dir(repo_root, run.run_id, run.workspace_id)
+    output_log_path = log_dir / OUTPUT_FILENAME
+    report_path = log_dir / REPORT_FILENAME
+
+    if harness_id is None:
+        harness, _warning = registry.route(str(run.model))
+    else:
+        harness = registry.get(harness_id)
+
+    resolved_perms = permission_resolver or SafeDefaultPermissionResolver()
+    start_session_id = str(run.run_id)
+    state.append_start_row(
+        RunStartRow(
+            run_id=run.run_id,
+            model=run.model,
+            harness=harness.id,
+            cwd=execution_cwd,
+            log_dir=log_dir,
+            session_id=start_session_id,
+            workspace_id=run.workspace_id,
+            agent=agent,
+            skills=skills,
+        )
+    )
+
+    budget_tracker = (
+        LiveBudgetTracker(budget=budget, workspace_spent_usd=workspace_spent_usd)
+        if budget is not None
+        else None
+    )
+    preflight_breach = budget_tracker.check() if budget_tracker is not None else None
+
+    started_at = time.monotonic()
+    exit_code = DEFAULT_INFRA_EXIT_CODE
+    finalized_session_id = start_session_id
+    extracted: FinalizeExtraction | None = None
+    failure_reason: str | None = None
+
+    try:
+        run_params = RunParams(
+            prompt=run.prompt,
+            model=run.model,
+            skills=skills,
+            agent=agent,
+            extra_args=extra_args,
+        )
+        command = tuple(harness.build_command(run_params, resolved_perms))
+        retries_attempted = 0
+
+        while True:
+            reset_finalize_attempt_artifacts(
+                artifacts=artifacts,
+                run_id=run.run_id,
+                log_dir=log_dir,
+            )
+
+            if preflight_breach is not None:
+                exit_code = DEFAULT_INFRA_EXIT_CODE
+                failure_reason = "budget_exceeded"
+                _append_budget_exceeded_event(state=state, run=run, breach=preflight_breach)
+                break
+
+            spawn_result = await spawn_and_stream(
+                run_id=run.run_id,
+                command=command,
+                cwd=execution_cwd,
+                artifacts=artifacts,
+                output_log_path=output_log_path,
+                stderr_log_path=log_dir / STDERR_FILENAME,
+                timeout_seconds=timeout_seconds,
+                env=env_overrides,
+                kill_grace_seconds=kill_grace_seconds,
+                budget_tracker=budget_tracker,
+                secrets=secrets,
+            )
+            exit_code = spawn_result.exit_code
+
+            if report_path.exists():
+                redacted_report = redact_secret_bytes(report_path.read_bytes(), secrets)
+                report_path.write_bytes(redacted_report)
+                artifacts.put(
+                    make_artifact_key(run.run_id, REPORT_FILENAME),
+                    redacted_report,
+                )
+
+            extracted = enrich_finalize(
+                artifacts=artifacts,
+                adapter=harness,
+                run_id=run.run_id,
+                log_dir=log_dir,
+                secrets=secrets,
+            )
+            if extracted.session_id:
+                finalized_session_id = extracted.session_id
+
+            if spawn_result.budget_breach is not None:
+                failure_reason = "budget_exceeded"
+                _append_budget_exceeded_event(
+                    state=state,
+                    run=run,
+                    breach=spawn_result.budget_breach,
+                )
+                break
+
+            # Some harnesses emit usage only at the end. Recheck post-run with extracted usage.
+            if (
+                budget_tracker is not None
+                and extracted.usage.total_cost_usd is not None
+                and budget_tracker.observe_cost(extracted.usage.total_cost_usd) is not None
+            ):
+                failure_reason = "budget_exceeded"
+                breach = budget_tracker.check()
+                if breach is not None:
+                    _append_budget_exceeded_event(state=state, run=run, breach=breach)
+                exit_code = DEFAULT_INFRA_EXIT_CODE
+                break
+
+            if exit_code == 0 and extracted.output_is_empty:
+                # Successful exit with no content is unusable; fail fast so supervisors can react.
+                exit_code = 1
+                failure_reason = "empty_output"
+                break
+
+            if exit_code == 0:
+                guardrail_result = run_guardrails(
+                    guardrails,
+                    run_id=run.run_id,
+                    cwd=execution_cwd,
+                    env=env_overrides,
+                    report_path=extracted.report_path,
+                    output_log_path=output_log_path,
+                )
+                if guardrail_result.ok:
+                    break
+
+                failure_reason = "guardrail_failed"
+                guardrail_text = _guardrail_failure_text(guardrail_result.failures)
+                _append_text_to_stderr_artifact(
+                    artifacts=artifacts,
+                    run_id=run.run_id,
+                    text=guardrail_text,
+                    secrets=secrets,
+                )
+
+                if retries_attempted >= max_retries:
+                    exit_code = 1
+                    break
+
+                retries_attempted += 1
+                exit_code = 1
+                logger.warning(
+                    "Retrying after guardrail failure.",
+                    run_id=str(run.run_id),
+                    harness_id=str(harness.id),
+                    retries_attempted=retries_attempted,
+                    max_retries=max_retries,
+                    guardrail_failures=[
+                        f"{item.script}:{item.exit_code}" for item in guardrail_result.failures
+                    ],
+                )
+                if retry_backoff_seconds > 0:
+                    await asyncio.sleep(retry_backoff_seconds * retries_attempted)
+                continue
+
+            stderr_key = make_artifact_key(run.run_id, STDERR_FILENAME)
+            stderr_text = (
+                artifacts.get(stderr_key).decode("utf-8", errors="ignore")
+                if artifacts.exists(stderr_key)
+                else ""
+            )
+            category = classify_error(exit_code, stderr_text)
+            if category == ErrorCategory.STRATEGY_CHANGE:
+                failure_reason = "strategy_change"
+
+            if not should_retry(
+                exit_code=exit_code,
+                stderr=stderr_text,
+                retries_attempted=retries_attempted,
+                max_retries=max_retries,
+            ):
+                break
+
+            retries_attempted += 1
+            logger.warning(
+                "Retrying failed run attempt.",
+                run_id=str(run.run_id),
+                harness_id=str(harness.id),
+                exit_code=exit_code,
+                retries_attempted=retries_attempted,
+                max_retries=max_retries,
+                error_category=str(category),
+            )
+            if retry_backoff_seconds > 0:
+                await asyncio.sleep(retry_backoff_seconds * retries_attempted)
+    except asyncio.CancelledError:
+        exit_code = 130
+    except Exception:
+        logger.exception(
+            "Run execution failed with infrastructure error.",
+            run_id=str(run.run_id),
+            harness_id=str(harness.id),
+        )
+        exit_code = DEFAULT_INFRA_EXIT_CODE
+    finally:
+        duration_seconds = time.monotonic() - started_at
+        finalized_report = extracted.report_path if extracted is not None else None
+        finalized_usage = extracted.usage if extracted is not None else None
+        files_touched_count = len(extracted.files_touched) if extracted is not None else None
+        finalize_row = RunFinalizeRow(
+            exit_code=exit_code,
+            duration_seconds=duration_seconds,
+            failure_reason=failure_reason,
+            output_log=output_log_path,
+            report_path=finalized_report,
+            harness_session_id=finalized_session_id,
+            input_tokens=finalized_usage.input_tokens if finalized_usage is not None else None,
+            output_tokens=finalized_usage.output_tokens if finalized_usage is not None else None,
+            total_cost_usd=finalized_usage.total_cost_usd if finalized_usage is not None else None,
+            files_touched_count=files_touched_count,
+        )
+        previous_sigterm_handler = signal.getsignal(signal.SIGTERM)
+        sigterm_ignored = False
+        try:
+            # Keep finalize-row persistence atomic against parent SIGTERM.
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            sigterm_ignored = True
+        except ValueError:
+            # Signal handlers can only be mutated from the main thread.
+            pass
+
+        try:
+            state.append_finalize_row(run.run_id, finalize_row)
+        finally:
+            if sigterm_ignored:
+                signal.signal(signal.SIGTERM, previous_sigterm_handler)
+
+    return exit_code
