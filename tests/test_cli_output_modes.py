@@ -1,4 +1,4 @@
-"""CLI output mode behavior for Slice 5b."""
+"""CLI output mode behavior for Slice C output formatting."""
 
 from __future__ import annotations
 
@@ -12,12 +12,13 @@ def test_porcelain_mode_outputs_stable_key_values(run_meridian) -> None:
     assert "\t" in result.stdout
 
 
-def test_plain_mode_is_valid_non_json_text(run_meridian) -> None:
-    result = run_meridian(["--format", "plain", "diag", "doctor"])
+def test_text_mode_is_human_readable(run_meridian) -> None:
+    result = run_meridian(["--format", "text", "diag", "doctor"])
     assert result.returncode == 0
-    assert result.stdout.strip().startswith("{")
-    payload = json.loads(result.stdout)
-    assert payload["ok"] is True
+    # format_text() on DiagDoctorOutput emits key: value lines, not JSON
+    assert "ok:" in result.stdout
+    assert "repo_root:" in result.stdout
+    assert not result.stdout.strip().startswith("{")
 
 
 def test_json_mode_outputs_machine_json(run_meridian) -> None:
@@ -25,3 +26,11 @@ def test_json_mode_outputs_machine_json(run_meridian) -> None:
     assert result.returncode == 0
     payload = json.loads(result.stdout)
     assert payload["ok"] is True
+
+
+def test_default_mode_uses_text_format(run_meridian) -> None:
+    # No format flag — default should be "text", which calls format_text()
+    result = run_meridian(["diag", "doctor"])
+    assert result.returncode == 0
+    assert "ok:" in result.stdout
+    assert not result.stdout.strip().startswith("{")

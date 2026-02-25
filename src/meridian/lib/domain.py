@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from meridian.lib.formatting import FormatContext
     from meridian.lib.types import (
         ArtifactKey,
         ModelId,
@@ -131,6 +132,9 @@ class IndexReport:
 
     indexed_count: int
 
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        return f"skills.reindex  ok  indexed={self.indexed_count}"
+
 
 @dataclass(frozen=True, slots=True)
 class SkillManifest:
@@ -151,6 +155,9 @@ class SkillContent:
     tags: tuple[str, ...]
     content: str
     path: str
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        return f"{self.name}: {self.description}\n\n{self.content}"
 
 
 @dataclass(frozen=True, slots=True)

@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from meridian.lib.ops._runtime import build_runtime, require_workspace_id
 from meridian.lib.ops.registry import OperationSpec, operation
 from meridian.lib.workspace import context as workspace_context
+
+if TYPE_CHECKING:
+    from meridian.lib.formatting import FormatContext
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,11 +40,22 @@ class ContextActionOutput:
     file_path: str
     status: str
 
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        """Single-line action confirmation for text output mode."""
+        return f"{self.workspace_id}  {self.status}  {self.file_path}"
+
 
 @dataclass(frozen=True, slots=True)
 class ContextListOutput:
     workspace_id: str
     files: tuple[str, ...]
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        """Workspace id with pinned file list for text output mode."""
+        if not self.files:
+            return f"{self.workspace_id}  (no pinned files)"
+        file_list = "\n".join(f"  {f}" for f in self.files)
+        return f"{self.workspace_id}\n{file_list}"
 
 
 def context_pin_sync(payload: ContextPinInput) -> ContextActionOutput:

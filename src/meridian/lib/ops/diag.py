@@ -7,7 +7,7 @@ import json
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from meridian.lib.ops._runtime import build_runtime
 from meridian.lib.ops.registry import OperationSpec, operation
@@ -15,6 +15,9 @@ from meridian.lib.state.db import open_connection
 from meridian.lib.state.schema import REQUIRED_TABLES, list_tables
 from meridian.lib.types import WorkspaceId
 from meridian.lib.workspace.launch import workspace_lock_path
+
+if TYPE_CHECKING:
+    from meridian.lib.formatting import FormatContext
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,11 +42,38 @@ class DiagDoctorOutput:
     skills_dir: str
     warnings: tuple[str, ...] = ()
 
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        """Key-value health check output for text output mode."""
+        from meridian.cli.format_helpers import kv_block
+
+        status = "ok" if self.ok else "WARNINGS"
+        pairs: list[tuple[str, str | None]] = [
+            ("ok", status),
+            ("repo_root", self.repo_root),
+            ("db_path", self.db_path),
+            ("schema_version", str(self.schema_version)),
+            ("runs", str(self.run_count)),
+            ("workspaces", str(self.workspace_count)),
+            ("agents_dir", self.agents_dir),
+            ("skills_dir", self.skills_dir),
+        ]
+        result = kv_block(pairs)
+        for w in self.warnings:
+            result += f"\nwarning: {w}"
+        return result
+
 
 @dataclass(frozen=True, slots=True)
 class DiagRepairOutput:
     ok: bool
     repaired: tuple[str, ...]
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        """Repair summary for text output mode."""
+        if not self.repaired:
+            return "ok: no repairs needed"
+        items = ", ".join(self.repaired)
+        return f"ok: repaired {items}"
 
 
 def diag_doctor_sync(payload: DiagDoctorInput) -> DiagDoctorOutput:

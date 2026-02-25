@@ -8,12 +8,15 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from meridian.lib.ops._runtime import build_runtime
 from meridian.lib.ops.registry import OperationSpec, operation
 from meridian.lib.state.db import open_connection
 from meridian.lib.state.jsonl import read_jsonl_rows
+
+if TYPE_CHECKING:
+    from meridian.lib.formatting import FormatContext
 
 _WORKSPACE_COUNTER_KEY = "counter:workspace"
 _GLOBAL_RUN_COUNTER_KEY = "counter:run:global"
@@ -35,6 +38,19 @@ class MigrateRunOutput:
     skipped_rows: int
     renamed_skill_dirs: tuple[str, ...]
     updated_reference_files: int
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        """Migration summary line for text output mode."""
+        parts: list[str] = [
+            f"imported={self.imported_runs}",
+            f"updated={self.updated_runs}",
+            f"skipped={self.skipped_rows}",
+        ]
+        if self.renamed_skill_dirs:
+            parts.append(f"renamed={','.join(self.renamed_skill_dirs)}")
+        if self.updated_reference_files:
+            parts.append(f"ref_updates={self.updated_reference_files}")
+        return "migrate.run  ok  " + "  ".join(parts)
 
 
 def _now_iso() -> str:

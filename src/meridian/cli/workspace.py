@@ -28,6 +28,7 @@ def _workspace_start(
     name: Annotated[str | None, Parameter(name="--name")] = None,
     model: Annotated[str, Parameter(name="--model")] = "",
     autocompact: Annotated[int | None, Parameter(name="--autocompact")] = None,
+    dry_run: Annotated[bool, Parameter(name="--dry-run")] = False,
     harness_args: Annotated[tuple[str, ...], Parameter(name="--harness-arg")] = (),
 ) -> None:
     emit(
@@ -36,6 +37,7 @@ def _workspace_start(
                 name=name,
                 model=model,
                 autocompact=autocompact,
+                dry_run=dry_run,
                 harness_args=harness_args,
             )
         )

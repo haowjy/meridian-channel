@@ -6,7 +6,7 @@ import asyncio
 import sqlite3
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from meridian.lib.domain import WorkspaceFilters
 from meridian.lib.ops._runtime import build_runtime
@@ -17,6 +17,9 @@ from meridian.lib.workspace import crud as workspace_crud
 from meridian.lib.workspace.launch import WorkspaceLaunchRequest, launch_supervisor
 from meridian.lib.workspace.summary import generate_workspace_summary
 
+if TYPE_CHECKING:
+    from meridian.lib.formatting import FormatContext
+
 
 @dataclass(frozen=True, slots=True)
 class WorkspaceStartInput:
@@ -24,6 +27,7 @@ class WorkspaceStartInput:
     model: str = ""
     autocompact: int | None = None
     harness_args: tuple[str, ...] = ()
+    dry_run: bool = False
     repo_root: str | None = None
 
 
@@ -65,6 +69,10 @@ class WorkspaceActionOutput:
     lock_path: str | None = None
     summary_path: str | None = None
 
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        """Single-line action summary for text output mode."""
+        return f"Workspace {self.workspace_id} {self.state} ({self.message.rstrip('.')})"
+
 
 @dataclass(frozen=True, slots=True)
 class WorkspaceListEntry:
@@ -72,10 +80,22 @@ class WorkspaceListEntry:
     state: str
     name: str | None
 
+    def as_row(self) -> list[str]:
+        """Return columnar cells for tabular alignment."""
+        return [self.workspace_id, self.state, self.name if self.name is not None else "-"]
+
 
 @dataclass(frozen=True, slots=True)
 class WorkspaceListOutput:
     workspaces: tuple[WorkspaceListEntry, ...]
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        """Columnar list of workspaces for text output mode."""
+        if not self.workspaces:
+            return "(no workspaces)"
+        from meridian.cli.format_helpers import tabular
+
+        return tabular([entry.as_row() for entry in self.workspaces])
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +106,19 @@ class WorkspaceDetailOutput:
     summary_path: str | None
     pinned_files: tuple[str, ...]
     run_ids: tuple[str, ...]
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        """Key-value detail view for text output mode. Omits None/empty fields."""
+        from meridian.cli.format_helpers import kv_block
+
+        pairs: list[tuple[str, str | None]] = [
+            ("Workspace", self.workspace_id),
+            ("State", self.state),
+            ("Name", self.name),
+            ("Pinned", ", ".join(self.pinned_files) if self.pinned_files else None),
+            ("Runs", ", ".join(self.run_ids) if self.run_ids else None),
+        ]
+        return kv_block(pairs)
 
 
 def _summary_text(path: str) -> str:
@@ -114,7 +147,6 @@ def workspace_start_sync(payload: WorkspaceStartInput) -> WorkspaceActionOutput:
 
     launch_result = launch_supervisor(
         repo_root=runtime.repo_root,
-        registry=runtime.harness_registry,
         request=WorkspaceLaunchRequest(
             workspace_id=workspace.workspace_id,
             model=payload.model,
@@ -123,6 +155,7 @@ def workspace_start_sync(payload: WorkspaceStartInput) -> WorkspaceActionOutput:
             fresh=True,
             summary_text=_summary_text(summary_path.as_posix()),
             pinned_context=pinned_context,
+            dry_run=payload.dry_run,
         ),
     )
     transitioned = workspace_crud.transition_workspace(
@@ -134,7 +167,7 @@ def workspace_start_sync(payload: WorkspaceStartInput) -> WorkspaceActionOutput:
     return WorkspaceActionOutput(
         workspace_id=str(workspace.workspace_id),
         state=transitioned.state,
-        message="Workspace session finished.",
+        message=("Workspace launch dry-run." if payload.dry_run else "Workspace session finished."),
         exit_code=launch_result.exit_code,
         command=launch_result.command,
         lock_path=launch_result.lock_path.as_posix(),
@@ -174,7 +207,6 @@ def workspace_resume_sync(payload: WorkspaceResumeInput) -> WorkspaceActionOutpu
 
         launch_result = launch_supervisor(
             repo_root=runtime.repo_root,
-            registry=runtime.harness_registry,
             request=WorkspaceLaunchRequest(
                 workspace_id=workspace.workspace_id,
                 model=payload.model,

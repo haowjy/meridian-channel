@@ -74,6 +74,14 @@ def resolve_run_defaults(
         resolved_model = profile.model.strip()
     if not resolved_model:
         resolved_model = default_model
+    try:
+        from meridian.lib.config.catalog import resolve_model
+
+        catalog_entry = resolve_model(resolved_model)
+        resolved_model = str(catalog_entry.model_id)
+    except (KeyError, ValueError):
+        # Unknown model or ambiguous alias: defer to harness routing validation.
+        pass
 
     return RunPromptDefaults(
         model=resolved_model,

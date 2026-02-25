@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 from meridian.lib.harness._common import (
     extract_session_id_from_artifacts,
     extract_usage_from_artifacts,
     parse_json_stream_event,
+)
+from meridian.lib.harness._strategies import (
+    FlagEffect,
+    FlagStrategy,
+    PromptMode,
+    StrategyMap,
+    build_harness_command,
 )
 from meridian.lib.harness.adapter import (
     ArtifactStore,
@@ -21,8 +30,20 @@ def _strip_opencode_prefix(model: str) -> str:
     return model[len("opencode-") :] if model.startswith("opencode-") else model
 
 
+def _opencode_model_transform(value: object, args: list[str]) -> None:
+    args.extend(["--model", _strip_opencode_prefix(str(value))])
+
+
 class OpenCodeAdapter:
     """HarnessAdapter implementation for `opencode`."""
+
+    STRATEGIES: ClassVar[StrategyMap] = {
+        "model": FlagStrategy(effect=FlagEffect.TRANSFORM, transform=_opencode_model_transform),
+        "agent": FlagStrategy(effect=FlagEffect.DROP),
+        "skills": FlagStrategy(effect=FlagEffect.DROP),
+    }
+    PROMPT_MODE: ClassVar[PromptMode] = PromptMode.POSITIONAL
+    BASE_COMMAND: ClassVar[tuple[str, ...]] = ("opencode", "run")
 
     @property
     def id(self) -> HarnessId:
@@ -38,15 +59,14 @@ class OpenCodeAdapter:
         )
 
     def build_command(self, run: RunParams, perms: PermissionResolver) -> list[str]:
-        model = _strip_opencode_prefix(str(run.model))
-        command = ["opencode", "run", "--model", model, run.prompt]
-        if run.agent:
-            command.extend(["--agent", run.agent])
-        if run.skills:
-            command.extend(["--skills", ",".join(run.skills)])
-        command.extend(perms.resolve_flags(self.id))
-        command.extend(run.extra_args)
-        return command
+        return build_harness_command(
+            base_command=self.BASE_COMMAND,
+            prompt_mode=self.PROMPT_MODE,
+            run=run,
+            strategies=self.STRATEGIES,
+            perms=perms,
+            harness_id=self.id,
+        )
 
     def parse_stream_event(self, line: str) -> StreamEvent | None:
         return parse_json_stream_event(line)
@@ -56,4 +76,3 @@ class OpenCodeAdapter:
 
     def extract_session_id(self, artifacts: ArtifactStore, run_id: RunId) -> str | None:
         return extract_session_id_from_artifacts(artifacts, run_id)
-

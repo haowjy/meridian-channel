@@ -11,6 +11,7 @@ from cyclopts import App, Parameter
 from meridian.lib.domain import RunStatus
 from meridian.lib.ops.registry import get_all_operations
 from meridian.lib.ops.run import (
+    RunActionOutput,
     RunContinueInput,
     RunCreateInput,
     RunListInput,
@@ -53,26 +54,35 @@ def _run_create(
     resolved_budget_per_run = budget_per_run_usd
     if resolved_budget_per_run is None:
         resolved_budget_per_run = budget_usd
-    result = run_create_sync(
-        RunCreateInput(
-            prompt=prompt,
-            model=model,
-            skills=skill_flags,
-            files=references,
-            template_vars=template_vars,
-            agent=agent,
-            report_path=report_path,
-            dry_run=dry_run,
-            workspace=workspace,
-            timeout_secs=timeout_secs,
-            permission_tier=permission_tier,
-            unsafe=unsafe,
-            budget_per_run_usd=resolved_budget_per_run,
-            budget_per_workspace_usd=budget_per_workspace_usd,
-            guardrails=guardrails,
-            secrets=secrets,
+    try:
+        result = run_create_sync(
+            RunCreateInput(
+                prompt=prompt,
+                model=model,
+                skills=skill_flags,
+                files=references,
+                template_vars=template_vars,
+                agent=agent,
+                report_path=report_path,
+                dry_run=dry_run,
+                workspace=workspace,
+                timeout_secs=timeout_secs,
+                permission_tier=permission_tier,
+                unsafe=unsafe,
+                budget_per_run_usd=resolved_budget_per_run,
+                budget_per_workspace_usd=budget_per_workspace_usd,
+                guardrails=guardrails,
+                secrets=secrets,
+            )
         )
-    )
+    except KeyError as exc:
+        message = str(exc.args[0]) if exc.args else "Unknown skills."
+        result = RunActionOutput(
+            command="run.create",
+            status="failed",
+            error="unknown_skills",
+            message=message,
+        )
     emit(result)
 
 

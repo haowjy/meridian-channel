@@ -69,6 +69,7 @@ async def test_mcp_tools_registered_and_callable(package_root, cli_env) -> None:
             {
                 "prompt": "MCP non-blocking run_create verification",
                 "model": "gpt-5.3-codex",
+                "timeout_secs": 5,
             },
         )
         assert created.isError is False

@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 from meridian.lib.harness._common import (
     extract_session_id_from_artifacts,
     extract_usage_from_artifacts,
     parse_json_stream_event,
+)
+from meridian.lib.harness._strategies import (
+    FlagEffect,
+    FlagStrategy,
+    PromptMode,
+    StrategyMap,
+    build_harness_command,
 )
 from meridian.lib.harness.adapter import (
     ArtifactStore,
@@ -19,6 +28,14 @@ from meridian.lib.types import HarnessId, RunId
 
 class CodexAdapter:
     """HarnessAdapter implementation for `codex`."""
+
+    STRATEGIES: ClassVar[StrategyMap] = {
+        "model": FlagStrategy(effect=FlagEffect.CLI_FLAG, cli_flag="--model"),
+        "agent": FlagStrategy(effect=FlagEffect.DROP),
+        "skills": FlagStrategy(effect=FlagEffect.DROP),
+    }
+    PROMPT_MODE: ClassVar[PromptMode] = PromptMode.POSITIONAL
+    BASE_COMMAND: ClassVar[tuple[str, ...]] = ("codex", "exec")
 
     @property
     def id(self) -> HarnessId:
@@ -34,14 +51,14 @@ class CodexAdapter:
         )
 
     def build_command(self, run: RunParams, perms: PermissionResolver) -> list[str]:
-        command = ["codex", "exec", "--model", str(run.model), run.prompt]
-        if run.agent:
-            command.extend(["--agent", run.agent])
-        if run.skills:
-            command.extend(["--skills", ",".join(run.skills)])
-        command.extend(perms.resolve_flags(self.id))
-        command.extend(run.extra_args)
-        return command
+        return build_harness_command(
+            base_command=self.BASE_COMMAND,
+            prompt_mode=self.PROMPT_MODE,
+            run=run,
+            strategies=self.STRATEGIES,
+            perms=perms,
+            harness_id=self.id,
+        )
 
     def parse_stream_event(self, line: str) -> StreamEvent | None:
         return parse_json_stream_event(line)
@@ -51,4 +68,3 @@ class CodexAdapter:
 
     def extract_session_id(self, artifacts: ArtifactStore, run_id: RunId) -> str | None:
         return extract_session_id_from_artifacts(artifacts, run_id)
-

@@ -71,6 +71,15 @@ def test_yes_and_no_input_flags_are_wired(run_meridian) -> None:
     assert payload["status"] == "dry-run"
 
 
+def test_workspace_start_supports_dry_run(run_meridian) -> None:
+    result = run_meridian(["--json", "workspace", "start", "--dry-run"])
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["message"] == "Workspace launch dry-run."
+    assert payload["exit_code"] == 0
+    assert "mock_harness.py" in payload["command"][1]
+
+
 def test_completion_bash_emits_script(run_meridian) -> None:
     result = run_meridian(["completion", "bash"])
     assert result.returncode == 0

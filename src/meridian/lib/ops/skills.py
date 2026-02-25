@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from meridian.lib.config.skill_registry import SkillRegistry
 from meridian.lib.domain import IndexReport, SkillContent, SkillManifest
 from meridian.lib.ops.registry import OperationSpec, operation
+
+if TYPE_CHECKING:
+    from meridian.lib.formatting import FormatContext
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +39,14 @@ class SkillsReindexInput:
 @dataclass(frozen=True, slots=True)
 class SkillsQueryOutput:
     skills: tuple[SkillManifest, ...]
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        """One skill per line: name + description for text output mode."""
+        if not self.skills:
+            return "(no skills)"
+        from meridian.cli.format_helpers import tabular
+
+        return tabular([[skill.name, skill.description] for skill in self.skills])
 
 
 def _registry(repo_root: str | None) -> SkillRegistry:

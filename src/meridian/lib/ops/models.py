@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from meridian.lib.config.catalog import CatalogModel, load_model_catalog, resolve_model
 from meridian.lib.ops.registry import OperationSpec, operation
+
+if TYPE_CHECKING:
+    from meridian.lib.formatting import FormatContext
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +27,23 @@ class ModelsShowInput:
 @dataclass(frozen=True, slots=True)
 class ModelsListOutput:
     models: tuple[CatalogModel, ...]
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        """Columnar model table for text output mode."""
+        if not self.models:
+            return "(no models)"
+        from meridian.cli.format_helpers import tabular
+
+        rows = [
+            [
+                str(m.model_id),
+                m.harness,
+                f"({', '.join(m.aliases)})" if m.aliases else "",
+                m.role,
+            ]
+            for m in self.models
+        ]
+        return tabular(rows)
 
 
 def _repo_root(repo_root: str | None) -> Path | None:

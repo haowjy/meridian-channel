@@ -5,11 +5,14 @@ from __future__ import annotations
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from meridian.lib.config._paths import resolve_repo_root
 from meridian.lib.config.routing import route_model
 from meridian.lib.types import HarnessId, ModelId
+
+if TYPE_CHECKING:
+    from meridian.lib.formatting import FormatContext
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +25,20 @@ class CatalogModel:
     strengths: str
     cost_tier: str
     harness: HarnessId
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        """Key-value detail view for a single model."""
+        from meridian.cli.format_helpers import kv_block
+
+        pairs: list[tuple[str, str | None]] = [
+            ("Model", str(self.model_id)),
+            ("Harness", str(self.harness)),
+            ("Aliases", ", ".join(self.aliases) if self.aliases else None),
+            ("Role", self.role),
+            ("Strengths", self.strengths),
+            ("Cost", self.cost_tier),
+        ]
+        return kv_block(pairs)
 
 
 def _entry(

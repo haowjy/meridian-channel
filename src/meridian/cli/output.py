@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 import json
-import sys
 from dataclasses import dataclass
 from typing import Any, Literal, cast
 
+from meridian.lib.formatting import FormatContext, TextFormattable
 from meridian.lib.serialization import to_jsonable
 
-OutputFormat = Literal["rich", "plain", "json", "porcelain"]
+# Re-export so existing `from meridian.cli.output import FormatContext` still works.
+__all__ = ["FormatContext", "TextFormattable"]
+
+OutputFormat = Literal["text", "json", "porcelain"]
 type JSONScalar = str | int | float | bool | None
 type JSONValue = JSONScalar | list["JSONValue"] | dict[str, "JSONValue"]
+
+_DEFAULT_FORMAT_CTX = FormatContext()
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,7 +35,11 @@ def normalize_output_format(
     porcelain_mode: bool,
     stdout_is_tty: bool,
 ) -> OutputFormat:
-    """Resolve final output format from flags and TTY state."""
+    """Resolve final output format from flags and TTY state.
+
+    Default is always "text" regardless of TTY — callers should not need
+    to distinguish terminal vs pipe for basic text output.
+    """
 
     if json_mode:
         return "json"
@@ -38,16 +47,12 @@ def normalize_output_format(
         return "porcelain"
 
     if requested is None or requested == "":
-        return "rich" if stdout_is_tty else "plain"
+        return "text"
 
     normalized = requested.strip().lower()
-    if normalized == "text":
-        return "plain"
-    if normalized in {"rich", "plain", "json", "porcelain"}:
-        if normalized == "rich" and not stdout_is_tty:
-            return "plain"
+    if normalized in {"text", "json", "porcelain"}:
         return cast("OutputFormat", normalized)
-    raise SystemExit("--format must be one of: rich, plain, json, porcelain, text")
+    raise SystemExit("--format must be one of: text, json, porcelain")
 
 
 def _porcelain_value(value: JSONValue) -> str:
@@ -75,28 +80,6 @@ def _emit_porcelain(value: Any) -> None:
     print(payload)
 
 
-def _emit_plain(value: Any) -> None:
-    payload = _to_json_value(value)
-    if isinstance(payload, str):
-        print(payload)
-        return
-    print(json.dumps(payload, sort_keys=True, indent=2))
-
-
-def _emit_rich(value: Any) -> None:
-    try:
-        from rich.console import Console
-    except ImportError:
-        _emit_plain(value)
-        return
-
-    try:
-        console = Console(file=sys.stdout)
-        console.print_json(data=_to_json_value(value))
-    except Exception:
-        _emit_plain(value)
-
-
 def emit(value: Any, config: OutputConfig) -> None:
     """Emit one payload according to the configured output mode."""
 
@@ -106,7 +89,9 @@ def emit(value: Any, config: OutputConfig) -> None:
     if config.format == "porcelain":
         _emit_porcelain(value)
         return
-    if config.format == "rich":
-        _emit_rich(value)
-        return
-    _emit_plain(value)
+    # "text" mode: prefer format_text() if available, fall back to indented JSON
+    # for types that have not yet implemented the protocol.
+    if isinstance(value, TextFormattable):
+        print(value.format_text(_DEFAULT_FORMAT_CTX))
+    else:
+        print(json.dumps(_to_json_value(value), sort_keys=True, indent=2))

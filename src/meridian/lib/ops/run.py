@@ -9,7 +9,7 @@ import sqlite3
 import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import structlog
 
@@ -34,6 +34,9 @@ from meridian.lib.safety.permissions import (
 )
 from meridian.lib.safety.redaction import SecretSpec, parse_secret_specs, secrets_env_overrides
 from meridian.lib.types import ModelId, RunId
+
+if TYPE_CHECKING:
+    from meridian.lib.formatting import FormatContext
 
 _BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
 logger = structlog.get_logger(__name__)
@@ -87,6 +90,29 @@ class RunActionOutput:
     exit_code: int | None = None
     duration_secs: float | None = None
 
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        """Compact single-line summary for text output mode."""
+        parts: list[str] = [self.command, self.status]
+        if self.run_id is not None:
+            parts.append(self.run_id)
+        if self.model is not None:
+            parts.append(f"model={self.model}")
+        if self.harness_id is not None:
+            parts.append(f"harness={self.harness_id}")
+        if self.skills:
+            parts.append(f"skills={','.join(self.skills)}")
+        if self.duration_secs is not None:
+            parts.append(f"{self.duration_secs:.1f}s")
+        if self.exit_code is not None:
+            parts.append(f"exit={self.exit_code}")
+        if self.message is not None:
+            parts.append(self.message)
+        if self.error is not None:
+            parts.append(f"error={self.error}")
+        if self.warning is not None:
+            parts.append(f"warning={self.warning}")
+        return "  ".join(parts)
+
 
 @dataclass(frozen=True, slots=True)
 class RunListInput:
@@ -108,10 +134,29 @@ class RunListEntry:
     duration_secs: float | None
     cost_usd: float | None
 
+    def as_row(self) -> list[str]:
+        """Return columnar cells for tabular alignment."""
+        return [
+            self.run_id,
+            self.status,
+            self.model,
+            self.workspace_id if self.workspace_id is not None else "-",
+            f"{self.duration_secs:.1f}s" if self.duration_secs is not None else "-",
+            f"${self.cost_usd:.2f}" if self.cost_usd is not None else "-",
+        ]
+
 
 @dataclass(frozen=True, slots=True)
 class RunListOutput:
     runs: tuple[RunListEntry, ...]
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        """Columnar list of runs for text output mode."""
+        if not self.runs:
+            return "(no runs)"
+        from meridian.cli.format_helpers import tabular
+
+        return tabular([entry.as_row() for entry in self.runs])
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,6 +187,27 @@ class RunDetailOutput:
     report: str | None
     files_touched: tuple[str, ...] | None
     skills: tuple[str, ...]
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        """Key-value detail view for text output mode. Omits None/empty fields."""
+        from meridian.cli.format_helpers import kv_block
+
+        status_str = self.status
+        if self.exit_code is not None:
+            status_str += f" (exit {self.exit_code})"
+
+        pairs: list[tuple[str, str | None]] = [
+            ("Run", self.run_id),
+            ("Status", status_str),
+            ("Model", f"{self.model} ({self.harness})"),
+            ("Duration", f"{self.duration_secs:.1f}s" if self.duration_secs is not None else None),
+            ("Workspace", self.workspace_id),
+            ("Skills", ", ".join(self.skills) if self.skills else None),
+            ("Failure", self.failure_reason),
+            ("Cost", f"${self.cost_usd:.4f}" if self.cost_usd is not None else None),
+            ("Report", self.report_path),
+        ]
+        return kv_block(pairs)
 
 
 @dataclass(frozen=True, slots=True)

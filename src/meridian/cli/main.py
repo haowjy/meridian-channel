@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from contextlib import suppress
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +22,8 @@ from meridian.cli.output import emit as emit_output
 from meridian.cli.run import register_run_commands
 from meridian.cli.skills_cmd import register_skills_commands
 from meridian.cli.workspace import register_workspace_commands
+from meridian.lib.config._paths import resolve_repo_root
+from meridian.lib.workspace.launch import cleanup_orphaned_locks
 from meridian.server.main import run_server
 
 if TYPE_CHECKING:
@@ -42,7 +45,7 @@ _GLOBAL_OPTIONS: ContextVar[GlobalOptions | None] = ContextVar("_GLOBAL_OPTIONS"
 def get_global_options() -> GlobalOptions:
     """Return parsed global options for current command."""
 
-    default = GlobalOptions(output=OutputConfig(format="plain"))
+    default = GlobalOptions(output=OutputConfig(format="text"))
     return _GLOBAL_OPTIONS.get() or default
 
 
@@ -67,8 +70,14 @@ def _extract_global_options(argv: Sequence[str]) -> tuple[list[str], GlobalOptio
             json_mode = True
             i += 1
             continue
+        if arg == "--no-json":
+            i += 1
+            continue
         if arg == "--porcelain":
             porcelain_mode = True
+            i += 1
+            continue
+        if arg == "--no-porcelain":
             i += 1
             continue
         if arg == "--format":
@@ -85,8 +94,14 @@ def _extract_global_options(argv: Sequence[str]) -> tuple[list[str], GlobalOptio
             yes = True
             i += 1
             continue
+        if arg == "--no-yes":
+            i += 1
+            continue
         if arg == "--no-input":
             no_input = True
+            i += 1
+            continue
+        if arg == "--no-no-input":
             i += 1
             continue
 
@@ -102,7 +117,12 @@ def _extract_global_options(argv: Sequence[str]) -> tuple[list[str], GlobalOptio
     return cleaned, GlobalOptions(output=OutputConfig(format=resolved), yes=yes, no_input=no_input)
 
 
-app = App(name="meridian", help="Meridian orchestrator CLI", version=__version__)
+app = App(
+    name="meridian",
+    help="Meridian orchestrator CLI",
+    version=__version__,
+    help_formatter="plain",
+)
 
 
 @app.default
@@ -134,16 +154,18 @@ def serve() -> None:
     run_server()
 
 
-workspace_app = App(name="workspace", help="Workspace lifecycle commands")
-run_app = App(name="run", help="Run management commands")
-skills_app = App(name="skills", help="Skills catalog commands")
-models_app = App(name="models", help="Model catalog commands")
-context_app = App(name="context", help="Workspace context pinning commands")
-diag_app = App(name="diag", help="Diagnostics commands")
+workspace_app = App(name="workspace", help="Workspace lifecycle commands", help_formatter="plain")
+run_app = App(name="run", help="Run management commands", help_formatter="plain")
+skills_app = App(name="skills", help="Skills catalog commands", help_formatter="plain")
+models_app = App(name="models", help="Model catalog commands", help_formatter="plain")
+context_app = App(
+    name="context", help="Workspace context pinning commands", help_formatter="plain"
+)
+diag_app = App(name="diag", help="Diagnostics commands", help_formatter="plain")
 
-export_app = App(name="export", help="Export commands")
-migrate_app = App(name="migrate", help="Migration commands")
-completion_app = App(name="completion", help="Shell completion helpers")
+export_app = App(name="export", help="Export commands", help_formatter="plain")
+migrate_app = App(name="migrate", help="Migration commands", help_formatter="plain")
+completion_app = App(name="completion", help="Shell completion helpers", help_formatter="plain")
 
 
 app.command(workspace_app, name="workspace")
@@ -271,6 +293,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     """CLI entry point used by `meridian` and `python -m meridian`."""
 
     args = list(sys.argv[1:] if argv is None else argv)
+    with suppress(Exception):
+        # Cleanup is best-effort and should never block CLI usage.
+        cleanup_orphaned_locks(resolve_repo_root())
     cleaned_args, options = _extract_global_options(args)
 
     token = _GLOBAL_OPTIONS.set(options)

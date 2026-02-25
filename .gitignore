@@ -10,3 +10,4 @@ build/
 .meridian/
 scratch/
 uv.lock
+tmp/

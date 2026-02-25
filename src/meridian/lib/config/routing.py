@@ -32,11 +32,8 @@ def route_model(model: str, mode: RunMode = "harness") -> RoutingDecision:
         return RoutingDecision(harness_id=HarnessId("claude"))
     if normalized.startswith(("gpt-", "o1", "o3", "o4", "codex")):
         return RoutingDecision(harness_id=HarnessId("codex"))
-    if normalized.startswith("opencode-") or "/" in normalized:
+    if normalized.startswith(("opencode-", "gemini-", "gemini")) or "/" in normalized:
         return RoutingDecision(harness_id=HarnessId("opencode"))
 
-    warning = (
-        f"Unknown model family '{model}'. Falling back to codex (gpt-5.3-codex)."
-    )
+    warning = f"Unknown model family '{model}'. Using harness 'codex'."
     return RoutingDecision(harness_id=HarnessId("codex"), warning=warning)
-

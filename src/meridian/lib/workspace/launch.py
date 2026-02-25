@@ -7,15 +7,15 @@ import os
 import shlex
 import signal
 import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 from meridian.lib.domain import WorkspaceState
-from meridian.lib.exec.spawn import SafeDefaultPermissionResolver
-from meridian.lib.harness.adapter import RunParams
-from meridian.lib.harness.registry import HarnessRegistry
 from meridian.lib.prompt.assembly import resolve_run_defaults
+from meridian.lib.state.db import open_connection, resolve_state_paths
 from meridian.lib.types import ModelId, WorkspaceId
 
 _CONTINUATION_GUIDANCE = (
@@ -36,6 +36,7 @@ class WorkspaceLaunchRequest:
     passthrough_args: tuple[str, ...] = ()
     summary_text: str = ""
     pinned_context: str = ""
+    dry_run: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,83 +101,203 @@ def _write_lock(
     path.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
 
 
-def _build_default_harness_command(
+def _build_interactive_command(
     *,
     request: WorkspaceLaunchRequest,
     prompt: str,
-    registry: HarnessRegistry,
     passthrough_args: tuple[str, ...],
 ) -> tuple[str, ...]:
+    """Build interactive CLI command for workspace sessions."""
+
+    override = os.getenv("MERIDIAN_SUPERVISOR_COMMAND", "").strip()
+    if override:
+        command = [*shlex.split(override), *passthrough_args]
+        if not command:
+            raise ValueError("MERIDIAN_SUPERVISOR_COMMAND resolved to an empty command.")
+        return tuple(command)
+
     defaults = resolve_run_defaults(
         request.model,
         (),
         profile=None,
         mode="supervisor",
     )
-    harness, _warning = registry.route(defaults.model)
-    run = RunParams(
-        prompt=prompt,
-        model=ModelId(defaults.model),
-        skills=defaults.skills,
-        extra_args=passthrough_args,
-    )
-    return tuple(harness.build_command(run, SafeDefaultPermissionResolver()))
+    model = ModelId(defaults.model)
+    return ("claude", "--system-prompt", prompt, "--model", str(model), *passthrough_args)
 
 
 def _build_supervisor_command(
     *,
     request: WorkspaceLaunchRequest,
     prompt: str,
-    registry: HarnessRegistry,
 ) -> tuple[str, ...]:
     passthrough = list(request.passthrough_args)
     if request.autocompact is not None:
         passthrough.extend(["--autocompact", str(request.autocompact)])
 
-    override = os.getenv("MERIDIAN_SUPERVISOR_COMMAND", "").strip()
-    if override:
-        command = [*shlex.split(override), *passthrough]
-        if not command:
-            raise ValueError("MERIDIAN_SUPERVISOR_COMMAND resolved to an empty command.")
-        return tuple(command)
-
-    return _build_default_harness_command(
+    return _build_interactive_command(
         request=request,
         prompt=prompt,
-        registry=registry,
         passthrough_args=tuple(passthrough),
     )
 
 
-def launch_supervisor(
-    *,
+def _pid_exists(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # Process exists but owned by another user; assume it's alive.
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _transition_orphaned_workspace_states(
     repo_root: Path,
-    registry: HarnessRegistry,
-    request: WorkspaceLaunchRequest,
-) -> WorkspaceLaunchResult:
-    """Launch supervisor process and wait for exit."""
+    workspace_ids: tuple[WorkspaceId, ...],
+) -> None:
+    if not workspace_ids:
+        return
 
-    prompt = build_supervisor_prompt(request)
-    command = _build_supervisor_command(request=request, prompt=prompt, registry=registry)
-    lock_path = workspace_lock_path(repo_root, request.workspace_id)
+    db_path = resolve_state_paths(repo_root).db_path
+    conn = open_connection(db_path)
+    try:
+        with conn:
+            for workspace_id in workspace_ids:
+                conn.execute(
+                    """
+                    UPDATE workspaces
+                    SET status = 'paused',
+                        last_activity_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+                    WHERE id = ? AND status = 'active'
+                    """,
+                    (str(workspace_id),),
+                )
+    finally:
+        conn.close()
 
+
+def cleanup_orphaned_locks(repo_root: Path) -> tuple[WorkspaceId, ...]:
+    """Remove stale workspace locks and mark orphaned active workspaces paused."""
+
+    lock_dir = repo_root / ".meridian" / "active-workspaces"
+    if not lock_dir.exists():
+        return ()
+
+    orphaned: list[WorkspaceId] = []
+    for lock_file in sorted(lock_dir.glob("*.lock")):
+        if not lock_file.is_file():
+            continue
+
+        workspace_id = WorkspaceId(lock_file.stem)
+        child_pid = 0
+        try:
+            parsed = json.loads(lock_file.read_text(encoding="utf-8"))
+            if isinstance(parsed, dict):
+                payload = cast("dict[str, object]", parsed)
+                raw_workspace_id = payload.get("workspace_id")
+                if isinstance(raw_workspace_id, str) and raw_workspace_id.strip():
+                    workspace_id = WorkspaceId(raw_workspace_id.strip())
+                raw_child_pid = payload.get("child_pid")
+                if isinstance(raw_child_pid, int):
+                    child_pid = raw_child_pid
+        except (OSError, json.JSONDecodeError, TypeError):
+            pass
+
+        if child_pid > 0 and _pid_exists(child_pid):
+            continue
+
+        lock_file.unlink(missing_ok=True)
+        orphaned.append(workspace_id)
+
+    deduped = tuple(
+        WorkspaceId(workspace_id)
+        for workspace_id in sorted({str(workspace_id) for workspace_id in orphaned})
+    )
+    _transition_orphaned_workspace_states(repo_root, deduped)
+    return deduped
+
+
+def _build_workspace_env(request: WorkspaceLaunchRequest, prompt: str) -> dict[str, str]:
     child_env = os.environ.copy()
     child_env["MERIDIAN_WORKSPACE_ID"] = str(request.workspace_id)
     child_env.setdefault("MERIDIAN_DEPTH", "0")
     child_env["MERIDIAN_WORKSPACE_PROMPT"] = prompt
     if request.autocompact is not None:
         child_env["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"] = str(request.autocompact)
+    return child_env
 
-    _write_lock(
-        path=lock_path,
-        workspace_id=request.workspace_id,
-        command=command,
-        child_pid=None,
-    )
+
+def launch_supervisor(
+    *,
+    repo_root: Path,
+    request: WorkspaceLaunchRequest,
+) -> WorkspaceLaunchResult:
+    """Launch supervisor process and wait for exit."""
+
+    prompt = build_supervisor_prompt(request)
+    command = _build_supervisor_command(request=request, prompt=prompt)
+    lock_path = workspace_lock_path(repo_root, request.workspace_id)
+    child_env = _build_workspace_env(request, prompt)
+
+    if request.dry_run:
+        return WorkspaceLaunchResult(
+            command=command,
+            exit_code=0,
+            final_state="paused",
+            lock_path=lock_path,
+        )
+
+    if sys.stdin.isatty():
+        # execvp replaces this process entirely on success, so:
+        # - The lock file is intentionally left behind (PID stays the same since
+        #   exec replaces the process image). cleanup_orphaned_locks() on the
+        #   next CLI invocation will remove it after the child exits.
+        # - The caller's post-launch state transitions (in workspace_start_sync /
+        #   workspace_resume_sync) will never execute. The workspace row remains
+        #   in its pre-launch state until the next cleanup cycle.
+        _write_lock(
+            path=lock_path,
+            workspace_id=request.workspace_id,
+            command=command,
+            child_pid=os.getpid(),
+        )
+        saved_cwd = os.getcwd()
+        os.environ.update(child_env)
+        os.chdir(repo_root)
+        try:
+            os.execvp(command[0], list(command))
+        except OSError:
+            # execvp failed — restore environment and cwd so the caller
+            # can continue without corrupted process state.
+            for key in child_env:
+                if key not in os.environ:
+                    continue
+                if key.startswith("MERIDIAN_") or key == "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE":
+                    os.environ.pop(key, None)
+            os.chdir(saved_cwd)
+            lock_path.unlink(missing_ok=True)
+            return WorkspaceLaunchResult(
+                command=command,
+                exit_code=2,
+                final_state="abandoned",
+                lock_path=lock_path,
+            )
 
     exit_code = 2
     process: subprocess.Popen[str] | None = None
     try:
+        _write_lock(
+            path=lock_path,
+            workspace_id=request.workspace_id,
+            command=command,
+            child_pid=None,
+        )
         process = subprocess.Popen(
             command,
             cwd=repo_root,

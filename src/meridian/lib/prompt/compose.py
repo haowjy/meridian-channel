@@ -50,6 +50,17 @@ def _join_sections(sections: Sequence[str]) -> str:
     return "\n\n".join(non_empty)
 
 
+def _render_template(template: Template) -> str:
+    """Render a PEP 750 template into plain text."""
+
+    parts: list[str] = []
+    for index, segment in enumerate(template.strings):
+        parts.append(segment)
+        if index < len(template.interpolations):
+            parts.append(str(template.interpolations[index].value))
+    return "".join(parts)
+
+
 def compose_run_prompt(
     *,
     skills: Sequence[SkillContent],
@@ -137,7 +148,7 @@ def compose_run_prompt_text(
         template_variables=template_variables,
         prior_output=prior_output,
     )
-    return str(template).strip()
+    return _render_template(template).strip()
 
 
 def render_file_template(
