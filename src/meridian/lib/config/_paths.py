@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from meridian.lib.config.settings import SearchPathConfig
+
 
 def resolve_repo_root(explicit: Path | None = None) -> Path:
     """Resolve repository root that owns `.agents/skills/`.
@@ -30,20 +32,34 @@ def resolve_repo_root(explicit: Path | None = None) -> Path:
     return cwd
 
 
-def canonical_skills_dir(repo_root: Path) -> Path:
-    """Return canonical skill directory for this repository."""
+def resolve_search_paths(config: SearchPathConfig, repo_root: Path) -> list[Path]:
+    """Resolve configured search paths, returning existing local then global directories."""
 
-    return repo_root / ".agents" / "skills"
+    return resolve_path_list(config.agents, config.global_agents, repo_root)
 
 
-def canonical_agents_dir(repo_root: Path) -> Path:
-    """Return canonical agent-profile directory for this repository."""
+def resolve_path_list(
+    local_paths: tuple[str, ...],
+    global_paths: tuple[str, ...],
+    repo_root: Path,
+) -> list[Path]:
+    """Resolve configured local + global paths into existing absolute directories."""
 
-    return repo_root / ".agents" / "agents"
+    resolved: list[Path] = []
+    seen: set[Path] = set()
+    for raw_path in (*local_paths, *global_paths):
+        candidate = Path(raw_path).expanduser()
+        if not candidate.is_absolute():
+            candidate = repo_root / candidate
+        absolute = candidate.resolve()
+        if not absolute.is_dir() or absolute in seen:
+            continue
+        seen.add(absolute)
+        resolved.append(absolute)
+    return resolved
 
 
 def default_index_db_path(repo_root: Path) -> Path:
     """Return default SQLite index path shared across meridian state."""
 
     return repo_root / ".meridian" / "index" / "runs.db"
-

@@ -29,6 +29,7 @@ from meridian.lib.harness.adapter import (
 from meridian.lib.harness.registry import HarnessRegistry
 from meridian.lib.safety.budget import Budget
 from meridian.lib.safety.permissions import (
+    PermissionConfig,
     PermissionTier,
     build_permission_config,
     permission_flags_for_harness,
@@ -52,6 +53,10 @@ class ScriptHarnessAdapter:
 
     def build_command(self, run: RunParams, perms: PermissionResolver) -> list[str]:
         return [*self._command, *perms.resolve_flags(self.id), *run.extra_args]
+
+    def env_overrides(self, config: PermissionConfig) -> dict[str, str]:
+        _ = config
+        return {}
 
     def parse_stream_event(self, line: str) -> StreamEvent | None:
         _ = line

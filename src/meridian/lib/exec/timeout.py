@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 
-DEFAULT_KILL_GRACE_SECONDS = 2.0
+from meridian.lib.config.settings import MeridianConfig
+
+DEFAULT_KILL_GRACE_SECONDS = MeridianConfig().kill_grace_seconds
 
 
 class RunTimeoutError(TimeoutError):

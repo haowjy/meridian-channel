@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Annotated, Literal, cast
 from cyclopts import App, Parameter
 
 from meridian import __version__
+from meridian.cli.config_cmd import register_config_commands
 from meridian.cli.context import register_context_commands
 from meridian.cli.diag import register_diag_commands
 from meridian.cli.export import register_export_commands
@@ -162,6 +163,7 @@ context_app = App(
     name="context", help="Workspace context pinning commands", help_formatter="plain"
 )
 diag_app = App(name="diag", help="Diagnostics commands", help_formatter="plain")
+config_app = App(name="config", help="Repository config commands", help_formatter="plain")
 
 export_app = App(name="export", help="Export commands", help_formatter="plain")
 migrate_app = App(name="migrate", help="Migration commands", help_formatter="plain")
@@ -174,6 +176,7 @@ app.command(skills_app, name="skills")
 app.command(models_app, name="models")
 app.command(context_app, name="context")
 app.command(diag_app, name="diag")
+app.command(config_app, name="config")
 app.command(export_app, name="export")
 app.command(migrate_app, name="migrate")
 app.command(completion_app, name="completion")
@@ -270,6 +273,7 @@ def _register_group_commands() -> None:
         register_models_commands(models_app, emit),
         register_context_commands(context_app, emit),
         register_diag_commands(diag_app, emit),
+        register_config_commands(config_app, emit),
         register_migrate_commands(migrate_app, emit),
     )
     for commands, descriptions in modules:
@@ -292,7 +296,15 @@ def get_registered_cli_descriptions() -> dict[str, str]:
 def main(argv: Sequence[str] | None = None) -> None:
     """CLI entry point used by `meridian` and `python -m meridian`."""
 
+    from meridian.lib.logging import configure_logging
+
     args = list(sys.argv[1:] if argv is None else argv)
+
+    # Configure logging early so structlog warnings go to stderr, not stdout.
+    json_mode = "--json" in args or "--format" in args
+    verbose_count = args.count("--verbose") + args.count("-v")
+    configure_logging(json_mode=json_mode, verbosity=verbose_count)
+
     with suppress(Exception):
         # Cleanup is best-effort and should never block CLI usage.
         cleanup_orphaned_locks(resolve_repo_root())

@@ -6,17 +6,26 @@ import asyncio
 import json
 import os
 import sqlite3
+import sys
 import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import structlog
 
 from meridian.lib.config import load_agent_profile, load_model_guidance
+from meridian.lib.config.agent import AgentProfile
 from meridian.lib.domain import RunCreateParams, RunStatus
 from meridian.lib.exec.spawn import execute_with_finalization
-from meridian.lib.ops._runtime import build_runtime, resolve_workspace_id
+from meridian.lib.exec.terminal import TerminalEventFilter, resolve_visible_categories
+from meridian.lib.ops._runtime import (
+    OperationRuntime,
+    build_runtime,
+    build_runtime_from_root_and_config,
+    resolve_runtime_root_and_config,
+    resolve_workspace_id,
+)
 from meridian.lib.ops.registry import OperationSpec, operation
 from meridian.lib.prompt import (
     compose_run_prompt_text,
@@ -31,6 +40,7 @@ from meridian.lib.safety.permissions import (
     PermissionConfig,
     TieredPermissionResolver,
     build_permission_config,
+    parse_permission_tier,
 )
 from meridian.lib.safety.redaction import SecretSpec, parse_secret_specs, secrets_env_overrides
 from meridian.lib.types import ModelId, RunId
@@ -40,7 +50,13 @@ if TYPE_CHECKING:
 
 _BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
 logger = structlog.get_logger(__name__)
-DEFAULT_MAX_DEPTH = 3
+_LEGACY_DEFAULT_AGENT_SKILLS: tuple[str, ...] = ("run-agent", "agent")
+_TIER_RANKS = {
+    "read-only": 0,
+    "workspace-write": 1,
+    "full-access": 2,
+    "danger": 3,
+}
 
 
 def _empty_template_vars() -> dict[str, str]:
@@ -57,6 +73,9 @@ class RunCreateInput:
     agent: str | None = None
     report_path: str = "report.md"
     dry_run: bool = False
+    verbose: bool = False
+    quiet: bool = False
+    stream: bool = False
     workspace: str | None = None
     repo_root: str | None = None
     timeout_secs: float | None = None
@@ -231,8 +250,8 @@ class RunRetryInput:
 @dataclass(frozen=True, slots=True)
 class RunWaitInput:
     run_id: str
-    timeout_secs: float = 600.0
-    poll_interval_secs: float = 0.25
+    timeout_secs: float | None = None
+    poll_interval_secs: float | None = None
     include_report: bool = False
     include_files: bool = False
     repo_root: str | None = None
@@ -281,10 +300,22 @@ def _read_non_negative_int_env(name: str, default: int) -> int:
     return value
 
 
-def _depth_limits() -> tuple[int, int]:
+def _depth_limits(max_depth: int) -> tuple[int, int]:
     current_depth = _read_non_negative_int_env("MERIDIAN_DEPTH", 0)
-    max_depth = _read_non_negative_int_env("MERIDIAN_MAX_DEPTH", DEFAULT_MAX_DEPTH)
+    if max_depth < 0:
+        raise ValueError("max_depth must be >= 0.")
     return current_depth, max_depth
+
+
+def _emit_subrun_event(payload: dict[str, Any]) -> None:
+    if _read_non_negative_int_env("MERIDIAN_DEPTH", 0) <= 0:
+        return
+    event_payload = dict(payload)
+    event_payload["v"] = 1
+    parent_run_id = os.getenv("MERIDIAN_PARENT_RUN_ID", "").strip()
+    event_payload["parent"] = parent_run_id or None
+    event_payload["ts"] = time.time()
+    print(json.dumps(event_payload, separators=(",", ":")), file=sys.stdout, flush=True)
 
 
 def _depth_exceeded_output(current_depth: int, max_depth: int) -> RunActionOutput:
@@ -336,20 +367,68 @@ def _permission_tier_from_profile(agent_sandbox: str | None) -> str | None:
     return mapping.get(normalized)
 
 
-def _build_create_payload(payload: RunCreateInput) -> _PreparedCreate:
-    requested_skills = _normalize_skill_flags(payload.skills)
-    profile = load_agent_profile(payload.agent) if payload.agent else None
+def _warn_profile_tier_escalation(
+    *,
+    profile: AgentProfile | None,
+    inferred_tier: str | None,
+    default_tier: str,
+) -> None:
+    if profile is None or inferred_tier is None:
+        return
+    try:
+        resolved_inferred = parse_permission_tier(inferred_tier)
+        resolved_default = parse_permission_tier(default_tier)
+    except ValueError:
+        return
+    if _TIER_RANKS[resolved_inferred.value] <= _TIER_RANKS[resolved_default.value]:
+        return
+    logger.warning(
+        f"Agent profile '{profile.name}' infers {resolved_inferred.value} "
+        f"(config default: {resolved_default.value}). Use --permission to override."
+    )
+
+
+def _build_create_payload(
+    payload: RunCreateInput,
+    *,
+    runtime: OperationRuntime | None = None,
+) -> _PreparedCreate:
+    runtime_bundle = runtime or build_runtime(payload.repo_root)
+    explicit_requested_skills = _normalize_skill_flags(payload.skills)
+    requested_skills = explicit_requested_skills
+    profile: AgentProfile | None = None
+    if payload.agent:
+        profile = load_agent_profile(
+            payload.agent,
+            repo_root=runtime_bundle.repo_root,
+            search_paths=runtime_bundle.config.search_paths,
+        )
+    else:
+        configured_default_agent = runtime_bundle.config.default_agent.strip()
+        if configured_default_agent:
+            try:
+                profile = load_agent_profile(
+                    configured_default_agent,
+                    repo_root=runtime_bundle.repo_root,
+                    search_paths=runtime_bundle.config.search_paths,
+                )
+            except FileNotFoundError:
+                requested_skills = (*_LEGACY_DEFAULT_AGENT_SKILLS, *requested_skills)
+        else:
+            requested_skills = (*_LEGACY_DEFAULT_AGENT_SKILLS, *requested_skills)
+
     defaults = resolve_run_defaults(
         payload.model,
         requested_skills,
         profile=profile,
-        mode="standalone",
     )
-    runtime = build_runtime(payload.repo_root)
 
     from meridian.lib.config.skill_registry import SkillRegistry
 
-    registry = SkillRegistry(repo_root=runtime.repo_root)
+    registry = SkillRegistry(
+        repo_root=runtime_bundle.repo_root,
+        search_paths=runtime_bundle.config.search_paths,
+    )
     if not registry.list():
         registry.reindex()
 
@@ -357,14 +436,14 @@ def _build_create_payload(payload: RunCreateInput) -> _PreparedCreate:
     missing_skills = tuple(
         skill_name for skill_name in defaults.skills if skill_name not in available_skill_names
     )
-    explicit_skills = set(requested_skills)
+    explicit_skills = set(explicit_requested_skills)
     unknown_explicit = tuple(
         skill_name for skill_name in missing_skills if skill_name in explicit_skills
     )
     if unknown_explicit:
         raise KeyError(f"Unknown skills: {', '.join(unknown_explicit)}")
 
-    # Base/implicit skills may be unavailable in lightweight repositories used by tests.
+    # Implicit/default skills may be unavailable in lightweight repositories used by tests.
     # We skip only those missing implicit skills to keep dry-run and MCP surfaces usable.
     resolved_skill_names = tuple(
         skill_name for skill_name in defaults.skills if skill_name in available_skill_names
@@ -383,7 +462,7 @@ def _build_create_payload(payload: RunCreateInput) -> _PreparedCreate:
         template_variables=parsed_template_vars,
     )
 
-    harness, route_warning = runtime.harness_registry.route(defaults.model)
+    harness, route_warning = runtime_bundle.harness_registry.route(defaults.model)
     missing_skills_warning = (
         f"Skipped unavailable implicit skills: {', '.join(missing_skills)}."
         if missing_skills
@@ -393,15 +472,22 @@ def _build_create_payload(payload: RunCreateInput) -> _PreparedCreate:
     from meridian.lib.harness.adapter import RunParams
 
     inferred_tier = _permission_tier_from_profile(profile.sandbox if profile is not None else None)
+    if payload.permission_tier is None:
+        _warn_profile_tier_escalation(
+            profile=profile,
+            inferred_tier=inferred_tier,
+            default_tier=runtime_bundle.config.default_permission_tier,
+        )
     permission_config = build_permission_config(
         payload.permission_tier or inferred_tier,
         unsafe=payload.unsafe,
+        default_tier=runtime_bundle.config.default_permission_tier,
     )
     budget = normalize_budget(
         per_run_usd=payload.budget_per_run_usd,
         per_workspace_usd=payload.budget_per_workspace_usd,
     )
-    guardrails = normalize_guardrail_paths(payload.guardrails, repo_root=runtime.repo_root)
+    guardrails = normalize_guardrail_paths(payload.guardrails, repo_root=runtime_bundle.repo_root)
     secrets = parse_secret_specs(payload.secrets)
 
     preview_command = tuple(
@@ -538,12 +624,21 @@ def _detail_from_row(
 def _run_child_env(
     workspace_id: str | None,
     secrets: tuple[SecretSpec, ...],
+    parent_run_id: str | None = None,
 ) -> dict[str, str]:
     child_env = os.environ.copy()
     current_depth = _read_non_negative_int_env("MERIDIAN_DEPTH", 0)
     child_env["MERIDIAN_DEPTH"] = str(current_depth + 1)
     if workspace_id is not None:
         child_env["MERIDIAN_WORKSPACE_ID"] = workspace_id
+    if parent_run_id is None:
+        child_env.pop("MERIDIAN_PARENT_RUN_ID", None)
+    else:
+        normalized_parent = parent_run_id.strip()
+        if normalized_parent:
+            child_env["MERIDIAN_PARENT_RUN_ID"] = normalized_parent
+        else:
+            child_env.pop("MERIDIAN_PARENT_RUN_ID", None)
     child_env.update(secrets_env_overrides(secrets))
     return child_env
 
@@ -578,8 +673,8 @@ def _execute_run_blocking(
     *,
     payload: RunCreateInput,
     prepared: _PreparedCreate,
+    runtime: OperationRuntime,
 ) -> RunActionOutput:
-    runtime = build_runtime(payload.repo_root)
     workspace_id = resolve_workspace_id(payload.workspace)
 
     run = runtime.run_store_sync.create(
@@ -589,9 +684,31 @@ def _execute_run_blocking(
             workspace_id=workspace_id,
         )
     )
+    current_depth = _read_non_negative_int_env("MERIDIAN_DEPTH", 0)
+    run_start_event: dict[str, Any] = {
+        "t": "meridian.run.start",
+        "id": str(run.run_id),
+        "model": prepared.model,
+        "d": current_depth,
+    }
+    if prepared.agent_name is not None:
+        run_start_event["agent"] = prepared.agent_name
+    _emit_subrun_event(run_start_event)
 
     started = time.monotonic()
     workspace_id_str = str(workspace_id) if workspace_id is not None else None
+    event_observer = None
+    if not payload.stream:
+        event_filter = TerminalEventFilter(
+            visible_categories=resolve_visible_categories(
+                verbose=payload.verbose,
+                quiet=payload.quiet,
+                config=runtime.config.output,
+            ),
+            root_depth=_read_non_negative_int_env("MERIDIAN_DEPTH", 0),
+        )
+        event_observer = event_filter.observe
+
     exit_code = asyncio.run(
         execute_with_finalization(
             run,
@@ -601,13 +718,24 @@ def _execute_run_blocking(
             permission_resolver=TieredPermissionResolver(prepared.permission_config),
             cwd=runtime.repo_root,
             timeout_seconds=payload.timeout_secs,
+            kill_grace_seconds=runtime.config.kill_grace_seconds,
             skills=prepared.skills,
             agent=prepared.agent_name,
-            env_overrides=_run_child_env(workspace_id_str, prepared.secrets),
+            env_overrides=_run_child_env(
+                workspace_id_str,
+                prepared.secrets,
+                str(run.run_id),
+            ),
             budget=prepared.budget,
             workspace_spent_usd=_workspace_spend_usd(runtime.repo_root, workspace_id_str),
+            max_retries=runtime.config.max_retries,
+            retry_backoff_seconds=runtime.config.retry_backoff_seconds,
             guardrails=tuple(Path(item) for item in prepared.guardrails),
+            guardrail_timeout_seconds=runtime.config.guardrail_timeout_seconds,
             secrets=prepared.secrets,
+            event_observer=event_observer,
+            stream_stdout_to_terminal=payload.stream,
+            stream_stderr_to_terminal=payload.stream or payload.verbose,
         )
     )
     duration = time.monotonic() - started
@@ -616,6 +744,26 @@ def _execute_run_blocking(
     status = "failed"
     if row is not None:
         status = str(row["status"])
+    done_secs = duration
+    tokens_total: int | None = None
+    if row is not None:
+        row_duration = cast("float | None", row["duration_secs"])
+        if row_duration is not None:
+            done_secs = row_duration
+        input_tokens = cast("int | None", row["input_tokens"])
+        output_tokens = cast("int | None", row["output_tokens"])
+        if input_tokens is not None and output_tokens is not None:
+            tokens_total = input_tokens + output_tokens
+    _emit_subrun_event(
+        {
+            "t": "meridian.run.done",
+            "id": str(run.run_id),
+            "exit": exit_code,
+            "secs": done_secs,
+            "tok": tokens_total,
+            "d": current_depth,
+        }
+    )
 
     return RunActionOutput(
         command="run.create",
@@ -661,18 +809,23 @@ async def _execute_run_non_blocking(
         permission_resolver=TieredPermissionResolver(permission_config),
         cwd=runtime.repo_root,
         timeout_seconds=timeout_secs,
+        kill_grace_seconds=runtime.config.kill_grace_seconds,
         skills=skills,
         agent=agent_name,
         env_overrides=_run_child_env(
             str(run.workspace_id) if run.workspace_id is not None else None,
             secrets,
+            str(run.run_id),
         ),
         budget=budget,
         workspace_spent_usd=_workspace_spend_usd(
             runtime.repo_root,
             str(run.workspace_id) if run.workspace_id is not None else None,
         ),
+        max_retries=runtime.config.max_retries,
+        retry_backoff_seconds=runtime.config.retry_backoff_seconds,
         guardrails=tuple(Path(item) for item in guardrails),
+        guardrail_timeout_seconds=runtime.config.guardrail_timeout_seconds,
         secrets=secrets,
     )
 
@@ -694,12 +847,17 @@ def _track_task(task: asyncio.Task[None]) -> None:
 
 
 def run_create_sync(payload: RunCreateInput) -> RunActionOutput:
+    runtime: OperationRuntime
     if not payload.dry_run:
-        current_depth, max_depth = _depth_limits()
+        resolved_root, config = resolve_runtime_root_and_config(payload.repo_root)
+        current_depth, max_depth = _depth_limits(config.max_depth)
         if current_depth >= max_depth:
             return _depth_exceeded_output(current_depth, max_depth)
+        runtime = build_runtime_from_root_and_config(resolved_root, config)
+    else:
+        runtime = build_runtime(payload.repo_root)
 
-    prepared = _build_create_payload(payload)
+    prepared = _build_create_payload(payload, runtime=runtime)
     if payload.dry_run:
         return RunActionOutput(
             command="run.create",
@@ -717,16 +875,21 @@ def run_create_sync(payload: RunCreateInput) -> RunActionOutput:
             message="Dry run complete.",
         )
 
-    return _execute_run_blocking(payload=payload, prepared=prepared)
+    return _execute_run_blocking(payload=payload, prepared=prepared, runtime=runtime)
 
 
 async def run_create(payload: RunCreateInput) -> RunActionOutput:
+    runtime: OperationRuntime
     if not payload.dry_run:
-        current_depth, max_depth = _depth_limits()
+        resolved_root, config = resolve_runtime_root_and_config(payload.repo_root)
+        current_depth, max_depth = _depth_limits(config.max_depth)
         if current_depth >= max_depth:
             return _depth_exceeded_output(current_depth, max_depth)
+        runtime = build_runtime_from_root_and_config(resolved_root, config)
+    else:
+        runtime = build_runtime(payload.repo_root)
 
-    prepared = _build_create_payload(payload)
+    prepared = _build_create_payload(payload, runtime=runtime)
     if payload.dry_run:
         return RunActionOutput(
             command="run.create",
@@ -744,7 +907,6 @@ async def run_create(payload: RunCreateInput) -> RunActionOutput:
             message="Dry run complete.",
         )
 
-    runtime = build_runtime(payload.repo_root)
     workspace_id = resolve_workspace_id(payload.workspace)
     run = await runtime.run_store.create(
         RunCreateParams(
@@ -753,6 +915,16 @@ async def run_create(payload: RunCreateInput) -> RunActionOutput:
             workspace_id=workspace_id,
         )
     )
+    current_depth = _read_non_negative_int_env("MERIDIAN_DEPTH", 0)
+    run_start_event: dict[str, Any] = {
+        "t": "meridian.run.start",
+        "id": str(run.run_id),
+        "model": prepared.model,
+        "d": current_depth,
+    }
+    if prepared.agent_name is not None:
+        run_start_event["agent"] = prepared.agent_name
+    _emit_subrun_event(run_start_event)
 
     task = asyncio.create_task(
         _execute_run_non_blocking(
@@ -882,8 +1054,21 @@ def _run_is_terminal(status: str) -> bool:
 
 def run_wait_sync(payload: RunWaitInput) -> RunDetailOutput:
     runtime = build_runtime(payload.repo_root)
-    deadline = time.monotonic() + max(payload.timeout_secs, 0.0)
-    poll = payload.poll_interval_secs if payload.poll_interval_secs > 0 else 0.25
+    timeout_secs = (
+        payload.timeout_secs
+        if payload.timeout_secs is not None
+        else runtime.config.wait_timeout_seconds
+    )
+    deadline = time.monotonic() + max(timeout_secs, 0.0)
+    poll = (
+        payload.poll_interval_secs
+        if payload.poll_interval_secs is not None
+        # run.wait polling is a read-side retry loop, so we intentionally reuse
+        # retry_backoff_seconds as the default cadence when no poll interval is set.
+        else runtime.config.retry_backoff_seconds
+    )
+    if poll <= 0:
+        poll = runtime.config.retry_backoff_seconds
 
     while True:
         row = _read_run_row(runtime.repo_root, payload.run_id)

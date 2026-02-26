@@ -9,8 +9,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from meridian.lib.config.settings import MeridianConfig
+
 if TYPE_CHECKING:
     from meridian.lib.types import RunId
+
+
+DEFAULT_GUARDRAIL_TIMEOUT_SECONDS = MeridianConfig().guardrail_timeout_seconds
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +61,7 @@ def run_guardrails(
     env: Mapping[str, str] | None,
     report_path: Path | None,
     output_log_path: Path,
-    timeout_seconds: float = 30.0,
+    timeout_seconds: float = DEFAULT_GUARDRAIL_TIMEOUT_SECONDS,
 ) -> GuardrailResult:
     """Execute post-run guardrail scripts and collect failures."""
 

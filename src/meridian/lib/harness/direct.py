@@ -24,6 +24,7 @@ from meridian.lib.ops.codec import (
     normalize_optional,
     schema_from_type,
 )
+from meridian.lib.safety.permissions import PermissionConfig
 from meridian.lib.serialization import to_jsonable
 from meridian.lib.types import HarnessId, ModelId, RunId
 
@@ -89,6 +90,10 @@ class DirectAdapter:
     def build_command(self, run: RunParams, perms: PermissionResolver) -> list[str]:
         _ = (run, perms)
         return ["direct"]
+
+    def env_overrides(self, config: PermissionConfig) -> dict[str, str]:
+        _ = config
+        return {}
 
     def parse_stream_event(self, line: str) -> StreamEvent | None:
         _ = line

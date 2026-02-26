@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+from meridian.lib.config._paths import resolve_path_list
 from meridian.lib.ops._runtime import build_runtime
 from meridian.lib.ops.registry import OperationSpec, operation
 from meridian.lib.state.db import open_connection
@@ -92,13 +93,25 @@ def diag_doctor_sync(payload: DiagDoctorInput) -> DiagDoctorOutput:
     schema_version = int(schema_row["value"]) if schema_row is not None else 0
     run_count = int(run_row["count"]) if run_row is not None else 0
     workspace_count = int(workspace_row["count"]) if workspace_row is not None else 0
-    agents_dir = runtime.repo_root / ".agents" / "agents"
-    skills_dir = runtime.repo_root / ".agents" / "skills"
+    search_paths = runtime.config.search_paths
+    agents_dirs = resolve_path_list(
+        search_paths.agents,
+        search_paths.global_agents,
+        runtime.repo_root,
+    )
+    skills_dirs = resolve_path_list(
+        search_paths.skills,
+        search_paths.global_skills,
+        runtime.repo_root,
+    )
     warnings: list[str] = []
-    if not skills_dir.is_dir():
-        warnings.append("Missing .agents/skills directory.")
-    if not agents_dir.is_dir():
-        warnings.append("Missing .agents/agents directory.")
+    if not skills_dirs:
+        warnings.append("No configured skills directories were found.")
+    if not agents_dirs:
+        warnings.append("No configured agent profile directories were found.")
+
+    agents_dir = agents_dirs[0] if agents_dirs else runtime.repo_root
+    skills_dir = skills_dirs[0] if skills_dirs else runtime.repo_root
 
     return DiagDoctorOutput(
         ok=not warnings,

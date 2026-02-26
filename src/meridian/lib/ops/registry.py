@@ -62,6 +62,7 @@ def get_operation(name: str) -> OperationSpec[Any, Any]:
 def _bootstrap_operation_modules() -> None:
     # Imported lazily to keep the registry as the single source of truth while
     # allowing operation modules to self-register via `operation(...)`.
+    import meridian.lib.ops.config as config_ops
     import meridian.lib.ops.context as context_ops
     import meridian.lib.ops.diag as diag_ops
     import meridian.lib.ops.migrate as migrate_ops
@@ -71,6 +72,7 @@ def _bootstrap_operation_modules() -> None:
     import meridian.lib.ops.workspace as workspace_ops
 
     _ = (
+        config_ops,
         context_ops,
         diag_ops,
         migrate_ops,

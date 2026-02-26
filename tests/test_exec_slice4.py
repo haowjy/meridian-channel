@@ -29,6 +29,7 @@ from meridian.lib.harness.adapter import (
     StreamEvent,
 )
 from meridian.lib.harness.registry import HarnessRegistry
+from meridian.lib.safety.permissions import PermissionConfig
 from meridian.lib.state.artifact_store import LocalStore, make_artifact_key
 from meridian.lib.types import HarnessId, ModelId, RunId
 
@@ -83,6 +84,10 @@ class MockHarnessAdapter:
         command.extend(run.extra_args)
         return command
 
+    def env_overrides(self, config: PermissionConfig) -> dict[str, str]:
+        _ = config
+        return {}
+
     def parse_stream_event(self, line: str) -> StreamEvent | None:
         _ = line
         return None
@@ -110,7 +115,7 @@ def _fetch_run_row(state: StateDB, run_id: RunId) -> sqlite3.Row:
 
 
 @pytest.mark.asyncio
-async def test_execute_with_finalization_streams_and_captures(
+async def test_execute_with_finalization_captures_without_stderr_passthrough(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     package_root: Path,
@@ -183,6 +188,44 @@ async def test_execute_with_finalization_streams_and_captures(
     stderr_text = artifacts.get(stderr_key).decode("utf-8")
     assert "slice4 warning" in stderr_text
 
+    captured = capsys.readouterr()
+    assert "slice4 warning" not in captured.err
+
+
+@pytest.mark.asyncio
+async def test_execute_with_finalization_allows_stderr_passthrough_when_enabled(
+    capsys: pytest.CaptureFixture[str],
+    package_root: Path,
+    tmp_path: Path,
+) -> None:
+    state = StateDB(tmp_path)
+    run = state.create_run(RunCreateParams(prompt="stream", model=ModelId("gpt-5.3-codex")))
+    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
+    fixture = package_root / "tests" / "fixtures" / "partial.jsonl"
+    adapter = MockHarnessAdapter(
+        script=package_root / "tests" / "mock_harness.py",
+        base_args=(
+            "--stdout-file",
+            str(fixture),
+            "--stderr",
+            "slice4 warning",
+        ),
+    )
+    registry = HarnessRegistry()
+    registry.register(adapter)
+
+    exit_code = await execute_with_finalization(
+        run,
+        state=state,
+        artifacts=artifacts,
+        registry=registry,
+        harness_id=adapter.id,
+        cwd=tmp_path,
+        timeout_seconds=5.0,
+        stream_stderr_to_terminal=True,
+    )
+
+    assert exit_code == 0
     captured = capsys.readouterr()
     assert "slice4 warning" in captured.err
 
@@ -371,6 +414,7 @@ def test_kill_running_parent_process_still_finalizes_run(
                 StreamEvent,
             )
             from meridian.lib.harness.registry import HarnessRegistry
+            from meridian.lib.safety.permissions import PermissionConfig
             from meridian.lib.state.artifact_store import LocalStore
             from meridian.lib.types import HarnessId, ModelId, RunId
 
@@ -392,6 +436,10 @@ def test_kill_running_parent_process_still_finalizes_run(
                         "--hang",
                         *perms.resolve_flags(self.id),
                     ]
+
+                def env_overrides(self, config: PermissionConfig) -> dict[str, str]:
+                    _ = config
+                    return {{}}
 
                 def parse_stream_event(self, line: str) -> StreamEvent | None:
                     _ = line

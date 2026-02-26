@@ -199,11 +199,16 @@ def workspace_resume_sync(payload: WorkspaceResumeInput) -> WorkspaceActionOutpu
             repo_root=runtime.repo_root,
             workspace_id=workspace.workspace_id,
         )
-        pinned_context = workspace_context.inject_pinned_context(
-            state=runtime.state,
-            repo_root=runtime.repo_root,
-            workspace_id=workspace.workspace_id,
-        )
+        # Only inject pinned context on fresh starts. On resume (--continue),
+        # the conversation already has the full history including pinned files.
+        # Re-injection after compaction is a separate concern (future: compaction detection).
+        pinned_context = ""
+        if payload.fresh:
+            pinned_context = workspace_context.inject_pinned_context(
+                state=runtime.state,
+                repo_root=runtime.repo_root,
+                workspace_id=workspace.workspace_id,
+            )
 
         launch_result = launch_supervisor(
             repo_root=runtime.repo_root,

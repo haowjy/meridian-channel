@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import ClassVar
 
 from meridian.lib.harness._common import (
+    categorize_stream_event,
     extract_session_id_from_artifacts,
     extract_usage_from_artifacts,
     parse_json_stream_event,
@@ -23,6 +24,7 @@ from meridian.lib.harness.adapter import (
     RunParams,
     StreamEvent,
 )
+from meridian.lib.safety.permissions import PermissionConfig
 from meridian.lib.types import HarnessId, RunId
 
 
@@ -31,11 +33,18 @@ class ClaudeAdapter:
 
     STRATEGIES: ClassVar[StrategyMap] = {
         "model": FlagStrategy(effect=FlagEffect.CLI_FLAG, cli_flag="--model"),
-        "agent": FlagStrategy(effect=FlagEffect.CLI_FLAG, cli_flag="--agent"),
+        "agent": FlagStrategy(effect=FlagEffect.DROP),
         "skills": FlagStrategy(effect=FlagEffect.DROP),
     }
     PROMPT_MODE: ClassVar[PromptMode] = PromptMode.FLAG
     BASE_COMMAND: ClassVar[tuple[str, ...]] = ("claude", "-p")
+    EVENT_CATEGORY_MAP: ClassVar[dict[str, str]] = {
+        "result": "lifecycle",
+        "tool_use": "tool-use",
+        "assistant": "assistant",
+        "thinking": "thinking",
+        "error": "error",
+    }
 
     @property
     def id(self) -> HarnessId:
@@ -60,8 +69,15 @@ class ClaudeAdapter:
             harness_id=self.id,
         )
 
+    def env_overrides(self, config: PermissionConfig) -> dict[str, str]:
+        _ = config
+        return {}
+
     def parse_stream_event(self, line: str) -> StreamEvent | None:
-        return parse_json_stream_event(line)
+        event = parse_json_stream_event(line)
+        if event is None:
+            return None
+        return categorize_stream_event(event, exact_map=self.EVENT_CATEGORY_MAP)
 
     def extract_usage(self, artifacts: ArtifactStore, run_id: RunId):
         return extract_usage_from_artifacts(artifacts, run_id)

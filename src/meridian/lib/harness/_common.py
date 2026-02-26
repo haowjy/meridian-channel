@@ -11,6 +11,40 @@ from meridian.lib.harness.adapter import ArtifactStore, StreamEvent
 from meridian.lib.types import ArtifactKey, RunId
 
 
+def _payload_text(payload: dict[str, object], key: str, *, default: str = "?") -> str:
+    value = payload.get(key)
+    if value is None:
+        return default
+    rendered = str(value).strip()
+    return rendered or default
+
+
+def _synthesize_meridian_protocol_text(
+    *,
+    event_type: str,
+    payload: dict[str, object],
+) -> str | None:
+    if event_type == "run.start":
+        run_id = _payload_text(payload, "id")
+        model = _payload_text(payload, "model")
+        agent = payload.get("agent")
+        if agent is None or not str(agent).strip():
+            return f"{run_id} {model} started"
+        return f"{run_id} {model} ({str(agent).strip()}) started"
+
+    if event_type == "run.done":
+        run_id = _payload_text(payload, "id")
+        secs = _payload_text(payload, "secs")
+        exit_code = _payload_text(payload, "exit")
+        rendered = f"{run_id} completed {secs}s exit={exit_code}"
+        tokens = payload.get("tok")
+        if tokens is not None:
+            rendered = f"{rendered} tok={tokens}"
+        return rendered
+
+    return None
+
+
 def parse_json_stream_event(line: str) -> StreamEvent | None:
     stripped = line.strip()
     if not stripped:
@@ -18,17 +52,99 @@ def parse_json_stream_event(line: str) -> StreamEvent | None:
     try:
         payload_obj = json.loads(stripped)
     except json.JSONDecodeError:
-        return StreamEvent(event_type="line", raw_line=line, text=stripped)
+        return StreamEvent(
+            event_type="line",
+            category="progress",
+            raw_line=line,
+            text=stripped,
+        )
 
     if not isinstance(payload_obj, dict):
-        return StreamEvent(event_type="line", raw_line=line, text=stripped)
+        return StreamEvent(
+            event_type="line",
+            category="progress",
+            raw_line=line,
+            text=stripped,
+        )
 
     payload = cast("dict[str, object]", payload_obj)
-    event_type = str(payload.get("type") or payload.get("event") or "line")
+    event_type = str(payload.get("type") or payload.get("t") or payload.get("event") or "line")
     text = payload.get("text") or payload.get("message")
+    # Recognize both "run.*" and "meridian.run.*" as meridian protocol events.
+    synth_type = event_type
+    if synth_type.startswith("meridian."):
+        synth_type = synth_type[len("meridian."):]
+    category = "sub-run" if synth_type.startswith("run.") else "progress"
+    if text is None and "t" in payload and synth_type.startswith("run."):
+        text = _synthesize_meridian_protocol_text(event_type=synth_type, payload=payload)
     if text is not None:
-        return StreamEvent(event_type=event_type, raw_line=line, text=str(text))
-    return StreamEvent(event_type=event_type, raw_line=line, text=None)
+        return StreamEvent(
+            event_type=event_type,
+            category=category,
+            raw_line=line,
+            text=str(text),
+            metadata=payload,
+        )
+    return StreamEvent(
+        event_type=event_type,
+        category=category,
+        raw_line=line,
+        text=None,
+        metadata=payload,
+    )
+
+
+def categorize_stream_event(
+    event: StreamEvent,
+    *,
+    exact_map: dict[str, str] | None = None,
+) -> StreamEvent:
+    normalized = event.event_type.strip().lower()
+    category = _category_from_event_type(normalized, exact_map=exact_map)
+    return StreamEvent(
+        event_type=event.event_type,
+        category=category,
+        raw_line=event.raw_line,
+        text=event.text,
+        metadata=event.metadata,
+    )
+
+
+def _category_from_event_type(
+    normalized_event_type: str,
+    *,
+    exact_map: dict[str, str] | None,
+) -> str:
+    if exact_map is not None and normalized_event_type in exact_map:
+        return exact_map[normalized_event_type]
+
+    if normalized_event_type.startswith("run.") or normalized_event_type.startswith(
+        "meridian.run."
+    ):
+        return "sub-run"
+    if any(token in normalized_event_type for token in ("error", "fail", "warning", "warn")):
+        return "error"
+    if any(token in normalized_event_type for token in ("tool", "function_call", "call_tool")):
+        return "tool-use"
+    if any(token in normalized_event_type for token in ("think", "reasoning", "reason")):
+        return "thinking"
+    if any(token in normalized_event_type for token in ("assistant", "message", "response")):
+        return "assistant"
+    if any(
+        token in normalized_event_type
+        for token in (
+            "start",
+            "started",
+            "finish",
+            "finished",
+            "complete",
+            "completed",
+            "done",
+            "result",
+        )
+    ):
+        return "lifecycle"
+    return "progress"
 
 
 def _read_json_artifact(

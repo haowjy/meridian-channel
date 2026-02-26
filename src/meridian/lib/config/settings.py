@@ -1,0 +1,376 @@
+"""Repository-level operational config loader."""
+
+from __future__ import annotations
+
+import logging
+import os
+import tomllib
+from dataclasses import dataclass, fields
+from pathlib import Path
+from typing import cast
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class OutputConfig:
+    """Terminal output filtering configuration for run streaming."""
+
+    show: tuple[str, ...] = ("lifecycle", "sub-run", "error", "system")
+    verbosity: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SearchPathConfig:
+    """Configurable discovery paths for agent profiles and skills."""
+
+    agents: tuple[str, ...] = (
+        ".agents/agents",
+        ".claude/agents",
+        ".opencode/agents",
+        ".cursor/agents",
+    )
+    skills: tuple[str, ...] = (
+        ".agents/skills",
+        ".claude/skills",
+        ".opencode/skills",
+        ".cursor/skills",
+    )
+    global_agents: tuple[str, ...] = ("~/.claude/agents", "~/.opencode/agents")
+    global_skills: tuple[str, ...] = ("~/.claude/skills", "~/.opencode/skills")
+
+
+@dataclass(frozen=True, slots=True)
+class MeridianConfig:
+    """Resolved operational configuration for meridian."""
+
+    max_depth: int = 3
+    max_retries: int = 3
+    retry_backoff_seconds: float = 0.25
+    kill_grace_seconds: float = 2.0
+    guardrail_timeout_seconds: float = 30.0
+    wait_timeout_seconds: float = 600.0
+    default_permission_tier: str = "read-only"
+    supervisor_agent: str = "supervisor"
+    default_agent: str = "agent"
+    output: OutputConfig = OutputConfig()
+    search_paths: SearchPathConfig = SearchPathConfig()
+
+
+_SECTION_KEY_MAP: dict[str, dict[str, str]] = {
+    "defaults": {
+        "max_depth": "max_depth",
+        "max_retries": "max_retries",
+        "retry_backoff_seconds": "retry_backoff_seconds",
+        "supervisor_agent": "supervisor_agent",
+        "agent": "default_agent",
+        "default_agent": "default_agent",
+    },
+    "timeouts": {
+        "kill_grace_seconds": "kill_grace_seconds",
+        "guardrail_seconds": "guardrail_timeout_seconds",
+        "guardrail_timeout_seconds": "guardrail_timeout_seconds",
+        "wait_seconds": "wait_timeout_seconds",
+        "wait_timeout_seconds": "wait_timeout_seconds",
+    },
+    "permissions": {
+        "default_tier": "default_permission_tier",
+        "default_permission_tier": "default_permission_tier",
+    },
+}
+
+_TOP_LEVEL_KEY_MAP: dict[str, str] = {
+    "max_depth": "max_depth",
+    "max_retries": "max_retries",
+    "retry_backoff_seconds": "retry_backoff_seconds",
+    "kill_grace_seconds": "kill_grace_seconds",
+    "guardrail_timeout_seconds": "guardrail_timeout_seconds",
+    "wait_timeout_seconds": "wait_timeout_seconds",
+    "default_permission_tier": "default_permission_tier",
+    "supervisor_agent": "supervisor_agent",
+    "default_agent": "default_agent",
+}
+
+_ENV_OVERRIDE_MAP: dict[str, str] = {
+    "MERIDIAN_MAX_DEPTH": "max_depth",
+    "MERIDIAN_MAX_RETRIES": "max_retries",
+    "MERIDIAN_RETRY_BACKOFF_SECONDS": "retry_backoff_seconds",
+    "MERIDIAN_KILL_GRACE_SECONDS": "kill_grace_seconds",
+    "MERIDIAN_GUARDRAIL_TIMEOUT_SECONDS": "guardrail_timeout_seconds",
+    "MERIDIAN_WAIT_TIMEOUT_SECONDS": "wait_timeout_seconds",
+    "MERIDIAN_DEFAULT_PERMISSION_TIER": "default_permission_tier",
+    "MERIDIAN_SUPERVISOR_AGENT": "supervisor_agent",
+    "MERIDIAN_DEFAULT_AGENT": "default_agent",
+}
+
+_OUTPUT_VERBOSITY_PRESETS = frozenset({"quiet", "normal", "verbose", "debug"})
+_SEARCH_PATH_KEYS = frozenset({"agents", "skills", "global_agents", "global_skills"})
+
+
+def _expected_type_name(field_name: str) -> str:
+    if field_name in {"max_depth", "max_retries"}:
+        return "int"
+    if field_name in {
+        "retry_backoff_seconds",
+        "kill_grace_seconds",
+        "guardrail_timeout_seconds",
+        "wait_timeout_seconds",
+    }:
+        return "float"
+    return "str"
+
+
+def _coerce_file_value(*, field_name: str, raw_value: object, source: str) -> object:
+    expected = _expected_type_name(field_name)
+    if expected == "int":
+        if isinstance(raw_value, bool) or not isinstance(raw_value, int):
+            raise ValueError(
+                f"Invalid value for '{source}': expected int, got "
+                f"{type(raw_value).__name__} ({raw_value!r})."
+            )
+        return raw_value
+
+    if expected == "float":
+        if isinstance(raw_value, bool) or not isinstance(raw_value, int | float):
+            raise ValueError(
+                f"Invalid value for '{source}': expected float, got "
+                f"{type(raw_value).__name__} ({raw_value!r})."
+            )
+        return float(raw_value)
+
+    if not isinstance(raw_value, str):
+        raise ValueError(
+            f"Invalid value for '{source}': expected str, got "
+            f"{type(raw_value).__name__} ({raw_value!r})."
+        )
+    normalized = raw_value.strip()
+    if not normalized:
+        raise ValueError(f"Invalid value for '{source}': expected non-empty string.")
+    return normalized
+
+
+def _coerce_output_config(*, raw_value: object, source: str) -> OutputConfig:
+    if not isinstance(raw_value, dict):
+        raise ValueError(f"Invalid value for '{source}': expected table.")
+
+    defaults = OutputConfig()
+    show = defaults.show
+    verbosity = defaults.verbosity
+    for key, value in cast("dict[str, object]", raw_value).items():
+        if key == "show":
+            if not isinstance(value, list):
+                raise ValueError(
+                    f"Invalid value for '{source}.show': expected array[str], "
+                    f"got {type(value).__name__} ({value!r})."
+                )
+            parsed: list[str] = []
+            for item in cast("list[object]", value):
+                if not isinstance(item, str):
+                    raise ValueError(
+                        f"Invalid value for '{source}.show': expected array[str], got "
+                        f"{type(item).__name__} ({item!r})."
+                    )
+                normalized = item.strip()
+                if not normalized:
+                    raise ValueError(
+                        f"Invalid value for '{source}.show': expected non-empty category."
+                    )
+                parsed.append(normalized)
+            show = tuple(parsed)
+            continue
+
+        if key == "verbosity":
+            if not isinstance(value, str):
+                raise ValueError(
+                    f"Invalid value for '{source}.verbosity': expected str, got "
+                    f"{type(value).__name__} ({value!r})."
+                )
+            normalized = value.strip().lower()
+            if not normalized:
+                raise ValueError(
+                    f"Invalid value for '{source}.verbosity': expected non-empty string."
+                )
+            if normalized not in _OUTPUT_VERBOSITY_PRESETS:
+                raise ValueError(
+                    f"Invalid value for '{source}.verbosity': expected one of "
+                    f"{sorted(_OUTPUT_VERBOSITY_PRESETS)}, got {value!r}."
+                )
+            verbosity = normalized
+            continue
+
+        logger.warning("Ignoring unknown Meridian config key '%s.%s'.", source, key)
+
+    return OutputConfig(show=show, verbosity=verbosity)
+
+
+def _coerce_search_path_list(*, raw_value: object, source: str) -> tuple[str, ...]:
+    if not isinstance(raw_value, list):
+        raise ValueError(
+            f"Invalid value for '{source}': expected array[str], got "
+            f"{type(raw_value).__name__} ({raw_value!r})."
+        )
+
+    parsed: list[str] = []
+    for item in cast("list[object]", raw_value):
+        if not isinstance(item, str):
+            raise ValueError(
+                f"Invalid value for '{source}': expected array[str], got "
+                f"{type(item).__name__} ({item!r})."
+            )
+        normalized = item.strip()
+        if not normalized:
+            raise ValueError(
+                f"Invalid value for '{source}': expected non-empty path entries."
+            )
+        parsed.append(normalized)
+    return tuple(parsed)
+
+
+def _coerce_search_path_config(*, raw_value: object, source: str) -> SearchPathConfig:
+    if not isinstance(raw_value, dict):
+        raise ValueError(f"Invalid value for '{source}': expected table.")
+
+    defaults = SearchPathConfig()
+    values: dict[str, tuple[str, ...]] = {
+        "agents": defaults.agents,
+        "skills": defaults.skills,
+        "global_agents": defaults.global_agents,
+        "global_skills": defaults.global_skills,
+    }
+
+    for key, value in cast("dict[str, object]", raw_value).items():
+        if key not in _SEARCH_PATH_KEYS:
+            logger.warning("Ignoring unknown Meridian config key '%s.%s'.", source, key)
+            continue
+        values[key] = _coerce_search_path_list(raw_value=value, source=f"{source}.{key}")
+
+    return SearchPathConfig(
+        agents=values["agents"],
+        skills=values["skills"],
+        global_agents=values["global_agents"],
+        global_skills=values["global_skills"],
+    )
+
+
+def _coerce_env_value(*, field_name: str, raw_value: str, env_name: str) -> object:
+    expected = _expected_type_name(field_name)
+    if expected == "int":
+        try:
+            return int(raw_value.strip())
+        except ValueError as error:
+            raise ValueError(
+                f"Invalid environment override '{env_name}': expected int, got {raw_value!r}."
+            ) from error
+
+    if expected == "float":
+        try:
+            return float(raw_value.strip())
+        except ValueError as error:
+            raise ValueError(
+                f"Invalid environment override '{env_name}': expected float, got {raw_value!r}."
+            ) from error
+
+    normalized = raw_value.strip()
+    if not normalized:
+        raise ValueError(
+            f"Invalid environment override '{env_name}': expected non-empty string."
+        )
+    return normalized
+
+
+def _default_values() -> dict[str, object]:
+    defaults = MeridianConfig()
+    return {field.name: getattr(defaults, field.name) for field in fields(MeridianConfig)}
+
+
+def _apply_toml_payload(
+    *,
+    values: dict[str, object],
+    payload: dict[str, object],
+    path: Path,
+) -> None:
+    for key, raw_value in payload.items():
+        if key == "output":
+            values["output"] = _coerce_output_config(raw_value=raw_value, source="output")
+            continue
+        if key == "search_paths":
+            values["search_paths"] = _coerce_search_path_config(
+                raw_value=raw_value,
+                source="search_paths",
+            )
+            continue
+
+        section_map = _SECTION_KEY_MAP.get(key)
+        if section_map is not None:
+            if not isinstance(raw_value, dict):
+                raise ValueError(f"Invalid value for '{key}' in '{path}': expected table.")
+            for section_key, section_value in cast("dict[str, object]", raw_value).items():
+                field_name = section_map.get(section_key)
+                if field_name is None:
+                    logger.warning(
+                        "Ignoring unknown Meridian config key '%s.%s'.",
+                        key,
+                        section_key,
+                    )
+                    continue
+                values[field_name] = _coerce_file_value(
+                    field_name=field_name,
+                    raw_value=section_value,
+                    source=f"{key}.{section_key}",
+                )
+            continue
+
+        field_name = _TOP_LEVEL_KEY_MAP.get(key)
+        if field_name is None:
+            logger.warning("Ignoring unknown Meridian config key '%s'.", key)
+            continue
+        values[field_name] = _coerce_file_value(
+            field_name=field_name,
+            raw_value=raw_value,
+            source=key,
+        )
+
+
+def _apply_env_overrides(values: dict[str, object]) -> None:
+    for env_name, field_name in _ENV_OVERRIDE_MAP.items():
+        raw_value = os.getenv(env_name)
+        if raw_value is None:
+            continue
+        values[field_name] = _coerce_env_value(
+            field_name=field_name,
+            raw_value=raw_value,
+            env_name=env_name,
+        )
+
+
+def _build_config(values: dict[str, object]) -> MeridianConfig:
+    config = MeridianConfig(
+        max_depth=cast("int", values["max_depth"]),
+        max_retries=cast("int", values["max_retries"]),
+        retry_backoff_seconds=cast("float", values["retry_backoff_seconds"]),
+        kill_grace_seconds=cast("float", values["kill_grace_seconds"]),
+        guardrail_timeout_seconds=cast("float", values["guardrail_timeout_seconds"]),
+        wait_timeout_seconds=cast("float", values["wait_timeout_seconds"]),
+        default_permission_tier=cast("str", values["default_permission_tier"]),
+        supervisor_agent=cast("str", values["supervisor_agent"]),
+        default_agent=cast("str", values["default_agent"]),
+        output=cast("OutputConfig", values["output"]),
+        search_paths=cast("SearchPathConfig", values["search_paths"]),
+    )
+    if config.default_permission_tier.strip().lower() == "danger":
+        raise ValueError("Invalid default_permission_tier: 'danger' is not allowed in config.")
+    return config
+
+
+def load_config(repo_root: Path) -> MeridianConfig:
+    """Load `.meridian/config.toml` and apply environment overrides."""
+
+    values = _default_values()
+    path = repo_root / ".meridian" / "config.toml"
+    if path.is_file():
+        payload_obj = tomllib.loads(path.read_text(encoding="utf-8"))
+        payload = cast("dict[str, object]", payload_obj)
+        _apply_toml_payload(values=values, payload=payload, path=path)
+
+    _apply_env_overrides(values)
+    return _build_config(values)

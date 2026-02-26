@@ -12,6 +12,7 @@ from meridian.lib.safety.permissions import (
     PermissionTier,
     TieredPermissionResolver,
     build_permission_config,
+    opencode_permission_json,
 )
 from meridian.lib.safety.redaction import (
     SecretSpec,
@@ -33,6 +34,7 @@ __all__ = [
     "TieredPermissionResolver",
     "build_permission_config",
     "normalize_guardrail_paths",
+    "opencode_permission_json",
     "parse_secret_specs",
     "redact_secret_bytes",
     "redact_secrets",

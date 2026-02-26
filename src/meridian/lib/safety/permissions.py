@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from enum import StrEnum
 
+import structlog
+
 from meridian.lib.types import HarnessId
+
+logger = structlog.get_logger(__name__)
 
 
 class PermissionTier(StrEnum):
@@ -25,17 +30,32 @@ class PermissionConfig:
     unsafe: bool = False
 
 
-def parse_permission_tier(raw: str | PermissionTier | None) -> PermissionTier:
+def parse_permission_tier(
+    raw: str | PermissionTier | None,
+    *,
+    default_tier: str | PermissionTier = PermissionTier.READ_ONLY,
+) -> PermissionTier:
     """Parse one permission tier string."""
 
+    resolved_default = _parse_permission_tier_value(default_tier)
     if raw is None:
-        return PermissionTier.READ_ONLY
+        return resolved_default
     if isinstance(raw, PermissionTier):
         return raw
 
     normalized = raw.strip().lower()
     if not normalized:
-        return PermissionTier.READ_ONLY
+        return resolved_default
+    return _parse_permission_tier_value(normalized)
+
+
+def _parse_permission_tier_value(raw: str | PermissionTier) -> PermissionTier:
+    if isinstance(raw, PermissionTier):
+        return raw
+
+    normalized = raw.strip().lower()
+    if not normalized:
+        raise ValueError("Unsupported permission tier ''.")
     for candidate in PermissionTier:
         if candidate.value == normalized:
             return candidate
@@ -47,10 +67,14 @@ def build_permission_config(
     tier: str | PermissionTier | None,
     *,
     unsafe: bool,
+    default_tier: str | PermissionTier = PermissionTier.READ_ONLY,
 ) -> PermissionConfig:
     """Build and validate a permission configuration."""
 
-    resolved = PermissionConfig(tier=parse_permission_tier(tier), unsafe=unsafe)
+    resolved = PermissionConfig(
+        tier=parse_permission_tier(tier, default_tier=default_tier),
+        unsafe=unsafe,
+    )
     if resolved.tier is PermissionTier.DANGER and not resolved.unsafe:
         raise ValueError(
             "Permission tier 'danger' requires explicit --unsafe confirmation."
@@ -85,6 +109,41 @@ def _claude_allowed_tools(tier: PermissionTier) -> tuple[str, ...]:
     if tier is PermissionTier.WORKSPACE_WRITE:
         return workspace_write
     return full_access
+
+
+def opencode_permission_json(tier: PermissionTier) -> str:
+    """Build OpenCode permission JSON from one safety tier."""
+
+    if tier is PermissionTier.READ_ONLY:
+        permissions = {
+            "*": "deny",
+            "read": "allow",
+            "grep": "allow",
+            "glob": "allow",
+            "list": "allow",
+        }
+    elif tier is PermissionTier.WORKSPACE_WRITE:
+        permissions = {
+            "*": "deny",
+            "read": "allow",
+            "grep": "allow",
+            "glob": "allow",
+            "list": "allow",
+            "edit": "allow",
+            "bash": "deny",
+        }
+    elif tier is PermissionTier.FULL_ACCESS:
+        permissions = {"*": "allow"}
+    elif tier is PermissionTier.DANGER:
+        logger.warning(
+            "OpenCode 'danger' tier currently matches 'full-access'.",
+            tier=tier.value,
+        )
+        permissions = {"*": "allow"}
+    else:  # pragma: no cover - enum exhaustive guard
+        raise ValueError(f"Unsupported OpenCode permission tier: {tier!r}")
+
+    return json.dumps(permissions, sort_keys=True, separators=(",", ":"))
 
 
 def permission_flags_for_harness(

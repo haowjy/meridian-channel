@@ -6,7 +6,6 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from meridian.lib.config.agent import AgentProfile
-from meridian.lib.config.base_skills import BaseSkillMode, inject_base_skills
 from meridian.lib.config.skill_registry import SkillRegistry
 from meridian.lib.domain import SkillContent
 
@@ -55,7 +54,6 @@ def resolve_run_defaults(
     requested_skills: Sequence[str],
     *,
     profile: AgentProfile | None,
-    mode: BaseSkillMode | None = "standalone",
     default_model: str = DEFAULT_MODEL,
 ) -> RunPromptDefaults:
     """Merge explicit run options with agent-profile defaults."""
@@ -65,9 +63,6 @@ def resolve_run_defaults(
         for skill_name in profile.skills:
             if skill_name not in merged:
                 merged.append(skill_name)
-
-    if mode is not None:
-        merged = list(inject_base_skills(merged, mode))
 
     resolved_model = requested_model.strip()
     if not resolved_model and profile is not None and profile.model:

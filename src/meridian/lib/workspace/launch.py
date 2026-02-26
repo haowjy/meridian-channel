@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shlex
 import signal
@@ -13,16 +14,31 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
+from meridian.lib.config._paths import resolve_repo_root
+from meridian.lib.config.agent import AgentProfile, load_agent_profile
+from meridian.lib.config.settings import load_config
 from meridian.lib.domain import WorkspaceState
-from meridian.lib.prompt.assembly import resolve_run_defaults
+from meridian.lib.prompt.assembly import load_skill_contents, resolve_run_defaults
+from meridian.lib.safety.permissions import (
+    build_permission_config,
+    parse_permission_tier,
+    permission_flags_for_harness,
+)
 from meridian.lib.state.db import open_connection, resolve_state_paths
-from meridian.lib.types import ModelId, WorkspaceId
+from meridian.lib.types import HarnessId, ModelId, WorkspaceId
 
 _CONTINUATION_GUIDANCE = (
     "You are resuming an existing workspace. Continue from the current state, "
     "preserve prior decisions unless evidence has changed, and avoid duplicating "
     "already-completed work."
 )
+logger = logging.getLogger(__name__)
+_TIER_RANKS = {
+    "read-only": 0,
+    "workspace-write": 1,
+    "full-access": 2,
+    "danger": 3,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +119,7 @@ def _write_lock(
 
 def _build_interactive_command(
     *,
+    repo_root: Path | None = None,
     request: WorkspaceLaunchRequest,
     prompt: str,
     passthrough_args: tuple[str, ...],
@@ -116,18 +133,88 @@ def _build_interactive_command(
             raise ValueError("MERIDIAN_SUPERVISOR_COMMAND resolved to an empty command.")
         return tuple(command)
 
+    resolved_root = resolve_repo_root(repo_root)
+    config = load_config(resolved_root)
+    profile: AgentProfile | None = None
+    configured_profile = config.supervisor_agent.strip()
+    if configured_profile:
+        try:
+            profile = load_agent_profile(
+                configured_profile,
+                repo_root=resolved_root,
+                search_paths=config.search_paths,
+            )
+        except FileNotFoundError:
+            profile = None
+
     defaults = resolve_run_defaults(
         request.model,
         (),
-        profile=None,
-        mode="supervisor",
+        profile=profile,
     )
+
+    prompt_with_profile_skills = prompt
+    if profile is not None and defaults.skills:
+        from meridian.lib.config.skill_registry import SkillRegistry
+
+        registry = SkillRegistry(
+            repo_root=resolved_root,
+            search_paths=config.search_paths,
+        )
+        if not registry.list():
+            registry.reindex()
+        available_skills = {item.name for item in registry.list()}
+        skill_names = tuple(
+            skill_name for skill_name in defaults.skills if skill_name in available_skills
+        )
+        missing_skills = tuple(
+            skill_name for skill_name in defaults.skills if skill_name not in available_skills
+        )
+        if missing_skills:
+            logger.warning(
+                "Skipping unavailable supervisor profile skills: %s.",
+                ", ".join(missing_skills),
+            )
+        loaded_skills = load_skill_contents(registry, skill_names)
+        if loaded_skills:
+            sections = [prompt_with_profile_skills, "", "# Supervisor Skills"]
+            for skill in loaded_skills:
+                sections.extend(["", f"## Skill: {skill.name}", "", skill.content.strip()])
+            prompt_with_profile_skills = "\n".join(sections).strip()
+
     model = ModelId(defaults.model)
-    return ("claude", "--system-prompt", prompt, "--model", str(model), *passthrough_args)
+    command: list[str] = [
+        "claude",
+        "--system-prompt",
+        prompt_with_profile_skills,
+        "--model",
+        str(model),
+    ]
+    inferred_tier = _permission_tier_from_profile(profile.sandbox if profile is not None else None)
+    if inferred_tier is not None:
+        _warn_profile_tier_escalation(
+            profile=profile,
+            inferred_tier=inferred_tier,
+            default_tier=config.default_permission_tier,
+        )
+        permission_config = build_permission_config(
+            inferred_tier,
+            unsafe=False,
+            default_tier=config.default_permission_tier,
+        )
+        command.extend(
+            permission_flags_for_harness(
+                HarnessId("claude"),
+                permission_config,
+            )
+        )
+    command.extend(passthrough_args)
+    return tuple(command)
 
 
 def _build_supervisor_command(
     *,
+    repo_root: Path,
     request: WorkspaceLaunchRequest,
     prompt: str,
 ) -> tuple[str, ...]:
@@ -136,9 +223,46 @@ def _build_supervisor_command(
         passthrough.extend(["--autocompact", str(request.autocompact)])
 
     return _build_interactive_command(
+        repo_root=repo_root,
         request=request,
         prompt=prompt,
         passthrough_args=tuple(passthrough),
+    )
+
+
+def _permission_tier_from_profile(agent_sandbox: str | None) -> str | None:
+    if agent_sandbox is None:
+        return None
+    normalized = agent_sandbox.strip().lower()
+    if not normalized:
+        return None
+    mapping = {
+        "read-only": "read-only",
+        "workspace-write": "workspace-write",
+        "danger-full-access": "full-access",
+        "unrestricted": "full-access",
+    }
+    return mapping.get(normalized)
+
+
+def _warn_profile_tier_escalation(
+    *,
+    profile: AgentProfile | None,
+    inferred_tier: str | None,
+    default_tier: str,
+) -> None:
+    if profile is None or inferred_tier is None:
+        return
+    try:
+        resolved_inferred = parse_permission_tier(inferred_tier)
+        resolved_default = parse_permission_tier(default_tier)
+    except ValueError:
+        return
+    if _TIER_RANKS[resolved_inferred.value] <= _TIER_RANKS[resolved_default.value]:
+        return
+    logger.warning(
+        f"Agent profile '{profile.name}' infers {resolved_inferred.value} "
+        f"(config default: {resolved_default.value}). Use --permission to override."
     )
 
 
@@ -241,7 +365,7 @@ def launch_supervisor(
     """Launch supervisor process and wait for exit."""
 
     prompt = build_supervisor_prompt(request)
-    command = _build_supervisor_command(request=request, prompt=prompt)
+    command = _build_supervisor_command(repo_root=repo_root, request=request, prompt=prompt)
     lock_path = workspace_lock_path(repo_root, request.workspace_id)
     child_env = _build_workspace_env(request, prompt)
 

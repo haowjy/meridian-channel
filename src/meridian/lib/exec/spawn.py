@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import signal
 import sys
 import time
@@ -15,6 +16,7 @@ from typing import cast
 import structlog
 
 from meridian.lib.adapters.sqlite import RunFinalizeRow, RunStartRow, StateDB
+from meridian.lib.config.settings import MeridianConfig
 from meridian.lib.domain import Run
 from meridian.lib.exec.errors import ErrorCategory, classify_error, should_retry
 from meridian.lib.exec.signals import SignalForwarder, map_process_exit_code
@@ -32,10 +34,12 @@ from meridian.lib.extract.finalize import (
 from meridian.lib.harness.adapter import (
     PermissionResolver,
     RunParams,
+    StreamEvent,
 )
 from meridian.lib.harness.registry import HarnessRegistry
 from meridian.lib.safety.budget import Budget, BudgetBreach, LiveBudgetTracker
 from meridian.lib.safety.guardrails import GuardrailFailure, run_guardrails
+from meridian.lib.safety.permissions import PermissionConfig
 from meridian.lib.safety.redaction import SecretSpec, redact_secret_bytes
 from meridian.lib.state.artifact_store import ArtifactStore, make_artifact_key
 from meridian.lib.types import HarnessId, RunId, WorkspaceId
@@ -45,7 +49,10 @@ STDERR_FILENAME = "stderr.log"
 TOKENS_FILENAME = "tokens.json"
 REPORT_FILENAME = "report.md"
 DEFAULT_INFRA_EXIT_CODE = 2
-DEFAULT_MAX_RETRIES = 3
+_DEFAULT_CONFIG = MeridianConfig()
+DEFAULT_MAX_RETRIES = _DEFAULT_CONFIG.max_retries
+DEFAULT_RETRY_BACKOFF_SECONDS = _DEFAULT_CONFIG.retry_backoff_seconds
+DEFAULT_GUARDRAIL_TIMEOUT_SECONDS = _DEFAULT_CONFIG.guardrail_timeout_seconds
 logger = structlog.get_logger(__name__)
 
 
@@ -55,6 +62,13 @@ class SafeDefaultPermissionResolver(PermissionResolver):
     def resolve_flags(self, harness_id: HarnessId) -> list[str]:
         _ = harness_id
         return []
+
+
+def _permission_config_for_env_overrides(resolver: PermissionResolver) -> PermissionConfig:
+    config = getattr(resolver, "config", None)
+    if isinstance(config, PermissionConfig):
+        return config
+    return PermissionConfig()
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +116,9 @@ async def _capture_stdout(
     *,
     secrets: tuple[SecretSpec, ...],
     line_observer: Callable[[bytes], None] | None,
+    parse_stream_event: Callable[[str], StreamEvent | None] | None = None,
+    event_observer: Callable[[StreamEvent], None] | None = None,
+    stream_to_terminal: bool = False,
 ) -> tuple[bytes, bytes | None]:
     output_file.parent.mkdir(parents=True, exist_ok=True)
     buffer = bytearray()
@@ -115,6 +132,23 @@ async def _capture_stdout(
             redacted_chunk = redact_secret_bytes(chunk, secrets)
             if line_observer is not None:
                 line_observer(redacted_chunk)
+
+            line_text = redacted_chunk.decode("utf-8", errors="replace")
+            if parse_stream_event is not None and event_observer is not None:
+                try:
+                    parsed_event = parse_stream_event(line_text)
+                except Exception:
+                    logger.warning("Failed to parse harness stream event.", exc_info=True)
+                else:
+                    if parsed_event is not None:
+                        try:
+                            event_observer(parsed_event)
+                        except Exception:
+                            logger.warning("Stream event observer failed.", exc_info=True)
+
+            if stream_to_terminal:
+                sys.stderr.write(line_text)
+                sys.stderr.flush()
 
             parsed_tokens = _extract_tokens_payload(chunk)
             if parsed_tokens is not None:
@@ -132,7 +166,7 @@ async def _capture_stderr(
     stderr_file: Path,
     *,
     secrets: tuple[SecretSpec, ...],
-    stream_to_terminal: bool = True,
+    stream_to_terminal: bool = False,
 ) -> bytes:
     stderr_file.parent.mkdir(parents=True, exist_ok=True)
     buffer = bytearray()
@@ -183,6 +217,10 @@ async def spawn_and_stream(
     kill_grace_seconds: float = DEFAULT_KILL_GRACE_SECONDS,
     budget_tracker: LiveBudgetTracker | None = None,
     secrets: tuple[SecretSpec, ...] = (),
+    parse_stream_event: Callable[[str], StreamEvent | None] | None = None,
+    event_observer: Callable[[StreamEvent], None] | None = None,
+    stream_stdout_to_terminal: bool = False,
+    stream_stderr_to_terminal: bool = False,
 ) -> SpawnResult:
     """Spawn one process, stream/capture output, and return mapped exit metadata."""
 
@@ -225,6 +263,9 @@ async def spawn_and_stream(
             output_log_path,
             secrets=secrets,
             line_observer=_on_stdout_line,
+            parse_stream_event=parse_stream_event,
+            event_observer=event_observer,
+            stream_to_terminal=stream_stdout_to_terminal,
         )
     )
     stderr_task = asyncio.create_task(
@@ -232,6 +273,7 @@ async def spawn_and_stream(
             process.stderr,
             stderr_log_path,
             secrets=secrets,
+            stream_to_terminal=stream_stderr_to_terminal,
         )
     )
 
@@ -347,11 +389,15 @@ async def execute_with_finalization(
     env_overrides: dict[str, str] | None = None,
     harness_id: HarnessId | None = None,
     max_retries: int = DEFAULT_MAX_RETRIES,
-    retry_backoff_seconds: float = 0.25,
+    retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
     budget: Budget | None = None,
     workspace_spent_usd: float = 0.0,
     guardrails: tuple[Path, ...] = (),
+    guardrail_timeout_seconds: float = DEFAULT_GUARDRAIL_TIMEOUT_SECONDS,
     secrets: tuple[SecretSpec, ...] = (),
+    event_observer: Callable[[StreamEvent], None] | None = None,
+    stream_stdout_to_terminal: bool = False,
+    stream_stderr_to_terminal: bool = False,
 ) -> int:
     """Execute one run and always append a finalize row via try/finally."""
 
@@ -367,6 +413,14 @@ async def execute_with_finalization(
         harness = registry.get(harness_id)
 
     resolved_perms = permission_resolver or SafeDefaultPermissionResolver()
+    permission_config = _permission_config_for_env_overrides(resolved_perms)
+    adapter_env_overrides = harness.env_overrides(permission_config)
+    if env_overrides is None:
+        child_env = os.environ.copy() if adapter_env_overrides else None
+    else:
+        child_env = dict(env_overrides)
+    if child_env is not None:
+        child_env.update(adapter_env_overrides)
     start_session_id = str(run.run_id)
     state.append_start_row(
         RunStartRow(
@@ -427,10 +481,18 @@ async def execute_with_finalization(
                 output_log_path=output_log_path,
                 stderr_log_path=log_dir / STDERR_FILENAME,
                 timeout_seconds=timeout_seconds,
-                env=env_overrides,
+                env=child_env,
                 kill_grace_seconds=kill_grace_seconds,
                 budget_tracker=budget_tracker,
                 secrets=secrets,
+                parse_stream_event=(
+                    harness.parse_stream_event
+                    if harness.capabilities.supports_stream_events
+                    else None
+                ),
+                event_observer=event_observer,
+                stream_stdout_to_terminal=stream_stdout_to_terminal,
+                stream_stderr_to_terminal=stream_stderr_to_terminal,
             )
             exit_code = spawn_result.exit_code
 
@@ -485,9 +547,10 @@ async def execute_with_finalization(
                     guardrails,
                     run_id=run.run_id,
                     cwd=execution_cwd,
-                    env=env_overrides,
+                    env=child_env,
                     report_path=extracted.report_path,
                     output_log_path=output_log_path,
+                    timeout_seconds=guardrail_timeout_seconds,
                 )
                 if guardrail_result.ok:
                     break

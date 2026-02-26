@@ -1,0 +1,14 @@
+[defaults]
+max_depth = 7
+max_retries = 4
+retry_backoff_seconds = 0.5
+supervisor_agent = "lead-supervisor"
+agent = "worker-agent"
+
+[timeouts]
+kill_grace_seconds = 1.5
+guardrail_seconds = 45.0
+wait_seconds = 900.0
+
+[permissions]
+default_tier = "workspace-write"

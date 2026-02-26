@@ -55,6 +55,7 @@ def test_run_defaults_merge_agent_profile_defaults() -> None:
         variant=None,
         skills=("reviewing", "agent"),
         tools=(),
+        mcp_tools=(),
         sandbox=None,
         variant_models=(),
         body="Profile body",
@@ -65,7 +66,6 @@ def test_run_defaults_merge_agent_profile_defaults() -> None:
         "",
         ("reviewing",),
         profile=profile,
-        mode=None,
     )
     assert defaults.model == "gpt-5.3-codex"
     assert defaults.skills == ("reviewing", "agent")

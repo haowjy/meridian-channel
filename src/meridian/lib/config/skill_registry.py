@@ -6,14 +6,13 @@ import json
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
 from meridian.lib.config._paths import (
-    canonical_skills_dir,
     default_index_db_path,
+    resolve_path_list,
     resolve_repo_root,
 )
-from meridian.lib.config.base_skills import base_skill_names
+from meridian.lib.config.settings import SearchPathConfig, load_config
 from meridian.lib.config.skill import scan_skills
 from meridian.lib.domain import IndexReport, SkillContent, SkillManifest
 from meridian.lib.state.db import DEFAULT_BUSY_TIMEOUT_MS
@@ -42,7 +41,7 @@ class SkillRow:
 
 
 class SkillRegistry:
-    """Skill catalog with discovery + indexing from `.agents/skills/`."""
+    """Skill catalog with discovery + indexing from configured skill directories."""
 
     def __init__(
         self,
@@ -50,9 +49,17 @@ class SkillRegistry:
         repo_root: Path | None = None,
         *,
         busy_timeout_ms: int = DEFAULT_BUSY_TIMEOUT_MS,
+        search_paths: SearchPathConfig | None = None,
     ) -> None:
         self._repo_root = resolve_repo_root(repo_root)
-        self._skills_dir = canonical_skills_dir(self._repo_root)
+        resolved_search_paths = search_paths or load_config(self._repo_root).search_paths
+        self._skills_dirs = tuple(
+            resolve_path_list(
+                resolved_search_paths.skills,
+                resolved_search_paths.global_skills,
+                self._repo_root,
+            )
+        )
         self._db_path = (db_path or default_index_db_path(self._repo_root)).resolve()
         self._busy_timeout_ms = busy_timeout_ms
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -67,8 +74,8 @@ class SkillRegistry:
         return self._repo_root
 
     @property
-    def skills_dir(self) -> Path:
-        return self._skills_dir
+    def skills_dirs(self) -> tuple[Path, ...]:
+        return self._skills_dirs
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self._db_path)
@@ -83,15 +90,23 @@ class SkillRegistry:
             connection.executescript(_SCHEMA_SQL)
 
     def reindex(self, skills_dir: Path | None = None) -> IndexReport:
-        """Rebuild index from canonical `.agents/skills/` directory."""
+        """Rebuild index from configured skill search directories."""
 
-        if skills_dir is not None and skills_dir.resolve() != self._skills_dir.resolve():
-            raise ValueError(
-                "Skill discovery is restricted to .agents/skills; "
-                f"expected '{self._skills_dir}', got '{skills_dir}'."
-            )
+        scan_dirs: list[Path]
+        if skills_dir is not None:
+            requested = skills_dir.resolve()
+            if requested not in self._skills_dirs:
+                expected = ", ".join(path.as_posix() for path in self._skills_dirs)
+                expected_text = expected if expected else "<none>"
+                raise ValueError(
+                    "Skill discovery is restricted to configured search paths; "
+                    f"expected one of '{expected_text}', got '{skills_dir}'."
+                )
+            scan_dirs = [requested]
+        else:
+            scan_dirs = list(self._skills_dirs)
 
-        documents = scan_skills(self._repo_root)
+        documents = scan_skills(self._repo_root, skills_dirs=scan_dirs)
         with self._connect() as connection:
             connection.execute("DELETE FROM skills")
             connection.executemany(
@@ -199,8 +214,3 @@ class SkillRegistry:
 
         loaded = self.load([name])
         return loaded[0]
-
-    def base_skills(self, mode: Literal["standalone", "supervisor"]) -> list[SkillContent]:
-        """Load base skills injected for a given run mode."""
-
-        return self.load(list(base_skill_names(mode)))

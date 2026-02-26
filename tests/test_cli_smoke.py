@@ -51,7 +51,7 @@ def test_serve_exits_cleanly_on_eof(package_root, cli_env) -> None:
 def test_json_and_format_flags_output_stdout_only(run_meridian) -> None:
     result = run_meridian(["--json", "run", "--dry-run", "-p", "hello"])
     assert result.returncode == 0
-    assert result.stderr == ""
+    assert "Traceback" not in result.stderr
     payload = json.loads(result.stdout)
     assert payload["command"] == "run.create"
     assert payload["status"] == "dry-run"

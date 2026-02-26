@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 
 from meridian.lib.config.agent import load_agent_profile
-from meridian.lib.config.base_skills import base_skill_names, inject_base_skills
 from meridian.lib.config.catalog import load_model_catalog, resolve_model
 from meridian.lib.config.model_guidance import load_model_guidance, selected_guidance_paths
 from meridian.lib.config.routing import route_model
@@ -52,7 +51,7 @@ def test_parse_skill_frontmatter_from_fixture(package_root: Path) -> None:
     assert "# Sample Skill" in parsed.body
 
 
-def test_skill_registry_reindex_search_load_and_base_skills(tmp_path: Path) -> None:
+def test_skill_registry_reindex_search_and_load(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     _create_skill(repo_root, "run-agent", "Run delegation skill", tags=["base"])
     _create_skill(repo_root, "agent", "Worker guidance", tags=["base"])
@@ -74,11 +73,6 @@ def test_skill_registry_reindex_search_load_and_base_skills(tmp_path: Path) -> N
     loaded = registry.show("reviewing")
     assert loaded.name == "reviewing"
     assert "Review code" in loaded.content
-
-    standalone = registry.base_skills("standalone")
-    assert [item.name for item in standalone] == ["run-agent", "agent"]
-    supervisor = registry.base_skills("supervisor")
-    assert [item.name for item in supervisor] == ["run-agent", "agent", "orchestrate"]
 
     other_dir = repo_root / "not-skills"
     other_dir.mkdir(parents=True)
@@ -117,6 +111,7 @@ def test_agent_profile_parsing(tmp_path: Path) -> None:
             "variant: high\n"
             "skills: [reviewing]\n"
             "tools: [Read, Grep]\n"
+            "mcp-tools: [run_list, run_show]\n"
             "sandbox: danger-full-access\n"
             "variant-models:\n"
             "  - claude-opus-4-6\n"
@@ -131,6 +126,7 @@ def test_agent_profile_parsing(tmp_path: Path) -> None:
     assert profile.model == "claude-sonnet-4-6"
     assert profile.skills == ("reviewing",)
     assert profile.tools == ("Read", "Grep")
+    assert profile.mcp_tools == ("run_list", "run_show")
     assert profile.variant_models == ("claude-opus-4-6",)
     assert "Review code." in profile.body
 
@@ -170,11 +166,3 @@ def test_model_catalog_override_and_resolution(tmp_path: Path) -> None:
     resolved = resolve_model("custom", repo_root=repo_root)
     assert str(resolved.model_id) == "my-custom-model"
     assert resolved.harness == "opencode"
-
-    assert base_skill_names("standalone") == ("run-agent", "agent")
-    assert base_skill_names("supervisor") == ("run-agent", "agent", "orchestrate")
-    assert inject_base_skills(["agent", "reviewing"], "standalone") == (
-        "run-agent",
-        "agent",
-        "reviewing",
-    )

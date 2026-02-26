@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import ClassVar
 
 from meridian.lib.harness._common import (
+    categorize_stream_event,
     extract_session_id_from_artifacts,
     extract_usage_from_artifacts,
     parse_json_stream_event,
@@ -23,6 +24,7 @@ from meridian.lib.harness.adapter import (
     RunParams,
     StreamEvent,
 )
+from meridian.lib.safety.permissions import PermissionConfig, opencode_permission_json
 from meridian.lib.types import HarnessId, RunId
 
 
@@ -44,6 +46,14 @@ class OpenCodeAdapter:
     }
     PROMPT_MODE: ClassVar[PromptMode] = PromptMode.POSITIONAL
     BASE_COMMAND: ClassVar[tuple[str, ...]] = ("opencode", "run")
+    EVENT_CATEGORY_MAP: ClassVar[dict[str, str]] = {
+        "run.start": "sub-run",
+        "run.done": "sub-run",
+        "tool.call": "tool-use",
+        "assistant": "assistant",
+        "thinking": "thinking",
+        "error": "error",
+    }
 
     @property
     def id(self) -> HarnessId:
@@ -68,8 +78,14 @@ class OpenCodeAdapter:
             harness_id=self.id,
         )
 
+    def env_overrides(self, config: PermissionConfig) -> dict[str, str]:
+        return {"OPENCODE_PERMISSION": opencode_permission_json(config.tier)}
+
     def parse_stream_event(self, line: str) -> StreamEvent | None:
-        return parse_json_stream_event(line)
+        event = parse_json_stream_event(line)
+        if event is None:
+            return None
+        return categorize_stream_event(event, exact_map=self.EVENT_CATEGORY_MAP)
 
     def extract_usage(self, artifacts: ArtifactStore, run_id: RunId):
         return extract_usage_from_artifacts(artifacts, run_id)

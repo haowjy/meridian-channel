@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging as std_logging
+import sys
 
 import structlog
 
@@ -19,7 +20,10 @@ def configure_logging(json_mode: bool = False, verbosity: int = 0) -> None:
     """Configure structlog for CLI or MCP server mode."""
 
     level = _level_from_verbosity(verbosity)
-    std_logging.basicConfig(level=level, format="%(message)s")
+    # Route log output to stderr so it never pollutes JSON/structured stdout.
+    handler = std_logging.StreamHandler(sys.stderr)
+    handler.setFormatter(std_logging.Formatter("%(message)s"))
+    std_logging.basicConfig(level=level, handlers=[handler])
 
     renderer: structlog.typing.Processor = (
         structlog.processors.JSONRenderer() if json_mode else structlog.dev.ConsoleRenderer()
@@ -33,5 +37,7 @@ def configure_logging(json_mode: bool = False, verbosity: int = 0) -> None:
             renderer,
         ],
         wrapper_class=structlog.make_filtering_bound_logger(level),
+        # Route structlog output to stderr so it never pollutes JSON stdout.
+        logger_factory=structlog.PrintLoggerFactory(file=sys.stderr),
         cache_logger_on_first_use=True,
     )

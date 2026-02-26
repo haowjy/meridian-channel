@@ -14,6 +14,7 @@ from meridian.lib.adapters.sqlite import (
     StateDB,
 )
 from meridian.lib.config._paths import resolve_repo_root
+from meridian.lib.config.settings import MeridianConfig, load_config
 from meridian.lib.harness.registry import HarnessRegistry, get_default_harness_registry
 from meridian.lib.state.artifact_store import LocalStore
 from meridian.lib.types import WorkspaceId
@@ -24,6 +25,7 @@ class OperationRuntime:
     """Resolved dependencies used by operation handlers."""
 
     repo_root: Path
+    config: MeridianConfig
     state: StateDB
     run_store_sync: SQLiteRunStoreSync
     run_store: SQLiteRunStore
@@ -33,23 +35,42 @@ class OperationRuntime:
     artifacts: LocalStore
 
 
-def build_runtime(repo_root: str | None = None) -> OperationRuntime:
-    """Build a runtime bundle rooted at one repository path."""
+def resolve_runtime_root_and_config(
+    repo_root: str | None = None,
+) -> tuple[Path, MeridianConfig]:
+    """Resolve repository root and load operational config."""
 
     explicit_root = Path(repo_root).expanduser().resolve() if repo_root else None
     resolved_root = resolve_repo_root(explicit_root)
-    state = StateDB(resolved_root)
+    return resolved_root, load_config(resolved_root)
+
+
+def build_runtime_from_root_and_config(
+    repo_root: Path,
+    config: MeridianConfig,
+) -> OperationRuntime:
+    """Build a runtime bundle from one pre-resolved root and config."""
+
+    state = StateDB(repo_root)
     run_store_sync = SQLiteRunStoreSync(state)
     return OperationRuntime(
-        repo_root=resolved_root,
+        repo_root=repo_root,
+        config=config,
         state=state,
         run_store_sync=run_store_sync,
         run_store=SQLiteRunStore(run_store_sync),
         workspace_store=SQLiteWorkspaceStore(state),
         context_store=SQLiteContextStore(state),
         harness_registry=get_default_harness_registry(),
-        artifacts=LocalStore(resolved_root / ".meridian" / "artifacts"),
+        artifacts=LocalStore(repo_root / ".meridian" / "artifacts"),
     )
+
+
+def build_runtime(repo_root: str | None = None) -> OperationRuntime:
+    """Build a runtime bundle rooted at one repository path."""
+
+    resolved_root, config = resolve_runtime_root_and_config(repo_root)
+    return build_runtime_from_root_and_config(resolved_root, config)
 
 
 def resolve_workspace_id(workspace: str | None) -> WorkspaceId | None:

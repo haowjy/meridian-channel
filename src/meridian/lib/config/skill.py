@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from meridian.lib.config._paths import canonical_skills_dir, resolve_repo_root
+from meridian.lib.config._paths import resolve_path_list, resolve_repo_root
+from meridian.lib.config.settings import load_config
 
 _INT_RE = re.compile(r"^-?[0-9]+$")
 _FLOAT_RE = re.compile(r"^-?(?:[0-9]+\.[0-9]*|\.[0-9]+)$")
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,9 +215,39 @@ def discover_skill_files(skills_dir: Path) -> list[Path]:
     return sorted(path for path in skills_dir.rglob("SKILL.md") if path.is_file())
 
 
-def scan_skills(repo_root: Path | None = None) -> list[SkillDocument]:
-    """Scan canonical `.agents/skills/` and parse all discovered skills."""
+def _skill_search_dirs(repo_root: Path) -> list[Path]:
+    config = load_config(repo_root).search_paths
+    return resolve_path_list(
+        config.skills,
+        config.global_skills,
+        repo_root,
+    )
+
+
+def scan_skills(
+    repo_root: Path | None = None,
+    skills_dirs: list[Path] | None = None,
+) -> list[SkillDocument]:
+    """Scan configured skill directories and parse all discovered skills."""
 
     root = resolve_repo_root(repo_root)
-    skills_dir = canonical_skills_dir(root)
-    return [parse_skill_file(path) for path in discover_skill_files(skills_dir)]
+    directories = skills_dirs if skills_dirs is not None else _skill_search_dirs(root)
+    documents: list[SkillDocument] = []
+    selected_by_name: dict[str, SkillDocument] = {}
+
+    for directory in directories:
+        for path in discover_skill_files(directory):
+            document = parse_skill_file(path)
+            existing = selected_by_name.get(document.name)
+            if existing is not None:
+                logger.warning(
+                    "Skill '%s' found in multiple paths: %s, %s. Using %s.",
+                    document.name,
+                    existing.path,
+                    document.path,
+                    existing.path,
+                )
+                continue
+            selected_by_name[document.name] = document
+            documents.append(document)
+    return documents

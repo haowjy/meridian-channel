@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +14,8 @@ from meridian.lib.types import HarnessId, ModelId
 
 if TYPE_CHECKING:
     from meridian.lib.formatting import FormatContext
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,7 +122,14 @@ def _parse_aliases(raw: object) -> tuple[str, ...]:
         candidate = raw.strip()
         return (candidate,) if candidate else ()
     if isinstance(raw, list):
-        values = [str(item).strip() for item in cast("list[object]", raw) if str(item).strip()]
+        values: list[str] = []
+        seen: set[str] = set()
+        for item in cast("list[object]", raw):
+            normalized = str(item).strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            values.append(normalized)
         return tuple(values)
     return ()
 
@@ -194,10 +204,24 @@ def resolve_model(name_or_alias: str, repo_root: Path | None = None) -> CatalogM
     if normalized in by_id:
         return by_id[normalized]
 
-    alias_matches = [entry for entry in catalog if normalized in entry.aliases]
-    if not alias_matches:
+    alias_to_model: dict[str, CatalogModel] = {}
+    for entry in catalog:
+        for alias in entry.aliases:
+            existing = alias_to_model.get(alias)
+            if existing is None:
+                alias_to_model[alias] = entry
+                continue
+            if str(existing.model_id) == str(entry.model_id):
+                continue
+            logger.warning(
+                "Model alias '%s' is declared by '%s' and '%s'. Using '%s'.",
+                alias,
+                existing.model_id,
+                entry.model_id,
+                existing.model_id,
+            )
+
+    resolved = alias_to_model.get(normalized)
+    if resolved is None:
         raise KeyError(f"Unknown model '{name_or_alias}'.")
-    if len(alias_matches) > 1:
-        candidates = ", ".join(str(entry.model_id) for entry in alias_matches)
-        raise ValueError(f"Ambiguous model alias '{name_or_alias}'. Candidates: {candidates}")
-    return alias_matches[0]
+    return resolved

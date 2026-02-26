@@ -6,7 +6,12 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from meridian.lib.domain import TokenUsage
+from meridian.lib.safety.permissions import PermissionConfig
 from meridian.lib.types import ArtifactKey, HarnessId, ModelId, RunId
+
+
+def _empty_metadata() -> dict[str, object]:
+    return {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,8 +40,10 @@ class StreamEvent:
     """Structured stream event parsed from harness output."""
 
     event_type: str
+    category: str
     raw_line: str
     text: str | None = None
+    metadata: dict[str, object] = field(default_factory=_empty_metadata)
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +81,8 @@ class HarnessAdapter(Protocol):
     def capabilities(self) -> HarnessCapabilities: ...
 
     def build_command(self, run: RunParams, perms: PermissionResolver) -> list[str]: ...
+
+    def env_overrides(self, config: PermissionConfig) -> dict[str, str]: ...
 
     def parse_stream_event(self, line: str) -> StreamEvent | None: ...
 

@@ -125,7 +125,9 @@ def test_workspace_resume_generates_summary_and_reinjects_pinned_context(
     prompt = env["MERIDIAN_WORKSPACE_PROMPT"]
     assert isinstance(prompt, str)
     assert "Continuation Guidance" in prompt
-    assert "Pinned analysis context" in prompt
+    # On resume (fresh=False), pinned context is NOT re-injected — the conversation
+    # already has the full history. Re-injection only happens on fresh starts.
+    assert "Pinned analysis context" not in prompt
     assert "# Workspace Summary" in prompt
 
     listed = context_list_sync(
@@ -173,11 +175,13 @@ def test_workspace_resume_prelaunch_failure_rolls_back_to_paused(tmp_path: Path)
     state.transition_workspace(workspace.workspace_id, "paused")
     state.pin_file(workspace.workspace_id, (tmp_path / "missing.md").as_posix())
 
+    # With fresh=True, pinned context is injected and missing files cause an error.
     with pytest.raises(FileNotFoundError, match="Pinned context file is missing"):
         workspace_resume_sync(
             WorkspaceResumeInput(
                 workspace=str(workspace.workspace_id),
                 repo_root=tmp_path.as_posix(),
+                fresh=True,
             )
         )
 

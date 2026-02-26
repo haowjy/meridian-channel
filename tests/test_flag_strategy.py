@@ -39,7 +39,7 @@ def test_every_run_params_field_is_mapped_for_each_adapter() -> None:
         assert not missing, f"{adapter_class.__name__} missing strategy for {sorted(missing)}"
 
 
-def test_claude_build_command_uses_agent_and_prompt_flag() -> None:
+def test_claude_build_command_drops_agent_and_uses_prompt_flag() -> None:
     command = ClaudeAdapter().build_command(
         _sample_run(model="claude-opus-4-6"),
         StubPermissionResolver(),
@@ -51,12 +51,11 @@ def test_claude_build_command_uses_agent_and_prompt_flag() -> None:
         "Implement feature X.",
         "--model",
         "claude-opus-4-6",
-        "--agent",
-        "reviewer",
         "--perm",
         "claude",
         "--json",
     ]
+    assert "--agent" not in command
     assert "--skills" not in command
 
 
@@ -107,7 +106,6 @@ def test_resolve_run_defaults_resolves_model_alias(monkeypatch, tmp_path: Path) 
         requested_model="codex",
         requested_skills=(),
         profile=None,
-        mode=None,
     )
 
     assert defaults.model == "gpt-5.3-codex"

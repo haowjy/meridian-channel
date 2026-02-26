@@ -19,6 +19,7 @@ from meridian.lib.workspace.launch import (
 
 def test_build_interactive_command_uses_system_prompt_model_and_passthrough(
     monkeypatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.delenv("MERIDIAN_SUPERVISOR_COMMAND", raising=False)
 
@@ -30,6 +31,7 @@ def test_build_interactive_command_uses_system_prompt_model_and_passthrough(
     prompt = build_supervisor_prompt(request)
 
     command = _build_interactive_command(
+        repo_root=tmp_path,
         request=request,
         prompt=prompt,
         passthrough_args=("--permission-mode", "acceptEdits"),
