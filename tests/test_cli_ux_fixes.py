@@ -139,8 +139,27 @@ def test_bug9_unknown_skill_returns_structured_error_payload(
     assert payload["message"] == "Unknown skills: nonexistent-skill"
 
 
-def test_bug16_skills_show_unknown_skill_emits_clean_error(
-    package_root: Path, cli_env: dict[str, str], tmp_path: Path
+@pytest.mark.parametrize(
+    "args,error_fragment",
+    [
+        pytest.param(
+            ["skills", "show", "nonexistent-skill"],
+            "Unknown skills: nonexistent-skill",
+            id="skills-show",
+        ),
+        pytest.param(
+            ["run", "show", "nonexistent-run"],
+            "Run 'nonexistent-run' not found",
+            id="run-show",
+        ),
+    ],
+)
+def test_bug16_show_unknown_resource_emits_clean_error(
+    args: list[str],
+    error_fragment: str,
+    package_root: Path,
+    cli_env: dict[str, str],
+    tmp_path: Path,
 ) -> None:
     repo_root = tmp_path / "repo"
     _seed_base_skills(repo_root)
@@ -149,29 +168,11 @@ def test_bug16_skills_show_unknown_skill_emits_clean_error(
         package_root=package_root,
         cli_env=cli_env,
         repo_root=repo_root,
-        args=["skills", "show", "nonexistent-skill"],
+        args=args,
     )
 
     assert result.returncode != 0
-    assert "error:" in result.stderr
-    assert "Traceback" not in result.stderr
-
-
-def test_bug16_run_show_unknown_run_emits_clean_error(
-    package_root: Path, cli_env: dict[str, str], tmp_path: Path
-) -> None:
-    repo_root = tmp_path / "repo"
-    _seed_base_skills(repo_root)
-
-    result = _run_cli(
-        package_root=package_root,
-        cli_env=cli_env,
-        repo_root=repo_root,
-        args=["run", "show", "nonexistent-run"],
-    )
-
-    assert result.returncode != 0
-    assert "Run 'nonexistent-run' not found" in result.stderr
+    assert error_fragment in result.stderr
     assert "Traceback" not in result.stderr
 
 

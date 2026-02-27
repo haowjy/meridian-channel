@@ -1,0 +1,221 @@
+"""Run operation input/output dataclasses and shared lightweight model helpers."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+from meridian.lib.domain import RunStatus
+
+if TYPE_CHECKING:
+    from meridian.lib.formatting import FormatContext
+
+
+def _empty_template_vars() -> dict[str, str]:
+    return {}
+
+
+@dataclass(frozen=True, slots=True)
+class RunCreateInput:
+    prompt: str = ""
+    model: str = ""
+    skills: tuple[str, ...] = ()
+    files: tuple[str, ...] = ()
+    template_vars: tuple[str, ...] = ()
+    agent: str | None = None
+    report_path: str = "report.md"
+    dry_run: bool = False
+    verbose: bool = False
+    quiet: bool = False
+    stream: bool = False
+    workspace: str | None = None
+    repo_root: str | None = None
+    timeout_secs: float | None = None
+    permission_tier: str | None = None
+    unsafe: bool = False
+    budget_per_run_usd: float | None = None
+    budget_per_workspace_usd: float | None = None
+    guardrails: tuple[str, ...] = ()
+    secrets: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class RunActionOutput:
+    command: str
+    status: str
+    run_id: str | None = None
+    message: str | None = None
+    error: str | None = None
+    current_depth: int | None = None
+    max_depth: int | None = None
+    model: str | None = None
+    harness_id: str | None = None
+    warning: str | None = None
+    agent: str | None = None
+    skills: tuple[str, ...] = ()
+    reference_files: tuple[str, ...] = ()
+    template_vars: dict[str, str] = field(default_factory=_empty_template_vars)
+    report_path: str | None = None
+    composed_prompt: str | None = None
+    cli_command: tuple[str, ...] = ()
+    exit_code: int | None = None
+    duration_secs: float | None = None
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        """Compact single-line summary for text output mode."""
+        parts: list[str] = [self.command, self.status]
+        if self.run_id is not None:
+            parts.append(self.run_id)
+        if self.model is not None:
+            parts.append(f"model={self.model}")
+        if self.harness_id is not None:
+            parts.append(f"harness={self.harness_id}")
+        if self.skills:
+            parts.append(f"skills={','.join(self.skills)}")
+        if self.duration_secs is not None:
+            parts.append(f"{self.duration_secs:.1f}s")
+        if self.exit_code is not None:
+            parts.append(f"exit={self.exit_code}")
+        if self.message is not None:
+            parts.append(self.message)
+        if self.error is not None:
+            parts.append(f"error={self.error}")
+        if self.warning is not None:
+            parts.append(f"warning={self.warning}")
+        return "  ".join(parts)
+
+
+@dataclass(frozen=True, slots=True)
+class RunListInput:
+    workspace: str | None = None
+    status: RunStatus | None = None
+    model: str | None = None
+    limit: int = 20
+    no_workspace: bool = False
+    failed: bool = False
+    repo_root: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RunListEntry:
+    run_id: str
+    status: str
+    model: str
+    workspace_id: str | None
+    duration_secs: float | None
+    cost_usd: float | None
+
+    def as_row(self) -> list[str]:
+        """Return columnar cells for tabular alignment."""
+        return [
+            self.run_id,
+            self.status,
+            self.model,
+            self.workspace_id if self.workspace_id is not None else "-",
+            f"{self.duration_secs:.1f}s" if self.duration_secs is not None else "-",
+            f"${self.cost_usd:.2f}" if self.cost_usd is not None else "-",
+        ]
+
+
+@dataclass(frozen=True, slots=True)
+class RunListOutput:
+    runs: tuple[RunListEntry, ...]
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        """Columnar list of runs for text output mode."""
+        if not self.runs:
+            return "(no runs)"
+        from meridian.cli.format_helpers import tabular
+
+        return tabular([entry.as_row() for entry in self.runs])
+
+
+@dataclass(frozen=True, slots=True)
+class RunShowInput:
+    run_id: str
+    include_report: bool = False
+    include_files: bool = False
+    repo_root: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RunDetailOutput:
+    run_id: str
+    status: str
+    model: str
+    harness: str
+    workspace_id: str | None
+    started_at: str
+    finished_at: str | None
+    duration_secs: float | None
+    exit_code: int | None
+    failure_reason: str | None
+    input_tokens: int | None
+    output_tokens: int | None
+    cost_usd: float | None
+    report_path: str | None
+    report_summary: str | None
+    report: str | None
+    files_touched: tuple[str, ...] | None
+    skills: tuple[str, ...]
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        """Key-value detail view for text output mode. Omits None/empty fields."""
+        from meridian.cli.format_helpers import kv_block
+
+        status_str = self.status
+        if self.exit_code is not None:
+            status_str += f" (exit {self.exit_code})"
+
+        pairs: list[tuple[str, str | None]] = [
+            ("Run", self.run_id),
+            ("Status", status_str),
+            ("Model", f"{self.model} ({self.harness})"),
+            ("Duration", f"{self.duration_secs:.1f}s" if self.duration_secs is not None else None),
+            ("Workspace", self.workspace_id),
+            ("Skills", ", ".join(self.skills) if self.skills else None),
+            ("Failure", self.failure_reason),
+            ("Cost", f"${self.cost_usd:.4f}" if self.cost_usd is not None else None),
+            ("Report", self.report_path),
+        ]
+        return kv_block(pairs)
+
+
+@dataclass(frozen=True, slots=True)
+class RunContinueInput:
+    run_id: str
+    prompt: str
+    model: str = ""
+    timeout_secs: float | None = None
+    repo_root: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RunRetryInput:
+    run_id: str
+    prompt: str | None = None
+    model: str = ""
+    timeout_secs: float | None = None
+    repo_root: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RunWaitInput:
+    run_id: str
+    timeout_secs: float | None = None
+    poll_interval_secs: float | None = None
+    include_report: bool = False
+    include_files: bool = False
+    repo_root: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RunListFilters:
+    """Type-safe run-list filters converted into parameterized SQL."""
+
+    model: str | None = None
+    workspace: str | None = None
+    no_workspace: bool = False
+    status: RunStatus | None = None
+    failed: bool = False
+    limit: int = 20

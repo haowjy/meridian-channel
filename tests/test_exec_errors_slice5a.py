@@ -2,27 +2,38 @@
 
 from __future__ import annotations
 
+import pytest
+
 from meridian.lib.exec.errors import ErrorCategory, classify_error, should_retry
 
 
-def test_classify_error_token_limit_unrecoverable() -> None:
-    category = classify_error(1, "Request failed: token limit exceeded for this model.")
-    assert category == ErrorCategory.UNRECOVERABLE
-
-
-def test_classify_error_model_not_found_unrecoverable() -> None:
-    category = classify_error(1, "Model not found: gpt-unknown")
-    assert category == ErrorCategory.UNRECOVERABLE
-
-
-def test_classify_error_network_retryable() -> None:
-    category = classify_error(1, "Network error: connection reset by peer")
-    assert category == ErrorCategory.RETRYABLE
-
-
-def test_classify_error_context_overflow_strategy_change() -> None:
-    category = classify_error(1, "Maximum context length exceeded; prompt too long.")
-    assert category == ErrorCategory.STRATEGY_CHANGE
+@pytest.mark.parametrize(
+    "error_message,expected",
+    [
+        pytest.param(
+            "Request failed: token limit exceeded for this model.",
+            ErrorCategory.UNRECOVERABLE,
+            id="token-limit",
+        ),
+        pytest.param(
+            "Model not found: gpt-unknown",
+            ErrorCategory.UNRECOVERABLE,
+            id="model-not-found",
+        ),
+        pytest.param(
+            "Network error: connection reset by peer",
+            ErrorCategory.RETRYABLE,
+            id="network-error",
+        ),
+        pytest.param(
+            "Maximum context length exceeded; prompt too long.",
+            ErrorCategory.STRATEGY_CHANGE,
+            id="context-overflow",
+        ),
+    ],
+)
+def test_classify_error_categories(error_message: str, expected: ErrorCategory) -> None:
+    assert classify_error(1, error_message) == expected
 
 
 def test_should_retry_honors_retryable_and_max_limit() -> None:

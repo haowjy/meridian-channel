@@ -1,6 +1,6 @@
 # Post-Sandbox Cleanup & Refactoring
 
-**Status:** approved
+**Status:** done (all 8 tasks complete)
 
 ## Context
 

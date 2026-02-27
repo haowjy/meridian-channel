@@ -19,6 +19,31 @@ from meridian.lib.prompt.reference import (
 )
 from meridian.lib.prompt.sanitize import sanitize_prior_output, strip_stale_report_paths
 
+_STALE_FILE_PATH_INSTRUCTION = """
+# Report
+
+**IMPORTANT - As your FINAL action**, write a report of your work to: `/tmp/old/report.md`
+
+Include: what was done.
+
+Use plain markdown. This file is read by the orchestrator to understand
+what you did without parsing verbose logs.
+
+Fix the bug in parser.py.
+"""
+
+_STALE_FINAL_MESSAGE_INSTRUCTION = """
+# Report
+
+**IMPORTANT - Your final message should be a report of your work.**
+
+Include: what was done.
+
+Use plain markdown. Meridian captures your final message as the run report.
+
+Follow-up request for the same task.
+"""
+
 
 def _write_skill(repo_root: Path, name: str, body: str) -> None:
     skill_file = repo_root / ".agents" / "skills" / name / "SKILL.md"
@@ -89,39 +114,29 @@ def test_reference_loader_errors_for_missing_file(tmp_path: Path) -> None:
         _ = load_reference_files([tmp_path / "missing.md"])
 
 
-def test_strip_stale_report_instruction_from_retry_prompt() -> None:
-    stale = """
-# Report
-
-**IMPORTANT - As your FINAL action**, write a report of your work to: `/tmp/old/report.md`
-
-Include: what was done.
-
-Use plain markdown. This file is read by the orchestrator to understand
-what you did without parsing verbose logs.
-
-Fix the bug in parser.py.
-"""
-    cleaned = strip_stale_report_paths(stale)
-    assert "/tmp/old/report.md" not in cleaned
-    assert "Fix the bug in parser.py." in cleaned
-
-
-def test_strip_stale_current_report_instruction_from_retry_prompt() -> None:
-    stale = """
-# Report
-
-**IMPORTANT - Your final message should be a report of your work.**
-
-Include: what was done.
-
-Use plain markdown. Meridian captures your final message as the run report.
-
-Follow-up request for the same task.
-"""
-    cleaned = strip_stale_report_paths(stale)
-    assert "Your final message should be a report of your work." not in cleaned
-    assert "Follow-up request for the same task." in cleaned
+@pytest.mark.parametrize(
+    "stale_text,should_remove,should_preserve",
+    [
+        pytest.param(
+            _STALE_FILE_PATH_INSTRUCTION,
+            "/tmp/old/report.md",
+            "Fix the bug in parser.py.",
+            id="file-path-instruction",
+        ),
+        pytest.param(
+            _STALE_FINAL_MESSAGE_INSTRUCTION,
+            "Your final message should be a report of your work.",
+            "Follow-up request for the same task.",
+            id="final-message-instruction",
+        ),
+    ],
+)
+def test_strip_stale_report_instructions(
+    stale_text: str, should_remove: str, should_preserve: str
+) -> None:
+    cleaned = strip_stale_report_paths(stale_text)
+    assert should_remove not in cleaned
+    assert should_preserve in cleaned
 
 
 def test_sanitize_prior_output_wraps_boundary_markers() -> None:

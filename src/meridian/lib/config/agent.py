@@ -64,9 +64,9 @@ def _normalize_string_list(value: object) -> tuple[str, ...]:
 @lru_cache(maxsize=1)
 def _known_mcp_tools() -> frozenset[str]:
     # Import lazily to avoid loading the full operations graph at module import time.
-    from meridian.lib.ops import get_all_operations
+    from meridian.lib.ops.registry import get_mcp_tool_names
 
-    return frozenset(op.mcp_name for op in get_all_operations() if not op.cli_only)
+    return get_mcp_tool_names()
 
 
 def _normalize_mcp_tools(value: object, *, profile_name: str) -> tuple[str, ...]:

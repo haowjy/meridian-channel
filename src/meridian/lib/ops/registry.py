@@ -31,6 +31,7 @@ class OperationSpec(Generic[InputT, OutputT]):
 
 
 _REGISTRY: dict[str, OperationSpec[Any, Any]] = {}
+_bootstrapped = False
 
 
 def operation(spec: OperationSpec[InputT, OutputT]) -> OperationSpec[InputT, OutputT]:
@@ -50,13 +51,22 @@ def operation(spec: OperationSpec[InputT, OutputT]) -> OperationSpec[InputT, Out
 def get_all_operations() -> list[OperationSpec[Any, Any]]:
     """Return all registered operations sorted by canonical name."""
 
+    _ensure_bootstrapped()
     return [_REGISTRY[name] for name in sorted(_REGISTRY)]
 
 
 def get_operation(name: str) -> OperationSpec[Any, Any]:
     """Fetch one operation spec by canonical name."""
 
+    _ensure_bootstrapped()
     return _REGISTRY[name]
+
+
+def get_mcp_tool_names() -> frozenset[str]:
+    """Return non-CLI MCP tool names from the operation registry."""
+
+    _ensure_bootstrapped()
+    return frozenset(spec.mcp_name for spec in _REGISTRY.values() if not spec.cli_only)
 
 
 def _bootstrap_operation_modules() -> None:
@@ -83,4 +93,10 @@ def _bootstrap_operation_modules() -> None:
     )
 
 
-_bootstrap_operation_modules()
+def _ensure_bootstrapped() -> None:
+    global _bootstrapped
+    if _bootstrapped:
+        return
+    # Only mark bootstrapped after a successful import sequence so failures retry.
+    _bootstrap_operation_modules()
+    _bootstrapped = True
