@@ -51,6 +51,8 @@ class OpenCodeAdapter:
         "model": FlagStrategy(effect=FlagEffect.TRANSFORM, transform=_opencode_model_transform),
         "agent": FlagStrategy(effect=FlagEffect.DROP),
         "skills": FlagStrategy(effect=FlagEffect.DROP),
+        "continue_session_id": FlagStrategy(effect=FlagEffect.DROP),
+        "continue_fork": FlagStrategy(effect=FlagEffect.DROP),
     }
     PROMPT_MODE: ClassVar[PromptMode] = PromptMode.POSITIONAL
     BASE_COMMAND: ClassVar[tuple[str, ...]] = ("opencode", "run")
@@ -72,13 +74,14 @@ class OpenCodeAdapter:
         return HarnessCapabilities(
             supports_stream_events=True,
             supports_session_resume=True,
+            supports_session_fork=True,
             supports_native_skills=True,
             supports_programmatic_tools=False,
         )
 
     def build_command(self, run: RunParams, perms: PermissionResolver) -> list[str]:
         mcp_config = self.mcp_config(run)
-        return build_harness_command(
+        command = build_harness_command(
             base_command=self.BASE_COMMAND,
             prompt_mode=self.PROMPT_MODE,
             run=run,
@@ -87,6 +90,13 @@ class OpenCodeAdapter:
             harness_id=self.id,
             mcp_config=mcp_config,
         )
+        session_id = (run.continue_session_id or "").strip()
+        if not session_id:
+            return command
+        command.extend(["--session", session_id])
+        if run.continue_fork:
+            command.append("--fork")
+        return command
 
     def mcp_config(self, run: RunParams) -> McpConfig | None:
         repo_root = (run.repo_root or "").strip()
@@ -123,3 +133,15 @@ class OpenCodeAdapter:
 
     def extract_session_id(self, artifacts: ArtifactStore, run_id: RunId) -> str | None:
         return extract_session_id_from_artifacts(artifacts, run_id)
+
+    def extract_tasks(self, event: StreamEvent) -> list[dict[str, str]] | None:
+        _ = event
+        return None
+
+    def extract_findings(self, event: StreamEvent) -> list[dict[str, str]] | None:
+        _ = event
+        return None
+
+    def extract_summary(self, output: str) -> str | None:
+        _ = output
+        return None

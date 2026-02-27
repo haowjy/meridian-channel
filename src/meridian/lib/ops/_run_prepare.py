@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from difflib import get_close_matches
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -10,7 +11,7 @@ import structlog
 
 from meridian.lib.config import load_agent_profile, load_model_guidance
 from meridian.lib.config.agent import AgentProfile
-from meridian.lib.config.catalog import resolve_model
+from meridian.lib.config.catalog import load_model_catalog, resolve_model
 from meridian.lib.config.routing import route_model
 from meridian.lib.harness.registry import get_default_harness_registry
 from meridian.lib.ops._runtime import OperationRuntime, build_runtime, resolve_runtime_root_and_config
@@ -60,6 +61,8 @@ class _PreparedCreate:
     budget: Budget | None
     guardrails: tuple[str, ...]
     secrets: tuple[SecretSpec, ...]
+    continue_session_id: str | None
+    continue_fork: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +88,52 @@ def _looks_like_alias_identifier(candidate: str) -> bool:
     return "/" not in candidate and "-" not in candidate and "." not in candidate
 
 
+def _model_validation_context(
+    requested_model: str,
+    *,
+    repo_root: Path | None,
+) -> str:
+    catalog = load_model_catalog(repo_root=repo_root)
+    if not catalog:
+        return ""
+
+    available_models = ", ".join(
+        f"{entry.model_id} [{entry.harness}]"
+        for entry in catalog
+    )
+
+    alias_to_model: dict[str, str] = {}
+    candidates: list[str] = []
+    for entry in catalog:
+        model_id = str(entry.model_id)
+        candidates.append(model_id)
+        for alias in entry.aliases:
+            alias = alias.strip()
+            if not alias:
+                continue
+            candidates.append(alias)
+            alias_to_model.setdefault(alias, model_id)
+
+    suggestion: str | None = None
+    close = get_close_matches(requested_model, candidates, n=1, cutoff=0.5)
+    if close:
+        suggestion = alias_to_model.get(close[0], close[0])
+    else:
+        for candidate in candidates:
+            lowered_candidate = candidate.lower()
+            lowered_requested = requested_model.lower()
+            if lowered_candidate.startswith(lowered_requested) or lowered_requested.startswith(
+                lowered_candidate
+            ):
+                suggestion = alias_to_model.get(candidate, candidate)
+                break
+
+    context_lines = [f"Available models: {available_models}"]
+    if suggestion is not None:
+        context_lines.append(f"Did you mean: {suggestion}?")
+    return "\n".join(context_lines)
+
+
 def _validate_requested_model(
     requested_model: str,
     *,
@@ -100,18 +149,27 @@ def _validate_requested_model(
     except KeyError:
         pass
 
+    validation_context = _model_validation_context(normalized, repo_root=explicit_root)
+
     if _looks_like_alias_identifier(normalized):
-        raise ValueError(
+        message = (
             f"Unknown model alias '{normalized}'. Run `meridian models list` to inspect aliases."
+        )
+        if validation_context:
+            message = f"{message}\n{validation_context}"
+        raise ValueError(
+            message
         )
 
     routed = route_model(normalized)
     if routed.warning is None:
         return normalized, f"Model '{normalized}' is not in catalog. Routing to '{routed.harness_id}'."
 
-    raise ValueError(
-        f"Unknown model '{normalized}'. Run `meridian models list` to inspect supported models."
-    )
+    message = f"Unknown model '{normalized}'. Run `meridian models list` to inspect supported models."
+    if validation_context:
+        message = f"{message}\n{validation_context}"
+
+    raise ValueError(message)
 
 
 def _validate_create_input(payload: RunCreateInput) -> tuple[RunCreateInput, str | None]:
@@ -232,7 +290,7 @@ def _build_create_payload(
         skill_name for skill_name in defaults.skills if skill_name in available_skill_names
     )
     loaded_skills = load_skill_contents(registry, resolved_skill_names)
-    loaded_references = load_reference_files(payload.files)
+    loaded_references = load_reference_files(payload.files, base_dir=runtime_view.repo_root)
     parsed_template_vars = parse_template_assignments(payload.template_vars)
 
     # Model guidance is coupled to the run-agent skill (it lives under
@@ -256,12 +314,37 @@ def _build_create_payload(
     )
 
     harness, route_warning = runtime_view.harness_registry.route(defaults.model)
+    requested_session_id = (payload.continue_session_id or "").strip()
+    requested_harness = (payload.continue_harness or "").strip()
+    resolved_continue_session_id: str | None = None
+    resolved_continue_fork = False
+    continuation_warning: str | None = None
+    if requested_session_id:
+        if requested_harness and requested_harness != str(harness.id):
+            continuation_warning = (
+                "Continuation session ignored because target harness differs from source run."
+            )
+        elif not harness.capabilities.supports_session_resume:
+            continuation_warning = (
+                f"Harness '{harness.id}' does not support session resume; starting fresh."
+            )
+        else:
+            resolved_continue_session_id = requested_session_id
+            if payload.continue_fork:
+                if harness.capabilities.supports_session_fork:
+                    resolved_continue_fork = True
+                else:
+                    continuation_warning = (
+                        f"Harness '{harness.id}' does not support session fork; resuming in-place."
+                    )
+
     missing_skills_warning = (
         f"Skipped unavailable implicit skills: {', '.join(missing_skills)}."
         if missing_skills
         else None
     )
     warning = _merge_warnings(route_warning, missing_skills_warning)
+    warning = _merge_warnings(warning, continuation_warning)
     warning = _merge_warnings(preflight_warning, warning)
     from meridian.lib.harness.adapter import RunParams
 
@@ -305,6 +388,8 @@ def _build_create_payload(
                 agent=defaults.agent_name,
                 repo_root=runtime_view.repo_root.as_posix(),
                 mcp_tools=profile.mcp_tools if profile is not None else (),
+                continue_session_id=resolved_continue_session_id,
+                continue_fork=resolved_continue_fork,
             ),
             TieredPermissionResolver(permission_config),
         )
@@ -326,4 +411,6 @@ def _build_create_payload(
         budget=budget,
         guardrails=tuple(path.as_posix() for path in guardrails),
         secrets=secrets,
+        continue_session_id=resolved_continue_session_id,
+        continue_fork=resolved_continue_fork,
     )

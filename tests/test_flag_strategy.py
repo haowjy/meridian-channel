@@ -79,6 +79,38 @@ def test_codex_build_command_drops_agent_and_uses_positional_prompt() -> None:
     assert "--skills" not in command
 
 
+def test_claude_build_command_resume_and_fork() -> None:
+    command = ClaudeAdapter().build_command(
+        RunParams(
+            prompt="Follow up.",
+            model=ModelId("claude-opus-4-6"),
+            continue_session_id="session-123",
+            continue_fork=True,
+        ),
+        StubPermissionResolver(),
+    )
+
+    assert "--resume" in command
+    assert "session-123" in command
+    assert "--fork-session" in command
+
+
+def test_codex_build_command_uses_resume_subcommand_when_session_available() -> None:
+    command = CodexAdapter().build_command(
+        RunParams(
+            prompt="Retry this task.",
+            model=ModelId("gpt-5.3-codex"),
+            continue_session_id="session-456",
+            continue_fork=True,
+        ),
+        StubPermissionResolver(),
+    )
+
+    assert command[:4] == ["codex", "exec", "resume", "session-456"]
+    assert "--model" in command
+    assert "--fork" not in command
+
+
 def test_opencode_build_command_strips_model_prefix_and_uses_positional_prompt() -> None:
     command = OpenCodeAdapter().build_command(
         _sample_run(model="opencode-gpt-5.3-codex"),
@@ -97,6 +129,22 @@ def test_opencode_build_command_strips_model_prefix_and_uses_positional_prompt()
     ]
     assert "--agent" not in command
     assert "--skills" not in command
+
+
+def test_opencode_build_command_resume_and_fork() -> None:
+    command = OpenCodeAdapter().build_command(
+        RunParams(
+            prompt="Retry this task.",
+            model=ModelId("opencode-gpt-5.3-codex"),
+            continue_session_id="session-789",
+            continue_fork=True,
+        ),
+        StubPermissionResolver(),
+    )
+
+    assert "--session" in command
+    assert "session-789" in command
+    assert "--fork" in command
 
 
 def test_resolve_run_defaults_resolves_model_alias(monkeypatch, tmp_path: Path) -> None:

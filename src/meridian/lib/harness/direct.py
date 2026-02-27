@@ -114,6 +114,18 @@ class DirectAdapter:
         _ = (artifacts, run_id)
         return None
 
+    def extract_tasks(self, event: StreamEvent) -> list[dict[str, str]] | None:
+        _ = event
+        return None
+
+    def extract_findings(self, event: StreamEvent) -> list[dict[str, str]] | None:
+        _ = event
+        return None
+
+    def extract_summary(self, output: str) -> str | None:
+        _ = output
+        return None
+
     @staticmethod
     def build_tool_definitions() -> list[dict[str, object]]:
         """Generate Anthropic tool definitions from operation registry."""

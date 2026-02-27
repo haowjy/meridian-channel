@@ -11,15 +11,21 @@ from cyclopts import App, Parameter
 from meridian.lib.ops.registry import get_all_operations
 from meridian.lib.ops.workspace import (
     WorkspaceCloseInput,
+    WorkspaceFilesInput,
     WorkspaceListInput,
+    WorkspaceReadInput,
     WorkspaceResumeInput,
     WorkspaceShowInput,
     WorkspaceStartInput,
+    WorkspaceWriteInput,
     workspace_close_sync,
+    workspace_files_sync,
     workspace_list_sync,
+    workspace_read_sync,
     workspace_resume_sync,
     workspace_show_sync,
     workspace_start_sync,
+    workspace_write_sync,
 )
 
 
@@ -117,6 +123,57 @@ def _workspace_show(emit: Any, workspace: str) -> None:
     emit(workspace_show_sync(WorkspaceShowInput(workspace=workspace)))
 
 
+def _workspace_write(
+    emit: Any,
+    name: str,
+    content: Annotated[
+        str | None,
+        Parameter(name="--content", help="Inline file content; defaults to stdin."),
+    ] = None,
+    session: Annotated[
+        str | None,
+        Parameter(name="--session", help="Session id (defaults to MERIDIAN_SESSION)."),
+    ] = None,
+) -> None:
+    emit(
+        workspace_write_sync(
+            WorkspaceWriteInput(
+                name=name,
+                content=content,
+                session_id=session,
+            )
+        )
+    )
+
+
+def _workspace_read(
+    emit: Any,
+    name: str,
+    session: Annotated[
+        str | None,
+        Parameter(name="--session", help="Session id (defaults to MERIDIAN_SESSION)."),
+    ] = None,
+) -> None:
+    emit(
+        workspace_read_sync(
+            WorkspaceReadInput(
+                name=name,
+                session_id=session,
+            )
+        )
+    )
+
+
+def _workspace_files(
+    emit: Any,
+    session: Annotated[
+        str | None,
+        Parameter(name="--session", help="Session id (defaults to MERIDIAN_SESSION)."),
+    ] = None,
+) -> None:
+    emit(workspace_files_sync(WorkspaceFilesInput(session_id=session)))
+
+
 def _workspace_close(emit: Any, workspace: str) -> None:
     emit(workspace_close_sync(WorkspaceCloseInput(workspace=workspace)))
 
@@ -127,6 +184,9 @@ def register_workspace_commands(app: App, emit: Any) -> tuple[set[str], dict[str
         "workspace.resume": lambda: partial(_workspace_resume, emit),
         "workspace.list": lambda: partial(_workspace_list, emit),
         "workspace.show": lambda: partial(_workspace_show, emit),
+        "workspace.write": lambda: partial(_workspace_write, emit),
+        "workspace.read": lambda: partial(_workspace_read, emit),
+        "workspace.files": lambda: partial(_workspace_files, emit),
         "workspace.close": lambda: partial(_workspace_close, emit),
     }
 

@@ -21,7 +21,10 @@ from meridian.lib.ops.run import (
     RunActionOutput,
     RunContinueInput,
     RunCreateInput,
+    RunRetryInput,
     run_continue_sync,
+    run_create_sync,
+    run_retry_sync,
 )
 from meridian.lib.ops.workspace import (
     WorkspaceResumeInput,
@@ -229,6 +232,19 @@ def test_run_continue_works_for_running_failed_and_succeeded(
         )
     )
     state.update_run_status(run.run_id, status)
+    conn = sqlite3.connect(state.paths.db_path)
+    try:
+        with conn:
+            conn.execute(
+                """
+                UPDATE runs
+                SET harness = ?, harness_session_id = ?
+                WHERE id = ?
+                """,
+                ("codex", "sess-source", str(run.run_id)),
+            )
+    finally:
+        conn.close()
 
     captured: dict[str, object] = {}
 
@@ -247,6 +263,7 @@ def test_run_continue_works_for_running_failed_and_succeeded(
         RunContinueInput(
             run_id=str(run.run_id),
             prompt="",
+            fork=True,
             repo_root=tmp_path.as_posix(),
         )
     )
@@ -255,6 +272,102 @@ def test_run_continue_works_for_running_failed_and_succeeded(
     forwarded = captured["payload"]
     assert isinstance(forwarded, RunCreateInput)
     assert forwarded.prompt == "original prompt"
+    assert forwarded.model == "gpt-5.3-codex"
+    assert forwarded.continue_harness == "codex"
+    assert forwarded.continue_session_id == "sess-source"
+    assert forwarded.continue_fork is True
+
+
+def test_run_retry_defaults_to_fork_and_uses_original_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = StateDB(tmp_path)
+    run = state.create_run(
+        RunCreateParams(
+            prompt="retry me",
+            model=ModelId("claude-opus-4-6"),
+        )
+    )
+    conn = sqlite3.connect(state.paths.db_path)
+    try:
+        with conn:
+            conn.execute(
+                """
+                UPDATE runs
+                SET harness = ?, harness_session_id = ?
+                WHERE id = ?
+                """,
+                ("claude", "sess-retry", str(run.run_id)),
+            )
+    finally:
+        conn.close()
+
+    captured: dict[str, object] = {}
+
+    def fake_run_create_sync(payload: RunCreateInput) -> RunActionOutput:
+        captured["payload"] = payload
+        return RunActionOutput(
+            command="run.create",
+            status="succeeded",
+            run_id="r-retry",
+            message="ok",
+        )
+
+    monkeypatch.setattr(run_ops, "run_create_sync", fake_run_create_sync)
+
+    result = run_retry_sync(
+        RunRetryInput(
+            run_id=str(run.run_id),
+            prompt=None,
+            repo_root=tmp_path.as_posix(),
+        )
+    )
+
+    assert result.command == "run.retry"
+    forwarded = captured["payload"]
+    assert isinstance(forwarded, RunCreateInput)
+    assert forwarded.prompt == "retry me"
+    assert forwarded.model == "claude-opus-4-6"
+    assert forwarded.continue_harness == "claude"
+    assert forwarded.continue_session_id == "sess-retry"
+    assert forwarded.continue_fork is True
+
+
+def test_run_create_dry_run_fallbacks_for_harness_mismatch_and_missing_fork_support(
+    tmp_path: Path,
+) -> None:
+    mismatch = run_create_sync(
+        RunCreateInput(
+            prompt="continue mismatch",
+            model="gpt-5.3-codex",
+            dry_run=True,
+            repo_root=tmp_path.as_posix(),
+            continue_session_id="sess-a",
+            continue_harness="claude",
+            continue_fork=True,
+        )
+    )
+    assert mismatch.status == "dry-run"
+    assert "resume" not in mismatch.cli_command
+    assert mismatch.warning is not None
+    assert "target harness differs" in mismatch.warning
+
+    no_fork_support = run_create_sync(
+        RunCreateInput(
+            prompt="continue codex",
+            model="gpt-5.3-codex",
+            dry_run=True,
+            repo_root=tmp_path.as_posix(),
+            continue_session_id="sess-b",
+            continue_harness="codex",
+            continue_fork=True,
+        )
+    )
+    assert no_fork_support.status == "dry-run"
+    assert no_fork_support.cli_command[:4] == ("codex", "exec", "resume", "sess-b")
+    assert no_fork_support.warning is not None
+    assert "does not support session fork" in no_fork_support.warning
 
 
 def test_diag_repair_rebuilds_corrupt_jsonl_and_repairs_workspace_state(tmp_path: Path) -> None:

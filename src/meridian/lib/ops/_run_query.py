@@ -12,6 +12,74 @@ from meridian.lib.types import RunId
 
 from ._run_models import RunDetailOutput, RunListFilters
 
+_RUN_REFERENCE_STATUS_FILTERS: dict[str, tuple[str, ...] | None] = {
+    "@latest": None,
+    "@last-failed": ("failed",),
+    "@last-completed": ("succeeded",),
+}
+
+
+def _select_latest_run_id(
+    repo_root: Path,
+    *,
+    statuses: tuple[str, ...] | None,
+) -> str | None:
+    db_path = resolve_state_paths(repo_root).db_path
+    if not db_path.is_file():
+        return None
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        if statuses is None:
+            row = conn.execute(
+                """
+                SELECT id
+                FROM runs
+                ORDER BY started_at DESC, rowid DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        else:
+            placeholders = ", ".join("?" for _ in statuses)
+            row = conn.execute(
+                f"""
+                SELECT id
+                FROM runs
+                WHERE status IN ({placeholders})
+                ORDER BY started_at DESC, rowid DESC
+                LIMIT 1
+                """,
+                statuses,
+            ).fetchone()
+    finally:
+        conn.close()
+
+    if row is None:
+        return None
+    return str(row["id"])
+
+
+def resolve_run_reference(repo_root: Path, ref: str) -> str:
+    normalized = ref.strip()
+    if not normalized:
+        raise ValueError("run_id is required")
+    if not normalized.startswith("@"):
+        return normalized
+
+    status_filter = _RUN_REFERENCE_STATUS_FILTERS.get(normalized)
+    if normalized not in _RUN_REFERENCE_STATUS_FILTERS:
+        supported = ", ".join(sorted(_RUN_REFERENCE_STATUS_FILTERS))
+        raise ValueError(f"Unknown run reference '{normalized}'. Supported references: {supported}")
+
+    resolved = _select_latest_run_id(repo_root, statuses=status_filter)
+    if resolved is None:
+        raise ValueError(f"No runs found for reference '{normalized}'")
+    return resolved
+
+
+def resolve_run_references(repo_root: Path, refs: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(resolve_run_reference(repo_root, ref) for ref in refs))
+
 
 def _read_run_row(repo_root: Path, run_id: str) -> sqlite3.Row | None:
     db_path = resolve_state_paths(repo_root).db_path
@@ -28,6 +96,7 @@ def _read_run_row(repo_root: Path, run_id: str) -> sqlite3.Row | None:
                 prompt,
                 model,
                 harness,
+                harness_session_id,
                 status,
                 started_at,
                 finished_at,

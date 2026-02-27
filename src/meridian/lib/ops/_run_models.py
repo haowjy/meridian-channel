@@ -28,6 +28,7 @@ class RunCreateInput:
     verbose: bool = False
     quiet: bool = False
     stream: bool = False
+    background: bool = False
     workspace: str | None = None
     repo_root: str | None = None
     timeout_secs: float | None = None
@@ -37,6 +38,9 @@ class RunCreateInput:
     budget_per_workspace_usd: float | None = None
     guardrails: tuple[str, ...] = ()
     secrets: tuple[str, ...] = ()
+    continue_session_id: str | None = None
+    continue_harness: str | None = None
+    continue_fork: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,9 +64,14 @@ class RunActionOutput:
     cli_command: tuple[str, ...] = ()
     exit_code: int | None = None
     duration_secs: float | None = None
+    background: bool = False
 
     def format_text(self, ctx: FormatContext | None = None) -> str:
         """Compact single-line summary for text output mode."""
+        # Background submissions print only the run ID so callers can capture
+        # it via R1=$(meridian run create --background ...).
+        if self.background and self.run_id is not None and self.status == "running":
+            return self.run_id
         parts: list[str] = [self.command, self.status]
         if self.run_id is not None:
             parts.append(self.run_id)
@@ -94,6 +103,44 @@ class RunListInput:
     no_workspace: bool = False
     failed: bool = False
     repo_root: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RunStatsInput:
+    session: str | None = None
+    workspace: str | None = None
+    repo_root: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RunStatsOutput:
+    total_runs: int
+    succeeded: int
+    failed: int
+    cancelled: int
+    running: int
+    total_duration_secs: float
+    total_cost_usd: float
+    models: dict[str, int]
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        _ = ctx
+        lines = [
+            f"total_runs: {self.total_runs}",
+            f"succeeded: {self.succeeded}",
+            f"failed: {self.failed}",
+            f"cancelled: {self.cancelled}",
+            f"running: {self.running}",
+            f"total_duration: {self.total_duration_secs:.1f}s",
+            f"total_cost: ${self.total_cost_usd:.4f}",
+        ]
+        if self.models:
+            lines.append("models:")
+            for model, count in self.models.items():
+                lines.append(f"{model}: {count}")
+        else:
+            lines.append("models: (none)")
+        return "\n".join(lines)
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,6 +249,7 @@ class RunContinueInput:
     run_id: str
     prompt: str
     model: str = ""
+    fork: bool = False
     timeout_secs: float | None = None
     repo_root: str | None = None
 
@@ -211,18 +259,51 @@ class RunRetryInput:
     run_id: str
     prompt: str | None = None
     model: str = ""
+    fork: bool = True
     timeout_secs: float | None = None
     repo_root: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class RunWaitInput:
-    run_id: str
+    run_ids: tuple[str, ...] = ()
+    # Compatibility alias for MCP clients that still send `run_id`.
+    run_id: str | None = None
     timeout_secs: float | None = None
     poll_interval_secs: float | None = None
     include_report: bool = False
     include_files: bool = False
     repo_root: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RunWaitMultiOutput:
+    runs: tuple[RunDetailOutput, ...]
+    total_runs: int
+    succeeded_runs: int
+    failed_runs: int
+    cancelled_runs: int
+    any_failed: bool
+    # Compatibility fields for single-run callers.
+    run_id: str | None = None
+    status: str | None = None
+    exit_code: int | None = None
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        """Summarize waited runs as a fixed-column table."""
+        from meridian.cli.format_helpers import tabular
+
+        rows = [["run_id", "status", "duration", "exit"]]
+        rows.extend(
+            [
+                run.run_id,
+                run.status,
+                f"{run.duration_secs:.1f}s" if run.duration_secs is not None else "-",
+                str(run.exit_code) if run.exit_code is not None else "-",
+            ]
+            for run in self.runs
+        )
+        return tabular(rows)
 
 
 @dataclass(frozen=True, slots=True)

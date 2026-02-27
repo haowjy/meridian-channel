@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
 import os
 import sqlite3
+import subprocess
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Protocol, cast
 
@@ -18,9 +21,13 @@ from meridian.lib.exec.spawn import execute_with_finalization
 from meridian.lib.exec.terminal import TerminalEventFilter, resolve_visible_categories
 from meridian.lib.ops._runtime import OperationRuntime, build_runtime, resolve_workspace_id
 from meridian.lib.safety.budget import Budget
-from meridian.lib.safety.permissions import PermissionConfig, TieredPermissionResolver
+from meridian.lib.safety.permissions import (
+    PermissionConfig,
+    TieredPermissionResolver,
+    parse_permission_tier,
+)
 from meridian.lib.safety.redaction import SecretSpec, secrets_env_overrides
-from meridian.lib.state.db import resolve_state_paths
+from meridian.lib.state.db import resolve_run_log_dir, resolve_state_paths
 from meridian.lib.types import ModelId, RunId
 
 from ._run_models import RunActionOutput, RunCreateInput
@@ -28,6 +35,11 @@ from ._run_query import _read_run_row
 
 _BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
 logger = structlog.get_logger(__name__)
+_BACKGROUND_SUBMIT_MESSAGE = "Background run submitted."
+_BACKGROUND_PID_FILENAME = "background.pid"
+_BACKGROUND_STDOUT_FILENAME = "background-launcher.stdout.log"
+_BACKGROUND_STDERR_FILENAME = "background-launcher.stderr.log"
+_SECRET_ENV_PREFIX = "MERIDIAN_SECRET_"
 
 
 class _PreparedCreateLike(Protocol):
@@ -46,6 +58,8 @@ class _PreparedCreateLike(Protocol):
     budget: Budget | None
     guardrails: tuple[str, ...]
     secrets: tuple[SecretSpec, ...]
+    continue_session_id: str | None
+    continue_fork: bool
 
 
 def _read_non_negative_int_env(name: str, default: int) -> int:
@@ -114,6 +128,18 @@ def _run_child_env(
     return child_env
 
 
+def _secrets_from_env() -> tuple[SecretSpec, ...]:
+    parsed: list[SecretSpec] = []
+    for key in sorted(os.environ):
+        if not key.startswith(_SECRET_ENV_PREFIX):
+            continue
+        secret_key = key[len(_SECRET_ENV_PREFIX) :].strip()
+        if not secret_key:
+            continue
+        parsed.append(SecretSpec(key=secret_key, value=os.environ[key]))
+    return tuple(parsed)
+
+
 def _workspace_spend_usd(repo_root: Path, workspace_id: str | None) -> float:
     if workspace_id is None:
         return 0.0
@@ -138,6 +164,236 @@ def _workspace_spend_usd(repo_root: Path, workspace_id: str | None) -> float:
         return float(fallback["spent"] or 0.0)
     finally:
         conn.close()
+
+
+def _stdout_is_tty() -> bool:
+    try:
+        return bool(sys.stdout.isatty())
+    except Exception:
+        return False
+
+
+async def _execute_existing_run(
+    *,
+    run_id: RunId,
+    repo_root: Path,
+    timeout_secs: float | None,
+    skills: tuple[str, ...],
+    agent_name: str | None,
+    mcp_tools: tuple[str, ...],
+    permission_config: PermissionConfig,
+    budget: Budget | None,
+    guardrails: tuple[str, ...],
+    secrets: tuple[SecretSpec, ...],
+    continue_session_id: str | None = None,
+    continue_fork: bool = False,
+    workspace_id_hint: str | None = None,
+) -> int:
+    runtime = build_runtime(str(repo_root))
+    run = await runtime.run_store.get(run_id)
+    if run is None:
+        logger.error("Run not found for background execution.", run_id=str(run_id))
+        return 1
+
+    workspace_id = (
+        str(run.workspace_id)
+        if run.workspace_id is not None
+        else workspace_id_hint
+    )
+    return await execute_with_finalization(
+        run,
+        state=runtime.state,
+        artifacts=runtime.artifacts,
+        registry=runtime.harness_registry,
+        permission_resolver=TieredPermissionResolver(permission_config),
+        permission_config=permission_config,
+        cwd=runtime.repo_root,
+        timeout_seconds=timeout_secs,
+        kill_grace_seconds=runtime.config.kill_grace_seconds,
+        skills=skills,
+        agent=agent_name,
+        mcp_tools=mcp_tools,
+        env_overrides=_run_child_env(
+            workspace_id,
+            secrets,
+            str(run.run_id),
+        ),
+        budget=budget,
+        workspace_spent_usd=_workspace_spend_usd(runtime.repo_root, workspace_id),
+        max_retries=runtime.config.max_retries,
+        retry_backoff_seconds=runtime.config.retry_backoff_seconds,
+        guardrails=tuple(Path(item) for item in guardrails),
+        guardrail_timeout_seconds=runtime.config.guardrail_timeout_seconds,
+        secrets=secrets,
+        continue_session_id=continue_session_id,
+        continue_fork=continue_fork,
+    )
+
+
+def _build_background_worker_command(
+    *,
+    run_id: str,
+    repo_root: Path,
+    workspace_id: str | None,
+    timeout_secs: float | None,
+    skills: tuple[str, ...],
+    agent_name: str | None,
+    mcp_tools: tuple[str, ...],
+    permission_config: PermissionConfig,
+    budget: Budget | None,
+    guardrails: tuple[str, ...],
+    continue_session_id: str | None,
+    continue_fork: bool,
+) -> tuple[str, ...]:
+    command: list[str] = [
+        sys.executable,
+        "-m",
+        "meridian.lib.ops._run_execute",
+        "--run-id",
+        run_id,
+        "--repo-root",
+        repo_root.as_posix(),
+        "--permission-tier",
+        permission_config.tier.value,
+    ]
+    if workspace_id is not None:
+        command.extend(["--workspace-id", workspace_id])
+    if timeout_secs is not None:
+        command.extend(["--timeout-secs", str(timeout_secs)])
+    if permission_config.unsafe:
+        command.append("--unsafe")
+    if budget is not None:
+        if budget.per_run_usd is not None:
+            command.extend(["--budget-per-run-usd", str(budget.per_run_usd)])
+        if budget.per_workspace_usd is not None:
+            command.extend(
+                ["--budget-per-workspace-usd", str(budget.per_workspace_usd)]
+            )
+    if agent_name is not None:
+        command.extend(["--agent", agent_name])
+    for skill in skills:
+        command.extend(["--skill", skill])
+    for tool in mcp_tools:
+        command.extend(["--mcp-tool", tool])
+    for guardrail in guardrails:
+        command.extend(["--guardrail", guardrail])
+    if continue_session_id is not None and continue_session_id.strip():
+        command.extend(["--continue-session-id", continue_session_id.strip()])
+    if continue_fork:
+        command.append("--continue-fork")
+    return tuple(command)
+
+
+def _execute_run_background(
+    *,
+    payload: RunCreateInput,
+    prepared: _PreparedCreateLike,
+    runtime: OperationRuntime,
+) -> RunActionOutput:
+    if payload.stream:
+        logger.warning("--stream is ignored with --background; output goes to run log files.")
+    workspace_id = resolve_workspace_id(payload.workspace)
+    run = runtime.run_store_sync.create(
+        RunCreateParams(
+            prompt=prepared.composed_prompt,
+            model=ModelId(prepared.model),
+            workspace_id=workspace_id,
+        )
+    )
+    run_id = str(run.run_id)
+    workspace_id_str = str(workspace_id) if workspace_id is not None else None
+
+    current_depth = _read_non_negative_int_env("MERIDIAN_DEPTH", 0)
+    run_start_event: dict[str, Any] = {
+        "t": "meridian.run.start",
+        "id": run_id,
+        "model": prepared.model,
+        "d": current_depth,
+    }
+    if prepared.agent_name is not None:
+        run_start_event["agent"] = prepared.agent_name
+    _emit_subrun_event(run_start_event)
+
+    launch_command = _build_background_worker_command(
+        run_id=run_id,
+        repo_root=runtime.repo_root,
+        workspace_id=workspace_id_str,
+        timeout_secs=payload.timeout_secs,
+        skills=prepared.skills,
+        agent_name=prepared.agent_name,
+        mcp_tools=prepared.mcp_tools,
+        permission_config=prepared.permission_config,
+        budget=prepared.budget,
+        guardrails=prepared.guardrails,
+        continue_session_id=prepared.continue_session_id,
+        continue_fork=prepared.continue_fork,
+    )
+    log_dir = resolve_run_log_dir(runtime.repo_root, run.run_id, run.workspace_id)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    stdout_path = log_dir / _BACKGROUND_STDOUT_FILENAME
+    stderr_path = log_dir / _BACKGROUND_STDERR_FILENAME
+
+    launch_env = dict(os.environ)
+    launch_env.update(secrets_env_overrides(prepared.secrets))
+    try:
+        with (
+            stdout_path.open("ab") as stdout_handle,
+            stderr_path.open("ab") as stderr_handle,
+        ):
+            process = subprocess.Popen(
+                launch_command,
+                cwd=runtime.repo_root,
+                env=launch_env,
+                stdin=subprocess.DEVNULL,
+                stdout=stdout_handle,
+                stderr=stderr_handle,
+                start_new_session=True,
+            )
+    except OSError as exc:
+        runtime.run_store_sync.update_status(run.run_id, "failed")
+        logger.exception(
+            "Failed to launch background run worker.",
+            run_id=run_id,
+            command=list(launch_command),
+        )
+        return RunActionOutput(
+            command="run.create",
+            status="failed",
+            run_id=run_id,
+            message=f"Failed to launch background run: {exc}",
+            error="background_launch_failed",
+            model=prepared.model,
+            harness_id=prepared.harness_id,
+            warning=prepared.warning,
+            agent=prepared.agent_name,
+            skills=prepared.skills,
+            reference_files=prepared.reference_files,
+            template_vars=prepared.template_vars,
+            report_path=prepared.report_path,
+            cli_command=prepared.cli_command,
+            exit_code=1,
+        )
+
+    (log_dir / _BACKGROUND_PID_FILENAME).write_text(f"{process.pid}\n", encoding="utf-8")
+    # The Popen object goes out of scope without wait(). This is intentional:
+    # the child runs in its own session (start_new_session=True) and is
+    # re-parented to init/systemd. We only need the PID for diagnostics.
+    return RunActionOutput(
+        command="run.create",
+        status="running",
+        run_id=run_id,
+        message=_BACKGROUND_SUBMIT_MESSAGE,
+        model=prepared.model,
+        harness_id=prepared.harness_id,
+        warning=prepared.warning,
+        agent=prepared.agent_name,
+        skills=prepared.skills,
+        reference_files=prepared.reference_files,
+        template_vars=prepared.template_vars,
+        report_path=prepared.report_path,
+        cli_command=prepared.cli_command,
+        background=True,
+    )
 
 
 def _execute_run_blocking(
@@ -169,7 +425,9 @@ def _execute_run_blocking(
     started = time.monotonic()
     workspace_id_str = str(workspace_id) if workspace_id is not None else None
     event_observer = None
-    if not payload.stream:
+    stdout_is_tty = _stdout_is_tty()
+    stream_stdout_to_terminal = payload.stream or not stdout_is_tty
+    if not payload.stream and stdout_is_tty:
         event_filter = TerminalEventFilter(
             visible_categories=resolve_visible_categories(
                 verbose=payload.verbose,
@@ -206,9 +464,11 @@ def _execute_run_blocking(
             guardrails=tuple(Path(item) for item in prepared.guardrails),
             guardrail_timeout_seconds=runtime.config.guardrail_timeout_seconds,
             secrets=prepared.secrets,
+            continue_session_id=prepared.continue_session_id,
+            continue_fork=prepared.continue_fork,
             event_observer=event_observer,
-            stream_stdout_to_terminal=payload.stream,
-            stream_stderr_to_terminal=payload.stream or payload.verbose,
+            stream_stdout_to_terminal=stream_stdout_to_terminal,
+            stream_stderr_to_terminal=payload.stream or payload.verbose or not stdout_is_tty,
         )
     )
     duration = time.monotonic() - started
@@ -269,40 +529,22 @@ async def _execute_run_non_blocking(
     budget: Budget | None,
     guardrails: tuple[str, ...],
     secrets: tuple[SecretSpec, ...],
+    continue_session_id: str | None,
+    continue_fork: bool,
 ) -> None:
-    runtime = build_runtime(str(repo_root))
-    run = await runtime.run_store.get(run_id)
-    if run is None:
-        return
-
-    await execute_with_finalization(
-        run,
-        state=runtime.state,
-        artifacts=runtime.artifacts,
-        registry=runtime.harness_registry,
-        permission_resolver=TieredPermissionResolver(permission_config),
-        permission_config=permission_config,
-        cwd=runtime.repo_root,
-        timeout_seconds=timeout_secs,
-        kill_grace_seconds=runtime.config.kill_grace_seconds,
+    _ = await _execute_existing_run(
+        run_id=run_id,
+        repo_root=repo_root,
+        timeout_secs=timeout_secs,
         skills=skills,
-        agent=agent_name,
+        agent_name=agent_name,
         mcp_tools=mcp_tools,
-        env_overrides=_run_child_env(
-            str(run.workspace_id) if run.workspace_id is not None else None,
-            secrets,
-            str(run.run_id),
-        ),
+        permission_config=permission_config,
         budget=budget,
-        workspace_spent_usd=_workspace_spend_usd(
-            runtime.repo_root,
-            str(run.workspace_id) if run.workspace_id is not None else None,
-        ),
-        max_retries=runtime.config.max_retries,
-        retry_backoff_seconds=runtime.config.retry_backoff_seconds,
-        guardrails=tuple(Path(item) for item in guardrails),
-        guardrail_timeout_seconds=runtime.config.guardrail_timeout_seconds,
+        guardrails=guardrails,
         secrets=secrets,
+        continue_session_id=continue_session_id,
+        continue_fork=continue_fork,
     )
 
 
@@ -320,3 +562,60 @@ def _track_task(task: asyncio.Task[None]) -> None:
             _BACKGROUND_TASKS.discard(done)
 
     task.add_done_callback(_cleanup)
+
+
+def _build_background_worker_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="python -m meridian.lib.ops._run_execute")
+    parser.add_argument("--run-id", required=True)
+    parser.add_argument("--repo-root", required=True)
+    parser.add_argument("--workspace-id", default=None)
+    parser.add_argument("--timeout-secs", type=float, default=None)
+    parser.add_argument("--skill", action="append", default=[])
+    parser.add_argument("--agent", default=None)
+    parser.add_argument("--mcp-tool", action="append", default=[])
+    parser.add_argument("--permission-tier", required=True)
+    parser.add_argument("--unsafe", action="store_true")
+    parser.add_argument("--budget-per-run-usd", type=float, default=None)
+    parser.add_argument("--budget-per-workspace-usd", type=float, default=None)
+    parser.add_argument("--guardrail", action="append", default=[])
+    parser.add_argument("--continue-session-id", default=None)
+    parser.add_argument("--continue-fork", action="store_true")
+    return parser
+
+
+def _background_worker_main(argv: Sequence[str] | None = None) -> int:
+    parser = _build_background_worker_parser()
+    parsed = parser.parse_args(list(argv) if argv is not None else None)
+
+    budget: Budget | None = None
+    if parsed.budget_per_run_usd is not None or parsed.budget_per_workspace_usd is not None:
+        budget = Budget(
+            per_run_usd=parsed.budget_per_run_usd,
+            per_workspace_usd=parsed.budget_per_workspace_usd,
+        )
+    permission_config = PermissionConfig(
+        tier=parse_permission_tier(parsed.permission_tier),
+        unsafe=parsed.unsafe,
+    )
+    secrets = _secrets_from_env()
+    return asyncio.run(
+        _execute_existing_run(
+            run_id=RunId(parsed.run_id),
+            repo_root=Path(parsed.repo_root).expanduser().resolve(),
+            workspace_id_hint=parsed.workspace_id,
+            timeout_secs=parsed.timeout_secs,
+            skills=tuple(str(item) for item in parsed.skill),
+            agent_name=cast("str | None", parsed.agent),
+            mcp_tools=tuple(str(item) for item in parsed.mcp_tool),
+            permission_config=permission_config,
+            budget=budget,
+            guardrails=tuple(str(item) for item in parsed.guardrail),
+            secrets=secrets,
+            continue_session_id=cast("str | None", parsed.continue_session_id),
+            continue_fork=bool(parsed.continue_fork),
+        )
+    )
+
+
+if __name__ == "__main__":
+    raise SystemExit(_background_worker_main())

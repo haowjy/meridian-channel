@@ -37,6 +37,8 @@ class CodexAdapter:
         "model": FlagStrategy(effect=FlagEffect.CLI_FLAG, cli_flag="--model"),
         "agent": FlagStrategy(effect=FlagEffect.DROP),
         "skills": FlagStrategy(effect=FlagEffect.DROP),
+        "continue_session_id": FlagStrategy(effect=FlagEffect.DROP),
+        "continue_fork": FlagStrategy(effect=FlagEffect.DROP),
     }
     PROMPT_MODE: ClassVar[PromptMode] = PromptMode.POSITIONAL
     BASE_COMMAND: ClassVar[tuple[str, ...]] = ("codex", "exec")
@@ -64,8 +66,14 @@ class CodexAdapter:
 
     def build_command(self, run: RunParams, perms: PermissionResolver) -> list[str]:
         mcp_config = self.mcp_config(run)
+        session_id = (run.continue_session_id or "").strip()
+        base_command = (
+            ("codex", "exec", "resume", session_id)
+            if session_id
+            else self.BASE_COMMAND
+        )
         return build_harness_command(
-            base_command=self.BASE_COMMAND,
+            base_command=base_command,
             prompt_mode=self.PROMPT_MODE,
             run=run,
             strategies=self.STRATEGIES,
@@ -116,3 +124,15 @@ class CodexAdapter:
 
     def extract_session_id(self, artifacts: ArtifactStore, run_id: RunId) -> str | None:
         return extract_session_id_from_artifacts(artifacts, run_id)
+
+    def extract_tasks(self, event: StreamEvent) -> list[dict[str, str]] | None:
+        _ = event
+        return None
+
+    def extract_findings(self, event: StreamEvent) -> list[dict[str, str]] | None:
+        _ = event
+        return None
+
+    def extract_summary(self, output: str) -> str | None:
+        _ = output
+        return None

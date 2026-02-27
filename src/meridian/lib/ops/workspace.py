@@ -5,7 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import sqlite3
+import sys
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from meridian.lib.domain import WorkspaceFilters
@@ -15,6 +18,13 @@ from meridian.lib.types import WorkspaceId
 from meridian.lib.workspace import context as workspace_context
 from meridian.lib.workspace import crud as workspace_crud
 from meridian.lib.workspace.launch import WorkspaceLaunchRequest, launch_supervisor
+from meridian.lib.workspace.session_files import (
+    display_workspace_file_name,
+    generate_workspace_session_id,
+    resolve_workspace_session_id,
+    workspace_session_file_path,
+    workspace_session_files_dir,
+)
 from meridian.lib.workspace.summary import generate_workspace_summary
 
 if TYPE_CHECKING:
@@ -58,6 +68,27 @@ class WorkspaceShowInput:
 @dataclass(frozen=True, slots=True)
 class WorkspaceCloseInput:
     workspace: str
+    repo_root: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceWriteInput:
+    name: str
+    content: str | None = None
+    session_id: str | None = None
+    repo_root: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceReadInput:
+    name: str
+    session_id: str | None = None
+    repo_root: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceFilesInput:
+    session_id: str | None = None
     repo_root: str | None = None
 
 
@@ -121,6 +152,58 @@ class WorkspaceDetailOutput:
             ("Runs", ", ".join(self.run_ids) if self.run_ids else None),
         ]
         return kv_block(pairs)
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceWriteOutput:
+    session_id: str
+    path: str
+    created_session: bool
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        """Write summary plus session bootstrap instructions when needed."""
+        lines: list[str] = []
+        if self.created_session:
+            lines.append(f"No active session. Created: {self.session_id}")
+            lines.append(f"Set MERIDIAN_SESSION={self.session_id} for subsequent commands.")
+        lines.append(f"Written: {self.path}")
+        return "\n".join(lines)
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceReadOutput:
+    session_id: str
+    path: str
+    content: str
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        """Emit raw file contents for piping/composition."""
+        return self.content
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceSessionFileEntry:
+    name: str
+    size_bytes: int
+    modified_at: str
+
+    def as_row(self) -> list[str]:
+        """Return display cells for one session file entry."""
+        return [self.name, str(self.size_bytes), self.modified_at]
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceFilesOutput:
+    session_id: str
+    files: tuple[WorkspaceSessionFileEntry, ...]
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        """Render session file listing in stable tabular form."""
+        if not self.files:
+            return f"{self.session_id}  (no files)"
+        from meridian.cli.format_helpers import tabular
+
+        return f"{self.session_id}\n{tabular([entry.as_row() for entry in self.files])}"
 
 
 def _summary_text(path: str) -> str:
@@ -318,6 +401,96 @@ async def workspace_show(payload: WorkspaceShowInput) -> WorkspaceDetailOutput:
     return await asyncio.to_thread(workspace_show_sync, payload)
 
 
+def _relative_path(path: Path, repo_root: Path) -> str:
+    try:
+        return path.relative_to(repo_root).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def _require_session_id(
+    explicit_session_id: str | None,
+    *,
+    action: str,
+) -> str:
+    session_id = resolve_workspace_session_id(explicit_session_id)
+    if session_id is None:
+        raise ValueError(
+            f"MERIDIAN_SESSION is required for workspace {action}. "
+            "Set MERIDIAN_SESSION or pass --session."
+        )
+    return session_id
+
+
+def workspace_write_sync(payload: WorkspaceWriteInput) -> WorkspaceWriteOutput:
+    runtime = build_runtime(payload.repo_root)
+    session_id = resolve_workspace_session_id(payload.session_id)
+    created_session = False
+    if session_id is None:
+        session_id = generate_workspace_session_id()
+        created_session = True
+
+    if payload.content is not None:
+        content = payload.content
+    elif sys.stdin.isatty():
+        raise ValueError("No content provided and stdin is a terminal. Pass --content or pipe input.")
+    else:
+        content = sys.stdin.read()
+    path = workspace_session_file_path(runtime.repo_root, session_id, payload.name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    return WorkspaceWriteOutput(
+        session_id=session_id,
+        path=_relative_path(path, runtime.repo_root),
+        created_session=created_session,
+    )
+
+
+async def workspace_write(payload: WorkspaceWriteInput) -> WorkspaceWriteOutput:
+    return await asyncio.to_thread(workspace_write_sync, payload)
+
+
+def workspace_read_sync(payload: WorkspaceReadInput) -> WorkspaceReadOutput:
+    runtime = build_runtime(payload.repo_root)
+    session_id = _require_session_id(payload.session_id, action="read")
+    path = workspace_session_file_path(runtime.repo_root, session_id, payload.name)
+    if not path.is_file():
+        raise FileNotFoundError(f"Workspace file not found: {path.as_posix()}")
+    return WorkspaceReadOutput(
+        session_id=session_id,
+        path=_relative_path(path, runtime.repo_root),
+        content=path.read_text(encoding="utf-8"),
+    )
+
+
+async def workspace_read(payload: WorkspaceReadInput) -> WorkspaceReadOutput:
+    return await asyncio.to_thread(workspace_read_sync, payload)
+
+
+def workspace_files_sync(payload: WorkspaceFilesInput) -> WorkspaceFilesOutput:
+    runtime = build_runtime(payload.repo_root)
+    session_id = _require_session_id(payload.session_id, action="files")
+    session_dir = workspace_session_files_dir(runtime.repo_root, session_id)
+    entries: list[WorkspaceSessionFileEntry] = []
+    if session_dir.is_dir():
+        for file_path in sorted(path for path in session_dir.iterdir() if path.is_file()):
+            stats = file_path.stat()
+            entries.append(
+                WorkspaceSessionFileEntry(
+                    name=display_workspace_file_name(file_path),
+                    size_bytes=stats.st_size,
+                    modified_at=datetime.fromtimestamp(stats.st_mtime, tz=UTC)
+                    .isoformat(timespec="seconds")
+                    .replace("+00:00", "Z"),
+                )
+            )
+    return WorkspaceFilesOutput(session_id=session_id, files=tuple(entries))
+
+
+async def workspace_files(payload: WorkspaceFilesInput) -> WorkspaceFilesOutput:
+    return await asyncio.to_thread(workspace_files_sync, payload)
+
+
 def workspace_close_sync(payload: WorkspaceCloseInput) -> WorkspaceActionOutput:
     runtime = build_runtime(payload.repo_root)
     workspace_id = WorkspaceId(payload.workspace.strip())
@@ -393,6 +566,48 @@ operation(
         cli_name="show",
         mcp_name="workspace_show",
         description="Show workspace details.",
+    )
+)
+
+operation(
+    OperationSpec[WorkspaceWriteInput, WorkspaceWriteOutput](
+        name="workspace.write",
+        handler=workspace_write,
+        sync_handler=workspace_write_sync,
+        input_type=WorkspaceWriteInput,
+        output_type=WorkspaceWriteOutput,
+        cli_group="workspace",
+        cli_name="write",
+        mcp_name="workspace_write",
+        description="Write a session-scoped workspace file.",
+    )
+)
+
+operation(
+    OperationSpec[WorkspaceReadInput, WorkspaceReadOutput](
+        name="workspace.read",
+        handler=workspace_read,
+        sync_handler=workspace_read_sync,
+        input_type=WorkspaceReadInput,
+        output_type=WorkspaceReadOutput,
+        cli_group="workspace",
+        cli_name="read",
+        mcp_name="workspace_read",
+        description="Read a session-scoped workspace file.",
+    )
+)
+
+operation(
+    OperationSpec[WorkspaceFilesInput, WorkspaceFilesOutput](
+        name="workspace.files",
+        handler=workspace_files,
+        sync_handler=workspace_files_sync,
+        input_type=WorkspaceFilesInput,
+        output_type=WorkspaceFilesOutput,
+        cli_group="workspace",
+        cli_name="files",
+        mcp_name="workspace_files",
+        description="List session-scoped workspace files.",
     )
 )
 

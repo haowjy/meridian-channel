@@ -97,6 +97,36 @@ def test_harness_adapters_map_event_categories() -> None:
     assert opencode_error is not None and opencode_error.category == "error"
 
 
+def test_claude_extract_tasks_from_todowrite_events() -> None:
+    adapter = ClaudeAdapter()
+    event = adapter.parse_stream_event(
+        json.dumps(
+            {
+                "type": "tool_use",
+                "name": "TodoWrite",
+                "input": {
+                    "todos": [
+                        {"id": "t1", "content": "Inspect schema", "status": "completed"},
+                        {"id": "t2", "content": "Add run stats command", "status": "in_progress"},
+                    ]
+                },
+            }
+        )
+    )
+    assert event is not None
+    assert adapter.extract_tasks(event) == [
+        {"id": "t1", "content": "Inspect schema", "status": "completed"},
+        {"id": "t2", "content": "Add run stats command", "status": "in_progress"},
+    ]
+
+
+def test_claude_extract_tasks_ignores_non_todo_events() -> None:
+    adapter = ClaudeAdapter()
+    event = adapter.parse_stream_event('{"type":"assistant","text":"hello"}')
+    assert event is not None
+    assert adapter.extract_tasks(event) is None
+
+
 def test_subrun_event_emission_when_depth_gt_zero(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

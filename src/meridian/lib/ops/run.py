@@ -27,20 +27,17 @@ from meridian.lib.types import ModelId
 from . import _run_execute as _run_execute_module
 from . import _run_prepare as _run_prepare_module
 from ._run_execute import (
-    _BACKGROUND_TASKS,
     _depth_exceeded_output,
     _depth_limits,
     _emit_subrun_event,
+    _execute_run_background,
     _execute_run_blocking,
     _execute_run_non_blocking,
     _read_non_negative_int_env,
-    _run_child_env,
     _track_task,
-    _workspace_spend_usd,
     logger,
 )
 from ._run_models import (
-    _empty_template_vars,
     RunActionOutput,
     RunContinueInput,
     RunCreateInput,
@@ -51,30 +48,31 @@ from ._run_models import (
     RunListOutput,
     RunRetryInput,
     RunShowInput,
+    RunStatsInput,
+    RunStatsOutput,
     RunWaitInput,
+    RunWaitMultiOutput,
 )
 from ._run_prepare import (
-    _CreateRuntimeView,
-    _PreparedCreate,
     _build_create_payload,
-    _looks_like_alias_identifier,
-    _merge_warnings,
-    _normalize_skill_flags,
     _validate_create_input,
-    _validate_requested_model,
 )
 from ._run_query import (
     _build_run_list_query,
     _detail_from_row,
-    _read_files_touched,
-    _read_report_text,
     _read_run_row,
+    resolve_run_reference,
+    resolve_run_references,
 )
+
+_run_child_env = _run_execute_module._run_child_env
 
 
 def run_create_sync(payload: RunCreateInput) -> RunActionOutput:
     _run_prepare_module.build_permission_config = build_permission_config
-    _run_prepare_module.validate_permission_config_for_harness = validate_permission_config_for_harness
+    _run_prepare_module.validate_permission_config_for_harness = (
+        validate_permission_config_for_harness
+    )
     _run_prepare_module.logger = logger
     _run_execute_module.execute_with_finalization = execute_with_finalization
     _run_execute_module.logger = logger
@@ -109,12 +107,16 @@ def run_create_sync(payload: RunCreateInput) -> RunActionOutput:
 
     if runtime is None:
         raise RuntimeError("Run runtime was not initialized.")
+    if payload.background:
+        return _execute_run_background(payload=payload, prepared=prepared, runtime=runtime)
     return _execute_run_blocking(payload=payload, prepared=prepared, runtime=runtime)
 
 
 async def run_create(payload: RunCreateInput) -> RunActionOutput:
     _run_prepare_module.build_permission_config = build_permission_config
-    _run_prepare_module.validate_permission_config_for_harness = validate_permission_config_for_harness
+    _run_prepare_module.validate_permission_config_for_harness = (
+        validate_permission_config_for_harness
+    )
     _run_prepare_module.logger = logger
     _run_execute_module.execute_with_finalization = execute_with_finalization
     _run_execute_module.logger = logger
@@ -180,6 +182,8 @@ async def run_create(payload: RunCreateInput) -> RunActionOutput:
             budget=prepared.budget,
             guardrails=prepared.guardrails,
             secrets=prepared.secrets,
+            continue_session_id=prepared.continue_session_id,
+            continue_fork=prepared.continue_fork,
         )
     )
     _track_task(task)
@@ -251,11 +255,124 @@ async def run_list(payload: RunListInput) -> RunListOutput:
     return await asyncio.to_thread(run_list_sync, payload)
 
 
+def _runs_table_columns(conn: sqlite3.Connection) -> set[str]:
+    rows = conn.execute("PRAGMA table_info(runs)").fetchall()
+    return {
+        str(row["name"])
+        for row in rows
+        if row["name"] is not None
+    }
+
+
+def _resolve_run_session_column(columns: set[str]) -> str | None:
+    if "session_id" in columns:
+        return "session_id"
+    if "harness_session_id" in columns:
+        return "harness_session_id"
+    return None
+
+
+def run_stats_sync(payload: RunStatsInput) -> RunStatsOutput:
+    repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
+    db_path = resolve_state_paths(repo_root).db_path
+    if not db_path.is_file():
+        return RunStatsOutput(
+            total_runs=0,
+            succeeded=0,
+            failed=0,
+            cancelled=0,
+            running=0,
+            total_duration_secs=0.0,
+            total_cost_usd=0.0,
+            models={},
+        )
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        columns = _runs_table_columns(conn)
+        where: list[str] = []
+        params: list[object] = []
+
+        workspace = payload.workspace.strip() if payload.workspace is not None else ""
+        if workspace:
+            where.append("workspace_id = ?")
+            params.append(workspace)
+
+        session = payload.session.strip() if payload.session is not None else ""
+        if session:
+            session_column = _resolve_run_session_column(columns)
+            if session_column is not None:
+                where.append(f"{session_column} = ?")
+                params.append(session)
+            # TODO: support session filtering on legacy schemas that have no session column.
+
+        where_clause = f" WHERE {' AND '.join(where)}" if where else ""
+
+        aggregate_row = conn.execute(
+            (
+                "SELECT "
+                "COUNT(*) AS total_runs, "
+                "COALESCE(SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END), 0) AS succeeded, "
+                "COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed, "
+                "COALESCE(SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END), 0) AS cancelled, "
+                "COALESCE(SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END), 0) AS running, "
+                "COALESCE(SUM(COALESCE(duration_secs, 0.0)), 0.0) AS total_duration_secs, "
+                "COALESCE(SUM(COALESCE(total_cost_usd, 0.0)), 0.0) AS total_cost_usd "
+                f"FROM runs{where_clause}"
+            ),
+            tuple(params),
+        ).fetchone()
+        if aggregate_row is None:
+            return RunStatsOutput(
+                total_runs=0,
+                succeeded=0,
+                failed=0,
+                cancelled=0,
+                running=0,
+                total_duration_secs=0.0,
+                total_cost_usd=0.0,
+                models={},
+            )
+
+        model_rows = conn.execute(
+            (
+                "SELECT model, COUNT(*) AS run_count "
+                f"FROM runs{where_clause} "
+                "GROUP BY model "
+                "ORDER BY run_count DESC, model ASC"
+            ),
+            tuple(params),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return RunStatsOutput(
+        total_runs=int(aggregate_row["total_runs"] or 0),
+        succeeded=int(aggregate_row["succeeded"] or 0),
+        failed=int(aggregate_row["failed"] or 0),
+        cancelled=int(aggregate_row["cancelled"] or 0),
+        running=int(aggregate_row["running"] or 0),
+        total_duration_secs=float(aggregate_row["total_duration_secs"] or 0.0),
+        total_cost_usd=float(aggregate_row["total_cost_usd"] or 0.0),
+        models={
+            str(row["model"]): int(row["run_count"])
+            for row in model_rows
+            if row["model"] is not None
+        },
+    )
+
+
+async def run_stats(payload: RunStatsInput) -> RunStatsOutput:
+    return await asyncio.to_thread(run_stats_sync, payload)
+
+
 def run_show_sync(payload: RunShowInput) -> RunDetailOutput:
     repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
-    row = _read_run_row(repo_root, payload.run_id)
+    run_id = resolve_run_reference(repo_root, payload.run_id)
+    row = _read_run_row(repo_root, run_id)
     if row is None:
-        raise ValueError(f"Run '{payload.run_id}' not found")
+        raise ValueError(f"Run '{run_id}' not found")
     return _detail_from_row(
         repo_root=repo_root,
         row=row,
@@ -272,8 +389,53 @@ def _run_is_terminal(status: str) -> bool:
     return status not in {"queued", "running"}
 
 
-def run_wait_sync(payload: RunWaitInput) -> RunDetailOutput:
+def _normalize_wait_run_ids(payload: RunWaitInput) -> tuple[str, ...]:
+    candidates: list[str] = []
+    for run_id in payload.run_ids:
+        normalized = run_id.strip()
+        if normalized:
+            candidates.append(normalized)
+
+    if payload.run_id is not None and payload.run_id.strip():
+        candidates.append(payload.run_id.strip())
+
+    deduped = tuple(dict.fromkeys(candidates))
+    if not deduped:
+        raise ValueError("At least one run_id is required")
+    return deduped
+
+
+def _build_wait_multi_output(results: tuple[RunDetailOutput, ...]) -> RunWaitMultiOutput:
+    total_runs = len(results)
+    succeeded_runs = sum(1 for run in results if run.status == "succeeded")
+    failed_runs = sum(1 for run in results if run.status == "failed")
+    cancelled_runs = sum(1 for run in results if run.status == "cancelled")
+    any_failed = any(run.status in {"failed", "cancelled"} for run in results)
+
+    run_id: str | None = None
+    status: str | None = None
+    exit_code: int | None = None
+    if total_runs == 1:
+        run_id = results[0].run_id
+        status = results[0].status
+        exit_code = results[0].exit_code
+
+    return RunWaitMultiOutput(
+        runs=results,
+        total_runs=total_runs,
+        succeeded_runs=succeeded_runs,
+        failed_runs=failed_runs,
+        cancelled_runs=cancelled_runs,
+        any_failed=any_failed,
+        run_id=run_id,
+        status=status,
+        exit_code=exit_code,
+    )
+
+
+def run_wait_sync(payload: RunWaitInput) -> RunWaitMultiOutput:
     repo_root, config = resolve_runtime_root_and_config(payload.repo_root)
+    run_ids = resolve_run_references(repo_root, _normalize_wait_run_ids(payload))
     timeout_secs = (
         payload.timeout_secs if payload.timeout_secs is not None else config.wait_timeout_seconds
     )
@@ -288,40 +450,64 @@ def run_wait_sync(payload: RunWaitInput) -> RunDetailOutput:
     if poll <= 0:
         poll = config.retry_backoff_seconds
 
-    while True:
-        row = _read_run_row(repo_root, payload.run_id)
-        if row is None:
-            raise ValueError(f"Run '{payload.run_id}' not found")
+    completed_rows: dict[str, sqlite3.Row] = {}
+    pending: set[str] = set(run_ids)
 
-        status = str(row["status"])
-        if _run_is_terminal(status):
-            return _detail_from_row(
-                repo_root=repo_root,
-                row=row,
-                include_report=payload.include_report,
-                include_files=payload.include_files,
+    while True:
+        for run_id in tuple(pending):
+            row = _read_run_row(repo_root, run_id)
+            if row is None:
+                raise ValueError(f"Run '{run_id}' not found")
+
+            status = str(row["status"])
+            if _run_is_terminal(status):
+                completed_rows[run_id] = row
+                pending.remove(run_id)
+
+        if not pending:
+            details = tuple(
+                _detail_from_row(
+                    repo_root=repo_root,
+                    row=completed_rows[run_id],
+                    include_report=payload.include_report,
+                    include_files=payload.include_files,
+                )
+                for run_id in run_ids
             )
+            return _build_wait_multi_output(details)
 
         if time.monotonic() >= deadline:
-            raise TimeoutError(f"Timed out waiting for run '{payload.run_id}'")
+            timed_out = "', '".join(sorted(pending))
+            raise TimeoutError(f"Timed out waiting for run(s) '{timed_out}'")
         time.sleep(poll)
 
 
-async def run_wait(payload: RunWaitInput) -> RunDetailOutput:
+async def run_wait(payload: RunWaitInput) -> RunWaitMultiOutput:
     return await asyncio.to_thread(run_wait_sync, payload)
 
 
-def _prompt_for_follow_up(payload_run_id: str, repo_root: Path, prompt: str | None) -> str:
+def _source_run_for_follow_up(payload_run_id: str, repo_root: Path) -> tuple[str, sqlite3.Row]:
+    resolved_run_id = resolve_run_reference(repo_root, payload_run_id)
+    row = _read_run_row(repo_root, resolved_run_id)
+    if row is None:
+        raise ValueError(f"Run '{resolved_run_id}' not found")
+    return resolved_run_id, row
+
+
+def _prompt_for_follow_up(source_run: sqlite3.Row, payload_run_id: str, prompt: str | None) -> str:
     if prompt is not None and prompt.strip():
         return prompt
 
-    row = _read_run_row(repo_root, payload_run_id)
-    if row is None:
-        raise ValueError(f"Run '{payload_run_id}' not found")
-    existing_prompt = str(row["prompt"] or "").strip()
+    existing_prompt = str(source_run["prompt"] or "").strip()
     if not existing_prompt:
         raise ValueError(f"Run '{payload_run_id}' has no stored prompt")
     return existing_prompt
+
+
+def _model_for_follow_up(source_run: sqlite3.Row, override_model: str) -> str:
+    if override_model.strip():
+        return override_model
+    return str(source_run["model"] or "").strip()
 
 
 def _with_command(result: RunActionOutput, command: str) -> RunActionOutput:
@@ -330,16 +516,22 @@ def _with_command(result: RunActionOutput, command: str) -> RunActionOutput:
 
 def run_continue_sync(payload: RunContinueInput) -> RunActionOutput:
     repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
-    derived_prompt = _prompt_for_follow_up(payload.run_id, repo_root, payload.prompt)
+    resolved_run_id, source_run = _source_run_for_follow_up(payload.run_id, repo_root)
+    derived_prompt = _prompt_for_follow_up(source_run, resolved_run_id, payload.prompt)
+    source_harness = str(source_run["harness"] or "").strip() or None
+    source_session_id = str(source_run["harness_session_id"] or "").strip() or None
     # Note: agent is not forwarded from the original run, so
     # agent_explicitly_requested will be False and permission-escalation
     # warnings won't fire.  This is acceptable for continue/retry since
     # the user already approved the original run's permissions.
     create_input = RunCreateInput(
         prompt=derived_prompt,
-        model=payload.model,
+        model=_model_for_follow_up(source_run, payload.model),
         repo_root=payload.repo_root,
         timeout_secs=payload.timeout_secs,
+        continue_session_id=source_session_id,
+        continue_harness=source_harness,
+        continue_fork=payload.fork,
     )
     result = run_create_sync(create_input)
     return _with_command(result, "run.continue")
@@ -351,12 +543,18 @@ async def run_continue(payload: RunContinueInput) -> RunActionOutput:
 
 def run_retry_sync(payload: RunRetryInput) -> RunActionOutput:
     repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
-    derived_prompt = _prompt_for_follow_up(payload.run_id, repo_root, payload.prompt)
+    resolved_run_id, source_run = _source_run_for_follow_up(payload.run_id, repo_root)
+    derived_prompt = _prompt_for_follow_up(source_run, resolved_run_id, payload.prompt)
+    source_harness = str(source_run["harness"] or "").strip() or None
+    source_session_id = str(source_run["harness_session_id"] or "").strip() or None
     create_input = RunCreateInput(
         prompt=derived_prompt,
-        model=payload.model,
+        model=_model_for_follow_up(source_run, payload.model),
         repo_root=payload.repo_root,
         timeout_secs=payload.timeout_secs,
+        continue_session_id=source_session_id,
+        continue_harness=source_harness,
+        continue_fork=payload.fork,
     )
     result = run_create_sync(create_input)
     return _with_command(result, "run.retry")
@@ -391,6 +589,20 @@ operation(
         cli_name="list",
         mcp_name="run_list",
         description="List runs with optional filters.",
+    )
+)
+
+operation(
+    OperationSpec[RunStatsInput, RunStatsOutput](
+        name="run.stats",
+        handler=run_stats,
+        sync_handler=run_stats_sync,
+        input_type=RunStatsInput,
+        output_type=RunStatsOutput,
+        cli_group="run",
+        cli_name="stats",
+        mcp_name="run_stats",
+        description="Show aggregate run statistics with optional filters.",
     )
 )
 
@@ -437,12 +649,12 @@ operation(
 )
 
 operation(
-    OperationSpec[RunWaitInput, RunDetailOutput](
+    OperationSpec[RunWaitInput, RunWaitMultiOutput](
         name="run.wait",
         handler=run_wait,
         sync_handler=run_wait_sync,
         input_type=RunWaitInput,
-        output_type=RunDetailOutput,
+        output_type=RunWaitMultiOutput,
         cli_group="run",
         cli_name="wait",
         mcp_name="run_wait",

@@ -463,6 +463,8 @@ async def execute_with_finalization(
     guardrails: tuple[Path, ...] = (),
     guardrail_timeout_seconds: float = DEFAULT_GUARDRAIL_TIMEOUT_SECONDS,
     secrets: tuple[SecretSpec, ...] = (),
+    continue_session_id: str | None = None,
+    continue_fork: bool = False,
     event_observer: Callable[[StreamEvent], None] | None = None,
     stream_stdout_to_terminal: bool = False,
     stream_stderr_to_terminal: bool = False,
@@ -488,6 +490,8 @@ async def execute_with_finalization(
         extra_args=extra_args,
         repo_root=execution_cwd.as_posix(),
         mcp_tools=mcp_tools,
+        continue_session_id=continue_session_id,
+        continue_fork=continue_fork,
     )
 
     resolved_perms = permission_resolver or SafeDefaultPermissionResolver()

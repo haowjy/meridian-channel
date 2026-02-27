@@ -113,6 +113,27 @@ def test_bug8_unknown_model_fails_fast_with_clean_error(
     assert result.stdout == ""
 
 
+def test_ol10_unknown_model_error_includes_available_models_and_suggestion(
+    package_root: Path, cli_env: dict[str, str], tmp_path: Path
+) -> None:
+    repo_root = tmp_path / "repo"
+    _seed_base_skills(repo_root)
+
+    result = _run_cli(
+        package_root=package_root,
+        cli_env=cli_env,
+        repo_root=repo_root,
+        args=["run", "--dry-run", "-m", "codxe", "-p", "test"],
+    )
+
+    assert result.returncode != 0
+    assert "Unknown model alias 'codxe'" in result.stderr
+    assert "Available models:" in result.stderr
+    assert "[codex]" in result.stderr
+    assert "Did you mean: gpt-5.3-codex?" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
 def test_bug9_unknown_skill_returns_structured_error_payload(
     package_root: Path, cli_env: dict[str, str], tmp_path: Path
 ) -> None:

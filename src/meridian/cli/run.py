@@ -17,12 +17,14 @@ from meridian.lib.ops.run import (
     RunListInput,
     RunRetryInput,
     RunShowInput,
+    RunStatsInput,
     RunWaitInput,
     run_continue_sync,
     run_create_sync,
     run_list_sync,
     run_retry_sync,
     run_show_sync,
+    run_stats_sync,
     run_wait_sync,
 )
 
@@ -95,6 +97,10 @@ def _run_create(
         bool,
         Parameter(name="--stream", help="Stream harness output while command runs."),
     ] = False,
+    background: Annotated[
+        bool,
+        Parameter(name="--background", help="Submit run and return immediately with run ID."),
+    ] = False,
     workspace: Annotated[
         str | None,
         Parameter(name="--workspace", help="Workspace id to run within."),
@@ -157,6 +163,7 @@ def _run_create(
                 verbose=verbose,
                 quiet=quiet,
                 stream=stream,
+                background=background,
                 workspace=workspace,
                 timeout_secs=timeout_secs,
                 permission_tier=permission_tier,
@@ -251,6 +258,27 @@ def _run_show(
     )
 
 
+def _run_stats(
+    emit: Any,
+    session: Annotated[
+        str | None,
+        Parameter(name="--session", help="Only include runs for this session id."),
+    ] = None,
+    workspace: Annotated[
+        str | None,
+        Parameter(name="--workspace", help="Only include runs from this workspace."),
+    ] = None,
+) -> None:
+    emit(
+        run_stats_sync(
+            RunStatsInput(
+                session=session,
+                workspace=workspace,
+            )
+        )
+    )
+
+
 def _run_continue(
     emit: Any,
     run_id: str,
@@ -262,6 +290,10 @@ def _run_continue(
         str,
         Parameter(name=["--model", "-m"], help="Override model for continuation."),
     ] = "",
+    fork: Annotated[
+        bool,
+        Parameter(name="--fork", help="Fork a new branch from the source harness session."),
+    ] = False,
     timeout_secs: Annotated[
         float | None,
         Parameter(name="--timeout-secs", help="Maximum runtime before timeout."),
@@ -273,6 +305,7 @@ def _run_continue(
                 run_id=run_id,
                 prompt=prompt,
                 model=model,
+                fork=fork,
                 timeout_secs=timeout_secs,
             )
         )
@@ -290,6 +323,13 @@ def _run_retry(
         str,
         Parameter(name=["--model", "-m"], help="Override model for retry."),
     ] = "",
+    fork: Annotated[
+        bool,
+        Parameter(
+            name="--fork",
+            help="Fork a new branch from the source harness session (default: true).",
+        ),
+    ] = True,
     timeout_secs: Annotated[
         float | None,
         Parameter(name="--timeout-secs", help="Maximum runtime before timeout."),
@@ -301,6 +341,7 @@ def _run_retry(
                 run_id=run_id,
                 prompt=prompt,
                 model=model,
+                fork=fork,
                 timeout_secs=timeout_secs,
             )
         )
@@ -309,7 +350,10 @@ def _run_retry(
 
 def _run_wait(
     emit: Any,
-    run_id: str,
+    run_ids: Annotated[
+        tuple[str, ...],
+        Parameter(name="run_id", help="Run IDs to wait for."),
+    ],
     timeout_secs: Annotated[
         float | None,
         Parameter(name="--timeout-secs", help="Maximum wait time before timing out."),
@@ -323,16 +367,17 @@ def _run_wait(
         Parameter(name="--include-files", help="Include run file metadata in output."),
     ] = False,
 ) -> None:
-    emit(
-        run_wait_sync(
-            RunWaitInput(
-                run_id=run_id,
-                timeout_secs=timeout_secs,
-                include_report=include_report,
-                include_files=include_files,
-            )
+    result = run_wait_sync(
+        RunWaitInput(
+            run_ids=run_ids,
+            timeout_secs=timeout_secs,
+            include_report=include_report,
+            include_files=include_files,
         )
     )
+    emit(result)
+    if result.any_failed:
+        raise SystemExit(1)
 
 
 def register_run_commands(app: App, emit: Emitter) -> tuple[set[str], dict[str, str]]:
@@ -341,6 +386,7 @@ def register_run_commands(app: App, emit: Emitter) -> tuple[set[str], dict[str, 
     handlers: dict[str, Callable[[], Callable[..., None]]] = {
         "run.create": lambda: partial(_run_create, emit),
         "run.list": lambda: partial(_run_list, emit),
+        "run.stats": lambda: partial(_run_stats, emit),
         "run.show": lambda: partial(_run_show, emit),
         "run.continue": lambda: partial(_run_continue, emit),
         "run.retry": lambda: partial(_run_retry, emit),

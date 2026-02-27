@@ -24,6 +24,7 @@ class HarnessCapabilities:
 
     supports_stream_events: bool = True
     supports_session_resume: bool = False
+    supports_session_fork: bool = False
     supports_native_skills: bool = False
     supports_programmatic_tools: bool = False
 
@@ -39,6 +40,8 @@ class RunParams:
     extra_args: tuple[str, ...] = ()
     repo_root: str | None = None
     mcp_tools: tuple[str, ...] = ()
+    continue_session_id: str | None = None
+    continue_fork: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +109,24 @@ class HarnessAdapter(Protocol):
     def extract_usage(self, artifacts: ArtifactStore, run_id: RunId) -> TokenUsage: ...
 
     def extract_session_id(self, artifacts: ArtifactStore, run_id: RunId) -> str | None: ...
+
+    def extract_tasks(self, event: StreamEvent) -> list[dict[str, str]] | None:
+        """Extract structured task updates from one stream event."""
+
+        _ = event
+        return None
+
+    def extract_findings(self, event: StreamEvent) -> list[dict[str, str]] | None:
+        """Extract structured findings from one stream event."""
+
+        _ = event
+        return None
+
+    def extract_summary(self, output: str) -> str | None:
+        """Extract a concise run summary from final output text."""
+
+        _ = output
+        return None
 
 
 def resolve_mcp_config(adapter: HarnessAdapter, run: RunParams) -> McpConfig | None:

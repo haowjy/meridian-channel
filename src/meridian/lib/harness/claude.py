@@ -6,7 +6,7 @@ import hashlib
 import json
 import tempfile
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, cast
 
 from meridian.lib.harness._common import (
     categorize_stream_event,
@@ -33,6 +33,76 @@ from meridian.lib.safety.permissions import PermissionConfig
 from meridian.lib.types import HarnessId, RunId
 
 
+def _iter_dicts(value: object) -> list[dict[str, object]]:
+    nested: list[dict[str, object]] = []
+    if isinstance(value, dict):
+        payload = cast("dict[str, object]", value)
+        nested.append(payload)
+        for child in payload.values():
+            nested.extend(_iter_dicts(child))
+    elif isinstance(value, list):
+        for child in cast("list[object]", value):
+            nested.extend(_iter_dicts(child))
+    return nested
+
+
+def _normalize_task(item: object) -> dict[str, str] | None:
+    if not isinstance(item, dict):
+        return None
+
+    payload = cast("dict[str, object]", item)
+    content_raw = (
+        payload.get("content")
+        or payload.get("task")
+        or payload.get("title")
+        or payload.get("text")
+    )
+    if content_raw is None:
+        return None
+    content = str(content_raw).strip()
+    if not content:
+        return None
+
+    normalized: dict[str, str] = {"content": content}
+    status_raw = payload.get("status")
+    if status_raw is not None:
+        status = str(status_raw).strip()
+        if status:
+            normalized["status"] = status
+    id_raw = payload.get("id")
+    if id_raw is not None:
+        task_id = str(id_raw).strip()
+        if task_id:
+            normalized["id"] = task_id
+    return normalized
+
+
+def _extract_todowrite_tasks(metadata: dict[str, object]) -> list[dict[str, str]]:
+    tasks: list[dict[str, str]] = []
+    todo_tool_names = {"todowrite", "todo_write", "todo.write"}
+    for payload in _iter_dicts(metadata):
+        name = str(
+            payload.get("name")
+            or payload.get("tool_name")
+            or payload.get("tool")
+            or ""
+        ).strip()
+        if name.lower() not in todo_tool_names:
+            continue
+        input_payload = payload.get("input")
+        todo_items = payload.get("todos")
+        if todo_items is None and isinstance(input_payload, dict):
+            input_dict = cast("dict[str, object]", input_payload)
+            todo_items = input_dict.get("todos") or input_dict.get("tasks")
+        if not isinstance(todo_items, list):
+            continue
+        for item in cast("list[object]", todo_items):
+            normalized = _normalize_task(item)
+            if normalized is not None:
+                tasks.append(normalized)
+    return tasks
+
+
 class ClaudeAdapter:
     """HarnessAdapter implementation for `claude`."""
 
@@ -40,6 +110,8 @@ class ClaudeAdapter:
         "model": FlagStrategy(effect=FlagEffect.CLI_FLAG, cli_flag="--model"),
         "agent": FlagStrategy(effect=FlagEffect.DROP),
         "skills": FlagStrategy(effect=FlagEffect.DROP),
+        "continue_session_id": FlagStrategy(effect=FlagEffect.DROP),
+        "continue_fork": FlagStrategy(effect=FlagEffect.DROP),
     }
     PROMPT_MODE: ClassVar[PromptMode] = PromptMode.FLAG
     BASE_COMMAND: ClassVar[tuple[str, ...]] = ("claude", "-p")
@@ -61,13 +133,14 @@ class ClaudeAdapter:
         return HarnessCapabilities(
             supports_stream_events=True,
             supports_session_resume=True,
+            supports_session_fork=True,
             supports_native_skills=True,
             supports_programmatic_tools=False,
         )
 
     def build_command(self, run: RunParams, perms: PermissionResolver) -> list[str]:
         mcp_config = self.mcp_config(run)
-        return build_harness_command(
+        command = build_harness_command(
             base_command=self.BASE_COMMAND,
             prompt_mode=self.PROMPT_MODE,
             run=run,
@@ -76,6 +149,13 @@ class ClaudeAdapter:
             harness_id=self.id,
             mcp_config=mcp_config,
         )
+        session_id = (run.continue_session_id or "").strip()
+        if not session_id:
+            return command
+        command.extend(["--resume", session_id])
+        if run.continue_fork:
+            command.append("--fork-session")
+        return command
 
     def _mcp_config_path(self, run: RunParams) -> Path:
         repo_root = (run.repo_root or "").strip() or "."
@@ -130,3 +210,15 @@ class ClaudeAdapter:
 
     def extract_session_id(self, artifacts: ArtifactStore, run_id: RunId) -> str | None:
         return extract_session_id_from_artifacts(artifacts, run_id)
+
+    def extract_tasks(self, event: StreamEvent) -> list[dict[str, str]] | None:
+        tasks = _extract_todowrite_tasks(event.metadata)
+        return tasks or None
+
+    def extract_findings(self, event: StreamEvent) -> list[dict[str, str]] | None:
+        _ = event
+        return None
+
+    def extract_summary(self, output: str) -> str | None:
+        _ = output
+        return None
