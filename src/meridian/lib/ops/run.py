@@ -55,10 +55,8 @@ from ._run_models import (
 )
 from ._run_prepare import (
     _CreateRuntimeView,
-    _LEGACY_DEFAULT_AGENT_SKILLS,
     _PreparedCreate,
     _build_create_payload,
-    _load_model_guidance_text,
     _looks_like_alias_identifier,
     _merge_warnings,
     _normalize_skill_flags,
@@ -333,6 +331,10 @@ def _with_command(result: RunActionOutput, command: str) -> RunActionOutput:
 def run_continue_sync(payload: RunContinueInput) -> RunActionOutput:
     repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
     derived_prompt = _prompt_for_follow_up(payload.run_id, repo_root, payload.prompt)
+    # Note: agent is not forwarded from the original run, so
+    # agent_explicitly_requested will be False and permission-escalation
+    # warnings won't fire.  This is acceptable for continue/retry since
+    # the user already approved the original run's permissions.
     create_input = RunCreateInput(
         prompt=derived_prompt,
         model=payload.model,

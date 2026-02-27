@@ -118,7 +118,8 @@ def test_run_falls_back_to_legacy_defaults_when_configured_profile_missing(tmp_p
 
     assert result.status == "dry-run"
     assert result.agent is None
-    assert result.skills == ("run-agent", "agent")
+    # Skills are opt-in: when default profile is missing, no implicit skills
+    assert result.skills == ()
 
 
 def test_workspace_supervisor_profile_controls_model_skills_and_sandbox(tmp_path: Path) -> None:
@@ -438,9 +439,11 @@ def test_run_logs_warning_when_profile_sandbox_exceeds_config_default(
     monkeypatch.setattr(run_ops, "logger", stub_logger)
     monkeypatch.setattr(permission_safety, "logger", stub_logger)
 
+    # Warning only fires when agent is explicitly requested (not implicit default)
     run_ops.run_create_sync(
         RunCreateInput(
             prompt="check warning",
+            agent="unsafe-agent",
             dry_run=True,
             repo_root=tmp_path.as_posix(),
         )

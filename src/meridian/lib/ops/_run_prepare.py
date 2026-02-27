@@ -41,7 +41,6 @@ if TYPE_CHECKING:
     from meridian.lib.harness.registry import HarnessRegistry
 
 logger = structlog.get_logger(__name__)
-_LEGACY_DEFAULT_AGENT_SKILLS: tuple[str, ...] = ("run-agent", "agent")
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,9 +127,9 @@ def _validate_create_input(payload: RunCreateInput) -> tuple[RunCreateInput, str
     return payload, model_warning
 
 
-def _load_model_guidance_text() -> str:
+def _load_model_guidance_text(repo_root: Path | None = None) -> str:
     try:
-        return load_model_guidance().content
+        return load_model_guidance(repo_root=repo_root).content
     except FileNotFoundError:
         return ""
 
@@ -171,6 +170,11 @@ def _build_create_payload(
 
     explicit_requested_skills = _normalize_skill_flags(payload.skills)
     requested_skills = explicit_requested_skills
+    # Track whether the agent was explicitly requested via --agent flag.
+    # Used to suppress noisy permission-escalation warnings for the implicit
+    # default agent profile (which normally has sandbox > config default).
+    agent_explicitly_requested = bool(payload.agent)
+
     profile: AgentProfile | None = None
     if payload.agent:
         profile = load_agent_profile(
@@ -188,9 +192,10 @@ def _build_create_payload(
                     search_paths=runtime_view.config.search_paths,
                 )
             except FileNotFoundError:
-                requested_skills = (*_LEGACY_DEFAULT_AGENT_SKILLS, *requested_skills)
-        else:
-            requested_skills = (*_LEGACY_DEFAULT_AGENT_SKILLS, *requested_skills)
+                # No default agent profile found — proceed without injecting
+                # any implicit skills.  Skills are opt-in: declare them in
+                # the agent profile or pass --skills explicitly.
+                pass
 
     defaults = resolve_run_defaults(
         payload.model,
@@ -230,13 +235,23 @@ def _build_create_payload(
     loaded_references = load_reference_files(payload.files)
     parsed_template_vars = parse_template_assignments(payload.template_vars)
 
+    # Model guidance is coupled to the run-agent skill (it lives under
+    # run-agent/references/).  Only inject it when run-agent is actually
+    # loaded — keeps trivial prompts small.
+    loaded_skill_names = {skill.name for skill in loaded_skills}
+    model_guidance = (
+        _load_model_guidance_text(repo_root=runtime_view.repo_root)
+        if "run-agent" in loaded_skill_names
+        else ""
+    )
+
     composed_prompt = compose_run_prompt_text(
         skills=loaded_skills,
         references=loaded_references,
         user_prompt=payload.prompt,
         report_path=payload.report_path,
         agent_body=defaults.agent_body,
-        model_guidance=_load_model_guidance_text(),
+        model_guidance=model_guidance,
         template_variables=parsed_template_vars,
     )
 
@@ -251,7 +266,11 @@ def _build_create_payload(
     from meridian.lib.harness.adapter import RunParams
 
     inferred_tier = _permission_tier_from_profile(profile.sandbox if profile is not None else None)
-    if payload.permission_tier is None:
+    # Only warn about tier escalation when the user explicitly chose an
+    # agent via --agent.  The implicit default agent profile often has
+    # sandbox > config default (e.g. workspace-write vs read-only), and
+    # warning every time is noise for normal configurations.
+    if payload.permission_tier is None and agent_explicitly_requested:
         _warn_profile_tier_escalation(
             profile=profile,
             inferred_tier=inferred_tier,

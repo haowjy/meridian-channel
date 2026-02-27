@@ -2,7 +2,7 @@
 name: agent
 description: Default agent
 model: gpt-5.3-codex
-skills: [run-agent]
+skills: []
 mcp-tools: [run_list, run_show, skills_list]
 sandbox: workspace-write
 ---

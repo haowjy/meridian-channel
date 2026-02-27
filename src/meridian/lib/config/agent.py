@@ -139,7 +139,7 @@ def _builtin_profiles() -> dict[str, AgentProfile]:
             description="Default agent",
             model="gpt-5.3-codex",
             variant=None,
-            skills=("run-agent",),
+            skills=(),
             tools=(),
             mcp_tools=("run_list", "run_show", "skills_list"),
             sandbox="workspace-write",
