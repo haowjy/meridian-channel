@@ -5,7 +5,6 @@ from __future__ import annotations
 import importlib
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from string.templatelib import Template
 from typing import Literal
 
 from meridian.lib.domain import SkillContent
@@ -48,17 +47,6 @@ def _join_sections(sections: Sequence[str]) -> str:
     return "\n\n".join(non_empty)
 
 
-def _render_template(template: Template) -> str:
-    """Render a PEP 750 template into plain text."""
-
-    parts: list[str] = []
-    for index, segment in enumerate(template.strings):
-        parts.append(segment)
-        if index < len(template.interpolations):
-            parts.append(str(template.interpolations[index].value))
-    return "".join(parts)
-
-
 def compose_run_prompt(
     *,
     skills: Sequence[SkillContent],
@@ -69,7 +57,7 @@ def compose_run_prompt(
     model_guidance: str = "",
     template_variables: Mapping[str, str | Path] | None = None,
     prior_output: str | None = None,
-) -> Template:
+) -> str:
     """Compose a run prompt with deterministic ordering and sanitization.
 
     Prompt assembly order:
@@ -111,13 +99,13 @@ def compose_run_prompt(
     report_instruction = build_report_instruction(report_path)
 
     if sections_text:
-        return t"""{sections_text}
+        return f"""{sections_text}
 
 {report_instruction}
 
 {cleaned_user_prompt}
 """
-    return t"""{report_instruction}
+    return f"""{report_instruction}
 
 {cleaned_user_prompt}
 """
@@ -136,7 +124,7 @@ def compose_run_prompt_text(
 ) -> str:
     """Compose and render prompt text."""
 
-    template = compose_run_prompt(
+    return compose_run_prompt(
         skills=skills,
         references=references,
         user_prompt=user_prompt,
@@ -145,8 +133,7 @@ def compose_run_prompt_text(
         model_guidance=model_guidance,
         template_variables=template_variables,
         prior_output=prior_output,
-    )
-    return _render_template(template).strip()
+    ).strip()
 
 
 def render_file_template(

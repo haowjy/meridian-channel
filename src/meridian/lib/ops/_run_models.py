@@ -167,15 +167,31 @@ class RunDetailOutput:
         if self.exit_code is not None:
             status_str += f" (exit {self.exit_code})"
 
+        duration_value: str | None
+        if self.duration_secs is None:
+            duration_value = None
+        elif isinstance(self.duration_secs, int | float):
+            duration_value = f"{self.duration_secs:.1f}s"
+        else:
+            duration_value = str(self.duration_secs)
+
+        cost_value: str | None
+        if self.cost_usd is None:
+            cost_value = None
+        elif isinstance(self.cost_usd, int | float):
+            cost_value = f"${self.cost_usd:.4f}"
+        else:
+            cost_value = str(self.cost_usd)
+
         pairs: list[tuple[str, str | None]] = [
             ("Run", self.run_id),
             ("Status", status_str),
             ("Model", f"{self.model} ({self.harness})"),
-            ("Duration", f"{self.duration_secs:.1f}s" if self.duration_secs is not None else None),
+            ("Duration", duration_value),
             ("Workspace", self.workspace_id),
             ("Skills", ", ".join(self.skills) if self.skills else None),
             ("Failure", self.failure_reason),
-            ("Cost", f"${self.cost_usd:.4f}" if self.cost_usd is not None else None),
+            ("Cost", cost_value),
             ("Report", self.report_path),
         ]
         return kv_block(pairs)
