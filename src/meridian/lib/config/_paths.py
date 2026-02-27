@@ -9,6 +9,17 @@ from meridian.lib.config.settings import SearchPathConfig
 from meridian.lib.state.db import resolve_state_paths
 
 
+def bundled_agents_root() -> Path | None:
+    """Return the path to meridian's bundled .agents/ directory, when available."""
+
+    import importlib.resources
+
+    try:
+        return Path(str(importlib.resources.files("meridian.resources") / ".agents"))
+    except Exception:
+        return None
+
+
 def resolve_repo_root(explicit: Path | None = None) -> Path:
     """Resolve repository root that owns `.agents/skills/`.
 

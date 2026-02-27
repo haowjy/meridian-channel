@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from meridian.lib.config._paths import (
+    bundled_agents_root,
     default_index_db_path,
     resolve_path_list,
     resolve_repo_root,
@@ -54,13 +55,17 @@ class SkillRegistry:
     ) -> None:
         self._repo_root = resolve_repo_root(repo_root)
         resolved_search_paths = search_paths or load_config(self._repo_root).search_paths
-        self._skills_dirs = tuple(
-            resolve_path_list(
-                resolved_search_paths.skills,
-                resolved_search_paths.global_skills,
-                self._repo_root,
-            )
+        resolved_skills_dirs = resolve_path_list(
+            resolved_search_paths.skills,
+            resolved_search_paths.global_skills,
+            self._repo_root,
         )
+        bundled_root = bundled_agents_root()
+        if bundled_root is not None:
+            bundled_skills_dir = bundled_root / "skills"
+            if bundled_skills_dir.is_dir() and bundled_skills_dir not in resolved_skills_dirs:
+                resolved_skills_dirs.append(bundled_skills_dir)
+        self._skills_dirs = tuple(resolved_skills_dirs)
         self._db_path = (db_path or default_index_db_path(self._repo_root)).resolve()
         self._busy_timeout_ms = busy_timeout_ms
         self._readonly = readonly

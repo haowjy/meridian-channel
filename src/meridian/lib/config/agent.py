@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import logging
-from functools import lru_cache
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import cast
 
-from meridian.lib.config._paths import resolve_path_list, resolve_repo_root
+from meridian.lib.config._paths import bundled_agents_root, resolve_path_list, resolve_repo_root
 from meridian.lib.config.settings import SearchPathConfig, load_config
 from meridian.lib.config.skill import split_markdown_frontmatter
 
@@ -139,7 +139,7 @@ def _builtin_profiles() -> dict[str, AgentProfile]:
             description="Default agent",
             model="gpt-5.3-codex",
             variant=None,
-            skills=("run-agent", "agent"),
+            skills=("run-agent",),
             tools=(),
             mcp_tools=("run_list", "run_show", "skills_list"),
             sandbox="workspace-write",
@@ -152,7 +152,7 @@ def _builtin_profiles() -> dict[str, AgentProfile]:
             description="Workspace supervisor",
             model="claude-opus-4-6",
             variant=None,
-            skills=("run-agent", "agent", "orchestrate"),
+            skills=("run-agent", "supervise"),
             tools=(),
             mcp_tools=(
                 "run_create",
@@ -231,14 +231,39 @@ def load_agent_profile(
     if not normalized:
         raise ValueError("Agent profile name must not be empty.")
 
-    for profile in scan_agent_profiles(repo_root=repo_root, search_paths=search_paths):
+    root = resolve_repo_root(repo_root)
+
+    for profile in scan_agent_profiles(repo_root=root, search_paths=search_paths):
         if profile.path.stem == normalized or profile.name == normalized:
             return profile
+
+    bundled_root = bundled_agents_root()
+    if bundled_root is not None:
+        bundled_agents_dir = bundled_root / "agents"
+        if bundled_agents_dir.is_dir():
+            try:
+                for profile in scan_agent_profiles(
+                    repo_root=root,
+                    search_dirs=[bundled_agents_dir],
+                ):
+                    if profile.path.stem == normalized or profile.name == normalized:
+                        return profile
+            except Exception as exc:
+                # Bundled profile parsing must be best-effort so hard-coded fallbacks
+                # still keep the CLI operational if package resources are unavailable.
+                logger.warning(
+                    "Unable to read bundled agent profiles from '%s': %s",
+                    bundled_agents_dir,
+                    exc,
+                )
 
     # Fall back to hard-coded built-in profiles.
     builtin = _builtin_profiles().get(normalized)
     if builtin is not None:
-        logger.info("Using built-in profile '%s' (no file found on disk).", normalized)
+        logger.info(
+            "Using built-in profile '%s' (no user or bundled profile found).",
+            normalized,
+        )
         return builtin
 
     raise FileNotFoundError(f"Agent profile '{name}' not found in configured search paths.")

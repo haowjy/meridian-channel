@@ -9,6 +9,7 @@ import pytest
 import meridian.lib.ops.run as run_ops
 import meridian.lib.safety.permissions as permission_safety
 import meridian.lib.workspace.launch as workspace_launch
+from meridian.lib.config._paths import bundled_agents_root
 from meridian.lib.config.agent import _BUILTIN_PATH, load_agent_profile
 from meridian.lib.ops.run import RunCreateInput
 from meridian.lib.types import WorkspaceId
@@ -272,7 +273,7 @@ def test_workspace_supervisor_profile_non_claude_model_raises_clear_error(tmp_pa
     with pytest.raises(
         ValueError,
         match=(
-            "Workspace supervisor only supports Claude harness models. "
+            r"Workspace supervisor only supports Claude harness models. "
             "Model 'gpt-5.3-codex' routes to harness 'codex'."
         ),
     ):
@@ -307,22 +308,28 @@ def test_agent_profile_parses_mcp_tools_and_defaults_to_empty_tuple(tmp_path: Pa
 
 
 def test_builtin_agent_profile_used_when_no_file_on_disk(tmp_path: Path) -> None:
-    """When no agent.md exists on disk, load_agent_profile returns the builtin."""
+    """When no agent.md exists on disk, load_agent_profile returns bundled defaults."""
     profile = load_agent_profile("agent", repo_root=tmp_path)
+    bundled_root = bundled_agents_root()
+    assert bundled_root is not None
     assert profile.name == "agent"
     assert profile.model == "gpt-5.3-codex"
     assert profile.sandbox == "workspace-write"
-    assert profile.path == _BUILTIN_PATH
+    assert profile.path == (bundled_root / "agents" / "agent.md").resolve()
+    assert profile.path != _BUILTIN_PATH
 
 
 def test_builtin_supervisor_profile_used_when_no_file_on_disk(tmp_path: Path) -> None:
-    """When no supervisor.md exists on disk, load_agent_profile returns the builtin."""
+    """When no supervisor.md exists on disk, load_agent_profile returns bundled defaults."""
     profile = load_agent_profile("supervisor", repo_root=tmp_path)
+    bundled_root = bundled_agents_root()
+    assert bundled_root is not None
     assert profile.name == "supervisor"
     assert profile.model == "claude-opus-4-6"
     assert profile.sandbox == "unrestricted"
-    assert "orchestrate" in profile.skills
-    assert profile.path == _BUILTIN_PATH
+    assert "supervise" in profile.skills
+    assert profile.path == (bundled_root / "agents" / "supervisor.md").resolve()
+    assert profile.path != _BUILTIN_PATH
 
 
 def test_disk_profile_takes_precedence_over_builtin(tmp_path: Path) -> None:

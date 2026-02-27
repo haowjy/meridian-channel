@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from meridian.lib.config._paths import resolve_search_paths
+from meridian.lib.config._paths import bundled_agents_root, resolve_search_paths
 from meridian.lib.config.agent import scan_agent_profiles
 from meridian.lib.config.settings import SearchPathConfig, load_config
 from meridian.lib.config.skill_registry import SkillRegistry
@@ -170,10 +170,13 @@ def test_skill_registry_scans_multi_path_and_first_match_wins_with_warning(
         db_path=repo_root / ".meridian" / "index" / "runs.db",
     )
 
+    bundled_root = bundled_agents_root()
+    assert bundled_root is not None
     assert registry.skills_dirs == (
         (repo_root / ".agents" / "skills").resolve(),
         (repo_root / ".cursor" / "skills").resolve(),
         (home_root / ".claude" / "skills").resolve(),
+        (bundled_root / "skills").resolve(),
     )
 
     caplog.set_level(logging.WARNING, logger="meridian.lib.config.skill")
