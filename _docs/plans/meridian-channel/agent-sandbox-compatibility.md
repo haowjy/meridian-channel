@@ -1,6 +1,6 @@
 # Agent Sandbox Compatibility
 
-**Status:** approved
+**Status:** done
 **Reviewed:** 2026-02-26 (3 codex reviews + 1 sonnet explore)
 
 ## Problem
