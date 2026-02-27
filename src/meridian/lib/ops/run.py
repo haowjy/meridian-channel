@@ -16,6 +16,8 @@ import structlog
 
 from meridian.lib.config import load_agent_profile, load_model_guidance
 from meridian.lib.config.agent import AgentProfile
+from meridian.lib.config.catalog import resolve_model
+from meridian.lib.config.routing import route_model
 from meridian.lib.domain import RunCreateParams, RunStatus
 from meridian.lib.exec.spawn import execute_with_finalization
 from meridian.lib.exec.terminal import TerminalEventFilter, resolve_visible_categories
@@ -37,12 +39,15 @@ from meridian.lib.prompt import (
 from meridian.lib.safety.budget import Budget, normalize_budget
 from meridian.lib.safety.guardrails import normalize_guardrail_paths
 from meridian.lib.safety.permissions import (
+    _permission_tier_from_profile,
+    _warn_profile_tier_escalation,
     PermissionConfig,
     TieredPermissionResolver,
     build_permission_config,
-    parse_permission_tier,
+    validate_permission_config_for_harness,
 )
 from meridian.lib.safety.redaction import SecretSpec, parse_secret_specs, secrets_env_overrides
+from meridian.lib.state.db import resolve_state_paths
 from meridian.lib.types import ModelId, RunId
 
 if TYPE_CHECKING:
@@ -51,12 +56,6 @@ if TYPE_CHECKING:
 _BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
 logger = structlog.get_logger(__name__)
 _LEGACY_DEFAULT_AGENT_SKILLS: tuple[str, ...] = ("run-agent", "agent")
-_TIER_RANKS = {
-    "read-only": 0,
-    "workspace-write": 1,
-    "full-access": 2,
-    "danger": 3,
-}
 
 
 def _empty_template_vars() -> dict[str, str]:
@@ -339,6 +338,52 @@ def _normalize_skill_flags(skill_flags: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(parsed)
 
 
+def _looks_like_alias_identifier(candidate: str) -> bool:
+    return "/" not in candidate and "-" not in candidate and "." not in candidate
+
+
+def _validate_requested_model(
+    requested_model: str,
+    *,
+    repo_root: str | None,
+) -> tuple[str, str | None]:
+    normalized = requested_model.strip()
+    if not normalized:
+        return "", None
+
+    explicit_root = Path(repo_root).expanduser().resolve() if repo_root else None
+    try:
+        return str(resolve_model(normalized, repo_root=explicit_root).model_id), None
+    except KeyError:
+        pass
+
+    if _looks_like_alias_identifier(normalized):
+        raise ValueError(
+            f"Unknown model alias '{normalized}'. Run `meridian models list` to inspect aliases."
+        )
+
+    routed = route_model(normalized)
+    if routed.warning is None:
+        return normalized, f"Model '{normalized}' is not in catalog. Routing to '{routed.harness_id}'."
+
+    raise ValueError(
+        f"Unknown model '{normalized}'. Run `meridian models list` to inspect supported models."
+    )
+
+
+def _validate_create_input(payload: RunCreateInput) -> tuple[RunCreateInput, str | None]:
+    if not payload.prompt.strip():
+        raise ValueError("prompt required: use --prompt/-p with non-empty text.")
+
+    resolved_model, model_warning = _validate_requested_model(
+        payload.model,
+        repo_root=payload.repo_root,
+    )
+    if resolved_model and resolved_model != payload.model:
+        return replace(payload, model=resolved_model), model_warning
+    return payload, model_warning
+
+
 def _load_model_guidance_text() -> str:
     try:
         return load_model_guidance().content
@@ -352,46 +397,11 @@ def _merge_warnings(primary: str | None, secondary: str | None) -> str | None:
     return primary or secondary
 
 
-def _permission_tier_from_profile(agent_sandbox: str | None) -> str | None:
-    if agent_sandbox is None:
-        return None
-    normalized = agent_sandbox.strip().lower()
-    if not normalized:
-        return None
-    mapping = {
-        "read-only": "read-only",
-        "workspace-write": "workspace-write",
-        "danger-full-access": "full-access",
-        "unrestricted": "full-access",
-    }
-    return mapping.get(normalized)
-
-
-def _warn_profile_tier_escalation(
-    *,
-    profile: AgentProfile | None,
-    inferred_tier: str | None,
-    default_tier: str,
-) -> None:
-    if profile is None or inferred_tier is None:
-        return
-    try:
-        resolved_inferred = parse_permission_tier(inferred_tier)
-        resolved_default = parse_permission_tier(default_tier)
-    except ValueError:
-        return
-    if _TIER_RANKS[resolved_inferred.value] <= _TIER_RANKS[resolved_default.value]:
-        return
-    logger.warning(
-        f"Agent profile '{profile.name}' infers {resolved_inferred.value} "
-        f"(config default: {resolved_default.value}). Use --permission to override."
-    )
-
-
 def _build_create_payload(
     payload: RunCreateInput,
     *,
     runtime: OperationRuntime | None = None,
+    preflight_warning: str | None = None,
 ) -> _PreparedCreate:
     runtime_bundle = runtime or build_runtime(payload.repo_root)
     explicit_requested_skills = _normalize_skill_flags(payload.skills)
@@ -469,6 +479,7 @@ def _build_create_payload(
         else None
     )
     warning = _merge_warnings(route_warning, missing_skills_warning)
+    warning = _merge_warnings(preflight_warning, warning)
     from meridian.lib.harness.adapter import RunParams
 
     inferred_tier = _permission_tier_from_profile(profile.sandbox if profile is not None else None)
@@ -477,11 +488,19 @@ def _build_create_payload(
             profile=profile,
             inferred_tier=inferred_tier,
             default_tier=runtime_bundle.config.default_permission_tier,
+            warning_logger=logger,
         )
     permission_config = build_permission_config(
         payload.permission_tier or inferred_tier,
         unsafe=payload.unsafe,
         default_tier=runtime_bundle.config.default_permission_tier,
+    )
+    warning = _merge_warnings(
+        warning,
+        validate_permission_config_for_harness(
+            harness_id=harness.id,
+            config=permission_config,
+        ),
     )
     budget = normalize_budget(
         per_run_usd=payload.budget_per_run_usd,
@@ -521,7 +540,7 @@ def _build_create_payload(
 
 
 def _read_run_row(repo_root: Path, run_id: str) -> sqlite3.Row | None:
-    db_path = repo_root / ".meridian" / "index" / "runs.db"
+    db_path = resolve_state_paths(repo_root).db_path
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
@@ -568,7 +587,7 @@ def _read_files_touched(repo_root: Path, run_id: str) -> tuple[str, ...]:
     from meridian.lib.extract.files_touched import extract_files_touched
     from meridian.lib.state.artifact_store import LocalStore
 
-    artifacts = LocalStore(repo_root / ".meridian" / "artifacts")
+    artifacts = LocalStore(resolve_state_paths(repo_root).artifacts_dir)
     return extract_files_touched(artifacts, RunId(run_id))
 
 
@@ -647,7 +666,7 @@ def _workspace_spend_usd(repo_root: Path, workspace_id: str | None) -> float:
     if workspace_id is None:
         return 0.0
 
-    db_path = repo_root / ".meridian" / "index" / "runs.db"
+    db_path = resolve_state_paths(repo_root).db_path
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
@@ -716,6 +735,7 @@ def _execute_run_blocking(
             artifacts=runtime.artifacts,
             registry=runtime.harness_registry,
             permission_resolver=TieredPermissionResolver(prepared.permission_config),
+            permission_config=prepared.permission_config,
             cwd=runtime.repo_root,
             timeout_seconds=payload.timeout_secs,
             kill_grace_seconds=runtime.config.kill_grace_seconds,
@@ -807,6 +827,7 @@ async def _execute_run_non_blocking(
         artifacts=runtime.artifacts,
         registry=runtime.harness_registry,
         permission_resolver=TieredPermissionResolver(permission_config),
+        permission_config=permission_config,
         cwd=runtime.repo_root,
         timeout_seconds=timeout_secs,
         kill_grace_seconds=runtime.config.kill_grace_seconds,
@@ -847,6 +868,8 @@ def _track_task(task: asyncio.Task[None]) -> None:
 
 
 def run_create_sync(payload: RunCreateInput) -> RunActionOutput:
+    payload, preflight_warning = _validate_create_input(payload)
+
     runtime: OperationRuntime
     if not payload.dry_run:
         resolved_root, config = resolve_runtime_root_and_config(payload.repo_root)
@@ -857,7 +880,7 @@ def run_create_sync(payload: RunCreateInput) -> RunActionOutput:
     else:
         runtime = build_runtime(payload.repo_root)
 
-    prepared = _build_create_payload(payload, runtime=runtime)
+    prepared = _build_create_payload(payload, runtime=runtime, preflight_warning=preflight_warning)
     if payload.dry_run:
         return RunActionOutput(
             command="run.create",
@@ -879,6 +902,8 @@ def run_create_sync(payload: RunCreateInput) -> RunActionOutput:
 
 
 async def run_create(payload: RunCreateInput) -> RunActionOutput:
+    payload, preflight_warning = _validate_create_input(payload)
+
     runtime: OperationRuntime
     if not payload.dry_run:
         resolved_root, config = resolve_runtime_root_and_config(payload.repo_root)
@@ -889,7 +914,7 @@ async def run_create(payload: RunCreateInput) -> RunActionOutput:
     else:
         runtime = build_runtime(payload.repo_root)
 
-    prepared = _build_create_payload(payload, runtime=runtime)
+    prepared = _build_create_payload(payload, runtime=runtime, preflight_warning=preflight_warning)
     if payload.dry_run:
         return RunActionOutput(
             command="run.create",

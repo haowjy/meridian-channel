@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 import sys
 from contextlib import suppress
 from contextvars import ContextVar
@@ -293,6 +294,15 @@ def get_registered_cli_descriptions() -> dict[str, str]:
     return dict(_REGISTERED_CLI_DESCRIPTIONS)
 
 
+def _operation_error_message(exc: Exception) -> str:
+    if isinstance(exc, KeyError) and exc.args:
+        return str(exc.args[0])
+    message = str(exc).strip()
+    if message:
+        return message
+    return exc.__class__.__name__
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     """CLI entry point used by `meridian` and `python -m meridian`."""
 
@@ -312,7 +322,11 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     token = _GLOBAL_OPTIONS.set(options)
     try:
-        app(cleaned_args)
+        try:
+            app(cleaned_args)
+        except (KeyError, ValueError, FileNotFoundError, sqlite3.OperationalError) as exc:
+            print(f"error: {_operation_error_message(exc)}", file=sys.stderr)
+            raise SystemExit(1) from None
     finally:
         _GLOBAL_OPTIONS.reset(token)
 

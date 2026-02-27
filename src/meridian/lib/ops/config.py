@@ -15,6 +15,7 @@ from meridian.lib.config._paths import resolve_repo_root
 from meridian.lib.config.settings import MeridianConfig, load_config
 from meridian.lib.ops.registry import OperationSpec, operation
 from meridian.lib.serialization import to_jsonable
+from meridian.lib.state.db import resolve_state_paths
 
 if TYPE_CHECKING:
     from meridian.lib.formatting import FormatContext
@@ -182,10 +183,13 @@ class ConfigResolvedValue:
 class ConfigShowOutput:
     path: str
     values: tuple[ConfigResolvedValue, ...]
+    warning: str | None = None
 
     def format_text(self, ctx: FormatContext | None = None) -> str:
         _ = ctx
         lines = [f"path: {self.path}"]
+        if self.warning is not None:
+            lines.append(f"warning: {self.warning}")
         for item in self.values:
             source_note = item.source
             if item.env_var is not None:
@@ -252,7 +256,7 @@ class ConfigResetOutput:
 
 
 def _config_path(repo_root: Path) -> Path:
-    return repo_root / ".meridian" / "config.toml"
+    return resolve_state_paths(repo_root).config_path
 
 
 def _resolve_repo_root(repo_root: str | None) -> Path:
@@ -604,7 +608,11 @@ def config_show_sync(payload: ConfigShowInput) -> ConfigShowOutput:
             )
         )
 
-    return ConfigShowOutput(path=path.as_posix(), values=tuple(values))
+    warning: str | None = None
+    if not repo_root.exists():
+        warning = f"Resolved repo root '{repo_root.as_posix()}' does not exist on disk."
+
+    return ConfigShowOutput(path=path.as_posix(), values=tuple(values), warning=warning)
 
 
 def config_set_sync(payload: ConfigSetInput) -> ConfigSetOutput:

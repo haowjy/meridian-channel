@@ -20,8 +20,9 @@ from meridian.lib.config.settings import load_config
 from meridian.lib.domain import WorkspaceState
 from meridian.lib.prompt.assembly import load_skill_contents, resolve_run_defaults
 from meridian.lib.safety.permissions import (
+    _permission_tier_from_profile,
+    _warn_profile_tier_escalation,
     build_permission_config,
-    parse_permission_tier,
     permission_flags_for_harness,
 )
 from meridian.lib.state.db import open_connection, resolve_state_paths
@@ -33,12 +34,6 @@ _CONTINUATION_GUIDANCE = (
     "already-completed work."
 )
 logger = logging.getLogger(__name__)
-_TIER_RANKS = {
-    "read-only": 0,
-    "workspace-write": 1,
-    "full-access": 2,
-    "danger": 3,
-}
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,7 +63,7 @@ class WorkspaceLaunchResult:
 def workspace_lock_path(repo_root: Path, workspace_id: WorkspaceId) -> Path:
     """Return active workspace lock path for one workspace ID."""
 
-    return repo_root / ".meridian" / "active-workspaces" / f"{workspace_id}.lock"
+    return resolve_state_paths(repo_root).active_workspaces_dir / f"{workspace_id}.lock"
 
 
 def build_supervisor_prompt(request: WorkspaceLaunchRequest) -> str:
@@ -190,24 +185,27 @@ def _build_interactive_command(
         "--model",
         str(model),
     ]
-    inferred_tier = _permission_tier_from_profile(profile.sandbox if profile is not None else None)
-    if inferred_tier is not None:
-        _warn_profile_tier_escalation(
-            profile=profile,
-            inferred_tier=inferred_tier,
-            default_tier=config.default_permission_tier,
+    resolved_tier = _resolve_permission_tier_for_profile(
+        profile=profile,
+        default_tier=config.default_permission_tier,
+    )
+    _warn_profile_tier_escalation(
+        profile=profile,
+        inferred_tier=resolved_tier,
+        default_tier=config.default_permission_tier,
+        warning_logger=logger,
+    )
+    permission_config = build_permission_config(
+        resolved_tier,
+        unsafe=False,
+        default_tier=config.default_permission_tier,
+    )
+    command.extend(
+        permission_flags_for_harness(
+            HarnessId("claude"),
+            permission_config,
         )
-        permission_config = build_permission_config(
-            inferred_tier,
-            unsafe=False,
-            default_tier=config.default_permission_tier,
-        )
-        command.extend(
-            permission_flags_for_harness(
-                HarnessId("claude"),
-                permission_config,
-            )
-        )
+    )
     command.extend(passthrough_args)
     return tuple(command)
 
@@ -230,40 +228,25 @@ def _build_supervisor_command(
     )
 
 
-def _permission_tier_from_profile(agent_sandbox: str | None) -> str | None:
-    if agent_sandbox is None:
-        return None
-    normalized = agent_sandbox.strip().lower()
-    if not normalized:
-        return None
-    mapping = {
-        "read-only": "read-only",
-        "workspace-write": "workspace-write",
-        "danger-full-access": "full-access",
-        "unrestricted": "full-access",
-    }
-    return mapping.get(normalized)
-
-
-def _warn_profile_tier_escalation(
+def _resolve_permission_tier_for_profile(
     *,
     profile: AgentProfile | None,
-    inferred_tier: str | None,
     default_tier: str,
-) -> None:
-    if profile is None or inferred_tier is None:
-        return
-    try:
-        resolved_inferred = parse_permission_tier(inferred_tier)
-        resolved_default = parse_permission_tier(default_tier)
-    except ValueError:
-        return
-    if _TIER_RANKS[resolved_inferred.value] <= _TIER_RANKS[resolved_default.value]:
-        return
-    logger.warning(
-        f"Agent profile '{profile.name}' infers {resolved_inferred.value} "
-        f"(config default: {resolved_default.value}). Use --permission to override."
-    )
+) -> str:
+    sandbox_value = profile.sandbox if profile is not None else None
+    inferred_tier = _permission_tier_from_profile(sandbox_value)
+    if inferred_tier is not None:
+        return inferred_tier
+
+    if profile is not None and sandbox_value is not None and sandbox_value.strip():
+        logger.warning(
+            "Agent profile '%s' has unsupported sandbox '%s'; "
+            "falling back to default permission tier '%s'.",
+            profile.name,
+            sandbox_value.strip(),
+            default_tier,
+        )
+    return default_tier
 
 
 def _pid_exists(pid: int) -> bool:
@@ -309,7 +292,7 @@ def _transition_orphaned_workspace_states(
 def cleanup_orphaned_locks(repo_root: Path) -> tuple[WorkspaceId, ...]:
     """Remove stale workspace locks and mark orphaned active workspaces paused."""
 
-    lock_dir = repo_root / ".meridian" / "active-workspaces"
+    lock_dir = resolve_state_paths(repo_root).active_workspaces_dir
     if not lock_dir.exists():
         return ()
 

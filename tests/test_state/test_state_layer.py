@@ -35,6 +35,7 @@ from meridian.lib.domain import (
     WorkspaceCreateParams,
 )
 from meridian.lib.state.artifact_store import InMemoryStore, LocalStore, make_artifact_key
+from meridian.lib.state import db as state_db
 from meridian.lib.state.db import get_busy_timeout, get_journal_mode, open_connection
 from meridian.lib.state.id_gen import next_run_id
 from meridian.lib.state.schema import (
@@ -88,6 +89,45 @@ def test_schema_bootstrap_and_db_pragmas(tmp_path: Path) -> None:
         assert get_schema_version(conn) == LATEST_SCHEMA_VERSION
     finally:
         conn.close()
+
+
+def test_open_connection_retries_when_database_is_locked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / ".meridian" / "index" / "runs.db"
+    attempts = {"count": 0}
+    real_connect = state_db.sqlite3.connect
+
+    def flaky_connect(*args: object, **kwargs: object) -> sqlite3.Connection:
+        attempts["count"] += 1
+        if attempts["count"] < 3:
+            raise sqlite3.OperationalError("database is locked")
+        return real_connect(*args, **kwargs)
+
+    monkeypatch.setattr(state_db.sqlite3, "connect", flaky_connect)
+
+    conn = state_db.open_connection(db_path, lock_retries=4, lock_backoff_secs=0.0)
+    try:
+        assert get_schema_version(conn) == LATEST_SCHEMA_VERSION
+    finally:
+        conn.close()
+
+    assert attempts["count"] == 3
+
+
+def test_open_connection_classifies_corruption_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / ".meridian" / "index" / "runs.db"
+
+    def corrupt_connect(*args: object, **kwargs: object) -> sqlite3.Connection:
+        _ = args, kwargs
+        raise sqlite3.OperationalError("database disk image is malformed")
+
+    monkeypatch.setattr(state_db.sqlite3, "connect", corrupt_connect)
+
+    with pytest.raises(sqlite3.OperationalError, match="appears corrupt"):
+        state_db.open_connection(db_path, lock_retries=0, lock_backoff_secs=0.0)
 
 
 def test_run_and_workspace_crud_with_counter_ids(tmp_path: Path) -> None:

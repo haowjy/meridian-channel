@@ -42,6 +42,7 @@ from meridian.lib.safety.guardrails import GuardrailFailure, run_guardrails
 from meridian.lib.safety.permissions import PermissionConfig
 from meridian.lib.safety.redaction import SecretSpec, redact_secret_bytes
 from meridian.lib.state.artifact_store import ArtifactStore, make_artifact_key
+from meridian.lib.state.db import resolve_run_log_dir
 from meridian.lib.types import HarnessId, RunId, WorkspaceId
 
 OUTPUT_FILENAME = "output.jsonl"
@@ -64,13 +65,6 @@ class SafeDefaultPermissionResolver(PermissionResolver):
         return []
 
 
-def _permission_config_for_env_overrides(resolver: PermissionResolver) -> PermissionConfig:
-    config = getattr(resolver, "config", None)
-    if isinstance(config, PermissionConfig):
-        return config
-    return PermissionConfig()
-
-
 @dataclass(frozen=True, slots=True)
 class SpawnResult:
     """Result from one spawned harness process."""
@@ -87,11 +81,7 @@ class SpawnResult:
 def run_log_dir(repo_root: Path, run_id: RunId, workspace_id: WorkspaceId | None) -> Path:
     """Resolve run artifact directory from run/workspace IDs."""
 
-    if workspace_id is None:
-        return repo_root / ".meridian" / "runs" / str(run_id)
-
-    local_id = str(run_id).split("/")[-1]
-    return repo_root / ".meridian" / "workspaces" / str(workspace_id) / "runs" / local_id
+    return resolve_run_log_dir(repo_root, run_id, workspace_id)
 
 
 def _extract_tokens_payload(raw_line: bytes) -> bytes | None:
@@ -380,6 +370,7 @@ async def execute_with_finalization(
     artifacts: ArtifactStore,
     registry: HarnessRegistry,
     permission_resolver: PermissionResolver | None = None,
+    permission_config: PermissionConfig | None = None,
     cwd: Path | None = None,
     timeout_seconds: float | None = None,
     kill_grace_seconds: float = DEFAULT_KILL_GRACE_SECONDS,
@@ -403,7 +394,7 @@ async def execute_with_finalization(
 
     execution_cwd = (cwd or Path.cwd()).resolve()
     repo_root = state.paths.root_dir.parent
-    log_dir = run_log_dir(repo_root, run.run_id, run.workspace_id)
+    log_dir = resolve_run_log_dir(repo_root, run.run_id, run.workspace_id)
     output_log_path = log_dir / OUTPUT_FILENAME
     report_path = log_dir / REPORT_FILENAME
 
@@ -413,8 +404,8 @@ async def execute_with_finalization(
         harness = registry.get(harness_id)
 
     resolved_perms = permission_resolver or SafeDefaultPermissionResolver()
-    permission_config = _permission_config_for_env_overrides(resolved_perms)
-    adapter_env_overrides = harness.env_overrides(permission_config)
+    resolved_permission_config = permission_config or PermissionConfig()
+    adapter_env_overrides = harness.env_overrides(resolved_permission_config)
     if env_overrides is None:
         child_env = os.environ.copy() if adapter_env_overrides else None
     else:

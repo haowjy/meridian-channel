@@ -9,6 +9,8 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import cast
 
+from meridian.lib.state.db import resolve_state_paths
+
 logger = logging.getLogger(__name__)
 
 
@@ -366,7 +368,7 @@ def load_config(repo_root: Path) -> MeridianConfig:
     """Load `.meridian/config.toml` and apply environment overrides."""
 
     values = _default_values()
-    path = repo_root / ".meridian" / "config.toml"
+    path = resolve_state_paths(repo_root).config_path
     if path.is_file():
         payload_obj = tomllib.loads(path.read_text(encoding="utf-8"))
         payload = cast("dict[str, object]", payload_obj)

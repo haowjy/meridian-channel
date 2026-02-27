@@ -62,7 +62,7 @@ def build_runtime_from_root_and_config(
         workspace_store=SQLiteWorkspaceStore(state),
         context_store=SQLiteContextStore(state),
         harness_registry=get_default_harness_registry(),
-        artifacts=LocalStore(repo_root / ".meridian" / "artifacts"),
+        artifacts=LocalStore(state.paths.artifacts_dir),
     )
 
 

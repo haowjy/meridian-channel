@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import meridian.lib.ops.run as run_ops
+import meridian.lib.safety.permissions as permission_safety
+import meridian.lib.workspace.launch as workspace_launch
 from meridian.lib.config.agent import _BUILTIN_PATH, load_agent_profile
 from meridian.lib.ops.run import RunCreateInput
 from meridian.lib.types import WorkspaceId
@@ -55,6 +57,11 @@ def _write_agent(
     lines.append("---")
     lines.extend(["", f"# {name}", "", "Agent body."])
     _write(repo_root / ".agents" / "agents" / f"{name}.md", "\n".join(lines) + "\n")
+
+
+def _allowed_tools_from_command(command: tuple[str, ...]) -> tuple[str, ...]:
+    payload = command[command.index("--allowedTools") + 1]
+    return tuple(item.strip() for item in payload.split(",") if item.strip())
 
 
 def test_run_uses_default_agent_profile_and_profile_skills(tmp_path: Path) -> None:
@@ -136,7 +143,7 @@ def test_workspace_supervisor_profile_controls_model_skills_and_sandbox(tmp_path
     assert "Supervisor orchestration content" in prompt_payload
 
 
-def test_workspace_supervisor_profile_missing_keeps_legacy_fallback(tmp_path: Path) -> None:
+def test_workspace_supervisor_profile_missing_uses_default_permission_tier(tmp_path: Path) -> None:
     _write_config(
         tmp_path,
         "[defaults]\nsupervisor_agent = 'missing-supervisor'\n",
@@ -151,8 +158,96 @@ def test_workspace_supervisor_profile_missing_keeps_legacy_fallback(tmp_path: Pa
     )
 
     assert command[command.index("--model") + 1] == "claude-opus-4-6"
-    assert "--allowedTools" not in command
+    assert "--allowedTools" in command
     assert command[command.index("--system-prompt") + 1] == "workspace prompt"
+
+
+def test_workspace_supervisor_profile_missing_sandbox_uses_default_permission_tier(
+    tmp_path: Path,
+) -> None:
+    _write_config(
+        tmp_path,
+        (
+            "[defaults]\n"
+            "supervisor_agent = 'lead-supervisor'\n"
+            "\n"
+            "[permissions]\n"
+            "default_tier = 'workspace-write'\n"
+        ),
+    )
+    _write_agent(
+        tmp_path,
+        name="lead-supervisor",
+        model="claude-sonnet-4-6",
+        skills=["orchestrate"],
+    )
+    _write_skill(tmp_path, "orchestrate", "Supervisor orchestration content")
+
+    command = _build_interactive_command(
+        repo_root=tmp_path,
+        request=WorkspaceLaunchRequest(workspace_id=WorkspaceId("w1")),
+        prompt="workspace prompt",
+        passthrough_args=(),
+    )
+
+    assert "--allowedTools" in command
+    allowed_tools = _allowed_tools_from_command(command)
+    assert "Edit" in allowed_tools
+    assert "Write" in allowed_tools
+
+
+def test_workspace_supervisor_profile_unknown_sandbox_uses_default_permission_tier_with_warning(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _write_config(
+        tmp_path,
+        (
+            "[defaults]\n"
+            "supervisor_agent = 'lead-supervisor'\n"
+            "\n"
+            "[permissions]\n"
+            "default_tier = 'read-only'\n"
+        ),
+    )
+    _write_agent(
+        tmp_path,
+        name="lead-supervisor",
+        model="claude-sonnet-4-6",
+        skills=["orchestrate"],
+        sandbox="full_access",
+    )
+    _write_skill(tmp_path, "orchestrate", "Supervisor orchestration content")
+
+    class _Logger:
+        def __init__(self) -> None:
+            self.messages: list[str] = []
+
+        def warning(self, message: str, *args: object) -> None:
+            self.messages.append(message % args if args else message)
+
+    stub_logger = _Logger()
+    monkeypatch.setattr(workspace_launch, "logger", stub_logger)
+
+    command = _build_interactive_command(
+        repo_root=tmp_path,
+        request=WorkspaceLaunchRequest(workspace_id=WorkspaceId("w1")),
+        prompt="workspace prompt",
+        passthrough_args=(),
+    )
+
+    assert "--allowedTools" in command
+    allowed_tools = _allowed_tools_from_command(command)
+    assert "Edit" not in allowed_tools
+    assert "Write" not in allowed_tools
+    assert any(
+        message
+        == (
+            "Agent profile 'lead-supervisor' has unsupported sandbox 'full_access'; "
+            "falling back to default permission tier 'read-only'."
+        )
+        for message in stub_logger.messages
+    )
 
 
 def test_agent_profile_parses_mcp_tools_and_defaults_to_empty_tuple(tmp_path: Path) -> None:
@@ -257,6 +352,7 @@ def test_run_logs_warning_when_profile_sandbox_exceeds_config_default(
 
     stub_logger = _Logger()
     monkeypatch.setattr(run_ops, "logger", stub_logger)
+    monkeypatch.setattr(permission_safety, "logger", stub_logger)
 
     run_ops.run_create_sync(
         RunCreateInput(

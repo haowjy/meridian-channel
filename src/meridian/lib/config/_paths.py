@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 from meridian.lib.config.settings import SearchPathConfig
+from meridian.lib.state.db import resolve_state_paths
 
 
 def resolve_repo_root(explicit: Path | None = None) -> Path:
@@ -62,4 +63,4 @@ def resolve_path_list(
 def default_index_db_path(repo_root: Path) -> Path:
     """Return default SQLite index path shared across meridian state."""
 
-    return repo_root / ".meridian" / "index" / "runs.db"
+    return resolve_state_paths(repo_root).db_path

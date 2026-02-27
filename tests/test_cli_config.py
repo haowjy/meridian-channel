@@ -88,3 +88,18 @@ def test_config_show_displays_sources(
     assert by_key["defaults.max_depth"] == "env var"
     assert by_key["defaults.max_retries"] == "file"
     assert by_key["defaults.supervisor_agent"] == "builtin"
+
+
+def test_config_show_warns_when_repo_root_does_not_exist(
+    run_meridian,
+    cli_env: dict[str, str],
+) -> None:
+    cli_env["MERIDIAN_REPO_ROOT"] = "/does/not/exist"
+
+    show_result = run_meridian(["--json", "config", "show"])
+    assert show_result.returncode == 0
+
+    payload = json.loads(show_result.stdout)
+    warning = payload.get("warning")
+    assert isinstance(warning, str)
+    assert "does not exist on disk" in warning

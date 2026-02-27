@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, cast
 
 from meridian.lib.config._paths import resolve_repo_root
 from meridian.lib.config.routing import route_model
+from meridian.lib.state.db import resolve_state_paths
 from meridian.lib.types import HarnessId, ModelId
 
 if TYPE_CHECKING:
@@ -112,7 +113,7 @@ def builtin_model_catalog() -> tuple[CatalogModel, ...]:
 
 
 def _catalog_path(repo_root: Path) -> Path:
-    return repo_root / ".meridian" / "models.toml"
+    return resolve_state_paths(repo_root).models_path
 
 
 def _parse_aliases(raw: object) -> tuple[str, ...]:

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, cast
 from meridian.lib.config._paths import resolve_path_list
 from meridian.lib.ops._runtime import build_runtime
 from meridian.lib.ops.registry import OperationSpec, operation
-from meridian.lib.state.db import open_connection
+from meridian.lib.state.db import open_connection, resolve_state_paths
 from meridian.lib.state.schema import REQUIRED_TABLES, list_tables
 from meridian.lib.types import WorkspaceId
 from meridian.lib.workspace.launch import workspace_lock_path
@@ -199,7 +199,7 @@ def _rebuild_runs_jsonl(conn: sqlite3.Connection, path: Path) -> None:
 
 
 def _repair_workspace_locks(repo_root: Path) -> bool:
-    lock_dir = repo_root / ".meridian" / "active-workspaces"
+    lock_dir = resolve_state_paths(repo_root).active_workspaces_dir
     if not lock_dir.exists():
         return False
 

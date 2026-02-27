@@ -32,6 +32,7 @@ from meridian.lib.state.db import (
     DEFAULT_BUSY_TIMEOUT_MS,
     StatePaths,
     open_connection,
+    resolve_run_log_dir,
     resolve_state_paths,
 )
 from meridian.lib.state.id_gen import next_run_id, next_workspace_id
@@ -146,13 +147,6 @@ class StateDB:
         if rel.is_absolute():
             return rel
         return self._repo_root / rel
-
-    def _run_dir_for_id(self, run_id: RunId, workspace_id: WorkspaceId | None) -> Path:
-        if workspace_id is None:
-            return Path(".meridian") / "runs" / str(run_id)
-
-        local_id = str(run_id).split("/")[-1]
-        return Path(".meridian") / "workspaces" / str(workspace_id) / "runs" / local_id
 
     def append_start_row(self, row: RunStartRow) -> None:
         start_json = self._start_row_to_json(row)
@@ -322,7 +316,11 @@ class StateDB:
             with conn:
                 generated = next_run_id(conn, params.workspace_id)
                 started = datetime.now(UTC)
-                run_dir = self._run_dir_for_id(generated.full_id, params.workspace_id)
+                run_dir = resolve_run_log_dir(
+                    self._repo_root,
+                    generated.full_id,
+                    params.workspace_id,
+                )
                 conn.execute(
                     """
                     INSERT INTO runs(

@@ -12,8 +12,9 @@ from typing import TYPE_CHECKING, cast
 
 from meridian.lib.ops._runtime import build_runtime
 from meridian.lib.ops.registry import OperationSpec, operation
-from meridian.lib.state.db import open_connection
+from meridian.lib.state.db import open_connection, resolve_run_log_dir
 from meridian.lib.state.jsonl import read_jsonl_rows
+from meridian.lib.types import RunId, WorkspaceId
 
 if TYPE_CHECKING:
     from meridian.lib.formatting import FormatContext
@@ -134,13 +135,25 @@ def _extract_started_at(row: dict[str, object]) -> str:
     )
 
 
-def _extract_log_dir(*, run_id: str, workspace_id: str | None, row: dict[str, object]) -> str:
+def _extract_log_dir(
+    *,
+    repo_root: Path,
+    run_id: str,
+    workspace_id: str | None,
+    row: dict[str, object],
+) -> str:
     existing = _to_text(row.get("log_dir"))
     if existing is not None:
         return existing
-    if workspace_id is None:
-        return f".meridian/runs/{run_id}"
-    return f".meridian/workspaces/{workspace_id}/runs/{_extract_local_id(run_id)}"
+    resolved = resolve_run_log_dir(
+        repo_root,
+        RunId(run_id),
+        WorkspaceId(workspace_id) if workspace_id is not None else None,
+    )
+    try:
+        return resolved.relative_to(repo_root).as_posix()
+    except ValueError:
+        return resolved.as_posix()
 
 
 def _ensure_workspace_row(conn: sqlite3.Connection, workspace_id: str, started_at: str) -> None:
@@ -154,7 +167,7 @@ def _ensure_workspace_row(conn: sqlite3.Connection, workspace_id: str, started_a
     )
 
 
-def _upsert_run_row(conn: sqlite3.Connection, row: dict[str, object]) -> bool:
+def _upsert_run_row(conn: sqlite3.Connection, repo_root: Path, row: dict[str, object]) -> bool:
     run_id = _extract_run_id(row)
     if run_id is None:
         return False
@@ -226,7 +239,12 @@ def _upsert_run_row(conn: sqlite3.Connection, row: dict[str, object]) -> bool:
             _to_int(row.get("exit_code")),
             _to_text(row.get("failure_reason")),
             _to_text(row.get("report_path")),
-            _extract_log_dir(run_id=run_id, workspace_id=workspace_id, row=row),
+            _extract_log_dir(
+                repo_root=repo_root,
+                run_id=run_id,
+                workspace_id=workspace_id,
+                row=row,
+            ),
             _to_text(row.get("prompt")) or "",
             _to_int(row.get("input_tokens")),
             _to_int(row.get("output_tokens")),
@@ -404,7 +422,7 @@ def migrate_run_sync(payload: MigrateRunInput) -> MigrateRunOutput:
                     skipped_rows += 1
                     continue
 
-                if not _upsert_run_row(db, parsed):
+                if not _upsert_run_row(db, runtime.repo_root, parsed):
                     skipped_rows += 1
                     continue
 

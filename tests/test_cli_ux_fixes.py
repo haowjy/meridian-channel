@@ -89,7 +89,7 @@ def test_bug6_gemini_alias_routes_to_opencode(
     assert payload["harness_id"] == "opencode"
 
 
-def test_bug8_unknown_model_warning_reports_harness_without_model_fallback(
+def test_bug8_unknown_model_fails_fast_with_clean_error(
     package_root: Path, cli_env: dict[str, str], tmp_path: Path
 ) -> None:
     repo_root = tmp_path / "repo"
@@ -102,13 +102,10 @@ def test_bug8_unknown_model_warning_reports_harness_without_model_fallback(
         args=["--json", "run", "--dry-run", "-m", "nonexistent-model", "-p", "test"],
     )
 
-    assert result.returncode == 0
-    payload = json.loads(result.stdout)
-    assert payload["harness_id"] == "codex"
-    warning = payload["warning"]
-    assert "Unknown model family 'nonexistent-model'" in warning
-    assert "Using harness 'codex'" in warning
-    assert "Falling back" not in warning
+    assert result.returncode != 0
+    assert "Unknown model 'nonexistent-model'" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert result.stdout == ""
 
 
 def test_bug9_unknown_skill_returns_structured_error_payload(
@@ -134,12 +131,66 @@ def test_bug9_unknown_skill_returns_structured_error_payload(
         ],
     )
 
-    assert result.returncode == 0
+    assert result.returncode == 1
     payload = json.loads(result.stdout)
     assert payload["command"] == "run.create"
     assert payload["status"] == "failed"
     assert payload["error"] == "unknown_skills"
     assert payload["message"] == "Unknown skills: nonexistent-skill"
+
+
+def test_bug16_skills_show_unknown_skill_emits_clean_error(
+    package_root: Path, cli_env: dict[str, str], tmp_path: Path
+) -> None:
+    repo_root = tmp_path / "repo"
+    _seed_base_skills(repo_root)
+
+    result = _run_cli(
+        package_root=package_root,
+        cli_env=cli_env,
+        repo_root=repo_root,
+        args=["skills", "show", "nonexistent-skill"],
+    )
+
+    assert result.returncode != 0
+    assert "error:" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_bug16_run_show_unknown_run_emits_clean_error(
+    package_root: Path, cli_env: dict[str, str], tmp_path: Path
+) -> None:
+    repo_root = tmp_path / "repo"
+    _seed_base_skills(repo_root)
+
+    result = _run_cli(
+        package_root=package_root,
+        cli_env=cli_env,
+        repo_root=repo_root,
+        args=["run", "show", "nonexistent-run"],
+    )
+
+    assert result.returncode != 0
+    assert "Run 'nonexistent-run' not found" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_bug17_run_create_requires_nonempty_prompt(
+    package_root: Path, cli_env: dict[str, str], tmp_path: Path
+) -> None:
+    repo_root = tmp_path / "repo"
+    _seed_base_skills(repo_root)
+
+    result = _run_cli(
+        package_root=package_root,
+        cli_env=cli_env,
+        repo_root=repo_root,
+        args=["run", "--dry-run"],
+    )
+
+    assert result.returncode != 0
+    assert "prompt required" in result.stderr.lower()
+    assert "Traceback" not in result.stderr
 
 
 @pytest.mark.parametrize(

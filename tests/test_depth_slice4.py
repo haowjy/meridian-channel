@@ -143,7 +143,7 @@ def test_cli_run_create_depth_limit_returns_structured_error(
         timeout=10,
     )
 
-    assert result.returncode == 0
+    assert result.returncode == 1
     payload = json.loads(result.stdout)
     assert payload["status"] == "failed"
     assert payload["error"] == "max_depth_exceeded"

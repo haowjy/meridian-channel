@@ -31,6 +31,7 @@ from meridian.lib.safety.permissions import (
     PermissionTier,
     TieredPermissionResolver,
     opencode_permission_json,
+    validate_permission_config_for_harness,
 )
 from meridian.lib.state.artifact_store import LocalStore, make_artifact_key
 from meridian.lib.types import HarnessId, ModelId, RunId
@@ -116,8 +117,37 @@ def test_opencode_permission_json_warns_when_danger_equals_full_access(
     assert payload == {"*": "allow"}
     assert warnings == [
         {
-            "message": "OpenCode 'danger' tier currently matches 'full-access'.",
+            "message": "OpenCode has no danger-bypass flag; DANGER falls back to FULL_ACCESS.",
             "kwargs": {"tier": "danger"},
+        }
+    ]
+
+
+def test_validate_permission_config_for_harness_warns_on_opencode_danger(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    warnings: list[dict[str, object]] = []
+
+    def _warning(message: str, **kwargs: object) -> None:
+        warnings.append({"message": message, "kwargs": kwargs})
+
+    monkeypatch.setattr(permissions_module.logger, "warning", _warning)
+
+    config = PermissionConfig(tier=PermissionTier.DANGER, unsafe=True)
+    warning = validate_permission_config_for_harness(
+        harness_id=HarnessId("opencode"),
+        config=config,
+    )
+
+    assert warning == "OpenCode has no danger-bypass flag; DANGER falls back to FULL_ACCESS."
+    assert warnings == [
+        {
+            "message": "OpenCode has no danger-bypass flag; DANGER falls back to FULL_ACCESS.",
+            "kwargs": {
+                "harness_id": "opencode",
+                "requested_tier": "danger",
+                "effective_tier": "full-access",
+            },
         }
     ]
 
@@ -182,6 +212,7 @@ async def test_execute_with_finalization_merges_adapter_env_overrides(
         artifacts=artifacts,
         registry=registry,
         permission_resolver=TieredPermissionResolver(permission_config),
+        permission_config=permission_config,
         harness_id=adapter.id,
         cwd=tmp_path,
         env_overrides={"MERIDIAN_CALLER_VAR": "caller-value"},

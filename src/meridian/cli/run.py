@@ -29,6 +29,14 @@ from meridian.lib.ops.run import (
 Emitter = Callable[[Any], None]
 
 
+def _run_create_exit_code(result: RunActionOutput) -> int:
+    if result.exit_code is not None:
+        return result.exit_code
+    if result.status in {"succeeded", "running", "dry-run"}:
+        return 0
+    return 1
+
+
 def _run_create(
     emit: Any,
     prompt: Annotated[str, Parameter(name=["--prompt", "-p"])] = "",
@@ -90,6 +98,9 @@ def _run_create(
             message=message,
         )
     emit(result)
+    exit_code = _run_create_exit_code(result)
+    if exit_code != 0:
+        raise SystemExit(exit_code)
 
 
 def _run_list(

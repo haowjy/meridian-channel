@@ -9,13 +9,18 @@ from typing import cast
 
 from meridian.lib.adapters.sqlite import StateDB
 from meridian.lib.domain import Workspace
+from meridian.lib.state.db import resolve_state_paths
 from meridian.lib.types import WorkspaceId
 
 
 def workspace_summary_path(repo_root: Path, workspace_id: WorkspaceId) -> Path:
     """Return canonical workspace-summary.md path for one workspace."""
 
-    return repo_root / ".meridian" / "workspaces" / str(workspace_id) / "workspace-summary.md"
+    return (
+        resolve_state_paths(repo_root).workspaces_dir
+        / str(workspace_id)
+        / "workspace-summary.md"
+    )
 
 
 def _load_workspace_runs(state: StateDB, workspace_id: WorkspaceId) -> list[sqlite3.Row]:

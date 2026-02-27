@@ -5,12 +5,20 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import TYPE_CHECKING, Protocol
 
 import structlog
 
 from meridian.lib.types import HarnessId
 
+if TYPE_CHECKING:
+    from meridian.lib.config.agent import AgentProfile
+
 logger = structlog.get_logger(__name__)
+
+
+class _WarningLogger(Protocol):
+    def warning(self, message: str) -> None: ...
 
 
 class PermissionTier(StrEnum):
@@ -20,6 +28,17 @@ class PermissionTier(StrEnum):
     WORKSPACE_WRITE = "workspace-write"
     FULL_ACCESS = "full-access"
     DANGER = "danger"
+
+
+_TIER_RANKS = {
+    "read-only": 0,
+    "workspace-write": 1,
+    "full-access": 2,
+    "danger": 3,
+}
+_OPENCODE_DANGER_FALLBACK_WARNING = (
+    "OpenCode has no danger-bypass flag; DANGER falls back to FULL_ACCESS."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +68,21 @@ def parse_permission_tier(
     return _parse_permission_tier_value(normalized)
 
 
+def _permission_tier_from_profile(agent_sandbox: str | None) -> str | None:
+    if agent_sandbox is None:
+        return None
+    normalized = agent_sandbox.strip().lower()
+    if not normalized:
+        return None
+    mapping = {
+        "read-only": "read-only",
+        "workspace-write": "workspace-write",
+        "danger-full-access": "full-access",
+        "unrestricted": "full-access",
+    }
+    return mapping.get(normalized)
+
+
 def _parse_permission_tier_value(raw: str | PermissionTier) -> PermissionTier:
     if isinstance(raw, PermissionTier):
         return raw
@@ -61,6 +95,29 @@ def _parse_permission_tier_value(raw: str | PermissionTier) -> PermissionTier:
             return candidate
     allowed = ", ".join(item.value for item in PermissionTier)
     raise ValueError(f"Unsupported permission tier '{raw}'. Expected: {allowed}.")
+
+
+def _warn_profile_tier_escalation(
+    *,
+    profile: AgentProfile | None,
+    inferred_tier: str | None,
+    default_tier: str,
+    warning_logger: _WarningLogger | None = None,
+) -> None:
+    if profile is None or inferred_tier is None:
+        return
+    try:
+        resolved_inferred = parse_permission_tier(inferred_tier)
+        resolved_default = parse_permission_tier(default_tier)
+    except ValueError:
+        return
+    if _TIER_RANKS[resolved_inferred.value] <= _TIER_RANKS[resolved_default.value]:
+        return
+    sink = warning_logger or logger
+    sink.warning(
+        f"Agent profile '{profile.name}' infers {resolved_inferred.value} "
+        f"(config default: {resolved_default.value}). Use --permission to override."
+    )
 
 
 def build_permission_config(
@@ -80,6 +137,24 @@ def build_permission_config(
             "Permission tier 'danger' requires explicit --unsafe confirmation."
         )
     return resolved
+
+
+def validate_permission_config_for_harness(
+    *,
+    harness_id: HarnessId,
+    config: PermissionConfig,
+) -> str | None:
+    """Validate one permission config against harness-specific capability limits."""
+
+    if harness_id == HarnessId("opencode") and config.tier is PermissionTier.DANGER:
+        logger.warning(
+            _OPENCODE_DANGER_FALLBACK_WARNING,
+            harness_id=str(harness_id),
+            requested_tier=config.tier.value,
+            effective_tier=PermissionTier.FULL_ACCESS.value,
+        )
+        return _OPENCODE_DANGER_FALLBACK_WARNING
+    return None
 
 
 def _claude_allowed_tools(tier: PermissionTier) -> tuple[str, ...]:
@@ -135,10 +210,7 @@ def opencode_permission_json(tier: PermissionTier) -> str:
     elif tier is PermissionTier.FULL_ACCESS:
         permissions = {"*": "allow"}
     elif tier is PermissionTier.DANGER:
-        logger.warning(
-            "OpenCode 'danger' tier currently matches 'full-access'.",
-            tier=tier.value,
-        )
+        logger.warning(_OPENCODE_DANGER_FALLBACK_WARNING, tier=tier.value)
         permissions = {"*": "allow"}
     else:  # pragma: no cover - enum exhaustive guard
         raise ValueError(f"Unsupported OpenCode permission tier: {tier!r}")
