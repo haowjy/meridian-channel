@@ -8,7 +8,7 @@ import os
 import signal
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -19,7 +19,8 @@ from meridian.lib.adapters.sqlite import RunFinalizeRow, RunStartRow, StateDB
 from meridian.lib.config.settings import MeridianConfig
 from meridian.lib.domain import Run
 from meridian.lib.exec.errors import ErrorCategory, classify_error, should_retry
-from meridian.lib.exec.signals import SignalForwarder, map_process_exit_code
+from meridian.lib.exec.process_groups import signal_process_group
+from meridian.lib.exec.signals import SignalForwarder, map_process_exit_code, signal_coordinator
 from meridian.lib.exec.timeout import (
     DEFAULT_KILL_GRACE_SECONDS,
     RunTimeoutError,
@@ -55,6 +56,79 @@ DEFAULT_MAX_RETRIES = _DEFAULT_CONFIG.max_retries
 DEFAULT_RETRY_BACKOFF_SECONDS = _DEFAULT_CONFIG.retry_backoff_seconds
 DEFAULT_GUARDRAIL_TIMEOUT_SECONDS = _DEFAULT_CONFIG.guardrail_timeout_seconds
 logger = structlog.get_logger(__name__)
+
+_CHILD_ENV_ALLOWLIST = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "USER",
+        "SHELL",
+        "LANG",
+        "TERM",
+        "TMPDIR",
+        "PYTHONPATH",
+        "VIRTUAL_ENV",
+    }
+)
+_CHILD_ENV_ALLOWLIST_PREFIXES = ("LC_", "XDG_", "UV_")
+_CHILD_ENV_SECRET_SUFFIXES = ("_TOKEN", "_KEY", "_SECRET")
+# Harness CLIs need these credentials to authenticate. Keep this explicit so
+# secret-like env vars still default to redacted unless intentionally allowed.
+_HARNESS_ENV_PASS_THROUGH = frozenset(
+    {
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_BASE_URL",
+        "OPENAI_API_KEY",
+        "OPENAI_ORG_ID",
+        "OPENAI_PROJECT_ID",
+        "OPENAI_BASE_URL",
+        "OPENROUTER_API_KEY",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "GROQ_API_KEY",
+        "XAI_API_KEY",
+        "MISTRAL_API_KEY",
+        "COHERE_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "TOGETHER_API_KEY",
+        "PERPLEXITY_API_KEY",
+    }
+)
+
+
+def _is_allowlisted_child_env_var(key: str) -> bool:
+    normalized = key.upper()
+    if normalized in _CHILD_ENV_ALLOWLIST:
+        return True
+    return any(normalized.startswith(prefix) for prefix in _CHILD_ENV_ALLOWLIST_PREFIXES)
+
+
+def _looks_like_secret_env_var(key: str) -> bool:
+    normalized = key.upper()
+    return any(normalized.endswith(suffix) for suffix in _CHILD_ENV_SECRET_SUFFIXES)
+
+
+def sanitize_child_env(
+    base_env: Mapping[str, str],
+    env_overrides: Mapping[str, str] | None,
+    pass_through: Collection[str],
+) -> dict[str, str]:
+    """Return a sanitized child environment with explicit pass-through controls."""
+
+    pass_through_keys = {name.upper() for name in pass_through}
+    sanitized: dict[str, str] = {}
+
+    for key, value in base_env.items():
+        normalized = key.upper()
+        if _looks_like_secret_env_var(normalized) and normalized not in pass_through_keys:
+            continue
+        if normalized in pass_through_keys or _is_allowlisted_child_env_var(normalized):
+            sanitized[key] = value
+
+    if env_overrides is not None:
+        sanitized.update(env_overrides)
+
+    return sanitized
 
 
 class SafeDefaultPermissionResolver(PermissionResolver):
@@ -185,12 +259,12 @@ async def _terminate_after_cancellation(
 
     # Task cancellation is usually driven by caller/user interruption, so we mirror
     # Ctrl-C semantics and let children handle graceful SIGINT shutdown paths.
-    process.send_signal(signal.SIGINT)
+    signal_process_group(process, signal.SIGINT)
     try:
         await asyncio.wait_for(process.wait(), timeout=kill_grace_seconds)
     except TimeoutError:
         if process.returncode is None:
-            process.kill()
+            signal_process_group(process, signal.SIGKILL)
             await process.wait()
 
 
@@ -221,6 +295,7 @@ async def spawn_and_stream(
         *command,
         cwd=str(cwd),
         env=env,
+        start_new_session=True,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -406,12 +481,18 @@ async def execute_with_finalization(
     resolved_perms = permission_resolver or SafeDefaultPermissionResolver()
     resolved_permission_config = permission_config or PermissionConfig()
     adapter_env_overrides = harness.env_overrides(resolved_permission_config)
-    if env_overrides is None:
-        child_env = os.environ.copy() if adapter_env_overrides else None
-    else:
-        child_env = dict(env_overrides)
-    if child_env is not None:
-        child_env.update(adapter_env_overrides)
+    runtime_env_overrides = {
+        "MERIDIAN_REPO_ROOT": execution_cwd.as_posix(),
+        "MERIDIAN_STATE_ROOT": state.paths.root_dir.resolve().as_posix(),
+    }
+    merged_env_overrides = dict(env_overrides or {})
+    merged_env_overrides.update(runtime_env_overrides)
+    merged_env_overrides.update(adapter_env_overrides)
+    child_env = sanitize_child_env(
+        base_env=os.environ,
+        env_overrides=merged_env_overrides,
+        pass_through=_HARNESS_ENV_PASS_THROUGH,
+    )
     start_session_id = str(run.run_id)
     state.append_start_row(
         RunStartRow(
@@ -631,20 +712,8 @@ async def execute_with_finalization(
             total_cost_usd=finalized_usage.total_cost_usd if finalized_usage is not None else None,
             files_touched_count=files_touched_count,
         )
-        previous_sigterm_handler = signal.getsignal(signal.SIGTERM)
-        sigterm_ignored = False
-        try:
+        with signal_coordinator().mask_sigterm():
             # Keep finalize-row persistence atomic against parent SIGTERM.
-            signal.signal(signal.SIGTERM, signal.SIG_IGN)
-            sigterm_ignored = True
-        except ValueError:
-            # Signal handlers can only be mutated from the main thread.
-            pass
-
-        try:
             state.append_finalize_row(run.run_id, finalize_row)
-        finally:
-            if sigterm_ignored:
-                signal.signal(signal.SIGTERM, previous_sigterm_handler)
 
     return exit_code

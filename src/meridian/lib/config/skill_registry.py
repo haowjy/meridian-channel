@@ -13,7 +13,7 @@ from meridian.lib.config._paths import (
     resolve_repo_root,
 )
 from meridian.lib.config.settings import SearchPathConfig, load_config
-from meridian.lib.config.skill import scan_skills
+from meridian.lib.config.skill import SkillDocument, scan_skills
 from meridian.lib.domain import IndexReport, SkillContent, SkillManifest
 from meridian.lib.state.db import DEFAULT_BUSY_TIMEOUT_MS
 
@@ -50,6 +50,7 @@ class SkillRegistry:
         *,
         busy_timeout_ms: int = DEFAULT_BUSY_TIMEOUT_MS,
         search_paths: SearchPathConfig | None = None,
+        readonly: bool = False,
     ) -> None:
         self._repo_root = resolve_repo_root(repo_root)
         resolved_search_paths = search_paths or load_config(self._repo_root).search_paths
@@ -62,8 +63,11 @@ class SkillRegistry:
         )
         self._db_path = (db_path or default_index_db_path(self._repo_root)).resolve()
         self._busy_timeout_ms = busy_timeout_ms
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._ensure_schema()
+        self._readonly = readonly
+        self._filesystem_documents: tuple[SkillDocument, ...] | None = None
+        if not self._readonly:
+            self._db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._ensure_schema()
 
     @property
     def db_path(self) -> Path:
@@ -77,7 +81,20 @@ class SkillRegistry:
     def skills_dirs(self) -> tuple[Path, ...]:
         return self._skills_dirs
 
+    @property
+    def readonly(self) -> bool:
+        return self._readonly
+
+    def _scan_documents(self, *, refresh: bool = False) -> tuple[SkillDocument, ...]:
+        if self._filesystem_documents is None or refresh:
+            self._filesystem_documents = tuple(
+                scan_skills(self._repo_root, skills_dirs=list(self._skills_dirs))
+            )
+        return self._filesystem_documents
+
     def _connect(self) -> sqlite3.Connection:
+        if self._readonly:
+            raise RuntimeError("SkillRegistry opened in readonly filesystem mode.")
         connection = sqlite3.connect(self._db_path)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
@@ -107,6 +124,9 @@ class SkillRegistry:
             scan_dirs = list(self._skills_dirs)
 
         documents = scan_skills(self._repo_root, skills_dirs=scan_dirs)
+        if self._readonly:
+            self._filesystem_documents = tuple(documents)
+            return IndexReport(indexed_count=len(documents))
         with self._connect() as connection:
             connection.execute("DELETE FROM skills")
             connection.executemany(
@@ -145,6 +165,20 @@ class SkillRegistry:
     def list(self) -> list[SkillManifest]:
         """List all indexed skills."""
 
+        if self._readonly:
+            return sorted(
+                [
+                    SkillManifest(
+                        name=document.name,
+                        description=document.description,
+                        tags=document.tags,
+                        path=str(document.path),
+                    )
+                    for document in self._scan_documents()
+                ],
+                key=lambda item: item.name,
+            )
+
         rows = self._read_rows(
             "SELECT name, description, tags_json, content, path FROM skills ORDER BY name ASC"
         )
@@ -159,6 +193,24 @@ class SkillRegistry:
         normalized = query.strip().lower()
         if not normalized:
             return self.list()
+
+        if self._readonly:
+            return sorted(
+                [
+                    SkillManifest(
+                        name=document.name,
+                        description=document.description,
+                        tags=document.tags,
+                        path=str(document.path),
+                    )
+                    for document in self._scan_documents()
+                    if normalized in document.name.lower()
+                    or normalized in document.description.lower()
+                    or normalized in " ".join(document.tags).lower()
+                    or normalized in document.content.lower()
+                ],
+                key=lambda item: item.name,
+            )
 
         like = f"%{normalized}%"
         rows = self._read_rows(
@@ -184,6 +236,22 @@ class SkillRegistry:
         normalized_names = [name.strip() for name in names if name.strip()]
         if not normalized_names:
             return []
+
+        if self._readonly:
+            docs_by_name = {document.name: document for document in self._scan_documents()}
+            missing = [name for name in normalized_names if name not in docs_by_name]
+            if missing:
+                raise KeyError(f"Unknown skills: {', '.join(missing)}")
+            return [
+                SkillContent(
+                    name=docs_by_name[name].name,
+                    description=docs_by_name[name].description,
+                    tags=docs_by_name[name].tags,
+                    content=docs_by_name[name].content,
+                    path=str(docs_by_name[name].path),
+                )
+                for name in normalized_names
+            ]
 
         loaded_by_name: dict[str, SkillContent] = {}
         placeholders = ", ".join("?" for _ in normalized_names)

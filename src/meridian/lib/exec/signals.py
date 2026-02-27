@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import os
+from contextlib import contextmanager
 import signal
+from collections.abc import Iterator
+from threading import Lock, RLock
 from types import FrameType
 from typing import Final, cast
+
+from meridian.lib.exec.process_groups import signal_process_group
 
 TARGET_SIGNALS: Final[tuple[signal.Signals, ...]] = (signal.SIGINT, signal.SIGTERM)
 
@@ -45,12 +51,134 @@ def map_process_exit_code(
     return 1
 
 
+class SignalCoordinator:
+    """Process-global signal demultiplexer for active signal forwarders."""
+
+    def __init__(self) -> None:
+        self._lock = RLock()
+        self._forwarders: set[SignalForwarder] = set()
+        self._previous_handlers: dict[signal.Signals, signal.Handlers] = {}
+        self._handlers_installed = False
+        self._sigterm_mask_depth = 0
+
+    def register_forwarder(self, forwarder: SignalForwarder) -> None:
+        with self._lock:
+            self._forwarders.add(forwarder)
+            self._ensure_handlers_installed_locked()
+
+    def unregister_forwarder(self, forwarder: SignalForwarder) -> None:
+        with self._lock:
+            self._forwarders.discard(forwarder)
+            self._maybe_uninstall_handlers_locked()
+
+    @contextmanager
+    def mask_sigterm(self) -> Iterator[None]:
+        """Ignore SIGTERM while executing a critical section."""
+
+        mask_installed = False
+        with self._lock:
+            if self._ensure_handlers_installed_locked():
+                self._sigterm_mask_depth += 1
+                mask_installed = True
+
+        try:
+            yield
+        finally:
+            if not mask_installed:
+                return
+            with self._lock:
+                self._sigterm_mask_depth -= 1
+                self._maybe_uninstall_handlers_locked()
+
+    def _ensure_handlers_installed_locked(self) -> bool:
+        if self._handlers_installed:
+            return True
+
+        previous_handlers: dict[signal.Signals, signal.Handlers] = {}
+        try:
+            for signum in TARGET_SIGNALS:
+                previous_handlers[signum] = cast("signal.Handlers", signal.getsignal(signum))
+                signal.signal(signum, self._on_signal)
+        except ValueError:
+            # Signal handlers can only be changed from the main thread.
+            return False
+
+        self._previous_handlers = previous_handlers
+        self._handlers_installed = True
+        return True
+
+    def _maybe_uninstall_handlers_locked(self) -> None:
+        if not self._handlers_installed:
+            return
+        if self._forwarders or self._sigterm_mask_depth > 0:
+            return
+
+        try:
+            for signum in TARGET_SIGNALS:
+                signal.signal(signum, self._previous_handlers.get(signum, signal.SIG_DFL))
+        except ValueError:
+            return
+
+        self._handlers_installed = False
+        self._previous_handlers.clear()
+
+    def _dispatch_previous_handler(
+        self,
+        signum: signal.Signals,
+        frame: FrameType | None,
+        previous_handler: signal.Handlers,
+    ) -> None:
+        if previous_handler == signal.SIG_IGN:
+            return
+        if previous_handler == signal.SIG_DFL:
+            # Re-emit to preserve default process semantics when no forwarders are active.
+            signal.signal(signum, signal.SIG_DFL)
+            try:
+                os.kill(os.getpid(), signum)
+            finally:
+                with self._lock:
+                    if self._handlers_installed:
+                        signal.signal(signum, self._on_signal)
+            return
+        if callable(previous_handler):
+            previous_handler(signum.value, frame)
+
+    def _on_signal(self, raw_signum: int, frame: FrameType | None) -> None:
+        signum = signal.Signals(raw_signum)
+        with self._lock:
+            if signum == signal.SIGTERM and self._sigterm_mask_depth > 0:
+                return
+            forwarders = tuple(self._forwarders)
+            previous_handler = self._previous_handlers.get(signum, signal.SIG_DFL)
+
+        if forwarders:
+            for forwarder in forwarders:
+                forwarder.forward_signal(signum)
+            return
+
+        self._dispatch_previous_handler(signum, frame, previous_handler)
+
+
+_COORDINATOR_LOCK = Lock()
+_COORDINATOR: SignalCoordinator | None = None
+
+
+def signal_coordinator() -> SignalCoordinator:
+    """Return the process-global signal coordinator singleton."""
+
+    global _COORDINATOR
+    if _COORDINATOR is None:
+        with _COORDINATOR_LOCK:
+            if _COORDINATOR is None:
+                _COORDINATOR = SignalCoordinator()
+    return _COORDINATOR
+
+
 class SignalForwarder:
     """Scoped SIGINT/SIGTERM forwarding from parent process to child process."""
 
     def __init__(self, process: asyncio.subprocess.Process) -> None:
         self._process = process
-        self._previous_handlers: dict[signal.Signals, signal.Handlers] = {}
         self._received_signal: signal.Signals | None = None
         self._seen_signal_count = 0
 
@@ -59,17 +187,12 @@ class SignalForwarder:
         return self._received_signal
 
     def __enter__(self) -> SignalForwarder:
-        for signum in TARGET_SIGNALS:
-            previous = cast("signal.Handlers", signal.getsignal(signum))
-            self._previous_handlers[signum] = previous
-            signal.signal(signum, self._on_signal)
+        signal_coordinator().register_forwarder(self)
         return self
 
     def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
         _ = (exc_type, exc, tb)
-        for signum, handler in self._previous_handlers.items():
-            signal.signal(signum, handler)
-        self._previous_handlers.clear()
+        signal_coordinator().unregister_forwarder(self)
 
     def forward_signal(self, signum: signal.Signals) -> None:
         """Forward one signal to the child and remember it for exit-code mapping."""
@@ -77,16 +200,8 @@ class SignalForwarder:
         self._received_signal = signum
         self._seen_signal_count += 1
 
-        if self._process.returncode is None:
-            try:
-                self._process.send_signal(signum)
-            except ProcessLookupError:
-                return
+        signal_process_group(self._process, signum)
 
         if self._seen_signal_count >= 2 and self._process.returncode is None:
             # Second termination signal means "force stop now".
-            self._process.kill()
-
-    def _on_signal(self, raw_signum: int, frame: FrameType | None) -> None:
-        _ = frame
-        self.forward_signal(signal.Signals(raw_signum))
+            signal_process_group(self._process, signal.SIGKILL)

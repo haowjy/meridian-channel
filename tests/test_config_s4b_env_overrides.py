@@ -184,6 +184,8 @@ async def test_execute_with_finalization_merges_adapter_env_overrides(
                     {
                         "caller": os.getenv("MERIDIAN_CALLER_VAR"),
                         "adapter": os.getenv("MERIDIAN_ADAPTER_TIER"),
+                        "repo_root": os.getenv("MERIDIAN_REPO_ROOT"),
+                        "state_root": os.getenv("MERIDIAN_STATE_ROOT"),
                     },
                     sort_keys=True,
                 ),
@@ -226,4 +228,6 @@ async def test_execute_with_finalization_merges_adapter_env_overrides(
     assert payload == {
         "caller": "caller-value",
         "adapter": PermissionTier.WORKSPACE_WRITE.value,
+        "repo_root": tmp_path.as_posix(),
+        "state_root": (tmp_path / ".meridian").as_posix(),
     }

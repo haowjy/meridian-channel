@@ -19,19 +19,17 @@ from meridian.lib.prompt.sanitize import sanitize_prior_output, strip_stale_repo
 
 
 def build_report_instruction(report_path: str) -> str:
-    """Build the report-write instruction appended to each composed run prompt."""
+    """Build the report instruction appended to each composed run prompt."""
 
     normalized = report_path.strip()
     if not normalized:
         raise ValueError("Report path must not be empty.")
     return (
         "# Report\n\n"
-        "**IMPORTANT - As your FINAL action**, write a report of your work to: "
-        f"`{normalized}`\n\n"
+        "**IMPORTANT - Your final message should be a report of your work.**\n\n"
         "Include: what was done, key decisions made, files created/modified, "
         "verification results, and any issues or blockers.\n\n"
-        "Use plain markdown. This file is read by the orchestrator to understand "
-        "what you did without parsing verbose logs."
+        "Use plain markdown. Meridian captures your final message as the run report."
     )
 
 

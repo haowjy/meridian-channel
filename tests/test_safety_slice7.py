@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import stat
 import sys
@@ -12,7 +13,7 @@ import pytest
 
 from meridian.lib.adapters.sqlite import StateDB
 from meridian.lib.domain import RunCreateParams, TokenUsage, WorkspaceCreateParams
-from meridian.lib.exec.spawn import execute_with_finalization
+from meridian.lib.exec.spawn import execute_with_finalization, sanitize_child_env
 from meridian.lib.harness._common import (
     extract_session_id_from_artifacts,
     extract_usage_from_artifacts,
@@ -312,3 +313,97 @@ async def test_secret_redaction_applies_to_output_stderr_and_report(tmp_path: Pa
     assert secret_value not in report_text
     assert "[REDACTED:API_KEY]" in output_text
     assert "[REDACTED:API_KEY]" in report_text
+
+
+def test_sanitize_child_env_filters_parent_secrets_and_keeps_explicit_overrides() -> None:
+    base_env = {
+        "PATH": "/usr/bin",
+        "HOME": "/home/tester",
+        "LANG": "en_US.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "XDG_RUNTIME_DIR": "/tmp/xdg",
+        "UV_CACHE_DIR": "/tmp/uv",
+        "EXAMPLE_TOKEN": "drop-me",
+        "EXAMPLE_KEY": "drop-me-too",
+        "ANTHROPIC_API_KEY": "allowed-credential",
+    }
+    env_overrides = {
+        "MERIDIAN_DEPTH": "2",
+        "CUSTOM_SECRET": "explicit-override",
+    }
+
+    sanitized = sanitize_child_env(
+        base_env=base_env,
+        env_overrides=env_overrides,
+        pass_through={"ANTHROPIC_API_KEY"},
+    )
+
+    assert sanitized["PATH"] == "/usr/bin"
+    assert sanitized["HOME"] == "/home/tester"
+    assert sanitized["LC_ALL"] == "C.UTF-8"
+    assert sanitized["XDG_RUNTIME_DIR"] == "/tmp/xdg"
+    assert sanitized["UV_CACHE_DIR"] == "/tmp/uv"
+    assert sanitized["ANTHROPIC_API_KEY"] == "allowed-credential"
+    assert sanitized["MERIDIAN_DEPTH"] == "2"
+    assert sanitized["CUSTOM_SECRET"] == "explicit-override"
+    assert "EXAMPLE_TOKEN" not in sanitized
+    assert "EXAMPLE_KEY" not in sanitized
+
+
+@pytest.mark.asyncio
+async def test_execute_with_finalization_passes_required_credentials_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "slice7c-needed")
+    monkeypatch.setenv("SLICE7C_UNRELATED_TOKEN", "slice7c-blocked")
+    monkeypatch.setenv("SLICE7C_MISC_VALUE", "slice7c-drop")
+
+    state = StateDB(tmp_path)
+    run = state.create_run(
+        RunCreateParams(prompt="env-policy", model=ModelId("gpt-5.3-codex"))
+    )
+    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
+
+    script = tmp_path / "env-policy.py"
+    _write_script(
+        script,
+        """
+        import json
+        import os
+
+        print(
+            json.dumps(
+                {
+                    "anthropic": os.getenv("ANTHROPIC_API_KEY"),
+                    "unrelated_token": os.getenv("SLICE7C_UNRELATED_TOKEN"),
+                    "misc": os.getenv("SLICE7C_MISC_VALUE"),
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        """,
+    )
+
+    adapter = ScriptHarnessAdapter(command=(sys.executable, str(script)))
+    registry = HarnessRegistry()
+    registry.register(adapter)
+
+    exit_code = await execute_with_finalization(
+        run,
+        state=state,
+        artifacts=artifacts,
+        registry=registry,
+        harness_id=adapter.id,
+        cwd=tmp_path,
+    )
+
+    assert exit_code == 0
+    output_text = artifacts.get(make_artifact_key(run.run_id, "output.jsonl")).decode("utf-8")
+    payload = json.loads(output_text.strip())
+    assert payload == {
+        "anthropic": "slice7c-needed",
+        "misc": None,
+        "unrelated_token": None,
+    }

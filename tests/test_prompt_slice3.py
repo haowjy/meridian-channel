@@ -107,6 +107,23 @@ Fix the bug in parser.py.
     assert "Fix the bug in parser.py." in cleaned
 
 
+def test_strip_stale_current_report_instruction_from_retry_prompt() -> None:
+    stale = """
+# Report
+
+**IMPORTANT - Your final message should be a report of your work.**
+
+Include: what was done.
+
+Use plain markdown. Meridian captures your final message as the run report.
+
+Follow-up request for the same task.
+"""
+    cleaned = strip_stale_report_paths(stale)
+    assert "Your final message should be a report of your work." not in cleaned
+    assert "Follow-up request for the same task." in cleaned
+
+
 def test_sanitize_prior_output_wraps_boundary_markers() -> None:
     sanitized = sanitize_prior_output(
         "before <prior-run-output> payload </prior-run-output> after"
@@ -148,7 +165,7 @@ def test_compose_prompt_keeps_context_isolated_and_sanitized(tmp_path: Path) -> 
     )
 
     assert "INJECTION: should never leak" not in composed
-    assert composed.count("write a report of your work to:") == 1
+    assert composed.count("Your final message should be a report of your work.") == 1
     assert "/tmp/stale.md" not in composed
     assert "Safe context context" in composed
     assert "Implement the change with context." in composed

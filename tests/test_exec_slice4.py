@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
 import os
 import signal
 import sqlite3
@@ -17,7 +18,12 @@ import pytest
 
 from meridian.lib.adapters.sqlite import RunFinalizeRow, StateDB
 from meridian.lib.domain import RunCreateParams, TokenUsage
-from meridian.lib.exec.signals import SignalForwarder, map_process_exit_code, signal_to_exit_code
+from meridian.lib.exec.signals import (
+    SignalCoordinator,
+    SignalForwarder,
+    map_process_exit_code,
+    signal_to_exit_code,
+)
 from meridian.lib.exec.spawn import SafeDefaultPermissionResolver, execute_with_finalization
 from meridian.lib.harness.adapter import (
     ArtifactStore as HarnessArtifactStore,
@@ -114,6 +120,16 @@ def _fetch_run_row(state: StateDB, run_id: RunId) -> sqlite3.Row:
     return row
 
 
+def _pid_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 @pytest.mark.asyncio
 async def test_execute_with_finalization_captures_without_stderr_passthrough(
     monkeypatch: pytest.MonkeyPatch,
@@ -143,11 +159,13 @@ async def test_execute_with_finalization_captures_without_stderr_passthrough(
     perms = RecordingPermissionResolver()
 
     called = False
+    start_new_session_values: list[object] = []
     original = spawn_module.asyncio.create_subprocess_exec
 
     async def wrapped_create_subprocess_exec(*args: object, **kwargs: object):
         nonlocal called
         called = True
+        start_new_session_values.append(kwargs.get("start_new_session"))
         return await original(*args, **kwargs)
 
     monkeypatch.setattr(
@@ -172,6 +190,7 @@ async def test_execute_with_finalization_captures_without_stderr_passthrough(
     assert adapter.build_calls == 1
     assert adapter.last_params is not None
     assert perms.seen_harness_ids == [HarnessId("mock")]
+    assert start_new_session_values == [True]
 
     row = _fetch_run_row(state, run.run_id)
     assert row["status"] == "succeeded"
@@ -262,6 +281,92 @@ async def test_timeout_kills_child_and_finalizes_row(package_root: Path, tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_timeout_kills_grandchild_processes(package_root: Path, tmp_path: Path) -> None:
+    parent_script = tmp_path / "parent.py"
+    child_script = tmp_path / "child.py"
+    child_pid_path = tmp_path / "child.pid"
+
+    child_script.write_text(
+        textwrap.dedent(
+            """
+            from __future__ import annotations
+
+            import time
+
+            while True:
+                time.sleep(0.25)
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    parent_script.write_text(
+        textwrap.dedent(
+            """
+            from __future__ import annotations
+
+            import subprocess
+            import sys
+            import time
+            from pathlib import Path
+
+            pid_file = Path(sys.argv[1])
+            child_path = Path(sys.argv[2])
+
+            child = subprocess.Popen([sys.executable, str(child_path)])
+            pid_file.write_text(str(child.pid), encoding="utf-8")
+
+            while True:
+                time.sleep(0.25)
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    state = StateDB(tmp_path)
+    run = state.create_run(RunCreateParams(prompt="hang", model=ModelId("gpt-5.3-codex")))
+    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
+    adapter = MockHarnessAdapter(
+        script=package_root / "tests" / "mock_harness.py",
+        command_override=(
+            sys.executable,
+            str(parent_script),
+            str(child_pid_path),
+            str(child_script),
+        ),
+    )
+    registry = HarnessRegistry()
+    registry.register(adapter)
+
+    exit_code = await execute_with_finalization(
+        run,
+        state=state,
+        artifacts=artifacts,
+        registry=registry,
+        harness_id=adapter.id,
+        cwd=tmp_path,
+        timeout_seconds=0.3,
+        kill_grace_seconds=0.1,
+    )
+
+    assert exit_code == 3
+    assert child_pid_path.exists()
+
+    child_pid = int(child_pid_path.read_text(encoding="utf-8").strip())
+    deadline = time.time() + 5.0
+    while _pid_exists(child_pid) and time.time() < deadline:
+        await asyncio.sleep(0.05)
+
+    try:
+        if _pid_exists(child_pid):
+            os.kill(child_pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+    assert _pid_exists(child_pid) is False
+
+
+@pytest.mark.asyncio
 async def test_infra_failure_still_writes_finalize_row(tmp_path: Path) -> None:
     state = StateDB(tmp_path)
     run = state.create_run(RunCreateParams(prompt="boom", model=ModelId("gpt-5.3-codex")))
@@ -308,21 +413,22 @@ async def test_execute_with_finalization_ignores_sigterm_during_finalize_write(
     registry = HarnessRegistry()
     registry.register(adapter)
 
-    current_sigterm_handler: object = signal.SIG_DFL
-    transitioned_handlers: list[object] = []
-    original_signal = spawn_module.signal.signal
+    sigterm_masked = False
+    transitioned_mask_states: list[bool] = []
 
-    def fake_signal(raw_signum: int, handler: object) -> object:
-        nonlocal current_sigterm_handler
-        signum = signal.Signals(raw_signum)
-        if signum != signal.SIGTERM:
-            return original_signal(raw_signum, handler)
-        previous = current_sigterm_handler
-        current_sigterm_handler = handler
-        transitioned_handlers.append(handler)
-        return previous
+    class FakeCoordinator:
+        @contextmanager
+        def mask_sigterm(self):
+            nonlocal sigterm_masked
+            sigterm_masked = True
+            transitioned_mask_states.append(sigterm_masked)
+            try:
+                yield
+            finally:
+                sigterm_masked = False
+                transitioned_mask_states.append(sigterm_masked)
 
-    monkeypatch.setattr(spawn_module.signal, "signal", fake_signal)
+    monkeypatch.setattr(spawn_module, "signal_coordinator", lambda: FakeCoordinator())
 
     finalize_called = False
     original_append_finalize_row = state.append_finalize_row
@@ -330,7 +436,7 @@ async def test_execute_with_finalization_ignores_sigterm_during_finalize_write(
     def wrapped_append_finalize_row(run_id: RunId, row: RunFinalizeRow) -> None:
         nonlocal finalize_called
         finalize_called = True
-        assert current_sigterm_handler == signal.SIG_IGN
+        assert sigterm_masked is True
         original_append_finalize_row(run_id, row)
 
     monkeypatch.setattr(state, "append_finalize_row", wrapped_append_finalize_row)
@@ -347,37 +453,92 @@ async def test_execute_with_finalization_ignores_sigterm_during_finalize_write(
 
     assert exit_code == 2
     assert finalize_called is True
-    assert transitioned_handlers
-    assert transitioned_handlers[0] == signal.SIG_IGN
-    assert transitioned_handlers[-1] != signal.SIG_IGN
+    assert transitioned_mask_states == [True, False]
 
 
-def test_signal_forwarder_forwards_sigint_and_sigterm() -> None:
+def test_signal_forwarder_forwards_sigint_and_sigterm(monkeypatch: pytest.MonkeyPatch) -> None:
+    import meridian.lib.exec.signals as signals_module
+
     class FakeProcess:
         def __init__(self) -> None:
+            self.pid = 12345
             self.returncode: int | None = None
-            self.sent_signals: list[signal.Signals] = []
-            self.killed = False
 
-        def send_signal(self, signum: int) -> None:
-            self.sent_signals.append(signal.Signals(signum))
+    sent_signals: list[signal.Signals] = []
 
-        def kill(self) -> None:
-            self.killed = True
-            self.returncode = -9
+    def fake_signal_process_group(
+        process: asyncio.subprocess.Process,
+        signum: signal.Signals,
+    ) -> None:
+        sent_signals.append(signum)
+        if signum == signal.SIGKILL:
+            process.returncode = -9
+
+    monkeypatch.setattr(signals_module, "signal_process_group", fake_signal_process_group)
 
     fake = FakeProcess()
     forwarder = SignalForwarder(cast("asyncio.subprocess.Process", fake))
     forwarder.forward_signal(signal.SIGINT)
     forwarder.forward_signal(signal.SIGTERM)
 
-    assert fake.sent_signals == [signal.SIGINT, signal.SIGTERM]
-    assert fake.killed is True
+    assert sent_signals == [signal.SIGINT, signal.SIGTERM, signal.SIGKILL]
     assert forwarder.received_signal == signal.SIGTERM
 
     assert signal_to_exit_code(signal.SIGINT) == 130
     assert signal_to_exit_code(signal.SIGTERM) == 143
     assert map_process_exit_code(raw_return_code=0, received_signal=signal.SIGTERM) == 143
+
+
+def test_signal_coordinator_dispatches_signal_to_all_active_forwarders(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import meridian.lib.exec.signals as signals_module
+
+    class FakeProcess:
+        def __init__(self) -> None:
+            self.pid = 12345
+            self.returncode: int | None = None
+
+        def kill(self) -> None:
+            self.returncode = -9
+
+    installed_handlers: dict[signal.Signals, object] = {}
+
+    def fake_getsignal(_signum: signal.Signals) -> object:
+        return signal.SIG_DFL
+
+    def fake_signal(raw_signum: int, handler: object) -> object:
+        signum = signal.Signals(raw_signum)
+        previous = installed_handlers.get(signum, signal.SIG_DFL)
+        installed_handlers[signum] = handler
+        return previous
+
+    sent_signals: list[signal.Signals] = []
+
+    def fake_signal_process_group(
+        process: asyncio.subprocess.Process,
+        signum: signal.Signals,
+    ) -> None:
+        sent_signals.append(signum)
+        if signum == signal.SIGKILL:
+            process.returncode = -9
+
+    monkeypatch.setattr(signals_module.signal, "getsignal", fake_getsignal)
+    monkeypatch.setattr(signals_module.signal, "signal", fake_signal)
+    monkeypatch.setattr(signals_module, "signal_process_group", fake_signal_process_group)
+
+    coordinator = SignalCoordinator()
+    monkeypatch.setattr(signals_module, "signal_coordinator", lambda: coordinator)
+
+    first = SignalForwarder(cast("asyncio.subprocess.Process", FakeProcess()))
+    second = SignalForwarder(cast("asyncio.subprocess.Process", FakeProcess()))
+
+    with first, second:
+        handler = installed_handlers.get(signal.SIGTERM)
+        assert callable(handler)
+        handler(signal.SIGTERM.value, None)
+
+    assert sent_signals == [signal.SIGTERM, signal.SIGTERM]
 
 
 def test_safe_default_permission_resolver_returns_no_flags() -> None:

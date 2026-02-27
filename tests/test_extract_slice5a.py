@@ -49,7 +49,7 @@ def test_adapters_extract_usage_from_cross_harness_payloads() -> None:
     assert opencode_usage.total_cost_usd == 0.015
 
 
-def test_report_fallback_uses_last_assistant_message_when_report_missing() -> None:
+def test_report_uses_last_assistant_message_when_report_missing() -> None:
     artifacts = InMemoryStore()
     run_id = RunId("r-report-fallback")
     artifacts.put(
@@ -60,8 +60,25 @@ def test_report_fallback_uses_last_assistant_message_when_report_missing() -> No
     )
 
     extracted = extract_or_fallback_report(artifacts, run_id)
-    assert extracted.source == "assistant_fallback"
+    assert extracted.source == "assistant_message"
     assert extracted.content == "final assistant message"
+
+
+def test_report_prefers_report_md_when_both_sources_exist() -> None:
+    artifacts = InMemoryStore()
+    run_id = RunId("r-report-prefer-file")
+    artifacts.put(
+        make_artifact_key(run_id, "output.jsonl"),
+        b'{"role":"assistant","content":"assistant summary"}\n',
+    )
+    artifacts.put(
+        make_artifact_key(run_id, "report.md"),
+        b"# File Report\n\nUse this one.\n",
+    )
+
+    extracted = extract_or_fallback_report(artifacts, run_id)
+    assert extracted.source == "report_md"
+    assert extracted.content == "# File Report\n\nUse this one."
 
 
 def test_extract_files_touched_from_structured_output_and_text() -> None:
@@ -83,7 +100,7 @@ def test_extract_files_touched_from_structured_output_and_text() -> None:
     )
 
 
-def test_enrich_finalize_materializes_report_fallback(tmp_path: Path) -> None:
+def test_enrich_finalize_materializes_report_from_assistant_message(tmp_path: Path) -> None:
     artifacts = InMemoryStore()
     run_id = RunId("r-finalize")
     artifacts.put(
@@ -99,7 +116,7 @@ def test_enrich_finalize_materializes_report_fallback(tmp_path: Path) -> None:
         log_dir=tmp_path / "logs" / "r-finalize",
     )
 
-    assert enrichment.report.source == "assistant_fallback"
+    assert enrichment.report.source == "assistant_message"
     assert enrichment.report_path is not None
     assert enrichment.report_path.exists()
     assert "final result" in enrichment.report_path.read_text(encoding="utf-8")

@@ -27,9 +27,22 @@ def resolve_repo_root(explicit: Path | None = None) -> Path:
         return Path(env_root).expanduser().resolve()
 
     cwd = Path.cwd().resolve()
-    for candidate in (cwd, *cwd.parents):
+    candidate = cwd
+    while True:
         if (candidate / ".agents" / "skills").is_dir():
             return candidate
+
+        git_marker = candidate / ".git"
+        # A .git file marks a worktree/submodule boundary. Do not walk above it,
+        # or repo-root discovery can escape into the parent monorepo.
+        if git_marker.is_file():
+            return candidate
+
+        parent = candidate.parent
+        if parent == candidate:
+            break
+        candidate = parent
+
     return cwd
 
 

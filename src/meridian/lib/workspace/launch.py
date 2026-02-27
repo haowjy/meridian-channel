@@ -16,6 +16,7 @@ from typing import cast
 
 from meridian.lib.config._paths import resolve_repo_root
 from meridian.lib.config.agent import AgentProfile, load_agent_profile
+from meridian.lib.config.routing import route_model
 from meridian.lib.config.settings import load_config
 from meridian.lib.domain import WorkspaceState
 from meridian.lib.prompt.assembly import load_skill_contents, resolve_run_defaults
@@ -147,6 +148,8 @@ def _build_interactive_command(
         (),
         profile=profile,
     )
+    model = ModelId(defaults.model)
+    supervisor_harness = _resolve_supervisor_harness(model=model)
 
     prompt_with_profile_skills = prompt
     if profile is not None and defaults.skills:
@@ -155,10 +158,10 @@ def _build_interactive_command(
         registry = SkillRegistry(
             repo_root=resolved_root,
             search_paths=config.search_paths,
+            readonly=True,
         )
-        if not registry.list():
-            registry.reindex()
-        available_skills = {item.name for item in registry.list()}
+        manifests = registry.list()
+        available_skills = {item.name for item in manifests}
         skill_names = tuple(
             skill_name for skill_name in defaults.skills if skill_name in available_skills
         )
@@ -177,7 +180,6 @@ def _build_interactive_command(
                 sections.extend(["", f"## Skill: {skill.name}", "", skill.content.strip()])
             prompt_with_profile_skills = "\n".join(sections).strip()
 
-    model = ModelId(defaults.model)
     command: list[str] = [
         "claude",
         "--system-prompt",
@@ -202,7 +204,7 @@ def _build_interactive_command(
     )
     command.extend(
         permission_flags_for_harness(
-            HarnessId("claude"),
+            supervisor_harness,
             permission_config,
         )
     )
@@ -247,6 +249,21 @@ def _resolve_permission_tier_for_profile(
             default_tier,
         )
     return default_tier
+
+
+def _resolve_supervisor_harness(*, model: ModelId) -> HarnessId:
+    decision = route_model(str(model), mode="harness")
+    harness_id = decision.harness_id
+    if harness_id == HarnessId("claude"):
+        return harness_id
+
+    message = (
+        "Workspace supervisor only supports Claude harness models. "
+        f"Model '{model}' routes to harness '{harness_id}'."
+    )
+    if decision.warning:
+        message = f"{message} {decision.warning}"
+    raise ValueError(message)
 
 
 def _pid_exists(pid: int) -> bool:

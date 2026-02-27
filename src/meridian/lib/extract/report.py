@@ -1,4 +1,4 @@
-"""Run report extraction with assistant-message fallback."""
+"""Run report extraction from assistant output with report.md preference."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Literal, cast
 from meridian.lib.state.artifact_store import ArtifactStore
 from meridian.lib.types import ArtifactKey, RunId
 
-ReportSource = Literal["report_md", "assistant_fallback"]
+ReportSource = Literal["report_md", "assistant_message"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,14 +111,16 @@ def _extract_last_assistant_message(output_lines: str) -> str | None:
 
 
 def extract_or_fallback_report(artifacts: ArtifactStore, run_id: RunId) -> ExtractedReport:
-    """Extract report text; fallback to last assistant output if report is missing."""
+    """Extract report text from assistant output, preferring report.md when available."""
+
+    output_lines = _read_artifact_text(artifacts, run_id, "output.jsonl")
+    assistant_message = _extract_last_assistant_message(output_lines)
+    assistant_report = assistant_message.strip() if assistant_message else ""
 
     report_content = _read_artifact_text(artifacts, run_id, "report.md").strip()
     if report_content:
         return ExtractedReport(content=report_content, source="report_md")
 
-    output_lines = _read_artifact_text(artifacts, run_id, "output.jsonl")
-    fallback = _extract_last_assistant_message(output_lines)
-    if fallback is None or not fallback.strip():
+    if not assistant_report:
         return ExtractedReport(content=None, source=None)
-    return ExtractedReport(content=fallback.strip(), source="assistant_fallback")
+    return ExtractedReport(content=assistant_report, source="assistant_message")

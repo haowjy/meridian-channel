@@ -21,6 +21,7 @@ from meridian.lib.config.routing import route_model
 from meridian.lib.domain import RunCreateParams, RunStatus
 from meridian.lib.exec.spawn import execute_with_finalization
 from meridian.lib.exec.terminal import TerminalEventFilter, resolve_visible_categories
+from meridian.lib.harness.registry import get_default_harness_registry
 from meridian.lib.ops._runtime import (
     OperationRuntime,
     build_runtime,
@@ -51,7 +52,9 @@ from meridian.lib.state.db import resolve_state_paths
 from meridian.lib.types import ModelId, RunId
 
 if TYPE_CHECKING:
+    from meridian.lib.config.settings import MeridianConfig
     from meridian.lib.formatting import FormatContext
+    from meridian.lib.harness.registry import HarnessRegistry
 
 _BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
 logger = structlog.get_logger(__name__)
@@ -275,6 +278,15 @@ class _PreparedCreate:
 
 
 @dataclass(frozen=True, slots=True)
+class _CreateRuntimeView:
+    """Subset of runtime dependencies needed for payload composition."""
+
+    repo_root: Path
+    config: MeridianConfig
+    harness_registry: HarnessRegistry
+
+
+@dataclass(frozen=True, slots=True)
 class RunListFilters:
     """Type-safe run-list filters converted into parameterized SQL."""
 
@@ -403,24 +415,45 @@ def _build_create_payload(
     runtime: OperationRuntime | None = None,
     preflight_warning: str | None = None,
 ) -> _PreparedCreate:
-    runtime_bundle = runtime or build_runtime(payload.repo_root)
+    runtime_view: _CreateRuntimeView
+    if runtime is not None:
+        runtime_view = _CreateRuntimeView(
+            repo_root=runtime.repo_root,
+            config=runtime.config,
+            harness_registry=runtime.harness_registry,
+        )
+    elif payload.dry_run:
+        repo_root, config = resolve_runtime_root_and_config(payload.repo_root)
+        runtime_view = _CreateRuntimeView(
+            repo_root=repo_root,
+            config=config,
+            harness_registry=get_default_harness_registry(),
+        )
+    else:
+        runtime_bundle = build_runtime(payload.repo_root)
+        runtime_view = _CreateRuntimeView(
+            repo_root=runtime_bundle.repo_root,
+            config=runtime_bundle.config,
+            harness_registry=runtime_bundle.harness_registry,
+        )
+
     explicit_requested_skills = _normalize_skill_flags(payload.skills)
     requested_skills = explicit_requested_skills
     profile: AgentProfile | None = None
     if payload.agent:
         profile = load_agent_profile(
             payload.agent,
-            repo_root=runtime_bundle.repo_root,
-            search_paths=runtime_bundle.config.search_paths,
+            repo_root=runtime_view.repo_root,
+            search_paths=runtime_view.config.search_paths,
         )
     else:
-        configured_default_agent = runtime_bundle.config.default_agent.strip()
+        configured_default_agent = runtime_view.config.default_agent.strip()
         if configured_default_agent:
             try:
                 profile = load_agent_profile(
                     configured_default_agent,
-                    repo_root=runtime_bundle.repo_root,
-                    search_paths=runtime_bundle.config.search_paths,
+                    repo_root=runtime_view.repo_root,
+                    search_paths=runtime_view.config.search_paths,
                 )
             except FileNotFoundError:
                 requested_skills = (*_LEGACY_DEFAULT_AGENT_SKILLS, *requested_skills)
@@ -436,13 +469,16 @@ def _build_create_payload(
     from meridian.lib.config.skill_registry import SkillRegistry
 
     registry = SkillRegistry(
-        repo_root=runtime_bundle.repo_root,
-        search_paths=runtime_bundle.config.search_paths,
+        repo_root=runtime_view.repo_root,
+        search_paths=runtime_view.config.search_paths,
+        readonly=payload.dry_run,
     )
-    if not registry.list():
+    manifests = registry.list()
+    if not manifests and not registry.readonly:
         registry.reindex()
+        manifests = registry.list()
 
-    available_skill_names = {item.name for item in registry.list()}
+    available_skill_names = {item.name for item in manifests}
     missing_skills = tuple(
         skill_name for skill_name in defaults.skills if skill_name not in available_skill_names
     )
@@ -472,7 +508,7 @@ def _build_create_payload(
         template_variables=parsed_template_vars,
     )
 
-    harness, route_warning = runtime_bundle.harness_registry.route(defaults.model)
+    harness, route_warning = runtime_view.harness_registry.route(defaults.model)
     missing_skills_warning = (
         f"Skipped unavailable implicit skills: {', '.join(missing_skills)}."
         if missing_skills
@@ -487,13 +523,13 @@ def _build_create_payload(
         _warn_profile_tier_escalation(
             profile=profile,
             inferred_tier=inferred_tier,
-            default_tier=runtime_bundle.config.default_permission_tier,
+            default_tier=runtime_view.config.default_permission_tier,
             warning_logger=logger,
         )
     permission_config = build_permission_config(
         payload.permission_tier or inferred_tier,
         unsafe=payload.unsafe,
-        default_tier=runtime_bundle.config.default_permission_tier,
+        default_tier=runtime_view.config.default_permission_tier,
     )
     warning = _merge_warnings(
         warning,
@@ -506,7 +542,7 @@ def _build_create_payload(
         per_run_usd=payload.budget_per_run_usd,
         per_workspace_usd=payload.budget_per_workspace_usd,
     )
-    guardrails = normalize_guardrail_paths(payload.guardrails, repo_root=runtime_bundle.repo_root)
+    guardrails = normalize_guardrail_paths(payload.guardrails, repo_root=runtime_view.repo_root)
     secrets = parse_secret_specs(payload.secrets)
 
     preview_command = tuple(
@@ -541,6 +577,8 @@ def _build_create_payload(
 
 def _read_run_row(repo_root: Path, run_id: str) -> sqlite3.Row | None:
     db_path = resolve_state_paths(repo_root).db_path
+    if not db_path.is_file():
+        return None
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
@@ -645,7 +683,9 @@ def _run_child_env(
     secrets: tuple[SecretSpec, ...],
     parent_run_id: str | None = None,
 ) -> dict[str, str]:
-    child_env = os.environ.copy()
+    # Preserve Meridian run context across nesting without forwarding unrelated
+    # parent process environment variables.
+    child_env = {key: value for key, value in os.environ.items() if key.startswith("MERIDIAN_")}
     current_depth = _read_non_negative_int_env("MERIDIAN_DEPTH", 0)
     child_env["MERIDIAN_DEPTH"] = str(current_depth + 1)
     if workspace_id is not None:
@@ -870,15 +910,13 @@ def _track_task(task: asyncio.Task[None]) -> None:
 def run_create_sync(payload: RunCreateInput) -> RunActionOutput:
     payload, preflight_warning = _validate_create_input(payload)
 
-    runtime: OperationRuntime
+    runtime: OperationRuntime | None = None
     if not payload.dry_run:
         resolved_root, config = resolve_runtime_root_and_config(payload.repo_root)
         current_depth, max_depth = _depth_limits(config.max_depth)
         if current_depth >= max_depth:
             return _depth_exceeded_output(current_depth, max_depth)
         runtime = build_runtime_from_root_and_config(resolved_root, config)
-    else:
-        runtime = build_runtime(payload.repo_root)
 
     prepared = _build_create_payload(payload, runtime=runtime, preflight_warning=preflight_warning)
     if payload.dry_run:
@@ -898,21 +936,21 @@ def run_create_sync(payload: RunCreateInput) -> RunActionOutput:
             message="Dry run complete.",
         )
 
+    if runtime is None:
+        raise RuntimeError("Run runtime was not initialized.")
     return _execute_run_blocking(payload=payload, prepared=prepared, runtime=runtime)
 
 
 async def run_create(payload: RunCreateInput) -> RunActionOutput:
     payload, preflight_warning = _validate_create_input(payload)
 
-    runtime: OperationRuntime
+    runtime: OperationRuntime | None = None
     if not payload.dry_run:
         resolved_root, config = resolve_runtime_root_and_config(payload.repo_root)
         current_depth, max_depth = _depth_limits(config.max_depth)
         if current_depth >= max_depth:
             return _depth_exceeded_output(current_depth, max_depth)
         runtime = build_runtime_from_root_and_config(resolved_root, config)
-    else:
-        runtime = build_runtime(payload.repo_root)
 
     prepared = _build_create_payload(payload, runtime=runtime, preflight_warning=preflight_warning)
     if payload.dry_run:
@@ -932,6 +970,8 @@ async def run_create(payload: RunCreateInput) -> RunActionOutput:
             message="Dry run complete.",
         )
 
+    if runtime is None:
+        raise RuntimeError("Run runtime was not initialized.")
     workspace_id = resolve_workspace_id(payload.workspace)
     run = await runtime.run_store.create(
         RunCreateParams(
@@ -984,7 +1024,7 @@ async def run_create(payload: RunCreateInput) -> RunActionOutput:
 
 
 def run_list_sync(payload: RunListInput) -> RunListOutput:
-    runtime = build_runtime(payload.repo_root)
+    repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
     filters = RunListFilters(
         model=(
             payload.model.strip()
@@ -1003,7 +1043,11 @@ def run_list_sync(payload: RunListInput) -> RunListOutput:
     )
     query, params = _build_run_list_query(filters)
 
-    conn = sqlite3.connect(runtime.state.paths.db_path)
+    db_path = resolve_state_paths(repo_root).db_path
+    if not db_path.is_file():
+        return RunListOutput(runs=())
+
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
         rows = conn.execute(query, tuple(params)).fetchall()
@@ -1057,12 +1101,12 @@ async def run_list(payload: RunListInput) -> RunListOutput:
 
 
 def run_show_sync(payload: RunShowInput) -> RunDetailOutput:
-    runtime = build_runtime(payload.repo_root)
-    row = _read_run_row(runtime.repo_root, payload.run_id)
+    repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
+    row = _read_run_row(repo_root, payload.run_id)
     if row is None:
         raise ValueError(f"Run '{payload.run_id}' not found")
     return _detail_from_row(
-        repo_root=runtime.repo_root,
+        repo_root=repo_root,
         row=row,
         include_report=payload.include_report,
         include_files=payload.include_files,
@@ -1078,11 +1122,11 @@ def _run_is_terminal(status: str) -> bool:
 
 
 def run_wait_sync(payload: RunWaitInput) -> RunDetailOutput:
-    runtime = build_runtime(payload.repo_root)
+    repo_root, config = resolve_runtime_root_and_config(payload.repo_root)
     timeout_secs = (
         payload.timeout_secs
         if payload.timeout_secs is not None
-        else runtime.config.wait_timeout_seconds
+        else config.wait_timeout_seconds
     )
     deadline = time.monotonic() + max(timeout_secs, 0.0)
     poll = (
@@ -1090,20 +1134,20 @@ def run_wait_sync(payload: RunWaitInput) -> RunDetailOutput:
         if payload.poll_interval_secs is not None
         # run.wait polling is a read-side retry loop, so we intentionally reuse
         # retry_backoff_seconds as the default cadence when no poll interval is set.
-        else runtime.config.retry_backoff_seconds
+        else config.retry_backoff_seconds
     )
     if poll <= 0:
-        poll = runtime.config.retry_backoff_seconds
+        poll = config.retry_backoff_seconds
 
     while True:
-        row = _read_run_row(runtime.repo_root, payload.run_id)
+        row = _read_run_row(repo_root, payload.run_id)
         if row is None:
             raise ValueError(f"Run '{payload.run_id}' not found")
 
         status = str(row["status"])
         if _run_is_terminal(status):
             return _detail_from_row(
-                repo_root=runtime.repo_root,
+                repo_root=repo_root,
                 row=row,
                 include_report=payload.include_report,
                 include_files=payload.include_files,
@@ -1136,8 +1180,8 @@ def _with_command(result: RunActionOutput, command: str) -> RunActionOutput:
 
 
 def run_continue_sync(payload: RunContinueInput) -> RunActionOutput:
-    runtime = build_runtime(payload.repo_root)
-    derived_prompt = _prompt_for_follow_up(payload.run_id, runtime.repo_root, payload.prompt)
+    repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
+    derived_prompt = _prompt_for_follow_up(payload.run_id, repo_root, payload.prompt)
     create_input = RunCreateInput(
         prompt=derived_prompt,
         model=payload.model,
@@ -1153,8 +1197,8 @@ async def run_continue(payload: RunContinueInput) -> RunActionOutput:
 
 
 def run_retry_sync(payload: RunRetryInput) -> RunActionOutput:
-    runtime = build_runtime(payload.repo_root)
-    derived_prompt = _prompt_for_follow_up(payload.run_id, runtime.repo_root, payload.prompt)
+    repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
+    derived_prompt = _prompt_for_follow_up(payload.run_id, repo_root, payload.prompt)
     create_input = RunCreateInput(
         prompt=derived_prompt,
         model=payload.model,

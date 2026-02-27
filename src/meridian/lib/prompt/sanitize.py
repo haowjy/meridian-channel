@@ -7,7 +7,13 @@ import re
 _CANONICAL_REPORT_BLOCK_RE = re.compile(
     r"""(?ms)
     \n*#\s*Report\s*\n+
-    \*\*IMPORTANT[^\n]*?write\s+a\s+report\s+of\s+your\s+work\s+to:\s*`[^`\n]+`\s*\n+
+    \*\*IMPORTANT[^\n]*?
+    (?:
+      write\s+a\s+report\s+of\s+your\s+work\s+to:\s*`[^`\n]+`
+      |
+      your\s+final\s+message\s+should\s+be\s+a\s+report\s+of\s+your\s+work\.?
+    )
+    [^\n]*\n+
     (?:(?:Keep\s+the\s+report\s+concise\.|Include:|Be\s+thorough:)[^\n]*\n+)?
     Use\s+plain\s+markdown\.[^\n]*\n*
     """
@@ -17,6 +23,8 @@ _REPORT_LINE_RE = re.compile(
     ^\s*
     (?:
       \*\*IMPORTANT[^\n]*?write\s+a\s+report\s+of\s+your\s+work\s+to:\s*`?[^`\n]+`?\s*
+      |
+      \*\*IMPORTANT[^\n]*?your\s+final\s+message\s+should\s+be\s+a\s+report\s+of\s+your\s+work\.?[^\n]*
       |
       write\s+your\s+report\s+to:\s*`?[^`\n]+`?\s*
       |

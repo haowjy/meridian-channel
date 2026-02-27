@@ -77,6 +77,7 @@ def _permission_tier_from_profile(agent_sandbox: str | None) -> str | None:
     mapping = {
         "read-only": "read-only",
         "workspace-write": "workspace-write",
+        "full-access": "full-access",
         "danger-full-access": "full-access",
         "unrestricted": "full-access",
     }

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 import meridian.lib.ops.run as run_ops
 import meridian.lib.safety.permissions as permission_safety
 import meridian.lib.workspace.launch as workspace_launch
@@ -248,6 +250,34 @@ def test_workspace_supervisor_profile_unknown_sandbox_uses_default_permission_ti
         )
         for message in stub_logger.messages
     )
+
+
+def test_workspace_supervisor_profile_non_claude_model_raises_clear_error(tmp_path: Path) -> None:
+    _write_config(
+        tmp_path,
+        "[defaults]\nsupervisor_agent = 'lead-supervisor'\n",
+    )
+    _write_agent(
+        tmp_path,
+        name="lead-supervisor",
+        model="gpt-5.3-codex",
+        skills=[],
+        sandbox="workspace-write",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "Workspace supervisor only supports Claude harness models. "
+            "Model 'gpt-5.3-codex' routes to harness 'codex'."
+        ),
+    ):
+        _build_interactive_command(
+            repo_root=tmp_path,
+            request=WorkspaceLaunchRequest(workspace_id=WorkspaceId("w1")),
+            prompt="workspace prompt",
+            passthrough_args=(),
+        )
 
 
 def test_agent_profile_parses_mcp_tools_and_defaults_to_empty_tuple(tmp_path: Path) -> None:

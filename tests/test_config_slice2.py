@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import meridian.lib.config.agent as agent_config
 from meridian.lib.config.agent import load_agent_profile
 from meridian.lib.config.catalog import load_model_catalog, resolve_model
 from meridian.lib.config.model_guidance import load_model_guidance, selected_guidance_paths
@@ -129,6 +130,72 @@ def test_agent_profile_parsing(tmp_path: Path) -> None:
     assert profile.mcp_tools == ("run_list", "run_show")
     assert profile.variant_models == ("claude-opus-4-6",)
     assert "Review code." in profile.body
+
+
+def test_agent_profile_unknown_sandbox_warns_at_parse_time(monkeypatch, tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    _write(
+        repo_root / ".agents" / "agents" / "reviewer.md",
+        (
+            "---\n"
+            "name: reviewer\n"
+            "model: claude-sonnet-4-6\n"
+            "sandbox: full_access\n"
+            "---\n\n"
+            "body\n"
+        ),
+    )
+
+    class _Logger:
+        def __init__(self) -> None:
+            self.messages: list[str] = []
+
+        def warning(self, message: str, *args: object) -> None:
+            self.messages.append(message % args if args else message)
+
+    stub_logger = _Logger()
+    monkeypatch.setattr(agent_config, "logger", stub_logger)
+
+    profile = load_agent_profile("reviewer", repo_root=repo_root)
+
+    assert profile.sandbox == "full_access"
+    assert any(
+        message == "Agent profile 'reviewer' has unknown sandbox 'full_access'."
+        for message in stub_logger.messages
+    )
+
+
+def test_agent_profile_mcp_tools_normalizes_and_warns_unknown(monkeypatch, tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    _write(
+        repo_root / ".agents" / "agents" / "reviewer.md",
+        (
+            "---\n"
+            "name: reviewer\n"
+            "model: claude-sonnet-4-6\n"
+            "mcp-tools: [run_list, RUN_SHOW, run_list, unknown_tool]\n"
+            "---\n\n"
+            "body\n"
+        ),
+    )
+
+    class _Logger:
+        def __init__(self) -> None:
+            self.messages: list[str] = []
+
+        def warning(self, message: str, *args: object) -> None:
+            self.messages.append(message % args if args else message)
+
+    stub_logger = _Logger()
+    monkeypatch.setattr(agent_config, "logger", stub_logger)
+
+    profile = load_agent_profile("reviewer", repo_root=repo_root)
+
+    assert profile.mcp_tools == ("run_list", "run_show", "unknown_tool")
+    assert any(
+        message == "Agent profile 'reviewer' includes unknown MCP tool 'unknown_tool'."
+        for message in stub_logger.messages
+    )
 
 
 def test_route_model_matches_bash_rules() -> None:

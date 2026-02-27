@@ -66,7 +66,7 @@ def _persist_report(
     redacted_content = redact_secrets(extracted.content, secrets)
     target = log_dir / _REPORT_FILENAME
     report_key = ArtifactKey(f"{run_id}/{_REPORT_FILENAME}")
-    if extracted.source == "assistant_fallback":
+    if extracted.source == "assistant_message":
         wrapped = f"# Auto-extracted Report\n\n{redacted_content.strip()}\n"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(wrapped, encoding="utf-8")

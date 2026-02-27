@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from functools import lru_cache
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -16,6 +17,15 @@ logger.addHandler(logging.NullHandler())
 
 # Sentinel path used for built-in profiles that don't exist on disk.
 _BUILTIN_PATH = Path("<builtin>")
+_KNOWN_SANDBOX_VALUES = frozenset(
+    {
+        "read-only",
+        "workspace-write",
+        "full-access",
+        "danger-full-access",
+        "unrestricted",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +61,40 @@ def _normalize_string_list(value: object) -> tuple[str, ...]:
     return ()
 
 
+@lru_cache(maxsize=1)
+def _known_mcp_tools() -> frozenset[str]:
+    # Import lazily to avoid loading the full operations graph at module import time.
+    from meridian.lib.ops import get_all_operations
+
+    return frozenset(op.mcp_name for op in get_all_operations() if not op.cli_only)
+
+
+def _normalize_mcp_tools(value: object, *, profile_name: str) -> tuple[str, ...]:
+    parsed = _normalize_string_list(value)
+    if not parsed:
+        return ()
+
+    known_tools = _known_mcp_tools()
+    known_tools_by_lower = {tool.lower(): tool for tool in known_tools}
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for candidate in parsed:
+        lowered = candidate.lower()
+        canonical = known_tools_by_lower.get(lowered)
+        if canonical is None:
+            logger.warning(
+                "Agent profile '%s' includes unknown MCP tool '%s'.",
+                profile_name,
+                candidate,
+            )
+            canonical = candidate
+        if canonical in seen:
+            continue
+        seen.add(canonical)
+        normalized.append(canonical)
+    return tuple(normalized)
+
+
 def parse_agent_profile(path: Path) -> AgentProfile:
     """Parse a single markdown agent profile file."""
 
@@ -63,15 +107,24 @@ def parse_agent_profile(path: Path) -> AgentProfile:
     variant_value = frontmatter.get("variant")
     sandbox_value = frontmatter.get("sandbox")
 
+    profile_name = str(name_value).strip() if name_value is not None else path.stem
+    sandbox = str(sandbox_value).strip() if sandbox_value is not None else None
+    if sandbox is not None and sandbox and sandbox not in _KNOWN_SANDBOX_VALUES:
+        logger.warning(
+            "Agent profile '%s' has unknown sandbox '%s'.",
+            profile_name,
+            sandbox,
+        )
+
     return AgentProfile(
-        name=str(name_value).strip() if name_value is not None else path.stem,
+        name=profile_name,
         description=str(description_value).strip() if description_value is not None else "",
         model=str(model_value).strip() if model_value is not None else None,
         variant=str(variant_value).strip() if variant_value is not None else None,
         skills=_normalize_string_list(frontmatter.get("skills")),
         tools=_normalize_string_list(frontmatter.get("tools")),
-        mcp_tools=_normalize_string_list(frontmatter.get("mcp-tools")),
-        sandbox=str(sandbox_value).strip() if sandbox_value is not None else None,
+        mcp_tools=_normalize_mcp_tools(frontmatter.get("mcp-tools"), profile_name=profile_name),
+        sandbox=sandbox,
         variant_models=_normalize_string_list(frontmatter.get("variant-models")),
         body=body,
         path=path.resolve(),

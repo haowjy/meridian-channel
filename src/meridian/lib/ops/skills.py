@@ -49,25 +49,17 @@ class SkillsQueryOutput:
         return tabular([[skill.name, skill.description] for skill in self.skills])
 
 
-def _registry(repo_root: str | None) -> SkillRegistry:
+def _registry(repo_root: str | None, *, readonly: bool = False) -> SkillRegistry:
     root = Path(repo_root).expanduser().resolve() if repo_root else None
-    return SkillRegistry(repo_root=root)
-
-
-def _ensure_index(registry: SkillRegistry) -> None:
-    if not registry.list():
-        registry.reindex()
-
+    return SkillRegistry(repo_root=root, readonly=readonly)
 
 def skills_list_sync(payload: SkillsListInput) -> SkillsQueryOutput:
-    registry = _registry(payload.repo_root)
-    _ensure_index(registry)
+    registry = _registry(payload.repo_root, readonly=True)
     return SkillsQueryOutput(skills=tuple(registry.list()))
 
 
 def skills_search_sync(payload: SkillsSearchInput) -> SkillsQueryOutput:
-    registry = _registry(payload.repo_root)
-    _ensure_index(registry)
+    registry = _registry(payload.repo_root, readonly=True)
     return SkillsQueryOutput(skills=tuple(registry.search(payload.query)))
 
 
@@ -75,8 +67,7 @@ def skills_load_sync(payload: SkillsLoadInput) -> SkillContent:
     name = payload.name.strip()
     if not name:
         raise ValueError("Skill name must not be empty.")
-    registry = _registry(payload.repo_root)
-    _ensure_index(registry)
+    registry = _registry(payload.repo_root, readonly=True)
     return registry.show(name)
 
 

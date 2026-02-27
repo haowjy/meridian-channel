@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import signal
 
 from meridian.lib.config.settings import MeridianConfig
+from meridian.lib.exec.process_groups import signal_process_group
 
 DEFAULT_KILL_GRACE_SECONDS = MeridianConfig().kill_grace_seconds
 
@@ -29,12 +31,12 @@ async def terminate_process(
 
     # Timeout expiry is an infra-enforced deadline (not a user interrupt),
     # so we begin with SIGTERM and only escalate to SIGKILL after grace.
-    process.terminate()
+    signal_process_group(process, signal.SIGTERM)
     try:
         await asyncio.wait_for(process.wait(), timeout=grace_seconds)
     except TimeoutError:
         if process.returncode is None:
-            process.kill()
+            signal_process_group(process, signal.SIGKILL)
             await process.wait()
 
 
