@@ -19,6 +19,7 @@ from meridian.lib.config.agent import AgentProfile, load_agent_profile
 from meridian.lib.config.routing import route_model
 from meridian.lib.config.settings import load_config
 from meridian.lib.domain import WorkspaceState
+from meridian.lib.exec.spawn import HARNESS_ENV_PASS_THROUGH, sanitize_child_env
 from meridian.lib.prompt.assembly import load_skill_contents, resolve_run_defaults
 from meridian.lib.safety.permissions import (
     _permission_tier_from_profile,
@@ -348,13 +349,19 @@ def cleanup_orphaned_locks(repo_root: Path) -> tuple[WorkspaceId, ...]:
 
 
 def _build_workspace_env(request: WorkspaceLaunchRequest, prompt: str) -> dict[str, str]:
-    child_env = os.environ.copy()
-    child_env["MERIDIAN_WORKSPACE_ID"] = str(request.workspace_id)
-    child_env.setdefault("MERIDIAN_DEPTH", "0")
-    child_env["MERIDIAN_WORKSPACE_PROMPT"] = prompt
+    env_overrides = {
+        "MERIDIAN_WORKSPACE_ID": str(request.workspace_id),
+        "MERIDIAN_DEPTH": os.environ.get("MERIDIAN_DEPTH", "0"),
+        "MERIDIAN_WORKSPACE_PROMPT": prompt,
+    }
     if request.autocompact is not None:
-        child_env["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"] = str(request.autocompact)
-    return child_env
+        env_overrides["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"] = str(request.autocompact)
+
+    return sanitize_child_env(
+        base_env=os.environ,
+        env_overrides=env_overrides,
+        pass_through=HARNESS_ENV_PASS_THROUGH,
+    )
 
 
 def launch_supervisor(

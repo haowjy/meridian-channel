@@ -75,7 +75,7 @@ _CHILD_ENV_ALLOWLIST_PREFIXES = ("LC_", "XDG_", "UV_")
 _CHILD_ENV_SECRET_SUFFIXES = ("_TOKEN", "_KEY", "_SECRET")
 # Harness CLIs need these credentials to authenticate. Keep this explicit so
 # secret-like env vars still default to redacted unless intentionally allowed.
-_HARNESS_ENV_PASS_THROUGH = frozenset(
+HARNESS_ENV_PASS_THROUGH = frozenset(
     {
         "ANTHROPIC_API_KEY",
         "ANTHROPIC_BASE_URL",
@@ -506,7 +506,7 @@ async def execute_with_finalization(
     child_env = sanitize_child_env(
         base_env=os.environ,
         env_overrides=merged_env_overrides,
-        pass_through=_HARNESS_ENV_PASS_THROUGH,
+        pass_through=HARNESS_ENV_PASS_THROUGH,
     )
     start_session_id = str(run.run_id)
     state.append_start_row(

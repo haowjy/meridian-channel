@@ -41,9 +41,6 @@ class HarnessRegistry:
             raise KeyError(f"Unknown harness '{harness_id}'")
         return self._adapters[harness_id]
 
-    def all(self) -> tuple[HarnessAdapter, ...]:
-        return tuple(self._adapters[key] for key in sorted(self._adapters))
-
     def ids(self) -> tuple[HarnessId, ...]:
         return tuple(sorted(self._adapters))
 

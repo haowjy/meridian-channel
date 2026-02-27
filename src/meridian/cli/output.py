@@ -9,9 +9,6 @@ from typing import Any, Literal, cast
 from meridian.lib.formatting import FormatContext, TextFormattable
 from meridian.lib.serialization import to_jsonable
 
-# Re-export so existing `from meridian.cli.output import FormatContext` still works.
-__all__ = ["FormatContext", "TextFormattable"]
-
 OutputFormat = Literal["text", "json", "porcelain"]
 type JSONScalar = str | int | float | bool | None
 type JSONValue = JSONScalar | list["JSONValue"] | dict[str, "JSONValue"]
@@ -33,13 +30,8 @@ def normalize_output_format(
     requested: str | None,
     json_mode: bool,
     porcelain_mode: bool,
-    stdout_is_tty: bool,
 ) -> OutputFormat:
-    """Resolve final output format from flags and TTY state.
-
-    Default is always "text" regardless of TTY — callers should not need
-    to distinguish terminal vs pipe for basic text output.
-    """
+    """Resolve final output format from global output flags."""
 
     if json_mode:
         return "json"

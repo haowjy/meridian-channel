@@ -970,9 +970,6 @@ class SQLiteWorkspaceStore:
     async def list(self, filters: WorkspaceFilters) -> list[WorkspaceSummary]:
         return await asyncio.to_thread(self._state.list_workspaces, filters)
 
-    async def transition(self, workspace_id: WorkspaceId, new_state: WorkspaceState) -> None:
-        await asyncio.to_thread(self._state.transition_workspace, workspace_id, new_state)
-
 
 class SQLiteContextStore:
     """Async adapter for ContextStore protocol."""
@@ -982,9 +979,6 @@ class SQLiteContextStore:
 
     async def pin(self, workspace_id: WorkspaceId, file_path: str) -> None:
         await asyncio.to_thread(self._state.pin_file, workspace_id, file_path)
-
-    async def unpin(self, workspace_id: WorkspaceId, file_path: str) -> None:
-        await asyncio.to_thread(self._state.unpin_file, workspace_id, file_path)
 
     async def list_pinned(self, workspace_id: WorkspaceId) -> list[PinnedFile]:
         return await asyncio.to_thread(self._state.list_pinned_files, workspace_id)

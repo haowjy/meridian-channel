@@ -11,6 +11,7 @@ from meridian.lib.ops.workspace import WorkspaceStartInput, workspace_start_sync
 from meridian.lib.types import WorkspaceId
 from meridian.lib.workspace.launch import (
     WorkspaceLaunchRequest,
+    _build_workspace_env,
     _build_interactive_command,
     build_supervisor_prompt,
     cleanup_orphaned_locks,
@@ -45,6 +46,33 @@ def test_build_interactive_command_uses_system_prompt_model_and_passthrough(
     assert command[command.index("--model") + 1] == "claude-opus-4-6"
     assert "--permission-mode" in command
     assert "acceptEdits" in command
+
+
+def test_build_workspace_env_sanitizes_parent_env_and_keeps_workspace_overrides(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("PATH", "/usr/local/bin:/usr/bin")
+    monkeypatch.setenv("HOME", "/home/sliceb")
+    monkeypatch.setenv("LANG", "C.UTF-8")
+    monkeypatch.setenv("MY_SECRET_TOKEN", "do-not-forward")
+    monkeypatch.setenv("RANDOM_PARENT_VALUE", "drop-me")
+    monkeypatch.setenv("MERIDIAN_DEPTH", "5")
+
+    request = WorkspaceLaunchRequest(
+        workspace_id=WorkspaceId("w99"),
+        autocompact=80,
+    )
+    env = _build_workspace_env(request, "workspace prompt")
+
+    assert env["PATH"] == "/usr/local/bin:/usr/bin"
+    assert env["HOME"] == "/home/sliceb"
+    assert env["LANG"] == "C.UTF-8"
+    assert "MY_SECRET_TOKEN" not in env
+    assert "RANDOM_PARENT_VALUE" not in env
+    assert env["MERIDIAN_WORKSPACE_ID"] == "w99"
+    assert env["MERIDIAN_DEPTH"] == "5"
+    assert env["MERIDIAN_WORKSPACE_PROMPT"] == "workspace prompt"
+    assert env["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"] == "80"
 
 
 def test_cleanup_orphaned_locks_removes_stale_lock_and_pauses_workspace(tmp_path: Path) -> None:

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 import sys
-from contextlib import suppress
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,6 +30,8 @@ from meridian.server.main import run_server
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,7 +116,6 @@ def _extract_global_options(argv: Sequence[str]) -> tuple[list[str], GlobalOptio
         requested=output_format,
         json_mode=json_mode,
         porcelain_mode=porcelain_mode,
-        stdout_is_tty=sys.stdout.isatty(),
     )
     return cleaned, GlobalOptions(output=OutputConfig(format=resolved), yes=yes, no_input=no_input)
 
@@ -141,7 +142,6 @@ def root(
         requested=output_format,
         json_mode=json_mode,
         porcelain_mode=porcelain,
-        stdout_is_tty=sys.stdout.isatty(),
     )
     _GLOBAL_OPTIONS.set(
         GlobalOptions(output=OutputConfig(format=resolved), yes=yes, no_input=no_input)
@@ -315,9 +315,11 @@ def main(argv: Sequence[str] | None = None) -> None:
     verbose_count = args.count("--verbose") + args.count("-v")
     configure_logging(json_mode=json_mode, verbosity=verbose_count)
 
-    with suppress(Exception):
+    try:
         # Cleanup is best-effort and should never block CLI usage.
         cleanup_orphaned_locks(resolve_repo_root())
+    except Exception:
+        logger.debug("orphaned lock cleanup failed", exc_info=True)
     cleaned_args, options = _extract_global_options(args)
 
     token = _GLOBAL_OPTIONS.set(options)

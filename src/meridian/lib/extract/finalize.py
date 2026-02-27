@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from meridian.lib.domain import TokenUsage
+from meridian.lib.extract._io import _read_artifact_text
 from meridian.lib.extract.files_touched import extract_files_touched
 from meridian.lib.extract.report import ExtractedReport, extract_or_fallback_report
 from meridian.lib.harness.adapter import HarnessAdapter
@@ -27,13 +28,6 @@ class FinalizeExtraction:
     report_path: Path | None
     report: ExtractedReport
     output_is_empty: bool
-
-
-def _read_artifact_text(artifacts: ArtifactStore, run_id: RunId, name: str) -> str:
-    key = ArtifactKey(f"{run_id}/{name}")
-    if not artifacts.exists(key):
-        return ""
-    return artifacts.get(key).decode("utf-8", errors="ignore")
 
 
 def reset_finalize_attempt_artifacts(

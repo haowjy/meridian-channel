@@ -33,9 +33,9 @@ def resolve_repo_root(explicit: Path | None = None) -> Path:
             return candidate
 
         git_marker = candidate / ".git"
-        # A .git file marks a worktree/submodule boundary. Do not walk above it,
-        # or repo-root discovery can escape into the parent monorepo.
-        if git_marker.is_file():
+        # A .git entry (file for worktree/submodule, directory for standalone
+        # repo) marks a repo boundary.
+        if git_marker.exists():
             return candidate
 
         parent = candidate.parent

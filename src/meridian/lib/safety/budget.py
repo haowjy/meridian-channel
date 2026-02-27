@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Literal, cast
+from typing import Literal
 
 COST_KEYS: tuple[str, ...] = (
     "total_cost_usd",
@@ -102,6 +102,10 @@ def normalize_budget(
 def extract_cost_usd_from_json_line(raw_line: bytes) -> float | None:
     """Extract the first recognized cost field from one JSON line payload."""
 
+    # Import lazily to avoid package init cycles:
+    # safety -> budget -> harness._common -> harness.adapter -> safety.permissions.
+    from meridian.lib.harness._common import _coerce_optional_float, _iter_dicts
+
     try:
         payload_obj = json.loads(raw_line.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
@@ -109,38 +113,7 @@ def extract_cost_usd_from_json_line(raw_line: bytes) -> float | None:
 
     for payload in _iter_dicts(payload_obj):
         for key in COST_KEYS:
-            value = _coerce_float(payload.get(key))
+            value = _coerce_optional_float(payload.get(key))
             if value is not None:
                 return value
-    return None
-
-
-def _iter_dicts(value: object) -> list[dict[str, object]]:
-    found: list[dict[str, object]] = []
-    if isinstance(value, dict):
-        payload = cast("dict[str, object]", value)
-        found.append(payload)
-        for nested in payload.values():
-            found.extend(_iter_dicts(nested))
-    elif isinstance(value, list):
-        for item in cast("list[object]", value):
-            found.extend(_iter_dicts(item))
-    return found
-
-
-def _coerce_float(value: object) -> float | None:
-    if isinstance(value, bool):
-        return float(value)
-    if isinstance(value, int | float):
-        return float(value)
-    if isinstance(value, str):
-        stripped = value.strip()
-        if not stripped:
-            return None
-        if stripped.startswith("$"):
-            stripped = stripped[1:]
-        try:
-            return float(stripped)
-        except ValueError:
-            return None
     return None

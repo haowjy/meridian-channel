@@ -6,8 +6,9 @@ import json
 from dataclasses import dataclass
 from typing import Literal, cast
 
+from meridian.lib.extract._io import _read_artifact_text
 from meridian.lib.state.artifact_store import ArtifactStore
-from meridian.lib.types import ArtifactKey, RunId
+from meridian.lib.types import RunId
 
 ReportSource = Literal["report_md", "assistant_message"]
 
@@ -16,13 +17,6 @@ ReportSource = Literal["report_md", "assistant_message"]
 class ExtractedReport:
     content: str | None
     source: ReportSource | None
-
-
-def _read_artifact_text(artifacts: ArtifactStore, run_id: RunId, name: str) -> str:
-    key = ArtifactKey(f"{run_id}/{name}")
-    if not artifacts.exists(key):
-        return ""
-    return artifacts.get(key).decode("utf-8", errors="ignore")
 
 
 def _text_from_value(value: object) -> str:

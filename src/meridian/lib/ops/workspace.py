@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import sqlite3
-from contextlib import suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
@@ -19,6 +19,8 @@ from meridian.lib.workspace.summary import generate_workspace_summary
 
 if TYPE_CHECKING:
     from meridian.lib.formatting import FormatContext
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -223,10 +225,13 @@ def workspace_resume_sync(payload: WorkspaceResumeInput) -> WorkspaceActionOutpu
             ),
         )
     except Exception:
+        logger.debug("workspace resume failed before launch completed", exc_info=True)
         # Keep lifecycle consistent when preflight fails after we set active for this resume call.
         if transitioned_to_active:
-            with suppress(Exception):
+            try:
                 workspace_crud.transition_workspace(runtime.state, workspace_id, "paused")
+            except Exception:
+                logger.debug("workspace resume rollback to paused failed", exc_info=True)
         raise
 
     transitioned = workspace_crud.transition_workspace(

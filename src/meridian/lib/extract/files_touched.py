@@ -6,8 +6,9 @@ import json
 import re
 from typing import cast
 
+from meridian.lib.extract._io import _read_artifact_text
 from meridian.lib.state.artifact_store import ArtifactStore
-from meridian.lib.types import ArtifactKey, RunId
+from meridian.lib.types import RunId
 
 _PATH_KEYS: frozenset[str] = frozenset(
     {
@@ -31,13 +32,6 @@ _FILE_LIST_KEYS: frozenset[str] = frozenset(
 _PATH_PATTERN = re.compile(
     r"(?<![\w/.-])(?:[A-Za-z]:\\)?(?:\.{1,2}/)?(?:[\w.-]+[\\/])+[\w.-]+(?:\.[\w.-]+)?"
 )
-
-
-def _read_text_artifact(artifacts: ArtifactStore, run_id: RunId, name: str) -> str:
-    key = ArtifactKey(f"{run_id}/{name}")
-    if not artifacts.exists(key):
-        return ""
-    return artifacts.get(key).decode("utf-8", errors="ignore")
 
 
 def _normalize_path(value: str) -> str | None:
@@ -107,7 +101,7 @@ def extract_files_touched(artifacts: ArtifactStore, run_id: RunId) -> tuple[str,
     found: list[str] = []
     seen: set[str] = set()
 
-    explicit_json = _read_text_artifact(artifacts, run_id, "files_touched.json").strip()
+    explicit_json = _read_artifact_text(artifacts, run_id, "files_touched.json").strip()
     if explicit_json:
         try:
             payload_obj = json.loads(explicit_json)
@@ -116,11 +110,11 @@ def extract_files_touched(artifacts: ArtifactStore, run_id: RunId) -> tuple[str,
         if payload_obj is not None:
             _extract_from_json_value(payload_obj, found, seen)
 
-    explicit_text = _read_text_artifact(artifacts, run_id, "files_touched.txt")
+    explicit_text = _read_artifact_text(artifacts, run_id, "files_touched.txt")
     for line in explicit_text.splitlines():
         _append_path(found, seen, line)
 
-    output_lines = _read_text_artifact(artifacts, run_id, "output.jsonl")
+    output_lines = _read_artifact_text(artifacts, run_id, "output.jsonl")
     for line in output_lines.splitlines():
         stripped = line.strip()
         if not stripped:
@@ -136,7 +130,7 @@ def extract_files_touched(artifacts: ArtifactStore, run_id: RunId) -> tuple[str,
         for candidate in _extract_paths_from_text(stripped):
             _append_path(found, seen, candidate)
 
-    report = _read_text_artifact(artifacts, run_id, "report.md")
+    report = _read_artifact_text(artifacts, run_id, "report.md")
     for candidate in _extract_paths_from_text(report):
         _append_path(found, seen, candidate)
 

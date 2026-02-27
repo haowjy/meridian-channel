@@ -84,11 +84,10 @@ class SignalCoordinator:
         try:
             yield
         finally:
-            if not mask_installed:
-                return
-            with self._lock:
-                self._sigterm_mask_depth -= 1
-                self._maybe_uninstall_handlers_locked()
+            if mask_installed:
+                with self._lock:
+                    self._sigterm_mask_depth -= 1
+                    self._maybe_uninstall_handlers_locked()
 
     def _ensure_handlers_installed_locked(self) -> bool:
         if self._handlers_installed:

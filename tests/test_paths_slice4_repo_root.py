@@ -33,6 +33,25 @@ def test_resolve_repo_root_stops_at_submodule_boundary(
     assert resolve_repo_root() == submodule_root.resolve()
 
 
+def test_resolve_repo_root_stops_at_git_directory_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    parent = tmp_path / "parent"
+    (parent / ".agents" / "skills").mkdir(parents=True, exist_ok=True)
+
+    child = parent / "child"
+    (child / ".git").mkdir(parents=True, exist_ok=True)
+
+    nested = child / "src"
+    nested.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.delenv("MERIDIAN_REPO_ROOT", raising=False)
+    monkeypatch.chdir(nested)
+
+    assert resolve_repo_root() == child.resolve()
+
+
 def test_resolve_repo_root_stops_at_filesystem_root_when_unanchored(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
