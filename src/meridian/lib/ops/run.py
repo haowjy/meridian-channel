@@ -269,6 +269,7 @@ class _PreparedCreate:
     reference_files: tuple[str, ...]
     template_vars: dict[str, str]
     report_path: str
+    mcp_tools: tuple[str, ...]
     agent_name: str | None
     cli_command: tuple[str, ...]
     permission_config: PermissionConfig
@@ -552,6 +553,8 @@ def _build_create_payload(
                 model=ModelId(defaults.model),
                 skills=tuple(skill.name for skill in loaded_skills),
                 agent=defaults.agent_name,
+                repo_root=runtime_view.repo_root.as_posix(),
+                mcp_tools=profile.mcp_tools if profile is not None else (),
             ),
             TieredPermissionResolver(permission_config),
         )
@@ -566,6 +569,7 @@ def _build_create_payload(
         reference_files=tuple(str(reference.path) for reference in loaded_references),
         template_vars=parsed_template_vars,
         report_path=Path(payload.report_path).expanduser().resolve().as_posix(),
+        mcp_tools=profile.mcp_tools if profile is not None else (),
         agent_name=defaults.agent_name,
         cli_command=preview_command,
         permission_config=permission_config,
@@ -781,6 +785,7 @@ def _execute_run_blocking(
             kill_grace_seconds=runtime.config.kill_grace_seconds,
             skills=prepared.skills,
             agent=prepared.agent_name,
+            mcp_tools=prepared.mcp_tools,
             env_overrides=_run_child_env(
                 workspace_id_str,
                 prepared.secrets,
@@ -851,6 +856,7 @@ async def _execute_run_non_blocking(
     timeout_secs: float | None,
     skills: tuple[str, ...],
     agent_name: str | None,
+    mcp_tools: tuple[str, ...],
     permission_config: PermissionConfig,
     budget: Budget | None,
     guardrails: tuple[str, ...],
@@ -873,6 +879,7 @@ async def _execute_run_non_blocking(
         kill_grace_seconds=runtime.config.kill_grace_seconds,
         skills=skills,
         agent=agent_name,
+        mcp_tools=mcp_tools,
         env_overrides=_run_child_env(
             str(run.workspace_id) if run.workspace_id is not None else None,
             secrets,
@@ -998,6 +1005,7 @@ async def run_create(payload: RunCreateInput) -> RunActionOutput:
             timeout_secs=payload.timeout_secs,
             skills=prepared.skills,
             agent_name=prepared.agent_name,
+            mcp_tools=prepared.mcp_tools,
             permission_config=prepared.permission_config,
             budget=prepared.budget,
             guardrails=prepared.guardrails,

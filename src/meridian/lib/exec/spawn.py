@@ -36,6 +36,7 @@ from meridian.lib.harness.adapter import (
     PermissionResolver,
     RunParams,
     StreamEvent,
+    resolve_mcp_config,
 )
 from meridian.lib.harness.registry import HarnessRegistry
 from meridian.lib.safety.budget import Budget, BudgetBreach, LiveBudgetTracker
@@ -451,6 +452,7 @@ async def execute_with_finalization(
     kill_grace_seconds: float = DEFAULT_KILL_GRACE_SECONDS,
     skills: tuple[str, ...] = (),
     agent: str | None = None,
+    mcp_tools: tuple[str, ...] = (),
     extra_args: tuple[str, ...] = (),
     env_overrides: dict[str, str] | None = None,
     harness_id: HarnessId | None = None,
@@ -478,9 +480,22 @@ async def execute_with_finalization(
     else:
         harness = registry.get(harness_id)
 
+    run_params = RunParams(
+        prompt=run.prompt,
+        model=run.model,
+        skills=skills,
+        agent=agent,
+        extra_args=extra_args,
+        repo_root=execution_cwd.as_posix(),
+        mcp_tools=mcp_tools,
+    )
+
     resolved_perms = permission_resolver or SafeDefaultPermissionResolver()
     resolved_permission_config = permission_config or PermissionConfig()
     adapter_env_overrides = harness.env_overrides(resolved_permission_config)
+    mcp_config = resolve_mcp_config(harness, run_params)
+    if mcp_config is not None:
+        adapter_env_overrides.update(mcp_config.env_overrides)
     runtime_env_overrides = {
         "MERIDIAN_REPO_ROOT": execution_cwd.as_posix(),
         "MERIDIAN_STATE_ROOT": state.paths.root_dir.resolve().as_posix(),
@@ -522,13 +537,6 @@ async def execute_with_finalization(
     failure_reason: str | None = None
 
     try:
-        run_params = RunParams(
-            prompt=run.prompt,
-            model=run.model,
-            skills=skills,
-            agent=agent,
-            extra_args=extra_args,
-        )
         command = tuple(harness.build_command(run_params, resolved_perms))
         retries_attempted = 0
 

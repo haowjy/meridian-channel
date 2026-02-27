@@ -14,6 +14,10 @@ def _empty_metadata() -> dict[str, object]:
     return {}
 
 
+def _empty_env_overrides() -> dict[str, str]:
+    return {}
+
+
 @dataclass(frozen=True, slots=True)
 class HarnessCapabilities:
     """Feature flags for one harness implementation."""
@@ -33,6 +37,17 @@ class RunParams:
     skills: tuple[str, ...] = ()
     agent: str | None = None
     extra_args: tuple[str, ...] = ()
+    repo_root: str | None = None
+    mcp_tools: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class McpConfig:
+    """Harness-specific MCP wiring details for one run."""
+
+    command_args: tuple[str, ...] = ()
+    env_overrides: dict[str, str] = field(default_factory=_empty_env_overrides)
+    claude_allowed_tools: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +97,8 @@ class HarnessAdapter(Protocol):
 
     def build_command(self, run: RunParams, perms: PermissionResolver) -> list[str]: ...
 
+    def mcp_config(self, run: RunParams) -> McpConfig | None: ...
+
     def env_overrides(self, config: PermissionConfig) -> dict[str, str]: ...
 
     def parse_stream_event(self, line: str) -> StreamEvent | None: ...
@@ -89,3 +106,12 @@ class HarnessAdapter(Protocol):
     def extract_usage(self, artifacts: ArtifactStore, run_id: RunId) -> TokenUsage: ...
 
     def extract_session_id(self, artifacts: ArtifactStore, run_id: RunId) -> str | None: ...
+
+
+def resolve_mcp_config(adapter: HarnessAdapter, run: RunParams) -> McpConfig | None:
+    """Resolve adapter MCP config if the adapter implements the optional hook."""
+
+    resolver = getattr(adapter, "mcp_config", None)
+    if resolver is None:
+        return None
+    return resolver(run)

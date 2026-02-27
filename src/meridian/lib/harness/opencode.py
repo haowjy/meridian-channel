@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import ClassVar
 
 from meridian.lib.harness._common import (
@@ -20,6 +21,7 @@ from meridian.lib.harness._strategies import (
 from meridian.lib.harness.adapter import (
     ArtifactStore,
     HarnessCapabilities,
+    McpConfig,
     PermissionResolver,
     RunParams,
     StreamEvent,
@@ -34,6 +36,12 @@ def _strip_opencode_prefix(model: str) -> str:
 
 def _opencode_model_transform(value: object, args: list[str]) -> None:
     args.extend(["--model", _strip_opencode_prefix(str(value))])
+
+
+def _opencode_mcp_globs(run: RunParams) -> tuple[str, ...]:
+    if run.mcp_tools:
+        return tuple(f"mcp__meridian__{tool}" for tool in run.mcp_tools)
+    return ("mcp__meridian__*",)
 
 
 class OpenCodeAdapter:
@@ -69,6 +77,7 @@ class OpenCodeAdapter:
         )
 
     def build_command(self, run: RunParams, perms: PermissionResolver) -> list[str]:
+        mcp_config = self.mcp_config(run)
         return build_harness_command(
             base_command=self.BASE_COMMAND,
             prompt_mode=self.PROMPT_MODE,
@@ -76,6 +85,28 @@ class OpenCodeAdapter:
             strategies=self.STRATEGIES,
             perms=perms,
             harness_id=self.id,
+            mcp_config=mcp_config,
+        )
+
+    def mcp_config(self, run: RunParams) -> McpConfig | None:
+        repo_root = (run.repo_root or "").strip()
+        if not repo_root:
+            return None
+        payload = {
+            "mcp_servers": {
+                "meridian": {
+                    "command": ["uv", "run", "--directory", repo_root, "meridian", "serve"],
+                    "tool_globs": list(_opencode_mcp_globs(run)),
+                }
+            }
+        }
+        # MCP sidecar crash behavior:
+        # OpenCode reports transport/config errors and the run fails unless the
+        # harness itself retries internally. Meridian does not restart sidecars.
+        return McpConfig(
+            env_overrides={
+                "OPENCODE_MCP_CONFIG": json.dumps(payload, sort_keys=True, separators=(",", ":"))
+            }
         )
 
     def env_overrides(self, config: PermissionConfig) -> dict[str, str]:

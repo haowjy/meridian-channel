@@ -66,6 +66,10 @@ def _allowed_tools_from_command(command: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(item.strip() for item in payload.split(",") if item.strip())
 
 
+def _flag_count(command: tuple[str, ...], flag: str) -> int:
+    return sum(1 for token in command if token == flag)
+
+
 def test_run_uses_default_agent_profile_and_profile_skills(tmp_path: Path) -> None:
     _write_config(
         tmp_path,
@@ -347,6 +351,43 @@ def test_run_uses_builtin_default_agent_when_no_profile_on_disk(tmp_path: Path) 
     assert result.status == "dry-run"
     assert result.model == "gpt-5.3-codex"
     assert result.agent == "agent"
+    assert "--config" in result.cli_command
+    assert any(
+        token.startswith("mcp_servers.meridian.command=") for token in result.cli_command
+    )
+    assert any(
+        token.startswith("mcp_servers.meridian.enabled_tools=") for token in result.cli_command
+    )
+
+
+def test_claude_command_merges_permission_and_mcp_allowed_tools(tmp_path: Path) -> None:
+    _write_agent(
+        tmp_path,
+        name="claude-reviewer",
+        model="claude-sonnet-4-6",
+        skills=[],
+        sandbox="workspace-write",
+        mcp_tools=["run_list", "run_show"],
+    )
+
+    result = run_ops.run_create_sync(
+        RunCreateInput(
+            prompt="review changes",
+            dry_run=True,
+            agent="claude-reviewer",
+            repo_root=tmp_path.as_posix(),
+        )
+    )
+
+    assert result.status == "dry-run"
+    assert result.harness_id == "claude"
+    assert "--mcp-config" in result.cli_command
+    assert _flag_count(result.cli_command, "--allowedTools") == 1
+    allowed_tools = _allowed_tools_from_command(result.cli_command)
+    assert "Edit" in allowed_tools
+    assert "Write" in allowed_tools
+    assert "mcp__meridian__run_list" in allowed_tools
+    assert "mcp__meridian__run_show" in allowed_tools
 
 
 def test_run_logs_warning_when_profile_sandbox_exceeds_config_default(

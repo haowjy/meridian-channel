@@ -168,6 +168,32 @@ def test_standard_harnesses_only_opencode_sets_env_overrides() -> None:
     }
 
 
+def test_opencode_mcp_config_uses_profile_scoped_tool_globs() -> None:
+    mcp_config = OpenCodeAdapter().mcp_config(
+        RunParams(
+            prompt="test",
+            model=ModelId("opencode-gpt-5.3-codex"),
+            repo_root="/tmp/repo",
+            mcp_tools=("run_list", "run_show"),
+        )
+    )
+
+    assert mcp_config is not None
+    payload = json.loads(mcp_config.env_overrides["OPENCODE_MCP_CONFIG"])
+    assert payload["mcp_servers"]["meridian"]["command"] == [
+        "uv",
+        "run",
+        "--directory",
+        "/tmp/repo",
+        "meridian",
+        "serve",
+    ]
+    assert payload["mcp_servers"]["meridian"]["tool_globs"] == [
+        "mcp__meridian__run_list",
+        "mcp__meridian__run_show",
+    ]
+
+
 @pytest.mark.asyncio
 async def test_execute_with_finalization_merges_adapter_env_overrides(
     tmp_path: Path,

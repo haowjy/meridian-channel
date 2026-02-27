@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import ClassVar
 
 from meridian.lib.harness._common import (
@@ -20,6 +21,7 @@ from meridian.lib.harness._strategies import (
 from meridian.lib.harness.adapter import (
     ArtifactStore,
     HarnessCapabilities,
+    McpConfig,
     PermissionResolver,
     RunParams,
     StreamEvent,
@@ -61,6 +63,7 @@ class CodexAdapter:
         )
 
     def build_command(self, run: RunParams, perms: PermissionResolver) -> list[str]:
+        mcp_config = self.mcp_config(run)
         return build_harness_command(
             base_command=self.BASE_COMMAND,
             prompt_mode=self.PROMPT_MODE,
@@ -68,7 +71,35 @@ class CodexAdapter:
             strategies=self.STRATEGIES,
             perms=perms,
             harness_id=self.id,
+            mcp_config=mcp_config,
         )
+
+    def mcp_config(self, run: RunParams) -> McpConfig | None:
+        repo_root = (run.repo_root or "").strip()
+        if not repo_root:
+            return None
+        command_literal = json.dumps(
+            ["uv", "run", "--directory", repo_root, "meridian", "serve"],
+            separators=(",", ":"),
+        )
+        config_args = [
+            "--config",
+            f"mcp_servers.meridian.command={command_literal}",
+        ]
+
+        if run.mcp_tools:
+            enabled_tools_literal = json.dumps(list(run.mcp_tools), separators=(",", ":"))
+            config_args.extend(
+                [
+                    "--config",
+                    f"mcp_servers.meridian.enabled_tools={enabled_tools_literal}",
+                ]
+            )
+
+        # MCP sidecar crash behavior:
+        # Codex reports a tool transport failure and exits non-zero; Meridian does not
+        # auto-reconnect sidecars and relies on normal run retry policy.
+        return McpConfig(command_args=tuple(config_args))
 
     def env_overrides(self, config: PermissionConfig) -> dict[str, str]:
         _ = config

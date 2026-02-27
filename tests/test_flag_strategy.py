@@ -29,7 +29,7 @@ def _sample_run(*, model: str) -> RunParams:
 
 
 def test_every_run_params_field_is_mapped_for_each_adapter() -> None:
-    skip = {"prompt", "extra_args"}
+    skip = {"prompt", "extra_args", "repo_root", "mcp_tools"}
     required = {field.name for field in dataclasses.fields(RunParams)} - skip
     adapter_classes = (ClaudeAdapter, CodexAdapter, OpenCodeAdapter)
 

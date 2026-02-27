@@ -14,6 +14,7 @@ from meridian.lib.domain import TokenUsage
 from meridian.lib.harness.adapter import (
     ArtifactStore,
     HarnessCapabilities,
+    McpConfig,
     PermissionResolver,
     RunParams,
     RunResult,
@@ -90,6 +91,12 @@ class DirectAdapter:
     def build_command(self, run: RunParams, perms: PermissionResolver) -> list[str]:
         _ = (run, perms)
         return ["direct"]
+
+    def mcp_config(self, run: RunParams) -> McpConfig | None:
+        _ = run
+        # Direct mode calls Meridian operations in-process via the API/tool loop, so
+        # there is no external MCP sidecar to configure or reconnect.
+        return None
 
     def env_overrides(self, config: PermissionConfig) -> dict[str, str]:
         _ = config

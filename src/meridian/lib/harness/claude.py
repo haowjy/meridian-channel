@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import tempfile
+from pathlib import Path
 from typing import ClassVar
 
 from meridian.lib.harness._common import (
@@ -20,6 +24,7 @@ from meridian.lib.harness._strategies import (
 from meridian.lib.harness.adapter import (
     ArtifactStore,
     HarnessCapabilities,
+    McpConfig,
     PermissionResolver,
     RunParams,
     StreamEvent,
@@ -45,6 +50,7 @@ class ClaudeAdapter:
         "thinking": "thinking",
         "error": "error",
     }
+    MCP_CONFIG_PREFIX: ClassVar[str] = "meridian-claude-mcp"
 
     @property
     def id(self) -> HarnessId:
@@ -60,6 +66,7 @@ class ClaudeAdapter:
         )
 
     def build_command(self, run: RunParams, perms: PermissionResolver) -> list[str]:
+        mcp_config = self.mcp_config(run)
         return build_harness_command(
             base_command=self.BASE_COMMAND,
             prompt_mode=self.PROMPT_MODE,
@@ -67,6 +74,45 @@ class ClaudeAdapter:
             strategies=self.STRATEGIES,
             perms=perms,
             harness_id=self.id,
+            mcp_config=mcp_config,
+        )
+
+    def _mcp_config_path(self, run: RunParams) -> Path:
+        repo_root = (run.repo_root or "").strip() or "."
+        fingerprint = hashlib.sha256(
+            f"{repo_root}|{','.join(run.mcp_tools)}".encode("utf-8")
+        ).hexdigest()[:16]
+        return Path(tempfile.gettempdir()) / f"{self.MCP_CONFIG_PREFIX}-{fingerprint}.json"
+
+    def _write_mcp_config(self, run: RunParams) -> Path:
+        repo_root = (run.repo_root or "").strip() or "."
+        payload = {
+            "mcpServers": {
+                "meridian": {
+                    "command": "uv",
+                    "args": ["run", "--directory", repo_root, "meridian", "serve"],
+                }
+            }
+        }
+        path = self._mcp_config_path(run)
+        path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+        return path
+
+    def mcp_config(self, run: RunParams) -> McpConfig | None:
+        if run.repo_root is None or not run.repo_root.strip():
+            return None
+        mcp_file = self._write_mcp_config(run)
+        if run.mcp_tools:
+            allowed_tools = tuple(f"mcp__meridian__{tool}" for tool in run.mcp_tools)
+        else:
+            allowed_tools = ("mcp__meridian__*",)
+
+        # MCP sidecar crash behavior:
+        # Claude surfaces MCP transport failures in-stream and the run usually exits
+        # non-zero; Meridian treats this as a failed attempt and does not reconnect.
+        return McpConfig(
+            command_args=("--mcp-config", mcp_file.as_posix()),
+            claude_allowed_tools=allowed_tools,
         )
 
     def env_overrides(self, config: PermissionConfig) -> dict[str, str]:

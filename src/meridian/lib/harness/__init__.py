@@ -4,10 +4,12 @@ from meridian.lib.harness.adapter import (
     ArtifactStore,
     HarnessAdapter,
     HarnessCapabilities,
+    McpConfig,
     PermissionResolver,
     RunParams,
     RunResult,
     StreamEvent,
+    resolve_mcp_config,
 )
 from meridian.lib.harness.claude import ClaudeAdapter
 from meridian.lib.harness.codex import CodexAdapter
@@ -23,10 +25,12 @@ __all__ = [
     "HarnessAdapter",
     "HarnessCapabilities",
     "HarnessRegistry",
+    "McpConfig",
     "OpenCodeAdapter",
     "PermissionResolver",
     "RunParams",
     "RunResult",
     "StreamEvent",
     "get_default_harness_registry",
+    "resolve_mcp_config",
 ]
