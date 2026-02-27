@@ -12,3 +12,7 @@ wait_seconds = 900.0
 
 [permissions]
 default_tier = "workspace-write"
+
+[supervisor]
+autocompact_pct = 61
+permission_tier = "workspace-write"

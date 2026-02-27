@@ -350,6 +350,21 @@ def test_sanitize_child_env_filters_parent_secrets_and_keeps_explicit_overrides(
     assert "EXAMPLE_KEY" not in sanitized
 
 
+def test_sanitize_child_env_does_not_leak_supervisor_autocompact_override() -> None:
+    sanitized = sanitize_child_env(
+        base_env={
+            "PATH": "/usr/bin",
+            "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "67",
+        },
+        env_overrides={"MERIDIAN_DEPTH": "2"},
+        pass_through=set(),
+    )
+
+    assert sanitized["PATH"] == "/usr/bin"
+    assert sanitized["MERIDIAN_DEPTH"] == "2"
+    assert "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE" not in sanitized
+
+
 @pytest.mark.asyncio
 async def test_execute_with_finalization_passes_required_credentials_only(
     tmp_path: Path,

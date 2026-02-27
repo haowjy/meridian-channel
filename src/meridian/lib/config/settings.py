@@ -43,6 +43,14 @@ class SearchPathConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class SupervisorConfig:
+    """Supervisor-specific harness settings."""
+
+    autocompact_pct: int = 65
+    permission_tier: str = "full-access"
+
+
+@dataclass(frozen=True, slots=True)
 class MeridianConfig:
     """Resolved operational configuration for meridian."""
 
@@ -55,6 +63,7 @@ class MeridianConfig:
     default_permission_tier: str = "read-only"
     supervisor_agent: str = "supervisor"
     default_agent: str = "agent"
+    supervisor: SupervisorConfig = SupervisorConfig()
     output: OutputConfig = OutputConfig()
     search_paths: SearchPathConfig = SearchPathConfig()
 
@@ -107,6 +116,9 @@ _ENV_OVERRIDE_MAP: dict[str, str] = {
 
 _OUTPUT_VERBOSITY_PRESETS = frozenset({"quiet", "normal", "verbose", "debug"})
 _SEARCH_PATH_KEYS = frozenset({"agents", "skills", "global_agents", "global_skills"})
+_SUPERVISOR_KEYS = frozenset({"autocompact_pct", "permission_tier"})
+_SUPERVISOR_AUTOCOMPACT_PCT_MIN = 1
+_SUPERVISOR_AUTOCOMPACT_PCT_MAX = 100
 
 
 def _expected_type_name(field_name: str) -> str:
@@ -254,6 +266,60 @@ def _coerce_search_path_config(*, raw_value: object, source: str) -> SearchPathC
     )
 
 
+def _coerce_supervisor_config(*, raw_value: object, source: str) -> SupervisorConfig:
+    if not isinstance(raw_value, dict):
+        raise ValueError(f"Invalid value for '{source}': expected table.")
+
+    defaults = SupervisorConfig()
+    autocompact_pct = defaults.autocompact_pct
+    permission_tier = defaults.permission_tier
+    for key, value in cast("dict[str, object]", raw_value).items():
+        if key not in _SUPERVISOR_KEYS:
+            logger.warning("Ignoring unknown Meridian config key '%s.%s'.", source, key)
+            continue
+
+        if key == "autocompact_pct":
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(
+                    f"Invalid value for '{source}.autocompact_pct': expected int, got "
+                    f"{type(value).__name__} ({value!r})."
+                )
+            if not (
+                _SUPERVISOR_AUTOCOMPACT_PCT_MIN
+                <= value
+                <= _SUPERVISOR_AUTOCOMPACT_PCT_MAX
+            ):
+                raise ValueError(
+                    f"Invalid value for '{source}.autocompact_pct': expected int between "
+                    f"{_SUPERVISOR_AUTOCOMPACT_PCT_MIN} and "
+                    f"{_SUPERVISOR_AUTOCOMPACT_PCT_MAX}, got {value!r}."
+                )
+            autocompact_pct = value
+            continue
+
+        if not isinstance(value, str):
+            raise ValueError(
+                f"Invalid value for '{source}.permission_tier': expected str, got "
+                f"{type(value).__name__} ({value!r})."
+            )
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError(
+                f"Invalid value for '{source}.permission_tier': expected non-empty string."
+            )
+        if normalized.lower() == "danger":
+            raise ValueError(
+                f"Invalid value for '{source}.permission_tier': 'danger' is not allowed in "
+                "config."
+            )
+        permission_tier = normalized
+
+    return SupervisorConfig(
+        autocompact_pct=autocompact_pct,
+        permission_tier=permission_tier,
+    )
+
+
 def _coerce_env_value(*, field_name: str, raw_value: str, env_name: str) -> object:
     expected = _expected_type_name(field_name)
     if expected == "int":
@@ -299,6 +365,12 @@ def _apply_toml_payload(
             values["search_paths"] = _coerce_search_path_config(
                 raw_value=raw_value,
                 source="search_paths",
+            )
+            continue
+        if key == "supervisor":
+            values["supervisor"] = _coerce_supervisor_config(
+                raw_value=raw_value,
+                source="supervisor",
             )
             continue
 
@@ -356,6 +428,7 @@ def _build_config(values: dict[str, object]) -> MeridianConfig:
         default_permission_tier=cast("str", values["default_permission_tier"]),
         supervisor_agent=cast("str", values["supervisor_agent"]),
         default_agent=cast("str", values["default_agent"]),
+        supervisor=cast("SupervisorConfig", values["supervisor"]),
         output=cast("OutputConfig", values["output"]),
         search_paths=cast("SearchPathConfig", values["search_paths"]),
     )

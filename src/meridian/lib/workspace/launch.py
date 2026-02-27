@@ -17,7 +17,7 @@ from typing import cast
 from meridian.lib.config._paths import resolve_repo_root
 from meridian.lib.config.agent import AgentProfile, load_agent_profile
 from meridian.lib.config.routing import route_model
-from meridian.lib.config.settings import load_config
+from meridian.lib.config.settings import MeridianConfig, load_config
 from meridian.lib.domain import WorkspaceState
 from meridian.lib.exec.spawn import HARNESS_ENV_PASS_THROUGH, sanitize_child_env
 from meridian.lib.prompt.assembly import load_skill_contents, resolve_run_defaults
@@ -120,6 +120,7 @@ def _build_interactive_command(
     request: WorkspaceLaunchRequest,
     prompt: str,
     passthrough_args: tuple[str, ...],
+    config: MeridianConfig | None = None,
 ) -> tuple[str, ...]:
     """Build interactive CLI command for workspace sessions."""
 
@@ -131,15 +132,15 @@ def _build_interactive_command(
         return tuple(command)
 
     resolved_root = resolve_repo_root(repo_root)
-    config = load_config(resolved_root)
+    resolved_config = config if config is not None else load_config(resolved_root)
     profile: AgentProfile | None = None
-    configured_profile = config.supervisor_agent.strip()
+    configured_profile = resolved_config.supervisor_agent.strip()
     if configured_profile:
         try:
             profile = load_agent_profile(
                 configured_profile,
                 repo_root=resolved_root,
-                search_paths=config.search_paths,
+                search_paths=resolved_config.search_paths,
             )
         except FileNotFoundError:
             profile = None
@@ -158,7 +159,7 @@ def _build_interactive_command(
 
         registry = SkillRegistry(
             repo_root=resolved_root,
-            search_paths=config.search_paths,
+            search_paths=resolved_config.search_paths,
             readonly=True,
         )
         manifests = registry.list()
@@ -188,20 +189,23 @@ def _build_interactive_command(
         "--model",
         str(model),
     ]
+    supervisor_default_tier = resolved_config.supervisor.permission_tier
     resolved_tier = _resolve_permission_tier_for_profile(
         profile=profile,
-        default_tier=config.default_permission_tier,
+        default_tier=supervisor_default_tier,
     )
     _warn_profile_tier_escalation(
         profile=profile,
         inferred_tier=resolved_tier,
-        default_tier=config.default_permission_tier,
+        default_tier=supervisor_default_tier,
         warning_logger=logger,
     )
+    # Supervisor settings only apply to this workspace supervisor launch path.
+    # Subagent runs are assembled in lib/ops/run.py and do not read this config.
     permission_config = build_permission_config(
         resolved_tier,
         unsafe=False,
-        default_tier=config.default_permission_tier,
+        default_tier=supervisor_default_tier,
     )
     command.extend(
         permission_flags_for_harness(
@@ -218,16 +222,23 @@ def _build_supervisor_command(
     repo_root: Path,
     request: WorkspaceLaunchRequest,
     prompt: str,
+    config: MeridianConfig | None = None,
 ) -> tuple[str, ...]:
+    resolved_config = config if config is not None else load_config(repo_root)
     passthrough = list(request.passthrough_args)
-    if request.autocompact is not None:
-        passthrough.extend(["--autocompact", str(request.autocompact)])
+    autocompact_pct = (
+        request.autocompact
+        if request.autocompact is not None
+        else resolved_config.supervisor.autocompact_pct
+    )
+    passthrough.extend(["--autocompact", str(autocompact_pct)])
 
     return _build_interactive_command(
         repo_root=repo_root,
         request=request,
         prompt=prompt,
         passthrough_args=tuple(passthrough),
+        config=resolved_config,
     )
 
 
@@ -348,14 +359,24 @@ def cleanup_orphaned_locks(repo_root: Path) -> tuple[WorkspaceId, ...]:
     return deduped
 
 
-def _build_workspace_env(request: WorkspaceLaunchRequest, prompt: str) -> dict[str, str]:
+def _build_workspace_env(
+    request: WorkspaceLaunchRequest,
+    prompt: str,
+    *,
+    default_autocompact_pct: int | None = None,
+) -> dict[str, str]:
     env_overrides = {
         "MERIDIAN_WORKSPACE_ID": str(request.workspace_id),
         "MERIDIAN_DEPTH": os.environ.get("MERIDIAN_DEPTH", "0"),
         "MERIDIAN_WORKSPACE_PROMPT": prompt,
     }
-    if request.autocompact is not None:
-        env_overrides["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"] = str(request.autocompact)
+    autocompact_pct = (
+        request.autocompact
+        if request.autocompact is not None
+        else default_autocompact_pct
+    )
+    if autocompact_pct is not None:
+        env_overrides["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"] = str(autocompact_pct)
 
     return sanitize_child_env(
         base_env=os.environ,
@@ -371,10 +392,20 @@ def launch_supervisor(
 ) -> WorkspaceLaunchResult:
     """Launch supervisor process and wait for exit."""
 
+    config = load_config(repo_root)
     prompt = build_supervisor_prompt(request)
-    command = _build_supervisor_command(repo_root=repo_root, request=request, prompt=prompt)
+    command = _build_supervisor_command(
+        repo_root=repo_root,
+        request=request,
+        prompt=prompt,
+        config=config,
+    )
     lock_path = workspace_lock_path(repo_root, request.workspace_id)
-    child_env = _build_workspace_env(request, prompt)
+    child_env = _build_workspace_env(
+        request,
+        prompt,
+        default_autocompact_pct=config.supervisor.autocompact_pct,
+    )
 
     if request.dry_run:
         return WorkspaceLaunchResult(

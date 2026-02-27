@@ -12,10 +12,17 @@ from meridian.lib.types import WorkspaceId
 from meridian.lib.workspace.launch import (
     WorkspaceLaunchRequest,
     _build_workspace_env,
+    _build_supervisor_command,
     _build_interactive_command,
     build_supervisor_prompt,
     cleanup_orphaned_locks,
 )
+
+
+def _install_config(repo_root: Path, content: str) -> None:
+    config_path = repo_root / ".meridian" / "config.toml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(content, encoding="utf-8")
 
 
 def test_build_interactive_command_uses_system_prompt_model_and_passthrough(
@@ -73,6 +80,41 @@ def test_build_workspace_env_sanitizes_parent_env_and_keeps_workspace_overrides(
     assert env["MERIDIAN_DEPTH"] == "5"
     assert env["MERIDIAN_WORKSPACE_PROMPT"] == "workspace prompt"
     assert env["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"] == "80"
+
+
+def test_supervisor_settings_apply_to_supervisor_command_and_env(tmp_path: Path) -> None:
+    _install_config(
+        tmp_path,
+        (
+            "[permissions]\n"
+            "default_tier = 'read-only'\n"
+            "\n"
+            "[supervisor]\n"
+            "autocompact_pct = 67\n"
+            "permission_tier = 'workspace-write'\n"
+        ),
+    )
+    request = WorkspaceLaunchRequest(workspace_id=WorkspaceId("w100"))
+
+    command = _build_supervisor_command(
+        repo_root=tmp_path,
+        request=request,
+        prompt="workspace prompt",
+    )
+
+    assert "--autocompact" in command
+    assert command[command.index("--autocompact") + 1] == "67"
+    assert "--allowedTools" in command
+    allowed_tools = command[command.index("--allowedTools") + 1]
+    assert "Edit" in allowed_tools
+    assert "Write" in allowed_tools
+
+    env = _build_workspace_env(
+        request,
+        "workspace prompt",
+        default_autocompact_pct=67,
+    )
+    assert env["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"] == "67"
 
 
 def test_cleanup_orphaned_locks_removes_stale_lock_and_pauses_workspace(tmp_path: Path) -> None:

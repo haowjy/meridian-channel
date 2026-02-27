@@ -180,6 +180,9 @@ def test_workspace_supervisor_profile_missing_sandbox_uses_default_permission_ti
             "\n"
             "[permissions]\n"
             "default_tier = 'workspace-write'\n"
+            "\n"
+            "[supervisor]\n"
+            "permission_tier = 'workspace-write'\n"
         ),
     )
     _write_agent(
@@ -215,6 +218,9 @@ def test_workspace_supervisor_profile_unknown_sandbox_uses_default_permission_ti
             "\n"
             "[permissions]\n"
             "default_tier = 'read-only'\n"
+            "\n"
+            "[supervisor]\n"
+            "permission_tier = 'read-only'\n"
         ),
     )
     _write_agent(
