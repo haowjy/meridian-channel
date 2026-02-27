@@ -7,7 +7,15 @@ dist/
 build/
 .pytest_cache/
 .ruff_cache/
-.meridian/
+
 scratch/
 uv.lock
 tmp/
+
+
+.meridian/
+.orchestrate/
+.scratch/
+
+err
+out
