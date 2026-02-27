@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+from meridian.lib import logging as cli_logging
+
+cli_main = importlib.import_module("meridian.cli.main")
 
 
 def _write_skill(repo_root: Path, name: str, body: str) -> None:
@@ -215,3 +220,77 @@ def test_bug3_no_prefixed_global_flags_are_accepted(
     payload = json.loads(result.stdout)
     assert payload["command"] == "run.create"
     assert payload["status"] == "dry-run"
+
+
+def test_dx2_unknown_top_level_command_has_clean_error(
+    package_root: Path,
+    cli_env: dict[str, str],
+    tmp_path: Path,
+) -> None:
+    result = _run_cli(
+        package_root=package_root,
+        cli_env=cli_env,
+        repo_root=tmp_path / "repo",
+        args=["foo"],
+    )
+
+    assert result.returncode == 1
+    assert "Unknown command: foo" in result.stderr
+    assert "Invalid value for \"JSON\"" not in result.stderr
+
+
+def test_dx2_init_alias_routes_to_config_init(
+    package_root: Path,
+    cli_env: dict[str, str],
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    result = _run_cli(
+        package_root=package_root,
+        cli_env=cli_env,
+        repo_root=repo_root,
+        args=["init"],
+    )
+
+    assert result.returncode == 0
+    assert (repo_root / ".meridian" / "config.toml").is_file()
+
+
+def test_dx3_help_uses_descriptions_and_hides_empty_flags(
+    package_root: Path,
+    cli_env: dict[str, str],
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _seed_base_skills(repo_root)
+    result = _run_cli(
+        package_root=package_root,
+        cli_env=cli_env,
+        repo_root=repo_root,
+        args=["run", "create", "--help"],
+    )
+
+    assert result.returncode == 0
+    assert "--empty-" not in result.stdout
+    assert "Prompt text for the run." in result.stdout
+    assert "Skill names to load (repeatable)." in result.stdout
+    assert ": [default:" not in result.stdout
+
+
+def test_dx5_timeout_error_returns_exit_code_124(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(cli_logging, "configure_logging", lambda json_mode, verbosity: None)
+    monkeypatch.setattr(cli_main, "cleanup_orphaned_locks", lambda repo_root: None)
+    monkeypatch.setattr(cli_main, "resolve_repo_root", lambda: Path.cwd())
+
+    def _raise_timeout(_: list[str]) -> None:
+        raise TimeoutError("Timed out waiting for run 'r-timeout'")
+
+    monkeypatch.setattr(cli_main, "app", _raise_timeout)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main.main(["run", "wait", "r-timeout"])
+
+    assert int(exc_info.value.code) == 124
+    stderr = capsys.readouterr().err
+    assert "Timed out waiting for run 'r-timeout'" in stderr
+    assert "Traceback" not in stderr

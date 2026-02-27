@@ -16,11 +16,18 @@ Emitter = Callable[[Any], None]
 
 def _migrate_run(
     emit: Emitter,
-    jsonl_path: Annotated[str | None, Parameter(name="--jsonl-path")] = None,
+    jsonl_path: Annotated[
+        str | None,
+        Parameter(name="--jsonl-path", help="Path to legacy JSONL runs file."),
+    ] = None,
     apply_skill_migrations: Annotated[
-        bool, Parameter(name="--apply-skill-migrations")
+        bool,
+        Parameter(name="--apply-skill-migrations", help="Apply skill catalog migrations."),
     ] = True,
-    repo_root: Annotated[str | None, Parameter(name="--repo-root")] = None,
+    repo_root: Annotated[
+        str | None,
+        Parameter(name="--repo-root", help="Repository root to migrate."),
+    ] = None,
 ) -> None:
     emit(
         migrate_run_sync(

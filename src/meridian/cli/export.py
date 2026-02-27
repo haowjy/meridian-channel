@@ -53,7 +53,10 @@ def export_workspace_sync(
 
 def _export_workspace(
     emit: Emitter,
-    workspace: Annotated[str | None, Parameter(name="--workspace")] = None,
+    workspace: Annotated[
+        str | None,
+        Parameter(name="--workspace", help="Workspace id to export."),
+    ] = None,
 ) -> None:
     emit(export_workspace_sync(workspace=workspace))
 

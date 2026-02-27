@@ -24,7 +24,10 @@ Emitter = Callable[[Any], None]
 def _context_pin(
     emit: Emitter,
     file_path: str,
-    workspace: Annotated[str | None, Parameter(name="--workspace")] = None,
+    workspace: Annotated[
+        str | None,
+        Parameter(name="--workspace", help="Workspace id to update."),
+    ] = None,
 ) -> None:
     emit(context_pin_sync(ContextPinInput(file_path=file_path, workspace=workspace)))
 
@@ -32,14 +35,20 @@ def _context_pin(
 def _context_unpin(
     emit: Emitter,
     file_path: str,
-    workspace: Annotated[str | None, Parameter(name="--workspace")] = None,
+    workspace: Annotated[
+        str | None,
+        Parameter(name="--workspace", help="Workspace id to update."),
+    ] = None,
 ) -> None:
     emit(context_unpin_sync(ContextUnpinInput(file_path=file_path, workspace=workspace)))
 
 
 def _context_list(
     emit: Emitter,
-    workspace: Annotated[str | None, Parameter(name="--workspace")] = None,
+    workspace: Annotated[
+        str | None,
+        Parameter(name="--workspace", help="Workspace id to inspect."),
+    ] = None,
 ) -> None:
     emit(context_list_sync(ContextListInput(workspace=workspace)))
 

@@ -25,11 +25,30 @@ from meridian.lib.ops.workspace import (
 
 def _workspace_start(
     emit: Any,
-    name: Annotated[str | None, Parameter(name="--name")] = None,
-    model: Annotated[str, Parameter(name="--model")] = "",
-    autocompact: Annotated[int | None, Parameter(name="--autocompact")] = None,
-    dry_run: Annotated[bool, Parameter(name="--dry-run")] = False,
-    harness_args: Annotated[tuple[str, ...], Parameter(name="--harness-arg")] = (),
+    name: Annotated[
+        str | None,
+        Parameter(name="--name", help="Optional workspace name."),
+    ] = None,
+    model: Annotated[
+        str,
+        Parameter(name="--model", help="Model id or alias for workspace harness."),
+    ] = "",
+    autocompact: Annotated[
+        int | None,
+        Parameter(name="--autocompact", help="Auto-compact threshold in messages."),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        Parameter(name="--dry-run", help="Preview launch command without starting harness."),
+    ] = False,
+    harness_args: Annotated[
+        tuple[str, ...],
+        Parameter(
+            name="--harness-arg",
+            help="Additional harness arguments (repeatable).",
+            negative_iterable=(),
+        ),
+    ] = (),
 ) -> None:
     emit(
         workspace_start_sync(
@@ -46,11 +65,30 @@ def _workspace_start(
 
 def _workspace_resume(
     emit: Any,
-    workspace: Annotated[str | None, Parameter(name="--workspace")] = None,
-    fresh: Annotated[bool, Parameter(name="--fresh")] = False,
-    model: Annotated[str, Parameter(name="--model")] = "",
-    autocompact: Annotated[int | None, Parameter(name="--autocompact")] = None,
-    harness_args: Annotated[tuple[str, ...], Parameter(name="--harness-arg")] = (),
+    workspace: Annotated[
+        str | None,
+        Parameter(name="--workspace", help="Workspace id to resume."),
+    ] = None,
+    fresh: Annotated[
+        bool,
+        Parameter(name="--fresh", help="Start a new harness process before resume."),
+    ] = False,
+    model: Annotated[
+        str,
+        Parameter(name="--model", help="Override model id or alias."),
+    ] = "",
+    autocompact: Annotated[
+        int | None,
+        Parameter(name="--autocompact", help="Auto-compact threshold in messages."),
+    ] = None,
+    harness_args: Annotated[
+        tuple[str, ...],
+        Parameter(
+            name="--harness-arg",
+            help="Additional harness arguments (repeatable).",
+            negative_iterable=(),
+        ),
+    ] = (),
 ) -> None:
     emit(
         workspace_resume_sync(
@@ -67,7 +105,10 @@ def _workspace_resume(
 
 def _workspace_list(
     emit: Any,
-    limit: Annotated[int, Parameter(name="--limit")] = 10,
+    limit: Annotated[
+        int,
+        Parameter(name="--limit", help="Maximum number of workspaces to return."),
+    ] = 10,
 ) -> None:
     emit(workspace_list_sync(WorkspaceListInput(limit=limit)))
 

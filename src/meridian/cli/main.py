@@ -126,15 +126,34 @@ app = App(
     version=__version__,
     help_formatter="plain",
 )
+_COMMAND_TREE_APP = app
 
 
 @app.default
 def root(
-    json_mode: Annotated[bool, Parameter(name="--json")] = False,
-    output_format: Annotated[str | None, Parameter(name="--format")] = None,
-    porcelain: Annotated[bool, Parameter(name="--porcelain")] = False,
-    yes: Annotated[bool, Parameter(name="--yes")] = False,
-    no_input: Annotated[bool, Parameter(name="--no-input")] = False,
+    json_mode: Annotated[
+        bool,
+        Parameter(name="--json", help="Emit command output as JSON."),
+    ] = False,
+    output_format: Annotated[
+        str | None,
+        Parameter(name="--format", help="Set output format: text, json, or porcelain."),
+    ] = None,
+    porcelain: Annotated[
+        bool,
+        Parameter(name="--porcelain", help="Emit stable tab-separated key/value output."),
+    ] = False,
+    yes: Annotated[
+        bool,
+        Parameter(name="--yes", help="Auto-approve prompts when supported."),
+    ] = False,
+    no_input: Annotated[
+        bool,
+        Parameter(
+            name="--no-input",
+            help="Disable interactive prompts and fail if input is needed.",
+        ),
+    ] = False,
 ) -> None:
     """Meridian root command with global options."""
 
@@ -212,9 +231,18 @@ def completion_fish() -> None:
 
 @completion_app.command(name="install")
 def completion_install(
-    shell: Annotated[str, Parameter(name="--shell")] = "bash",
-    output: Annotated[str | None, Parameter(name="--output")] = None,
-    add_to_startup: Annotated[bool, Parameter(name="--add-to-startup")] = False,
+    shell: Annotated[
+        str,
+        Parameter(name="--shell", help="Shell to generate completion for (bash, zsh, or fish)."),
+    ] = "bash",
+    output: Annotated[
+        str | None,
+        Parameter(name="--output", help="Optional file path where completion script is written."),
+    ] = None,
+    add_to_startup: Annotated[
+        bool,
+        Parameter(name="--add-to-startup", help="Append completion setup to shell startup files."),
+    ] = False,
 ) -> None:
     normalized_shell = _normalize_completion_shell(shell)
     destination = app.install_completion(
@@ -227,11 +255,18 @@ def completion_install(
 
 @app.command(name="start")
 def start_alias(
-    passthrough: Annotated[tuple[str, ...], Parameter(allow_leading_hyphen=True)] = (),
+    passthrough_args: Annotated[
+        tuple[str, ...],
+        Parameter(
+            allow_leading_hyphen=True,
+            negative_iterable=(),
+            help="Arguments forwarded to `workspace start`.",
+        ),
+    ] = (),
 ) -> None:
     """Alias for workspace start."""
 
-    workspace_app(["start", *passthrough])
+    workspace_app(["start", *passthrough_args])
 
 
 @app.command(name="list")
@@ -260,6 +295,13 @@ def doctor_alias() -> None:
     """Alias for diag doctor."""
 
     diag_app(["doctor"])
+
+
+@app.command(name="init")
+def init_alias() -> None:
+    """Alias for config init."""
+
+    config_app(["init"])
 
 
 _REGISTERED_CLI_COMMANDS: set[str] = set()
@@ -303,6 +345,32 @@ def _operation_error_message(exc: Exception) -> str:
     return exc.__class__.__name__
 
 
+def _first_positional_token(argv: Sequence[str]) -> str | None:
+    for token in argv:
+        if token == "--":
+            return None
+        if token.startswith("-"):
+            continue
+        return token
+    return None
+
+
+def _top_level_command_names() -> set[str]:
+    return {
+        name for name in _COMMAND_TREE_APP.resolved_commands() if not name.startswith("-")
+    }
+
+
+def _validate_top_level_command(argv: Sequence[str]) -> None:
+    candidate = _first_positional_token(argv)
+    if candidate is None:
+        return
+    if candidate in _top_level_command_names():
+        return
+    print(f"error: Unknown command: {candidate}", file=sys.stderr)
+    raise SystemExit(1)
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     """CLI entry point used by `meridian` and `python -m meridian`."""
 
@@ -321,11 +389,15 @@ def main(argv: Sequence[str] | None = None) -> None:
     except Exception:
         logger.debug("orphaned lock cleanup failed", exc_info=True)
     cleaned_args, options = _extract_global_options(args)
+    _validate_top_level_command(cleaned_args)
 
     token = _GLOBAL_OPTIONS.set(options)
     try:
         try:
             app(cleaned_args)
+        except TimeoutError as exc:
+            print(f"error: {_operation_error_message(exc)}", file=sys.stderr)
+            raise SystemExit(124) from None
         except (KeyError, ValueError, FileNotFoundError, sqlite3.OperationalError) as exc:
             print(f"error: {_operation_error_message(exc)}", file=sys.stderr)
             raise SystemExit(1) from None
