@@ -1,0 +1,3 @@
+# Runtime artifacts — hidden directories are generated, never committed
+.*
+!.gitignore
