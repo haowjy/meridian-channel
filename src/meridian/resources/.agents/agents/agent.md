@@ -4,7 +4,7 @@ description: Default agent
 model: gpt-5.3-codex
 skills: []
 mcp-tools: [run_list, run_show, skills_list]
-sandbox: workspace-write
+sandbox: space-write
 ---
 
 You are a task-execution agent managed by meridian. You receive a prompt describing your task, and you execute it.
