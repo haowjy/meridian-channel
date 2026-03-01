@@ -224,6 +224,13 @@ def _skill_search_dirs(repo_root: Path) -> list[Path]:
     )
 
 
+def _files_have_equal_text(first: Path, second: Path) -> bool:
+    try:
+        return first.read_text(encoding="utf-8") == second.read_text(encoding="utf-8")
+    except OSError:
+        return False
+
+
 def scan_skills(
     repo_root: Path | None = None,
     skills_dirs: list[Path] | None = None,
@@ -240,8 +247,11 @@ def scan_skills(
             document = parse_skill_file(path)
             existing = selected_by_name.get(document.name)
             if existing is not None:
+                if _files_have_equal_text(existing.path, document.path):
+                    continue
                 logger.warning(
-                    "Skill '%s' found in multiple paths: %s, %s. Using %s.",
+                    "Skill '%s' found in multiple paths with conflicting content: %s, %s. "
+                    "Using %s; conflicting duplicate ignored.",
                     document.name,
                     existing.path,
                     document.path,

@@ -226,19 +226,11 @@ def _build_harness_command(
     config: MeridianConfig | None = None,
 ) -> tuple[str, ...]:
     resolved_config = config if config is not None else load_config(repo_root)
-    passthrough = list(request.passthrough_args)
-    autocompact_pct = (
-        request.autocompact
-        if request.autocompact is not None
-        else resolved_config.primary.autocompact_pct
-    )
-    passthrough.extend(["--autocompact", str(autocompact_pct)])
-
     return _build_interactive_command(
         repo_root=repo_root,
         request=request,
         prompt=prompt,
-        passthrough_args=tuple(passthrough),
+        passthrough_args=request.passthrough_args,
         config=resolved_config,
     )
 

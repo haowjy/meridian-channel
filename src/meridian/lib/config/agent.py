@@ -182,6 +182,13 @@ def _agent_search_dirs(
     )
 
 
+def _files_have_equal_text(first: Path, second: Path) -> bool:
+    try:
+        return first.read_text(encoding="utf-8") == second.read_text(encoding="utf-8")
+    except OSError:
+        return False
+
+
 def scan_agent_profiles(
     repo_root: Path | None = None,
     search_dirs: list[Path] | None = None,
@@ -206,8 +213,11 @@ def scan_agent_profiles(
             profile = parse_agent_profile(path)
             existing = selected_by_name.get(profile.name)
             if existing is not None:
+                if _files_have_equal_text(existing.path, profile.path):
+                    continue
                 logger.warning(
-                    "Agent profile '%s' found in multiple paths: %s, %s. Using %s.",
+                    "Agent profile '%s' found in multiple paths with conflicting content: %s, %s. "
+                    "Using %s; conflicting duplicate ignored.",
                     profile.name,
                     existing.path,
                     profile.path,

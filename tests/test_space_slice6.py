@@ -78,8 +78,7 @@ def test_space_start_creates_lock_sets_env_and_forwards_passthrough(
 
     argv = payload["argv"]
     assert isinstance(argv, list)
-    assert "--autocompact" in argv
-    assert "72" in argv
+    assert "--autocompact" not in argv
     assert "--demo-flag" in argv
     assert "enabled" in argv
 
@@ -286,9 +285,9 @@ def test_start_command_launches_and_forwards_options(
     env = payload["env"]
     assert isinstance(env, dict)
     assert env["MERIDIAN_SPACE_ID"] == "s1"
+    assert env["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"] == "72"
 
     argv = payload["argv"]
     assert isinstance(argv, list)
-    assert "--autocompact" in argv
-    assert "72" in argv
+    assert "--autocompact" not in argv
     assert "enabled" in argv

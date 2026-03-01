@@ -101,8 +101,7 @@ def test_primary_settings_apply_to_harness_command_and_env(tmp_path: Path) -> No
         prompt="space prompt",
     )
 
-    assert "--autocompact" in command
-    assert command[command.index("--autocompact") + 1] == "67"
+    assert "--autocompact" not in command
     assert "--allowedTools" in command
     allowed_tools = command[command.index("--allowedTools") + 1]
     assert "Edit" in allowed_tools
