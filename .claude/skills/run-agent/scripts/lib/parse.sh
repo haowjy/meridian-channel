@@ -13,7 +13,8 @@ Options:
   -V, --variant VARIANT    Model variant passed to harness (default: high)
                            Presets: low, medium, high, xhigh, max
                            Not all variants apply to all models.
-      --timeout M          Kill hung harness runs after M minutes (default: 15). Supports fractional minutes.
+      --timeout M          Kill hung harness runs after M minutes (default: 30). Supports fractional minutes.
+      --idle-timeout S     Fail runs with no output activity for S seconds (default: 300, 0 disables).
       --agent NAME         Agent profile (passed to harness natively where supported)
   -s, --skills LIST        Comma-separated skill names to load
   -p, --prompt TEXT        Prompt text (can also pipe via stdin)
@@ -113,6 +114,11 @@ parse_args() {
         TIMEOUT_MINUTES="$2"
         shift 2
         ;;
+      --idle-timeout)
+        require_option_value "$1" "$#"
+        IDLE_TIMEOUT_SECONDS="$2"
+        shift 2
+        ;;
       --agent)
         require_option_value "$1" "$#"
         AGENT_NAME="$2"
@@ -204,6 +210,12 @@ validate_args() {
   if [[ -n "${TIMEOUT_MINUTES:-}" ]]; then
     if ! [[ "$TIMEOUT_MINUTES" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
       echo "ERROR: --timeout must be a non-negative number of minutes (got: $TIMEOUT_MINUTES)" >&2
+      exit 1
+    fi
+  fi
+  if [[ -n "${IDLE_TIMEOUT_SECONDS:-}" ]]; then
+    if ! [[ "$IDLE_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]]; then
+      echo "ERROR: --idle-timeout must be a non-negative integer number of seconds (got: $IDLE_TIMEOUT_SECONDS)" >&2
       exit 1
     fi
   fi

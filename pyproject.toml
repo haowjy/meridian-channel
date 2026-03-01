@@ -30,6 +30,7 @@ Issues = "https://github.com/haowjy/meridian-channel/issues"
 
 [project.scripts]
 meridian = "meridian.cli.main:main"
+pytests = "meridian.dev.pytests:main"
 
 [project.optional-dependencies]
 dev = [

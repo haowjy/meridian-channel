@@ -1,0 +1,64 @@
+# Development Guide: meridian-channel
+
+There are no users and there is no real user data. No need for backwards compatibility. It's okay to completely change the schema to get it into the right shape.
+
+## Philosophy
+
+**Meridian-Channel** is a coordination layer for multi-agent systems—not a file system, execution engine, or data warehouse.
+
+### Core Principles
+
+1. **Harness-Agnostic**: Same `meridian` commands work across Claude, Codex, OpenCode, Cursor, **etc.** (extensible to future harnesses) for both primary agents and subagents, with per-harness adapters
+2. **Files as Authority**: All state lives in files under `.meridian/.spaces/<space-id>/`. No database. `space.json` for space metadata, `runs.jsonl` for run events, `sessions.jsonl` for session tracking. Atomic writes via tmp+rename, `fcntl.flock` for concurrency.
+3. **Explicit Over Implicit**: MERIDIAN_SPACE_ID required; no auto-creation or implicit context
+4. **Agent Profiles Own Skills**: Static skill definitions in agent profiles, loaded fresh on agent launch/resume
+5. **Minimal Constraints**: Agents organize `.meridian/.spaces/<space-id>/fs/` however they want; Meridian provides container only
+
+### Architecture
+
+- **Space**: Self-contained agent ecosystem with primary + child agents, shared filesystem. Two states: `active` and `closed`.
+- **Primary Agent**: Entry point (any harness), launched via `meridian start`
+- **Agent Profile**: YAML markdown defining capabilities, tools, model, skills
+- **Skill**: Domain knowledge/capability loaded fresh on launch/resume (survives context compaction)
+- **State Layer**: `src/meridian/lib/state/paths.py` (path resolution), `src/meridian/lib/state/run_store.py` (JSONL run events), `src/meridian/lib/space/space_file.py` (space.json CRUD), `src/meridian/lib/space/session_store.py` (session tracking)
+
+## Development
+
+```bash
+# Install from source
+uv sync --extra dev
+
+# Run tests
+uv run pytest
+
+# Run tests with token-efficient output (preferred for agents)
+uv run pytests
+
+# Only prioritize last-failed tests first
+PYTESTS_LAST_FAILED=1 uv run pytests
+
+# Type check
+uv run pyright
+```
+
+### Long-Running Tasks
+
+For multi-phase plans, use the `/orchestrate` skill and NEVER write implementation code yourself. It discovers available skills, picks the right model for each subtask, and composes runs via `run-agent.sh`. See the orchestrate skill's SKILL.md for full details.
+
+Prefer to use `gpt-5.3-codex` for the majority of the tasks because its faster and cheaper than opus usually. Make sure you give these run-agents enough context to do their job.
+
+### Planning
+
+Make sure you use the `/mermaid` skill to plan your work. It will help you write plans in markdown format. Using `/orchestrate` and multiple agents to review-cycle through the plan can help you catch issues early and get a better plan.
+
+### Commit Checkpoints
+
+**Commit after each step that passes tests.** Don't accumulate changes across multiple steps — if a later step breaks things, you lose the ability to roll back cleanly. Each step's commit should be atomic and self-contained:
+1. Implement the step (via `/run-agent`)
+2. Verify tests pass (via `/run-agent` or directly)
+3. Commit with a descriptive message
+4. Move to the next step
+
+## Current Focus
+
+Files-as-authority refactor — see `plans/new-philosophy/implementation/plan.md`

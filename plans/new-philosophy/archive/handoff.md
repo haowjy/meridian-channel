@@ -38,28 +38,9 @@ Meridian is a **coordination layer**, not a file system/project manager/executio
 4. **Agent Profiles Own Skills**: Static skill definitions, loaded fresh on launch (survives context compaction)
 5. **Minimal Constraints**: Agents organize `.meridian/<space-id>/fs/` however they want
 
-## Available Skills
-
-All 7 meridian-collab skills copied to `.claude/skills/`:
-- `researching` — Codebase exploration
-- `reviewing` — Code review
-- `run-agent` — Agent execution engine
-- `orchestrate` — Multi-model task composition
-- `plan-task` — Task decomposition
-- `mermaid` — Diagram validation
-- `scratchpad` — Scratch code conventions
-
 ## Current Implementation Status
 
-### ✅ Complete
-- Agent profiles with `allowed_tools` field (fine-grained permissions)
-- ExplicitToolsResolver + factory (per-harness tool mapping)
-- Run preparation integration (wired in _run_prepare.py)
-- Space launch integration (wired in launch.py)
-- All tests passing (247 tests, 19 agent profile tests)
-- Bundled profiles fixed (workspace-write → space-write, terminology updated)
-
-### ❌ Not Yet Started
+### Meridian Overhaul to align with philosophy
 - Phase 0: Validation Audit (compare current implementation vs. ARCHITECTURE.md)
 - Phase 1: CLI Refactoring (implement `meridian fs` commands)
 - Phase 2: Space Metadata Migration (SQLite → `.meridian/<space-id>/space.md` files)
@@ -116,19 +97,6 @@ All 7 meridian-collab skills copied to `.claude/skills/`:
 - **tests/test_default_agent_profiles.py** — 19 comprehensive agent profile tests (all passing)
 - Run all: `uv run pytest` (247 tests pass)
 
-## Git Status
-
-### Changes Staged/Ready to Commit
-- `meridian-channel/CLAUDE.md` — New philosophy-focused dev guide
-- `meridian-channel/README.md` — Updated with philosophy + core concepts
-- `meridian-channel/src/meridian/resources/.agents/agents/agent.md` — Fixed sandbox (workspace-write → space-write)
-- `meridian-channel/src/meridian/resources/.agents/agents/supervisor.md` — Updated terminology, cleaned skills
-- Copied `.claude/` and `.agents/` from root for self-contained development
-
-### Documentation Moved
-- `_docs/meridian-channel/` → `meridian-channel/` (VISION.md, ARCHITECTURE.md, BEHAVIORS.md, etc.)
-- Root README.md cleaned (removed Agent Coordination section, moved to meridian-channel/README.md)
-
 ## Session Context Summary
 
 Previous work:
@@ -138,13 +106,6 @@ Previous work:
 4. Defined MVP scope (Claude-first, tracked fallbacks)
 5. Fixed bundled profiles + terminology alignment
 6. Set up self-contained submodule with full skills/agents support
-
-## What NOT to Do
-
-- ❌ Don't work from root directory context—focus on meridian-channel
-- ❌ Don't implement features without reviewing relevant phase section in IMPLEMENTATION-PLAN.md
-- ❌ Don't modify SQLite schema before Phase 2 decision gate
-- ❌ Don't remove `--skills` flag before Phase 1 plan is approved (deprecated but still used)
 
 ## Recommended Next Conversation
 

@@ -57,6 +57,9 @@ AGENT_TOOLS=""                   # comma-separated tool allowlist from agent pro
 AGENT_SANDBOX=""                 # Codex sandbox: read-only, workspace-write, danger-full-access (or empty)
 # Kill hung harness invocations (default: 30 minutes).
 TIMEOUT_MINUTES=30
+# Fail runs that produce no stdout/stderr activity for this many seconds.
+# Set to 0 via --idle-timeout to disable.
+IDLE_TIMEOUT_SECONDS=300
 SKILLS=()
 PROMPT=""
 CLI_PROMPT=""

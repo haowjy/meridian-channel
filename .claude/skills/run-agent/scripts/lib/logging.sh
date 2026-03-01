@@ -60,12 +60,13 @@ setup_logging() {
 
 write_log_params() {
   local cli_cmd="$1"
-  local skills_json labels_json now_utc session_id timeout_minutes
+  local skills_json labels_json now_utc session_id timeout_minutes idle_timeout_seconds
   skills_json="$(build_skills_json)"
   labels_json="$(build_labels_json)"
   now_utc="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
   session_id="${SESSION_ID:-$RUN_ID}"
-  timeout_minutes="${TIMEOUT_MINUTES:-15}"
+  timeout_minutes="${TIMEOUT_MINUTES:-30}"
+  idle_timeout_seconds="${IDLE_TIMEOUT_SECONDS:-300}"
 
   cat > "$LOG_DIR/params.json" <<EOF
 {
@@ -74,6 +75,7 @@ write_log_params() {
   "model": "$(json_escape "$MODEL")",
   "variant": "$(json_escape "$VARIANT")",
   "timeout_minutes": $timeout_minutes,
+  "idle_timeout_seconds": $idle_timeout_seconds,
   "agent": "$(json_escape "${AGENT_NAME:-}")",
   "tools": "$(json_escape "${AGENT_TOOLS:-}")",
   "sandbox": "$(json_escape "${AGENT_SANDBOX:-}")",
