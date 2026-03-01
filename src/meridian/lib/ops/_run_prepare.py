@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from difflib import get_close_matches
-import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -270,37 +269,10 @@ def _build_create_payload(
     # This keeps skills persistent across context compaction.
     native_agents = harness.capabilities.supports_native_agents
 
-    # Determine ad-hoc agent JSON (only for native-agent harnesses)
+    # With --skills removed, skills come exclusively from the agent profile.
+    # Native-agent harnesses either use the profile name directly or no agent.
     adhoc_agent_json = ""
     agent_for_params = defaults.agent_name
-
-    if native_agents:
-        if profile is not None:
-            profile_skill_set = set(profile.skills)
-            extra_skills = [s for s in defaults.skills if s not in profile_skill_set]
-            if extra_skills:
-                # Case 2: Named agent + extra skills -> ad-hoc agent with all skills
-                adhoc_agent_json = json.dumps(
-                    {
-                        "meridian-adhoc": {
-                            "prompt": profile.body.strip(),
-                            "skills": list(defaults.skills),
-                        }
-                    }
-                )
-                agent_for_params = "meridian-adhoc"
-            # else Case 1: Named agent, no extra skills -> native passthrough (agent_for_params already set)
-        elif defaults.skills:
-            # Case 3: No agent, just skills -> ad-hoc agent with skills only
-            adhoc_agent_json = json.dumps(
-                {
-                    "meridian-adhoc": {
-                        "skills": list(defaults.skills),
-                    }
-                }
-            )
-            agent_for_params = "meridian-adhoc"
-        # else Case 4: No agent, no skills -> bare prompt (agent_for_params stays None)
 
     composed_prompt = compose_run_prompt_text(
         skills=() if native_agents else resolved_skills.loaded_skills,

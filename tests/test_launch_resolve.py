@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+import meridian.lib.launch_resolve as launch_resolve
 from meridian.lib.config.agent import AgentProfile
 from meridian.lib.launch_resolve import (
     load_agent_profile_with_fallback,
@@ -85,6 +88,64 @@ def test_load_profile_no_profiles_returns_none(tmp_path: Path) -> None:
     assert profile is None
 
 
+def test_load_profile_whitespace_only_requested_agent_falls_through(tmp_path: Path) -> None:
+    _write_agent(tmp_path, name="configured-primary", model="claude-opus-4-6")
+    _write_agent(tmp_path, name="fallback-primary", model="claude-sonnet-4-6")
+
+    profile = load_agent_profile_with_fallback(
+        repo_root=tmp_path,
+        requested_agent="  ",
+        configured_default="configured-primary",
+        fallback_name="fallback-primary",
+    )
+
+    assert profile is not None
+    assert profile.name == "configured-primary"
+
+
+def test_load_profile_configured_default_equals_fallback_no_double_load(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    calls: list[str] = []
+
+    def _fake_load_agent_profile(
+        name: str,
+        *,
+        repo_root: Path,
+        search_paths: object | None = None,
+    ) -> AgentProfile:
+        calls.append(name)
+        if name != "agent":
+            raise FileNotFoundError(name)
+        return AgentProfile(
+            name="agent",
+            description="",
+            model="gpt-5.3-codex",
+            variant=None,
+            skills=(),
+            allowed_tools=(),
+            mcp_tools=(),
+            sandbox="workspace-write",
+            variant_models=(),
+            body="",
+            path=repo_root / ".agents" / "agents" / "agent.md",
+            raw_content="",
+        )
+
+    monkeypatch.setattr(launch_resolve, "load_agent_profile", _fake_load_agent_profile)
+
+    profile = load_agent_profile_with_fallback(
+        repo_root=tmp_path,
+        configured_default="agent",
+        fallback_name="agent",
+    )
+
+    assert profile is not None
+    assert profile.name == "agent"
+    assert calls == ["agent"]
+
+
 def test_resolve_skills_filters_unavailable(tmp_path: Path) -> None:
     _write_skill(tmp_path, name="reviewing")
 
@@ -110,6 +171,19 @@ def test_resolve_skills_builds_sources(tmp_path: Path) -> None:
 
     assert resolved.skill_names == ("orchestrate",)
     assert resolved.skill_sources == {"orchestrate": skill_file.parent.resolve()}
+
+
+def test_resolve_skills_empty_profile_skills(tmp_path: Path) -> None:
+    resolved = resolve_skills_from_profile(
+        profile_skills=(),
+        repo_root=tmp_path,
+        readonly=True,
+    )
+
+    assert resolved.skill_names == ()
+    assert resolved.loaded_skills == ()
+    assert resolved.skill_sources == {}
+    assert resolved.missing_skills == ()
 
 
 def test_permission_tier_from_sandbox() -> None:

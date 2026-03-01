@@ -58,6 +58,9 @@ class SpaceLaunchRequest:
     dry_run: bool = False
     permission_tier: str | None = None
     unsafe: bool = False
+    # Future: timeout/budget/guardrails/secrets are declared for flag parity
+    # with run spawn but not yet wired into the primary launch path.
+    # They will be consumed when the execution layers are unified (Step 4).
     timeout_secs: float | None = None
     budget_per_run_usd: float | None = None
     budget_per_space_usd: float | None = None
@@ -175,6 +178,11 @@ def _build_interactive_command(
         search_paths=resolved_config.search_paths,
         readonly=True,
     )
+    if resolved_skills.missing_skills:
+        logger.warning(
+            "Skipped unavailable skills for primary agent: %s",
+            ", ".join(resolved_skills.missing_skills),
+        )
     resolved_skill_sources = resolved_skills.skill_sources
 
     materialization_chat_id = chat_id.strip() or f"tmp-{uuid4().hex[:8]}"
@@ -273,6 +281,11 @@ def _resolve_primary_session_metadata(
         search_paths=config.search_paths,
         readonly=True,
     )
+    if resolved_skills.missing_skills:
+        logger.warning(
+            "Skipped unavailable skills for primary agent: %s",
+            ", ".join(resolved_skills.missing_skills),
+        )
     skill_names = resolved_skills.skill_names
     skill_paths = tuple(
         Path(skill.path).expanduser().resolve().as_posix()
@@ -416,9 +429,10 @@ def _cleanup_launch_materialized(*, repo_root: Path, harness_id: str, chat_id: s
         cleanup_materialized(harness_id, repo_root, chat_id)
     except Exception:
         logger.warning(
-            "Failed to cleanup primary-session materialized harness resources.",
-            harness_id=harness_id,
-            chat_id=chat_id,
+            "Failed to cleanup primary-session materialized harness resources "
+            "(harness=%s, chat=%s).",
+            harness_id,
+            chat_id,
             exc_info=True,
         )
 
