@@ -85,7 +85,7 @@ def _run_create(
     ] = False,
     stream: Annotated[
         bool,
-        Parameter(name="--stream", help="Stream harness output while command runs."),
+        Parameter(name="--stream", help="Stream raw harness output to terminal (debug only).", show=False),
     ] = False,
     background: Annotated[
         bool,

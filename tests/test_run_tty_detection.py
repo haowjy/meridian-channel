@@ -38,14 +38,15 @@ def _run_with_captured_stream_flags(
     return captured
 
 
-def test_run_create_non_tty_uses_append_only_streaming(monkeypatch, tmp_path: Path) -> None:
+def test_run_create_non_tty_uses_event_filter(monkeypatch, tmp_path: Path) -> None:
     captured = _run_with_captured_stream_flags(
         monkeypatch=monkeypatch,
         tmp_path=tmp_path,
         stdout_is_tty=False,
     )
-    assert captured["event_observer"] is None
-    assert captured["stream_stdout_to_terminal"] is True
+    # Non-TTY callers get filtered event output, not raw dumps.
+    assert callable(captured["event_observer"])
+    assert captured["stream_stdout_to_terminal"] is False
     assert captured["stream_stderr_to_terminal"] is False
 
 

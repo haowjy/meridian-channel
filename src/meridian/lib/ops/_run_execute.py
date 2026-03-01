@@ -579,7 +579,6 @@ def _execute_run_background(
             harness_id=prepared.harness_id,
             warning=prepared.warning,
             agent=prepared.agent_name,
-            skills=prepared.skills,
             reference_files=prepared.reference_files,
             template_vars=prepared.template_vars,
             report_path=prepared.report_path,
@@ -599,7 +598,6 @@ def _execute_run_background(
         harness_id=prepared.harness_id,
         warning=prepared.warning,
         agent=prepared.agent_name,
-        skills=prepared.skills,
         reference_files=prepared.reference_files,
         template_vars=prepared.template_vars,
         report_path=prepared.report_path,
@@ -644,15 +642,18 @@ def _execute_run_blocking(
     started = time.monotonic()
     space_id_str = str(space_id)
     event_observer = None
-    stdout_is_tty = _stdout_is_tty()
-    stream_stdout_to_terminal = payload.stream or not stdout_is_tty
-    if not payload.stream and stdout_is_tty:
+    # --stream: raw firehose (stdout+stderr piped to terminal), no filtering.
+    # Otherwise (TTY or not): use TerminalEventFilter for structured output.
+    # Non-TTY callers (CI, parent agents) should never get raw dumps.
+    stream_stdout_to_terminal = payload.stream
+    if not payload.stream:
         event_filter = TerminalEventFilter(
             visible_categories=resolve_visible_categories(
                 verbose=payload.verbose,
                 quiet=payload.quiet,
                 config=runtime.config.output,
             ),
+            output_stream=sys.stderr,
             root_depth=_read_non_negative_int_env("MERIDIAN_DEPTH", 0),
         )
         event_observer = event_filter.observe
@@ -766,7 +767,6 @@ def _execute_run_blocking(
         harness_id=prepared.harness_id,
         warning=prepared.warning,
         agent=resolved_agent_name,
-        skills=prepared.skills,
         reference_files=prepared.reference_files,
         template_vars=prepared.template_vars,
         report_path=prepared.report_path,
