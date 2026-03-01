@@ -189,6 +189,8 @@ def test_bug16_show_unknown_resource_emits_clean_error(
 ) -> None:
     repo_root = tmp_path / "repo"
     _seed_base_skills(repo_root)
+    if args[:2] == ["run", "show"]:
+        cli_env["MERIDIAN_SPACE_ID"] = "s1"
 
     result = _run_cli(
         package_root=package_root,

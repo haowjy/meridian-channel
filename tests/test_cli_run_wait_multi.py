@@ -14,7 +14,7 @@ def _detail(run_id: str, status: str, exit_code: int | None) -> RunDetailOutput:
         status=status,
         model="gpt-5.3-codex",
         harness="codex",
-        workspace_id=None,
+        space_id=None,
         started_at="2026-02-27T00:00:00Z",
         finished_at="2026-02-27T00:00:01Z",
         duration_secs=1.0,

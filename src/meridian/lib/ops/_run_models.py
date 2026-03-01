@@ -29,13 +29,13 @@ class RunCreateInput:
     quiet: bool = False
     stream: bool = False
     background: bool = False
-    workspace: str | None = None
+    space: str | None = None
     repo_root: str | None = None
     timeout_secs: float | None = None
     permission_tier: str | None = None
     unsafe: bool = False
     budget_per_run_usd: float | None = None
-    budget_per_workspace_usd: float | None = None
+    budget_per_space_usd: float | None = None
     guardrails: tuple[str, ...] = ()
     secrets: tuple[str, ...] = ()
     continue_session_id: str | None = None
@@ -96,11 +96,11 @@ class RunActionOutput:
 
 @dataclass(frozen=True, slots=True)
 class RunListInput:
-    workspace: str | None = None
+    space: str | None = None
     status: RunStatus | None = None
     model: str | None = None
     limit: int = 20
-    no_workspace: bool = False
+    no_space: bool = False
     failed: bool = False
     repo_root: str | None = None
 
@@ -108,7 +108,7 @@ class RunListInput:
 @dataclass(frozen=True, slots=True)
 class RunStatsInput:
     session: str | None = None
-    workspace: str | None = None
+    space: str | None = None
     repo_root: str | None = None
 
 
@@ -148,7 +148,7 @@ class RunListEntry:
     run_id: str
     status: str
     model: str
-    workspace_id: str | None
+    space_id: str | None
     duration_secs: float | None
     cost_usd: float | None
 
@@ -158,7 +158,7 @@ class RunListEntry:
             self.run_id,
             self.status,
             self.model,
-            self.workspace_id if self.workspace_id is not None else "-",
+            self.space_id if self.space_id is not None else "-",
             f"{self.duration_secs:.1f}s" if self.duration_secs is not None else "-",
             f"${self.cost_usd:.2f}" if self.cost_usd is not None else "-",
         ]
@@ -191,7 +191,7 @@ class RunDetailOutput:
     status: str
     model: str
     harness: str
-    workspace_id: str | None
+    space_id: str | None
     started_at: str
     finished_at: str | None
     duration_secs: float | None
@@ -235,7 +235,7 @@ class RunDetailOutput:
             ("Status", status_str),
             ("Model", f"{self.model} ({self.harness})"),
             ("Duration", duration_value),
-            ("Workspace", self.workspace_id),
+            ("Space", self.space_id),
             ("Skills", ", ".join(self.skills) if self.skills else None),
             ("Failure", self.failure_reason),
             ("Cost", cost_value),
@@ -250,16 +250,6 @@ class RunContinueInput:
     prompt: str
     model: str = ""
     fork: bool = False
-    timeout_secs: float | None = None
-    repo_root: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class RunRetryInput:
-    run_id: str
-    prompt: str | None = None
-    model: str = ""
-    fork: bool = True
     timeout_secs: float | None = None
     repo_root: str | None = None
 
@@ -311,8 +301,8 @@ class RunListFilters:
     """Type-safe run-list filters converted into parameterized SQL."""
 
     model: str | None = None
-    workspace: str | None = None
-    no_workspace: bool = False
+    space: str | None = None
+    no_space: bool = False
     status: RunStatus | None = None
     failed: bool = False
     limit: int = 20

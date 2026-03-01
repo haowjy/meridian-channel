@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 import stat
 import sys
 import textwrap
@@ -11,8 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from meridian.lib.adapters.sqlite import StateDB
-from meridian.lib.domain import RunCreateParams, TokenUsage, WorkspaceCreateParams
+from meridian.lib.domain import Run, TokenUsage
 from meridian.lib.exec.spawn import execute_with_finalization, sanitize_child_env
 from meridian.lib.harness._common import (
     extract_session_id_from_artifacts,
@@ -36,8 +34,11 @@ from meridian.lib.safety.permissions import (
     permission_flags_for_harness,
 )
 from meridian.lib.safety.redaction import SecretSpec
+from meridian.lib.space.space_file import create_space
+from meridian.lib.state import run_store
 from meridian.lib.state.artifact_store import LocalStore, make_artifact_key
-from meridian.lib.types import HarnessId, ModelId, RunId
+from meridian.lib.state.paths import resolve_space_dir
+from meridian.lib.types import HarnessId, ModelId, RunId, SpaceId
 
 
 class ScriptHarnessAdapter:
@@ -70,13 +71,20 @@ class ScriptHarnessAdapter:
         return extract_session_id_from_artifacts(artifacts, run_id)
 
 
-def _fetch_run_row(state: StateDB, run_id: RunId) -> sqlite3.Row:
-    conn = sqlite3.connect(state.paths.db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        row = conn.execute("SELECT * FROM runs WHERE id = ?", (str(run_id),)).fetchone()
-    finally:
-        conn.close()
+def _create_run(repo_root: Path, *, prompt: str, run_id: str = "r1") -> tuple[Run, Path]:
+    space = create_space(repo_root, name="slice7")
+    run = Run(
+        run_id=RunId(run_id),
+        prompt=prompt,
+        model=ModelId("gpt-5.3-codex"),
+        status="queued",
+        space_id=SpaceId(space.id),
+    )
+    return run, resolve_space_dir(repo_root, space.id)
+
+
+def _fetch_run_row(space_dir: Path, run_id: RunId) -> run_store.RunRecord:
+    row = run_store.get_run(space_dir, run_id)
     assert row is not None
     return row
 
@@ -101,10 +109,7 @@ def test_danger_permission_requires_unsafe() -> None:
 
 @pytest.mark.asyncio
 async def test_budget_breach_sigterms_process_and_marks_run_failed(tmp_path: Path) -> None:
-    state = StateDB(tmp_path)
-    run = state.create_run(
-        RunCreateParams(prompt="budget", model=ModelId("gpt-5.3-codex"))
-    )
+    run, space_dir = _create_run(tmp_path, prompt="budget")
     artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
 
     script = tmp_path / "budget.py"
@@ -124,7 +129,8 @@ async def test_budget_breach_sigterms_process_and_marks_run_failed(tmp_path: Pat
 
     exit_code = await execute_with_finalization(
         run,
-        state=state,
+        repo_root=tmp_path,
+        space_dir=space_dir,
         artifacts=artifacts,
         registry=registry,
         harness_id=adapter.id,
@@ -133,24 +139,17 @@ async def test_budget_breach_sigterms_process_and_marks_run_failed(tmp_path: Pat
     )
 
     assert exit_code == 2
-    row = _fetch_run_row(state, run.run_id)
-    assert row["failure_reason"] == "budget_exceeded"
+    row = _fetch_run_row(space_dir, run.run_id)
+    assert row.error == "budget_exceeded"
 
 
 @pytest.mark.asyncio
-async def test_workspace_totals_track_cost_across_runs(tmp_path: Path) -> None:
-    state = StateDB(tmp_path)
-    workspace = state.create_workspace(WorkspaceCreateParams(name="slice7"))
-    run = state.create_run(
-        RunCreateParams(
-            prompt="workspace-budget",
-            model=ModelId("gpt-5.3-codex"),
-            workspace_id=workspace.workspace_id,
-        )
-    )
+async def test_space_run_stats_track_cost_across_runs(tmp_path: Path) -> None:
+    space = create_space(tmp_path, name="slice7")
+    space_dir = resolve_space_dir(tmp_path, space.id)
     artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
 
-    script = tmp_path / "workspace-cost.py"
+    script = tmp_path / "space-cost.py"
     _write_script(
         script,
         """
@@ -167,41 +166,55 @@ async def test_workspace_totals_track_cost_across_runs(tmp_path: Path) -> None:
     registry = HarnessRegistry()
     registry.register(adapter)
 
-    exit_code = await execute_with_finalization(
-        run,
-        state=state,
-        artifacts=artifacts,
-        registry=registry,
-        harness_id=adapter.id,
-        cwd=tmp_path,
+    first = Run(
+        run_id=RunId("r1"),
+        prompt="space-budget-1",
+        model=ModelId("gpt-5.3-codex"),
+        status="queued",
+        space_id=SpaceId(space.id),
     )
-    assert exit_code == 0
+    second = Run(
+        run_id=RunId("r2"),
+        prompt="space-budget-2",
+        model=ModelId("gpt-5.3-codex"),
+        status="queued",
+        space_id=SpaceId(space.id),
+    )
 
-    conn = sqlite3.connect(state.paths.db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        workspace_row = conn.execute(
-            (
-                "SELECT total_cost_usd, total_input_tokens, total_output_tokens "
-                "FROM workspaces WHERE id = ?"
-            ),
-            (str(workspace.workspace_id),),
-        ).fetchone()
-    finally:
-        conn.close()
+    assert (
+        await execute_with_finalization(
+            first,
+            repo_root=tmp_path,
+            space_dir=space_dir,
+            artifacts=artifacts,
+            registry=registry,
+            harness_id=adapter.id,
+            cwd=tmp_path,
+        )
+        == 0
+    )
+    assert (
+        await execute_with_finalization(
+            second,
+            repo_root=tmp_path,
+            space_dir=space_dir,
+            artifacts=artifacts,
+            registry=registry,
+            harness_id=adapter.id,
+            cwd=tmp_path,
+        )
+        == 0
+    )
 
-    assert workspace_row is not None
-    assert workspace_row["total_cost_usd"] == pytest.approx(0.33)
-    assert workspace_row["total_input_tokens"] == 12
-    assert workspace_row["total_output_tokens"] == 5
+    stats = run_store.run_stats(space_dir)
+    assert stats["total_cost_usd"] == pytest.approx(0.66)
+    assert stats["total_input_tokens"] == 24
+    assert stats["total_output_tokens"] == 10
 
 
 @pytest.mark.asyncio
 async def test_guardrail_failure_triggers_retry(tmp_path: Path) -> None:
-    state = StateDB(tmp_path)
-    run = state.create_run(
-        RunCreateParams(prompt="guardrails", model=ModelId("gpt-5.3-codex"))
-    )
+    run, space_dir = _create_run(tmp_path, prompt="guardrails")
     artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
 
     run_counter = tmp_path / "run-counter.txt"
@@ -250,7 +263,8 @@ async def test_guardrail_failure_triggers_retry(tmp_path: Path) -> None:
 
     exit_code = await execute_with_finalization(
         run,
-        state=state,
+        repo_root=tmp_path,
+        space_dir=space_dir,
         artifacts=artifacts,
         registry=registry,
         harness_id=adapter.id,
@@ -268,10 +282,7 @@ async def test_guardrail_failure_triggers_retry(tmp_path: Path) -> None:
 async def test_secret_redaction_applies_to_output_stderr_and_report(tmp_path: Path) -> None:
     secret_value = "SUPER-SECRET-123"
 
-    state = StateDB(tmp_path)
-    run = state.create_run(
-        RunCreateParams(prompt="redact", model=ModelId("gpt-5.3-codex"))
-    )
+    run, space_dir = _create_run(tmp_path, prompt="redact")
     artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
 
     script = tmp_path / "redact.py"
@@ -280,7 +291,7 @@ async def test_secret_redaction_applies_to_output_stderr_and_report(tmp_path: Pa
         """
         import os
         import sys
-        
+
         value = os.getenv("MERIDIAN_SECRET_API_KEY", "")
         print(f'{{"role":"assistant","content":"value={value}"}}', flush=True)
         print(f"stderr={value}", file=sys.stderr, flush=True)
@@ -293,7 +304,8 @@ async def test_secret_redaction_applies_to_output_stderr_and_report(tmp_path: Pa
 
     exit_code = await execute_with_finalization(
         run,
-        state=state,
+        repo_root=tmp_path,
+        space_dir=space_dir,
         artifacts=artifacts,
         registry=registry,
         harness_id=adapter.id,
@@ -350,7 +362,7 @@ def test_sanitize_child_env_filters_parent_secrets_and_keeps_explicit_overrides(
     assert "EXAMPLE_KEY" not in sanitized
 
 
-def test_sanitize_child_env_does_not_leak_supervisor_autocompact_override() -> None:
+def test_sanitize_child_env_does_not_leak_primary_autocompact_override() -> None:
     sanitized = sanitize_child_env(
         base_env={
             "PATH": "/usr/bin",
@@ -374,10 +386,7 @@ async def test_execute_with_finalization_passes_required_credentials_only(
     monkeypatch.setenv("SLICE7C_UNRELATED_TOKEN", "slice7c-blocked")
     monkeypatch.setenv("SLICE7C_MISC_VALUE", "slice7c-drop")
 
-    state = StateDB(tmp_path)
-    run = state.create_run(
-        RunCreateParams(prompt="env-policy", model=ModelId("gpt-5.3-codex"))
-    )
+    run, space_dir = _create_run(tmp_path, prompt="env-policy")
     artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
 
     script = tmp_path / "env-policy.py"
@@ -407,7 +416,8 @@ async def test_execute_with_finalization_passes_required_credentials_only(
 
     exit_code = await execute_with_finalization(
         run,
-        state=state,
+        repo_root=tmp_path,
+        space_dir=space_dir,
         artifacts=artifacts,
         registry=registry,
         harness_id=adapter.id,

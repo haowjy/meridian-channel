@@ -1,338 +1,182 @@
-"""State-layer tests for Slice 1 acceptance criteria."""
+"""State-layer tests for file-authoritative stores."""
 
 from __future__ import annotations
 
 import dataclasses
 import json
 import multiprocessing
-import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
-from meridian.lib.adapters.sqlite import (
-    RunFinalizeRow,
-    RunStartRow,
-    SQLiteContextStore,
-    SQLiteRunStore,
-    SQLiteRunStoreSync,
-    SQLiteWorkspaceStore,
-    StateDB,
-)
-from meridian.lib.domain import (
-    ArtifactRecord,
-    PinnedFile,
-    Run,
-    RunCreateParams,
-    RunEdge,
-    RunEnrichment,
-    RunFilters,
-    Span,
-    TokenUsage,
-    WorkflowEvent,
-    Workspace,
-    WorkspaceCreateParams,
-)
+from meridian.lib.domain import PinnedFile, Run, Space, Span, WorkflowEvent
+from meridian.lib.space.session_store import get_last_session, start_session, stop_session
+from meridian.lib.space.space_file import create_space, get_space, update_space_status
 from meridian.lib.state.artifact_store import InMemoryStore, LocalStore, make_artifact_key
-from meridian.lib.state import db as state_db
-from meridian.lib.state.db import get_busy_timeout, get_journal_mode, open_connection
-from meridian.lib.state.id_gen import next_run_id
-from meridian.lib.state.schema import (
-    LATEST_SCHEMA_VERSION,
-    REQUIRED_TABLES,
-    get_schema_version,
-    list_tables,
-)
-from meridian.lib.types import HarnessId, ModelId, RunId, SpanId, TraceId
+from meridian.lib.state.id_gen import next_run_id, next_session_id, next_space_id
+from meridian.lib.state.run_store import finalize_run, get_run, list_runs, run_stats, start_run
+from meridian.lib.state.paths import resolve_space_dir
+from meridian.lib.types import RunId, SpanId, TraceId
 
 
-def _write_start_and_finalize(repo_root: str, idx: int) -> None:
+def _write_start_and_finalize(repo_root: str, space_id: str, idx: int) -> None:
     root = Path(repo_root)
-    state = StateDB(root)
+    space_dir = resolve_space_dir(root, space_id)
     run_id = RunId(f"rlock{idx}")
-    log_dir = root / ".meridian" / "runs" / str(run_id)
-
-    state.append_start_row(
-        RunStartRow(
-            run_id=run_id,
-            model=ModelId("gpt-5.3-codex"),
-            harness=HarnessId("codex"),
-            cwd=root,
-            log_dir=log_dir,
-            session_id=str(run_id),
-        )
+    start_run(
+        space_dir,
+        run_id=run_id,
+        session_id=f"c{idx}",
+        model="gpt-5.3-codex",
+        agent="coder",
+        harness="codex",
+        prompt=f"job-{idx}",
+        started_at="2026-02-25T00:00:00Z",
     )
-    state.append_finalize_row(
+    finalize_run(
+        space_dir,
         run_id,
-        RunFinalizeRow(
-            exit_code=0,
-            duration_seconds=0.1,
-            output_log=log_dir / "output.jsonl",
-            report_path=log_dir / "report.md",
-            harness_session_id="hsess",
-            input_tokens=123,
-            output_tokens=45,
-        ),
+        "succeeded",
+        0,
+        duration_secs=0.1,
+        finished_at="2026-02-25T00:00:01Z",
     )
 
 
-def test_schema_bootstrap_and_db_pragmas(tmp_path: Path) -> None:
-    state = StateDB(tmp_path)
-    assert state.paths.db_path.exists()
+def test_space_and_run_crud_with_file_backed_stores(tmp_path: Path) -> None:
+    space = create_space(tmp_path, name="writer-room")
+    space_dir = resolve_space_dir(tmp_path, space.id)
 
-    conn = open_connection(state.paths.db_path)
-    try:
-        assert get_journal_mode(conn) == "wal"
-        assert get_busy_timeout(conn) == 5000
-        assert REQUIRED_TABLES.issubset(list_tables(conn))
-        assert get_schema_version(conn) == LATEST_SCHEMA_VERSION
-    finally:
-        conn.close()
+    assert space.id == "s1"
+    assert get_space(tmp_path, space.id) is not None
 
-
-def test_open_connection_retries_when_database_is_locked(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    db_path = tmp_path / ".meridian" / "index" / "runs.db"
-    attempts = {"count": 0}
-    real_connect = state_db.sqlite3.connect
-
-    def flaky_connect(*args: object, **kwargs: object) -> sqlite3.Connection:
-        attempts["count"] += 1
-        if attempts["count"] < 3:
-            raise sqlite3.OperationalError("database is locked")
-        return real_connect(*args, **kwargs)
-
-    monkeypatch.setattr(state_db.sqlite3, "connect", flaky_connect)
-
-    conn = state_db.open_connection(db_path, lock_retries=4, lock_backoff_secs=0.0)
-    try:
-        assert get_schema_version(conn) == LATEST_SCHEMA_VERSION
-    finally:
-        conn.close()
-
-    assert attempts["count"] == 3
-
-
-def test_open_connection_classifies_corruption_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    db_path = tmp_path / ".meridian" / "index" / "runs.db"
-
-    def corrupt_connect(*args: object, **kwargs: object) -> sqlite3.Connection:
-        _ = args, kwargs
-        raise sqlite3.OperationalError("database disk image is malformed")
-
-    monkeypatch.setattr(state_db.sqlite3, "connect", corrupt_connect)
-
-    with pytest.raises(sqlite3.OperationalError, match="appears corrupt"):
-        state_db.open_connection(db_path, lock_retries=0, lock_backoff_secs=0.0)
-
-
-def test_run_and_workspace_crud_with_counter_ids(tmp_path: Path) -> None:
-    state = StateDB(tmp_path)
-
-    workspace = state.create_workspace(WorkspaceCreateParams(name="writer-room"))
-    assert str(workspace.workspace_id) == "w1"
-
-    standalone_run = state.create_run(
-        RunCreateParams(prompt="standalone", model=ModelId("claude-opus-4-6"))
+    run_1 = start_run(
+        space_dir,
+        session_id="c1",
+        model="claude-opus-4-6",
+        agent="planner",
+        harness="claude",
+        prompt="standalone",
     )
-    ws_run_1 = state.create_run(
-        RunCreateParams(
-            prompt="workspace-1",
-            model=ModelId("gpt-5.3-codex"),
-            workspace_id=workspace.workspace_id,
-        )
-    )
-    ws_run_2 = state.create_run(
-        RunCreateParams(
-            prompt="workspace-2",
-            model=ModelId("gpt-5.3-codex"),
-            workspace_id=workspace.workspace_id,
-        )
+    run_2 = start_run(
+        space_dir,
+        session_id="c1",
+        model="gpt-5.3-codex",
+        agent="coder",
+        harness="codex",
+        prompt="space-1",
     )
 
-    assert str(standalone_run.run_id) == "r1"
-    assert str(ws_run_1.run_id) == "w1/r1"
-    assert str(ws_run_2.run_id) == "w1/r2"
+    finalize_run(space_dir, run_1, "failed", 1)
+    finalize_run(space_dir, run_2, "succeeded", 0, input_tokens=10, output_tokens=20)
 
-    loaded = state.get_run(ws_run_1.run_id)
+    loaded = get_run(space_dir, run_2)
     assert loaded is not None
-    assert loaded.prompt == "workspace-1"
+    assert loaded.prompt == "space-1"
+    assert loaded.status == "succeeded"
+    assert loaded.input_tokens == 10
+    assert loaded.output_tokens == 20
 
-    state.update_run_status(ws_run_1.run_id, "running")
-    state.enrich_run(
-        ws_run_1.run_id,
-        RunEnrichment(
-            usage=TokenUsage(input_tokens=10, output_tokens=20),
-            report_path=tmp_path / "report.md",
-        ),
+    summaries = list_runs(space_dir, filters={"model": "gpt-5.3-codex"})
+    assert [summary.id for summary in summaries] == ["r2"]
+
+
+def test_space_status_transitions_and_finish_timestamp(tmp_path: Path) -> None:
+    space = create_space(tmp_path, name="status")
+
+    closed = update_space_status(tmp_path, space.id, "closed")
+    assert closed.status == "closed"
+    assert closed.finished_at is not None
+
+    reopened = update_space_status(tmp_path, space.id, "active")
+    assert reopened.status == "active"
+    assert reopened.finished_at is None
+
+
+def test_run_stats_aggregate_duration_cost_and_tokens(tmp_path: Path) -> None:
+    space = create_space(tmp_path, name="stats")
+    space_dir = resolve_space_dir(tmp_path, space.id)
+
+    r1 = start_run(
+        space_dir,
+        session_id="c1",
+        model="gpt-5.3-codex",
+        agent="coder",
+        harness="codex",
+        prompt="a",
+    )
+    r2 = start_run(
+        space_dir,
+        session_id="c2",
+        model="claude-sonnet-4-6",
+        agent="reviewer",
+        harness="claude",
+        prompt="b",
     )
 
-    summaries = state.list_runs(RunFilters(workspace_id=workspace.workspace_id))
-    assert {str(summary.run_id) for summary in summaries} == {"w1/r1", "w1/r2"}
-
-
-def test_append_start_finalize_dual_write_and_relative_paths(tmp_path: Path) -> None:
-    state = StateDB(tmp_path)
-    run = state.create_run(RunCreateParams(prompt="hello", model=ModelId("gpt-5.3-codex")))
-
-    run_dir = tmp_path / ".meridian" / "runs" / str(run.run_id)
-    started_at = datetime(2026, 2, 25, 0, 0, 0, tzinfo=UTC)
-    finished_at = datetime(2026, 2, 25, 0, 0, 4, tzinfo=UTC)
-
-    state.append_start_row(
-        RunStartRow(
-            run_id=run.run_id,
-            model=ModelId("gpt-5.3-codex"),
-            harness=HarnessId("codex"),
-            cwd=tmp_path,
-            log_dir=run_dir,
-            session_id="session-1",
-            started_at=started_at,
-        )
+    finalize_run(
+        space_dir,
+        r1,
+        "succeeded",
+        0,
+        duration_secs=4.0,
+        total_cost_usd=0.1,
+        input_tokens=100,
+        output_tokens=50,
     )
-    state.append_finalize_row(
-        run.run_id,
-        RunFinalizeRow(
-            exit_code=0,
-            duration_seconds=4.0,
-            finished_at=finished_at,
-            output_log=run_dir / "output.jsonl",
-            report_path=run_dir / "report.md",
-            input_tokens=222,
-            output_tokens=111,
-        ),
+    finalize_run(
+        space_dir,
+        r2,
+        "failed",
+        1,
+        duration_secs=6.0,
+        total_cost_usd=0.2,
+        input_tokens=20,
+        output_tokens=10,
     )
 
-    rows = state.read_jsonl_rows()
-    assert len(rows) == 2
-    assert rows[0]["status"] == "running"
-    assert rows[1]["status"] == "succeeded"
-
-    conn = open_connection(state.paths.db_path)
-    try:
-        row = conn.execute(
-            "SELECT status, cwd, log_dir, output_log, report_path FROM runs WHERE id = ?",
-            (str(run.run_id),),
-        ).fetchone()
-    finally:
-        conn.close()
-
-    assert row is not None
-    assert row["status"] == "succeeded"
-    for key in ("cwd", "log_dir", "output_log", "report_path"):
-        value = str(row[key])
-        assert not Path(value).is_absolute()
+    stats = run_stats(space_dir)
+    assert stats["total_runs"] == 2
+    assert stats["by_status"] == {"failed": 1, "succeeded": 1}
+    assert stats["by_model"] == {"claude-sonnet-4-6": 1, "gpt-5.3-codex": 1}
+    assert stats["total_duration_secs"] == 10.0
+    assert stats["total_cost_usd"] == pytest.approx(0.3)
+    assert stats["total_input_tokens"] == 120
+    assert stats["total_output_tokens"] == 60
 
 
-def test_events_spans_edges_and_artifacts(tmp_path: Path) -> None:
-    state = StateDB(tmp_path)
-    workspace = state.create_workspace(WorkspaceCreateParams(name="events"))
-    run = state.create_run(
-        RunCreateParams(
-            prompt="edge target",
-            model=ModelId("gpt-5.3-codex"),
-            workspace_id=workspace.workspace_id,
-        )
+def test_session_store_round_trip(tmp_path: Path) -> None:
+    space = create_space(tmp_path, name="sessions")
+    space_dir = resolve_space_dir(tmp_path, space.id)
+
+    session_id = start_session(
+        space_dir,
+        harness="codex",
+        harness_session_id="sess-1",
+        model="gpt-5.3-codex",
+        params=("--foo", "bar"),
     )
 
-    event = state.append_workflow_event(
-        workspace_id=workspace.workspace_id,
-        event_type="TaskScheduled",
-        payload={"step": "research"},
-        run_id=run.run_id,
-    )
-    assert event.event_type == "TaskScheduled"
+    last = get_last_session(space_dir)
+    assert last is not None
+    assert last.session_id == session_id
+    assert last.harness_session_id == "sess-1"
+    assert last.stopped_at is None
 
-    span = Span(
-        span_id=SpanId("span-1"),
-        trace_id=TraceId(str(workspace.workspace_id)),
-        parent_id=None,
-        name="run",
-        kind="workflow",
-        started_at=datetime.now(UTC),
-        attributes={"k": "v"},
-    )
-    state.add_span(span)
-    state.finish_span(
-        SpanId("span-1"),
-        status="ok",
-        attributes={"input_tokens": 123},
-    )
-
-    child_run = state.create_run(
-        RunCreateParams(
-            prompt="child",
-            model=ModelId("claude-haiku-4-5"),
-            workspace_id=workspace.workspace_id,
-        )
-    )
-    state.add_run_edge(
-        RunEdge(
-            source_run_id=run.run_id,
-            target_run_id=child_run.run_id,
-            edge_type="parent",
-        )
-    )
-
-    artifact = ArtifactRecord(
-        run_id=run.run_id,
-        key=make_artifact_key(run.run_id, "report.md"),
-        path=tmp_path / ".meridian" / "runs" / "report.md",
-        size=42,
-    )
-    state.upsert_artifact(artifact)
-
-    events = state.list_workflow_events(workspace.workspace_id)
-    assert len(events) == 1
-    assert events[0].payload["step"] == "research"
-
-    spans = state.list_spans(TraceId(str(workspace.workspace_id)))
-    assert len(spans) == 1
-    assert spans[0].ended_at is not None
-
-    artifacts = state.list_artifact_records(run.run_id)
-    assert len(artifacts) == 1
-    assert artifacts[0].path.is_absolute()
+    stop_session(space_dir, session_id)
+    stopped = get_last_session(space_dir)
+    assert stopped is not None
+    assert stopped.stopped_at is not None
 
 
-def test_context_pinning_stores_relative_and_reads_absolute(tmp_path: Path) -> None:
-    state = StateDB(tmp_path)
-    workspace = state.create_workspace(WorkspaceCreateParams(name="ctx"))
-    file_path = tmp_path / "notes" / "summary.md"
-
-    state.pin_file(workspace.workspace_id, file_path.as_posix())
-    pinned = state.list_pinned_files(workspace.workspace_id)
-    assert pinned == [
-        PinnedFile(
-            workspace_id=workspace.workspace_id,
-            file_path=file_path.as_posix(),
-        )
-    ]
-
-    conn = open_connection(state.paths.db_path)
-    try:
-        row = conn.execute(
-            "SELECT file_path FROM pinned_files WHERE workspace_id = ?",
-            (str(workspace.workspace_id),),
-        ).fetchone()
-    finally:
-        conn.close()
-
-    assert row is not None
-    assert row["file_path"] == "notes/summary.md"
-
-
-def test_locking_contention_writes_clean_jsonl_and_sqlite(tmp_path: Path) -> None:
-    state = StateDB(tmp_path)
+def test_locking_contention_writes_clean_jsonl(tmp_path: Path) -> None:
+    space = create_space(tmp_path, name="locks")
     process_count = 8
 
     ctx = multiprocessing.get_context("spawn")
     procs = [
-        ctx.Process(target=_write_start_and_finalize, args=(tmp_path.as_posix(), idx))
+        ctx.Process(target=_write_start_and_finalize, args=(tmp_path.as_posix(), space.id, idx))
         for idx in range(process_count)
     ]
     for proc in procs:
@@ -341,37 +185,35 @@ def test_locking_contention_writes_clean_jsonl_and_sqlite(tmp_path: Path) -> Non
         proc.join(timeout=20)
         assert proc.exitcode == 0
 
-    rows = state.read_jsonl_rows()
-    assert len(rows) == process_count * 2
+    space_dir = resolve_space_dir(tmp_path, space.id)
+    rows = list_runs(space_dir)
+    assert len(rows) == process_count
+    assert all(row.status == "succeeded" for row in rows)
 
     # Every line must remain parseable JSON under concurrent append pressure.
-    with state.paths.jsonl_path.open("r", encoding="utf-8") as handle:
+    with (space_dir / "runs.jsonl").open("r", encoding="utf-8") as handle:
         for line in handle:
             json.loads(line)
 
-    conn = open_connection(state.paths.db_path)
-    try:
-        count = conn.execute("SELECT COUNT(*) FROM runs WHERE status = 'succeeded'").fetchone()
-    finally:
-        conn.close()
 
-    assert count is not None
-    assert int(count[0]) == process_count
+def test_id_generation_uses_s_r_c_prefixes(tmp_path: Path) -> None:
+    assert str(next_space_id(tmp_path)) == "s1"
 
+    space = create_space(tmp_path, name="idgen")
+    space_dir = resolve_space_dir(tmp_path, space.id)
 
-def test_jsonl_round_trip_skips_corrupt_lines(tmp_path: Path) -> None:
-    state = StateDB(tmp_path)
-    state.paths.jsonl_path.parent.mkdir(parents=True, exist_ok=True)
-    state.paths.jsonl_path.write_text(
-        '{"run_id":"r1","status":"running"}\nnot-json\n{"run_id":"r1","status":"succeeded"}\n',
-        encoding="utf-8",
+    assert str(next_run_id(space_dir)) == "r1"
+    assert next_session_id(space_dir) == "c1"
+
+    start_run(
+        space_dir,
+        session_id="c1",
+        model="gpt-5.3-codex",
+        agent="coder",
+        harness="codex",
+        prompt="first",
     )
-
-    rows = state.read_jsonl_rows()
-    assert rows == [
-        {"run_id": "r1", "status": "running"},
-        {"run_id": "r1", "status": "succeeded"},
-    ]
+    assert str(next_run_id(space_dir)) == "r2"
 
 
 def test_artifact_store_local_and_memory(tmp_path: Path) -> None:
@@ -394,64 +236,16 @@ def test_artifact_store_local_and_memory(tmp_path: Path) -> None:
     assert not memory.exists(key)
 
 
-@pytest.mark.asyncio
-async def test_async_protocol_adapters_and_domain_frozen(tmp_path: Path) -> None:
-    state = StateDB(tmp_path)
-    sync_store = SQLiteRunStoreSync(state)
-    run_store = SQLiteRunStore(sync_store)
-    workspace_store = SQLiteWorkspaceStore(state)
-    context_store = SQLiteContextStore(state)
-
-    workspace = await workspace_store.create(WorkspaceCreateParams(name="async"))
-    run = await run_store.create(
-        RunCreateParams(
-            prompt="async run", model=ModelId("gpt-5.3-codex"), workspace_id=workspace.workspace_id
-        )
-    )
-    loaded = await run_store.get(run.run_id)
-    assert loaded is not None
-
-    await context_store.pin(workspace.workspace_id, (tmp_path / "context.md").as_posix())
-    pinned = await context_store.list_pinned(workspace.workspace_id)
-    assert len(pinned) == 1
-
-    for cls in (Run, Workspace, PinnedFile, WorkflowEvent, Span):
+def test_domain_dataclasses_are_frozen() -> None:
+    for cls in (Run, Space, PinnedFile, WorkflowEvent, Span):
         assert dataclasses.is_dataclass(cls)
         assert cls.__dataclass_params__.frozen
 
-
-def test_workspace_and_global_run_id_generation_uses_counters(tmp_path: Path) -> None:
-    state = StateDB(tmp_path)
-    workspace = state.create_workspace(WorkspaceCreateParams(name="idgen"))
-
-    conn = open_connection(state.paths.db_path)
-    try:
-        with conn:
-            standalone_1 = next_run_id(conn, None)
-            standalone_2 = next_run_id(conn, None)
-            workspace_1 = next_run_id(conn, workspace.workspace_id)
-            workspace_2 = next_run_id(conn, workspace.workspace_id)
-    finally:
-        conn.close()
-
-    assert str(standalone_1.full_id) == "r1"
-    assert str(standalone_2.full_id) == "r2"
-    assert str(workspace_1.full_id) == f"{workspace.workspace_id}/r1"
-    assert str(workspace_2.full_id) == f"{workspace.workspace_id}/r2"
-
-
-def test_create_run_raises_on_duplicate_generated_id(tmp_path: Path) -> None:
-    state = StateDB(tmp_path)
-    state.create_run(RunCreateParams(prompt="first", model=ModelId("gpt-5.3-codex")))
-
-    conn = open_connection(state.paths.db_path)
-    try:
-        with conn:
-            conn.execute(
-                "UPDATE schema_info SET value = '0' WHERE key = 'counter:run:global'",
-            )
-    finally:
-        conn.close()
-
-    with pytest.raises(sqlite3.IntegrityError):
-        state.create_run(RunCreateParams(prompt="duplicate", model=ModelId("gpt-5.3-codex")))
+    span = Span(
+        span_id=SpanId("span-1"),
+        trace_id=TraceId("trace-1"),
+        name="run",
+        kind="workflow",
+        started_at=datetime.now(UTC),
+    )
+    assert span.status == "ok"

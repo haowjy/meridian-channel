@@ -13,7 +13,6 @@ from meridian.lib.config.model_guidance import load_model_guidance, selected_gui
 from meridian.lib.config.routing import route_model
 from meridian.lib.config.skill import parse_skill_file
 from meridian.lib.config.skill_registry import SkillRegistry
-from meridian.lib.state.db import get_busy_timeout, get_journal_mode
 
 
 def _write(path: Path, content: str) -> None:
@@ -56,16 +55,14 @@ def test_skill_registry_reindex_search_and_load(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     _create_skill(repo_root, "run-agent", "Run delegation skill", tags=["base"])
     _create_skill(repo_root, "agent", "Worker guidance", tags=["base"])
-    _create_skill(repo_root, "orchestrate", "Supervisor guidance", tags=["base"])
+    _create_skill(repo_root, "orchestrate", "Primary guidance", tags=["base"])
     _create_skill(repo_root, "reviewing", "Review code", tags=["review", "quality"])
 
     registry = SkillRegistry(
         repo_root=repo_root,
         db_path=repo_root / ".meridian" / "index" / "runs.db",
     )
-    with registry._connect() as conn:
-        assert get_journal_mode(conn) == "wal"
-        assert get_busy_timeout(conn) == 5000
+    assert registry.db_path == repo_root / ".meridian" / "index" / "skills.json"
     report = registry.reindex()
     assert report.indexed_count == 4
 
@@ -111,7 +108,7 @@ def test_agent_profile_parsing(tmp_path: Path) -> None:
             "model: claude-sonnet-4-6\n"
             "variant: high\n"
             "skills: [reviewing]\n"
-            "tools: [Read, Grep]\n"
+            "allowed-tools: [Read, Grep]\n"
             "mcp-tools: [run_list, run_show]\n"
             "sandbox: danger-full-access\n"
             "variant-models:\n"
@@ -126,7 +123,7 @@ def test_agent_profile_parsing(tmp_path: Path) -> None:
     assert profile.name == "reviewer"
     assert profile.model == "claude-sonnet-4-6"
     assert profile.skills == ("reviewing",)
-    assert profile.tools == ("Read", "Grep")
+    assert profile.allowed_tools == ("Read", "Grep")
     assert profile.mcp_tools == ("run_list", "run_show")
     assert profile.variant_models == ("claude-opus-4-6",)
     assert "Review code." in profile.body

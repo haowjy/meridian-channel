@@ -73,23 +73,19 @@ def _bootstrap_operation_modules() -> None:
     # Imported lazily to keep the registry as the single source of truth while
     # allowing operation modules to self-register via `operation(...)`.
     import meridian.lib.ops.config as config_ops
-    import meridian.lib.ops.context as context_ops
     import meridian.lib.ops.diag as diag_ops
-    import meridian.lib.ops.migrate as migrate_ops
     import meridian.lib.ops.models as models_ops
     import meridian.lib.ops.run as run_ops
     import meridian.lib.ops.skills as skills_ops
-    import meridian.lib.ops.workspace as workspace_ops
+    import meridian.lib.ops.space as space_ops
 
     _ = (
         config_ops,
-        context_ops,
         diag_ops,
-        migrate_ops,
         models_ops,
         run_ops,
         skills_ops,
-        workspace_ops,
+        space_ops,
     )
 
 

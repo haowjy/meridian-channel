@@ -9,8 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from meridian.lib.adapters.sqlite import StateDB
-from meridian.lib.domain import RunCreateParams, TokenUsage
+from meridian.lib.domain import Run, TokenUsage
 from meridian.lib.exec.spawn import execute_with_finalization
 from meridian.lib.exec.terminal import (
     DEFAULT_VISIBLE_CATEGORIES,
@@ -31,10 +30,12 @@ from meridian.lib.harness.claude import ClaudeAdapter
 from meridian.lib.harness.codex import CodexAdapter
 from meridian.lib.harness.opencode import OpenCodeAdapter
 from meridian.lib.harness.registry import HarnessRegistry
-from meridian.lib.ops.run import _emit_subrun_event
+from meridian.lib.ops._run_execute import _emit_subrun_event
 from meridian.lib.safety.permissions import PermissionConfig
+from meridian.lib.space.space_file import create_space
 from meridian.lib.state.artifact_store import LocalStore
-from meridian.lib.types import HarnessId, ModelId, RunId
+from meridian.lib.state.paths import resolve_space_dir
+from meridian.lib.types import HarnessId, ModelId, RunId, SpaceId
 
 
 class _StreamingHarness:
@@ -193,8 +194,15 @@ async def test_execute_with_finalization_emits_categorized_events_to_observer(
     package_root: Path,
     tmp_path: Path,
 ) -> None:
-    state = StateDB(tmp_path)
-    run = state.create_run(RunCreateParams(prompt="events", model=ModelId("gpt-5.3-codex")))
+    space = create_space(tmp_path, name="stream-events")
+    run = Run(
+        run_id=RunId("r1"),
+        prompt="events",
+        model=ModelId("gpt-5.3-codex"),
+        status="queued",
+        space_id=SpaceId(space.id),
+    )
+    space_dir = resolve_space_dir(tmp_path, space.id)
     artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
     output_lines = tmp_path / "stream.jsonl"
     output_lines.write_text(
@@ -219,7 +227,8 @@ async def test_execute_with_finalization_emits_categorized_events_to_observer(
     observed: list[StreamEvent] = []
     exit_code = await execute_with_finalization(
         run,
-        state=state,
+        repo_root=tmp_path,
+        space_dir=space_dir,
         artifacts=artifacts,
         registry=registry,
         harness_id=adapter.id,

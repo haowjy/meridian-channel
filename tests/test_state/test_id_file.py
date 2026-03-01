@@ -1,0 +1,46 @@
+from __future__ import annotations
+
+import json
+
+from meridian.lib.state.id_gen import next_run_id, next_session_id, next_space_id
+
+
+def test_next_space_id_starts_at_s1(tmp_path):
+    assert next_space_id(tmp_path) == "s1"
+
+
+def test_next_space_id_uses_max_numeric_suffix(tmp_path):
+    spaces_dir = tmp_path / ".meridian" / ".spaces"
+    spaces_dir.mkdir(parents=True, exist_ok=True)
+    (spaces_dir / "s1").mkdir()
+    (spaces_dir / "s9").mkdir()
+    (spaces_dir / "s2").mkdir()
+    (spaces_dir / "x5").mkdir()
+    (spaces_dir / "sabc").mkdir()
+
+    assert next_space_id(tmp_path) == "s10"
+
+
+def test_next_run_id_counts_start_events_and_skips_truncated_trailing_line(tmp_path):
+    space_dir = tmp_path / ".meridian" / ".spaces" / "s1"
+    space_dir.mkdir(parents=True, exist_ok=True)
+    runs_jsonl = space_dir / "runs.jsonl"
+    with runs_jsonl.open("w", encoding="utf-8") as handle:
+        handle.write(json.dumps({"v": 1, "event": "start", "id": "r1"}) + "\n")
+        handle.write(json.dumps({"v": 1, "event": "finalize", "id": "r1"}) + "\n")
+        handle.write(json.dumps({"v": 1, "event": "start", "id": "r2"}) + "\n")
+        handle.write('{"v":1,"event":"start","id":"r3"')
+
+    assert next_run_id(space_dir) == "r3"
+
+
+def test_next_session_id_counts_start_events(tmp_path):
+    space_dir = tmp_path / ".meridian" / ".spaces" / "s2"
+    space_dir.mkdir(parents=True, exist_ok=True)
+    sessions_jsonl = space_dir / "sessions.jsonl"
+    with sessions_jsonl.open("w", encoding="utf-8") as handle:
+        handle.write(json.dumps({"v": 1, "event": "start", "session_id": "c1"}) + "\n")
+        handle.write(json.dumps({"v": 1, "event": "stop", "session_id": "c1"}) + "\n")
+        handle.write(json.dumps({"v": 1, "event": "start", "session_id": "c2"}) + "\n")
+
+    assert next_session_id(space_dir) == "c3"

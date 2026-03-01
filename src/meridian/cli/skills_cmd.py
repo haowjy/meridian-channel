@@ -10,11 +10,9 @@ from meridian.lib.ops.registry import get_all_operations
 from meridian.lib.ops.skills import (
     SkillsListInput,
     SkillsLoadInput,
-    SkillsReindexInput,
     SkillsSearchInput,
     skills_list_sync,
     skills_load_sync,
-    skills_reindex_sync,
     skills_search_sync,
 )
 
@@ -33,16 +31,11 @@ def _skills_show(emit: Emitter, name: str) -> None:
     emit(skills_load_sync(SkillsLoadInput(name=name)))
 
 
-def _skills_reindex(emit: Emitter) -> None:
-    emit(skills_reindex_sync(SkillsReindexInput()))
-
-
 def register_skills_commands(app: Any, emit: Emitter) -> tuple[set[str], dict[str, str]]:
     handlers: dict[str, Callable[[], Callable[..., None]]] = {
         "skills.list": lambda: partial(_skills_list, emit),
         "skills.search": lambda: partial(_skills_search, emit),
         "skills.load": lambda: partial(_skills_show, emit),
-        "skills.reindex": lambda: partial(_skills_reindex, emit),
     }
 
     registered: set[str] = set()

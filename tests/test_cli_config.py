@@ -87,7 +87,7 @@ def test_config_show_displays_sources(
 
     assert by_key["defaults.max_depth"] == "env var"
     assert by_key["defaults.max_retries"] == "file"
-    assert by_key["defaults.supervisor_agent"] == "builtin"
+    assert by_key["defaults.primary_agent"] == "builtin"
 
 
 def test_config_show_warns_when_repo_root_does_not_exist(

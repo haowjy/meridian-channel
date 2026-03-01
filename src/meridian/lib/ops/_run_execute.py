@@ -6,7 +6,6 @@ import argparse
 import asyncio
 import json
 import os
-import sqlite3
 import subprocess
 import sys
 import time
@@ -16,19 +15,21 @@ from typing import Any, Protocol, cast
 
 import structlog
 
-from meridian.lib.domain import RunCreateParams
+from meridian.lib.domain import Run
 from meridian.lib.exec.spawn import execute_with_finalization
 from meridian.lib.exec.terminal import TerminalEventFilter, resolve_visible_categories
-from meridian.lib.ops._runtime import OperationRuntime, build_runtime, resolve_workspace_id
+from meridian.lib.harness.adapter import PermissionResolver
+from meridian.lib.ops._runtime import OperationRuntime, build_runtime, resolve_space_id
 from meridian.lib.safety.budget import Budget
 from meridian.lib.safety.permissions import (
     PermissionConfig,
-    TieredPermissionResolver,
+    build_permission_resolver,
     parse_permission_tier,
 )
 from meridian.lib.safety.redaction import SecretSpec, secrets_env_overrides
-from meridian.lib.state.db import resolve_run_log_dir, resolve_state_paths
-from meridian.lib.types import ModelId, RunId
+from meridian.lib.state import run_store
+from meridian.lib.state.paths import resolve_run_log_dir, resolve_space_dir
+from meridian.lib.types import ModelId, RunId, SpaceId
 
 from ._run_models import RunActionOutput, RunCreateInput
 from ._run_query import _read_run_row
@@ -55,6 +56,8 @@ class _PreparedCreateLike(Protocol):
     agent_name: str | None
     cli_command: tuple[str, ...]
     permission_config: PermissionConfig
+    permission_resolver: PermissionResolver
+    allowed_tools: tuple[str, ...]
     budget: Budget | None
     guardrails: tuple[str, ...]
     secrets: tuple[SecretSpec, ...]
@@ -105,7 +108,7 @@ def _depth_exceeded_output(current_depth: int, max_depth: int) -> RunActionOutpu
 
 
 def _run_child_env(
-    workspace_id: str | None,
+    space_id: str | None,
     secrets: tuple[SecretSpec, ...],
     parent_run_id: str | None = None,
 ) -> dict[str, str]:
@@ -114,8 +117,8 @@ def _run_child_env(
     child_env = {key: value for key, value in os.environ.items() if key.startswith("MERIDIAN_")}
     current_depth = _read_non_negative_int_env("MERIDIAN_DEPTH", 0)
     child_env["MERIDIAN_DEPTH"] = str(current_depth + 1)
-    if workspace_id is not None:
-        child_env["MERIDIAN_WORKSPACE_ID"] = workspace_id
+    if space_id is not None:
+        child_env["MERIDIAN_SPACE_ID"] = space_id
     if parent_run_id is None:
         child_env.pop("MERIDIAN_PARENT_RUN_ID", None)
     else:
@@ -140,30 +143,26 @@ def _secrets_from_env() -> tuple[SecretSpec, ...]:
     return tuple(parsed)
 
 
-def _workspace_spend_usd(repo_root: Path, workspace_id: str | None) -> float:
-    if workspace_id is None:
-        return 0.0
+def _resolve_session_id() -> str:
+    session_id = os.getenv("MERIDIAN_SESSION_ID", "").strip()
+    if session_id:
+        return session_id
+    return "c0"
 
-    db_path = resolve_state_paths(repo_root).db_path
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        row = conn.execute(
-            "SELECT total_cost_usd FROM workspaces WHERE id = ?",
-            (workspace_id,),
-        ).fetchone()
-        if row is not None and row["total_cost_usd"] is not None:
-            return float(row["total_cost_usd"])
 
-        fallback = conn.execute(
-            "SELECT COALESCE(SUM(total_cost_usd), 0.0) AS spent FROM runs WHERE workspace_id = ?",
-            (workspace_id,),
-        ).fetchone()
-        if fallback is None:
-            return 0.0
-        return float(fallback["spent"] or 0.0)
-    finally:
-        conn.close()
+def _resolve_space(repo_root: Path, payload_space: str | None) -> tuple[SpaceId, Path]:
+    resolved = resolve_space_id(payload_space)
+    if resolved is None:
+        raise ValueError("Space is required. Pass --space or set MERIDIAN_SPACE_ID.")
+    return resolved, resolve_space_dir(repo_root, resolved)
+
+
+def _space_spend_usd(space_dir: Path) -> float:
+    total = 0.0
+    for run in run_store.list_runs(space_dir):
+        if run.total_cost_usd is not None:
+            total += run.total_cost_usd
+    return total
 
 
 def _stdout_is_tty() -> bool:
@@ -182,30 +181,47 @@ async def _execute_existing_run(
     agent_name: str | None,
     mcp_tools: tuple[str, ...],
     permission_config: PermissionConfig,
-    budget: Budget | None,
-    guardrails: tuple[str, ...],
-    secrets: tuple[SecretSpec, ...],
+    allowed_tools: tuple[str, ...] = (),
+    cli_permission_override: bool = False,
+    budget: Budget | None = None,
+    guardrails: tuple[str, ...] = (),
+    secrets: tuple[SecretSpec, ...] = (),
     continue_session_id: str | None = None,
     continue_fork: bool = False,
-    workspace_id_hint: str | None = None,
+    space_id_hint: str | None = None,
 ) -> int:
     runtime = build_runtime(str(repo_root))
-    run = await runtime.run_store.get(run_id)
-    if run is None:
-        logger.error("Run not found for background execution.", run_id=str(run_id))
+    space_id_text = (space_id_hint or os.getenv("MERIDIAN_SPACE_ID", "")).strip()
+    if not space_id_text:
+        logger.error("Missing space ID for run execution.", run_id=str(run_id))
         return 1
 
-    workspace_id = (
-        str(run.workspace_id)
-        if run.workspace_id is not None
-        else workspace_id_hint
+    space_dir = resolve_space_dir(repo_root, space_id_text)
+    run_record = run_store.get_run(space_dir, run_id)
+    if run_record is None or run_record.model is None or run_record.prompt is None:
+        logger.error("Run not found for background execution.", run_id=str(run_id))
+        return 1
+    run = Run(
+        run_id=RunId(run_record.id),
+        prompt=run_record.prompt,
+        model=ModelId(run_record.model),
+        status="running",
+        space_id=SpaceId(space_id_text),
     )
+
+    resolver = build_permission_resolver(
+        allowed_tools=allowed_tools,
+        permission_config=permission_config,
+        cli_permission_override=cli_permission_override,
+    )
+
     return await execute_with_finalization(
         run,
-        state=runtime.state,
+        repo_root=runtime.repo_root,
+        space_dir=space_dir,
         artifacts=runtime.artifacts,
         registry=runtime.harness_registry,
-        permission_resolver=TieredPermissionResolver(permission_config),
+        permission_resolver=resolver,
         permission_config=permission_config,
         cwd=runtime.repo_root,
         timeout_seconds=timeout_secs,
@@ -214,12 +230,12 @@ async def _execute_existing_run(
         agent=agent_name,
         mcp_tools=mcp_tools,
         env_overrides=_run_child_env(
-            workspace_id,
+            space_id_text,
             secrets,
             str(run.run_id),
         ),
         budget=budget,
-        workspace_spent_usd=_workspace_spend_usd(runtime.repo_root, workspace_id),
+        space_spent_usd=_space_spend_usd(space_dir),
         max_retries=runtime.config.max_retries,
         retry_backoff_seconds=runtime.config.retry_backoff_seconds,
         guardrails=tuple(Path(item) for item in guardrails),
@@ -234,12 +250,14 @@ def _build_background_worker_command(
     *,
     run_id: str,
     repo_root: Path,
-    workspace_id: str | None,
+    space_id: str | None,
     timeout_secs: float | None,
     skills: tuple[str, ...],
     agent_name: str | None,
     mcp_tools: tuple[str, ...],
     permission_config: PermissionConfig,
+    allowed_tools: tuple[str, ...],
+    cli_permission_override: bool,
     budget: Budget | None,
     guardrails: tuple[str, ...],
     continue_session_id: str | None,
@@ -256,8 +274,8 @@ def _build_background_worker_command(
         "--permission-tier",
         permission_config.tier.value,
     ]
-    if workspace_id is not None:
-        command.extend(["--workspace-id", workspace_id])
+    if space_id is not None:
+        command.extend(["--space-id", space_id])
     if timeout_secs is not None:
         command.extend(["--timeout-secs", str(timeout_secs)])
     if permission_config.unsafe:
@@ -265,9 +283,9 @@ def _build_background_worker_command(
     if budget is not None:
         if budget.per_run_usd is not None:
             command.extend(["--budget-per-run-usd", str(budget.per_run_usd)])
-        if budget.per_workspace_usd is not None:
+        if budget.per_space_usd is not None:
             command.extend(
-                ["--budget-per-workspace-usd", str(budget.per_workspace_usd)]
+                ["--budget-per-space-usd", str(budget.per_space_usd)]
             )
     if agent_name is not None:
         command.extend(["--agent", agent_name])
@@ -275,6 +293,10 @@ def _build_background_worker_command(
         command.extend(["--skill", skill])
     for tool in mcp_tools:
         command.extend(["--mcp-tool", tool])
+    for tool in allowed_tools:
+        command.extend(["--allowed-tool", tool])
+    if cli_permission_override:
+        command.append("--cli-permission-override")
     for guardrail in guardrails:
         command.extend(["--guardrail", guardrail])
     if continue_session_id is not None and continue_session_id.strip():
@@ -292,21 +314,30 @@ def _execute_run_background(
 ) -> RunActionOutput:
     if payload.stream:
         logger.warning("--stream is ignored with --background; output goes to run log files.")
-    workspace_id = resolve_workspace_id(payload.workspace)
-    run = runtime.run_store_sync.create(
-        RunCreateParams(
-            prompt=prepared.composed_prompt,
-            model=ModelId(prepared.model),
-            workspace_id=workspace_id,
-        )
+    space_id, space_dir = _resolve_space(runtime.repo_root, payload.space)
+    run_id = run_store.start_run(
+        space_dir,
+        session_id=_resolve_session_id(),
+        model=prepared.model,
+        agent=prepared.agent_name or "",
+        harness=prepared.harness_id,
+        prompt=prepared.composed_prompt,
+        harness_session_id=prepared.continue_session_id,
     )
-    run_id = str(run.run_id)
-    workspace_id_str = str(workspace_id) if workspace_id is not None else None
+    run = Run(
+        run_id=RunId(run_id),
+        prompt=prepared.composed_prompt,
+        model=ModelId(prepared.model),
+        status="running",
+        space_id=space_id,
+    )
+    run_id_text = str(run.run_id)
+    space_id_str = str(space_id)
 
     current_depth = _read_non_negative_int_env("MERIDIAN_DEPTH", 0)
     run_start_event: dict[str, Any] = {
         "t": "meridian.run.start",
-        "id": run_id,
+        "id": run_id_text,
         "model": prepared.model,
         "d": current_depth,
     }
@@ -315,20 +346,22 @@ def _execute_run_background(
     _emit_subrun_event(run_start_event)
 
     launch_command = _build_background_worker_command(
-        run_id=run_id,
+        run_id=run_id_text,
         repo_root=runtime.repo_root,
-        workspace_id=workspace_id_str,
+        space_id=space_id_str,
         timeout_secs=payload.timeout_secs,
         skills=prepared.skills,
         agent_name=prepared.agent_name,
         mcp_tools=prepared.mcp_tools,
         permission_config=prepared.permission_config,
+        allowed_tools=prepared.allowed_tools,
+        cli_permission_override=payload.permission_tier is not None,
         budget=prepared.budget,
         guardrails=prepared.guardrails,
         continue_session_id=prepared.continue_session_id,
         continue_fork=prepared.continue_fork,
     )
-    log_dir = resolve_run_log_dir(runtime.repo_root, run.run_id, run.workspace_id)
+    log_dir = resolve_run_log_dir(runtime.repo_root, run.run_id, run.space_id)
     log_dir.mkdir(parents=True, exist_ok=True)
     stdout_path = log_dir / _BACKGROUND_STDOUT_FILENAME
     stderr_path = log_dir / _BACKGROUND_STDERR_FILENAME
@@ -350,16 +383,22 @@ def _execute_run_background(
                 start_new_session=True,
             )
     except OSError as exc:
-        runtime.run_store_sync.update_status(run.run_id, "failed")
+        run_store.finalize_run(
+            space_dir,
+            run.run_id,
+            status="failed",
+            exit_code=1,
+            error=str(exc),
+        )
         logger.exception(
             "Failed to launch background run worker.",
-            run_id=run_id,
+            run_id=run_id_text,
             command=list(launch_command),
         )
         return RunActionOutput(
             command="run.create",
             status="failed",
-            run_id=run_id,
+            run_id=run_id_text,
             message=f"Failed to launch background run: {exc}",
             error="background_launch_failed",
             model=prepared.model,
@@ -381,7 +420,7 @@ def _execute_run_background(
     return RunActionOutput(
         command="run.create",
         status="running",
-        run_id=run_id,
+        run_id=run_id_text,
         message=_BACKGROUND_SUBMIT_MESSAGE,
         model=prepared.model,
         harness_id=prepared.harness_id,
@@ -402,14 +441,22 @@ def _execute_run_blocking(
     prepared: _PreparedCreateLike,
     runtime: OperationRuntime,
 ) -> RunActionOutput:
-    workspace_id = resolve_workspace_id(payload.workspace)
-
-    run = runtime.run_store_sync.create(
-        RunCreateParams(
-            prompt=prepared.composed_prompt,
-            model=ModelId(prepared.model),
-            workspace_id=workspace_id,
-        )
+    space_id, space_dir = _resolve_space(runtime.repo_root, payload.space)
+    run_id = run_store.start_run(
+        space_dir,
+        session_id=_resolve_session_id(),
+        model=prepared.model,
+        agent=prepared.agent_name or "",
+        harness=prepared.harness_id,
+        prompt=prepared.composed_prompt,
+        harness_session_id=prepared.continue_session_id,
+    )
+    run = Run(
+        run_id=RunId(run_id),
+        prompt=prepared.composed_prompt,
+        model=ModelId(prepared.model),
+        status="running",
+        space_id=space_id,
     )
     current_depth = _read_non_negative_int_env("MERIDIAN_DEPTH", 0)
     run_start_event: dict[str, Any] = {
@@ -423,7 +470,7 @@ def _execute_run_blocking(
     _emit_subrun_event(run_start_event)
 
     started = time.monotonic()
-    workspace_id_str = str(workspace_id) if workspace_id is not None else None
+    space_id_str = str(space_id)
     event_observer = None
     stdout_is_tty = _stdout_is_tty()
     stream_stdout_to_terminal = payload.stream or not stdout_is_tty
@@ -441,10 +488,11 @@ def _execute_run_blocking(
     exit_code = asyncio.run(
         execute_with_finalization(
             run,
-            state=runtime.state,
+            repo_root=runtime.repo_root,
+            space_dir=space_dir,
             artifacts=runtime.artifacts,
             registry=runtime.harness_registry,
-            permission_resolver=TieredPermissionResolver(prepared.permission_config),
+            permission_resolver=prepared.permission_resolver,
             permission_config=prepared.permission_config,
             cwd=runtime.repo_root,
             timeout_seconds=payload.timeout_secs,
@@ -453,12 +501,12 @@ def _execute_run_blocking(
             agent=prepared.agent_name,
             mcp_tools=prepared.mcp_tools,
             env_overrides=_run_child_env(
-                workspace_id_str,
+                space_id_str,
                 prepared.secrets,
                 str(run.run_id),
             ),
             budget=prepared.budget,
-            workspace_spent_usd=_workspace_spend_usd(runtime.repo_root, workspace_id_str),
+            space_spent_usd=_space_spend_usd(space_dir),
             max_retries=runtime.config.max_retries,
             retry_backoff_seconds=runtime.config.retry_backoff_seconds,
             guardrails=tuple(Path(item) for item in prepared.guardrails),
@@ -476,15 +524,15 @@ def _execute_run_blocking(
     row = _read_run_row(runtime.repo_root, str(run.run_id))
     status = "failed"
     if row is not None:
-        status = str(row["status"])
+        status = row.status
     done_secs = duration
     tokens_total: int | None = None
     if row is not None:
-        row_duration = cast("float | None", row["duration_secs"])
+        row_duration = row.duration_secs
         if row_duration is not None:
             done_secs = row_duration
-        input_tokens = cast("int | None", row["input_tokens"])
-        output_tokens = cast("int | None", row["output_tokens"])
+        input_tokens = row.input_tokens
+        output_tokens = row.output_tokens
         if input_tokens is not None and output_tokens is not None:
             tokens_total = input_tokens + output_tokens
     _emit_subrun_event(
@@ -526,6 +574,8 @@ async def _execute_run_non_blocking(
     agent_name: str | None,
     mcp_tools: tuple[str, ...],
     permission_config: PermissionConfig,
+    allowed_tools: tuple[str, ...] = (),
+    cli_permission_override: bool = False,
     budget: Budget | None,
     guardrails: tuple[str, ...],
     secrets: tuple[SecretSpec, ...],
@@ -540,6 +590,8 @@ async def _execute_run_non_blocking(
         agent_name=agent_name,
         mcp_tools=mcp_tools,
         permission_config=permission_config,
+        allowed_tools=allowed_tools,
+        cli_permission_override=cli_permission_override,
         budget=budget,
         guardrails=guardrails,
         secrets=secrets,
@@ -568,16 +620,18 @@ def _build_background_worker_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m meridian.lib.ops._run_execute")
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--repo-root", required=True)
-    parser.add_argument("--workspace-id", default=None)
+    parser.add_argument("--space-id", default=None)
     parser.add_argument("--timeout-secs", type=float, default=None)
     parser.add_argument("--skill", action="append", default=[])
     parser.add_argument("--agent", default=None)
     parser.add_argument("--mcp-tool", action="append", default=[])
+    parser.add_argument("--allowed-tool", action="append", default=[])
     parser.add_argument("--permission-tier", required=True)
     parser.add_argument("--unsafe", action="store_true")
     parser.add_argument("--budget-per-run-usd", type=float, default=None)
-    parser.add_argument("--budget-per-workspace-usd", type=float, default=None)
+    parser.add_argument("--budget-per-space-usd", type=float, default=None)
     parser.add_argument("--guardrail", action="append", default=[])
+    parser.add_argument("--cli-permission-override", action="store_true")
     parser.add_argument("--continue-session-id", default=None)
     parser.add_argument("--continue-fork", action="store_true")
     return parser
@@ -588,26 +642,29 @@ def _background_worker_main(argv: Sequence[str] | None = None) -> int:
     parsed = parser.parse_args(list(argv) if argv is not None else None)
 
     budget: Budget | None = None
-    if parsed.budget_per_run_usd is not None or parsed.budget_per_workspace_usd is not None:
+    if parsed.budget_per_run_usd is not None or parsed.budget_per_space_usd is not None:
         budget = Budget(
             per_run_usd=parsed.budget_per_run_usd,
-            per_workspace_usd=parsed.budget_per_workspace_usd,
+            per_space_usd=parsed.budget_per_space_usd,
         )
     permission_config = PermissionConfig(
         tier=parse_permission_tier(parsed.permission_tier),
         unsafe=parsed.unsafe,
     )
     secrets = _secrets_from_env()
+    allowed_tools = tuple(str(item) for item in parsed.allowed_tool)
     return asyncio.run(
         _execute_existing_run(
             run_id=RunId(parsed.run_id),
             repo_root=Path(parsed.repo_root).expanduser().resolve(),
-            workspace_id_hint=parsed.workspace_id,
+            space_id_hint=parsed.space_id,
             timeout_secs=parsed.timeout_secs,
             skills=tuple(str(item) for item in parsed.skill),
             agent_name=cast("str | None", parsed.agent),
             mcp_tools=tuple(str(item) for item in parsed.mcp_tool),
             permission_config=permission_config,
+            allowed_tools=allowed_tools,
+            cli_permission_override=bool(parsed.cli_permission_override),
             budget=budget,
             guardrails=tuple(str(item) for item in parsed.guardrail),
             secrets=secrets,

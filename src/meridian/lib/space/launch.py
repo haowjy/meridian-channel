@@ -1,4 +1,4 @@
-"""Workspace supervisor launcher helpers."""
+"""Primary agent launcher helpers."""
 
 from __future__ import annotations
 
@@ -18,20 +18,21 @@ from meridian.lib.config._paths import resolve_repo_root
 from meridian.lib.config.agent import AgentProfile, load_agent_profile
 from meridian.lib.config.routing import route_model
 from meridian.lib.config.settings import MeridianConfig, load_config
-from meridian.lib.domain import WorkspaceState
+from meridian.lib.domain import SpaceState
 from meridian.lib.exec.spawn import HARNESS_ENV_PASS_THROUGH, sanitize_child_env
 from meridian.lib.prompt.assembly import load_skill_contents, resolve_run_defaults
 from meridian.lib.safety.permissions import (
-    _permission_tier_from_profile,
-    _warn_profile_tier_escalation,
+    permission_tier_from_profile,
+    warn_profile_tier_escalation,
     build_permission_config,
-    permission_flags_for_harness,
+    build_permission_resolver,
 )
-from meridian.lib.state.db import open_connection, resolve_state_paths
-from meridian.lib.types import HarnessId, ModelId, WorkspaceId
+from meridian.lib.space import space_file
+from meridian.lib.state.paths import resolve_state_paths
+from meridian.lib.types import HarnessId, ModelId, SpaceId
 
 _CONTINUATION_GUIDANCE = (
-    "You are resuming an existing workspace. Continue from the current state, "
+    "You are resuming an existing space. Continue from the current state, "
     "preserve prior decisions unless evidence has changed, and avoid duplicating "
     "already-completed work."
 )
@@ -39,10 +40,10 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
-class WorkspaceLaunchRequest:
-    """Inputs for launching one workspace supervisor session."""
+class SpaceLaunchRequest:
+    """Inputs for launching one primary agent session."""
 
-    workspace_id: WorkspaceId
+    space_id: SpaceId
     model: str = ""
     fresh: bool = False
     autocompact: int | None = None
@@ -53,30 +54,30 @@ class WorkspaceLaunchRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class WorkspaceLaunchResult:
-    """Result metadata from a completed supervisor launch."""
+class SpaceLaunchResult:
+    """Result metadata from a completed primary launch."""
 
     command: tuple[str, ...]
     exit_code: int
-    final_state: WorkspaceState
+    final_state: SpaceState
     lock_path: Path
 
 
-def workspace_lock_path(repo_root: Path, workspace_id: WorkspaceId) -> Path:
-    """Return active workspace lock path for one workspace ID."""
+def space_lock_path(repo_root: Path, space_id: SpaceId) -> Path:
+    """Return active space lock path for one space ID."""
 
-    return resolve_state_paths(repo_root).active_workspaces_dir / f"{workspace_id}.lock"
+    return resolve_state_paths(repo_root).active_spaces_dir / f"{space_id}.lock"
 
 
-def build_supervisor_prompt(request: WorkspaceLaunchRequest) -> str:
-    """Build launch prompt for workspace start/resume sessions."""
+def build_primary_prompt(request: SpaceLaunchRequest) -> str:
+    """Build launch prompt for space start/resume sessions."""
 
     sections: list[str] = [
-        "# Meridian Workspace Session",
-        f"Workspace: {request.workspace_id}",
+        "# Meridian Space Session",
+        f"Space: {request.space_id}",
     ]
     if request.summary_text.strip():
-        sections.extend(["", "# Workspace Summary", "", request.summary_text.strip()])
+        sections.extend(["", "# Space Summary", "", request.summary_text.strip()])
 
     if request.fresh:
         sections.extend(
@@ -84,7 +85,7 @@ def build_supervisor_prompt(request: WorkspaceLaunchRequest) -> str:
                 "",
                 "# Session Mode",
                 "",
-                "Start a fresh supervisor conversation for this workspace.",
+                "Start a fresh primary conversation for this space.",
             ]
         )
     else:
@@ -99,12 +100,12 @@ def build_supervisor_prompt(request: WorkspaceLaunchRequest) -> str:
 def _write_lock(
     *,
     path: Path,
-    workspace_id: WorkspaceId,
+    space_id: SpaceId,
     command: tuple[str, ...],
     child_pid: int | None,
 ) -> None:
     payload = {
-        "workspace_id": str(workspace_id),
+        "space_id": str(space_id),
         "parent_pid": os.getpid(),
         "child_pid": child_pid,
         "started_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -117,24 +118,24 @@ def _write_lock(
 def _build_interactive_command(
     *,
     repo_root: Path | None = None,
-    request: WorkspaceLaunchRequest,
+    request: SpaceLaunchRequest,
     prompt: str,
     passthrough_args: tuple[str, ...],
     config: MeridianConfig | None = None,
 ) -> tuple[str, ...]:
-    """Build interactive CLI command for workspace sessions."""
+    """Build interactive CLI command for space sessions."""
 
-    override = os.getenv("MERIDIAN_SUPERVISOR_COMMAND", "").strip()
+    override = os.getenv("MERIDIAN_HARNESS_COMMAND", "").strip()
     if override:
         command = [*shlex.split(override), *passthrough_args]
         if not command:
-            raise ValueError("MERIDIAN_SUPERVISOR_COMMAND resolved to an empty command.")
+            raise ValueError("MERIDIAN_HARNESS_COMMAND resolved to an empty command.")
         return tuple(command)
 
     resolved_root = resolve_repo_root(repo_root)
     resolved_config = config if config is not None else load_config(resolved_root)
     profile: AgentProfile | None = None
-    configured_profile = resolved_config.supervisor_agent.strip()
+    configured_profile = resolved_config.primary_agent.strip()
     if configured_profile:
         try:
             profile = load_agent_profile(
@@ -151,7 +152,7 @@ def _build_interactive_command(
         profile=profile,
     )
     model = ModelId(defaults.model)
-    supervisor_harness = _resolve_supervisor_harness(model=model)
+    harness = _resolve_harness(model=model)
 
     prompt_with_profile_skills = prompt
     if profile is not None and defaults.skills:
@@ -172,12 +173,12 @@ def _build_interactive_command(
         )
         if missing_skills:
             logger.warning(
-                "Skipping unavailable supervisor profile skills: %s.",
+                "Skipping unavailable primary profile skills: %s.",
                 ", ".join(missing_skills),
             )
         loaded_skills = load_skill_contents(registry, skill_names)
         if loaded_skills:
-            sections = [prompt_with_profile_skills, "", "# Supervisor Skills"]
+            sections = [prompt_with_profile_skills, "", "# Primary Skills"]
             for skill in loaded_skills:
                 sections.extend(["", f"## Skill: {skill.name}", "", skill.content.strip()])
             prompt_with_profile_skills = "\n".join(sections).strip()
@@ -189,38 +190,38 @@ def _build_interactive_command(
         "--model",
         str(model),
     ]
-    supervisor_default_tier = resolved_config.supervisor.permission_tier
+    primary_default_tier = resolved_config.primary.permission_tier
     resolved_tier = _resolve_permission_tier_for_profile(
         profile=profile,
-        default_tier=supervisor_default_tier,
+        default_tier=primary_default_tier,
     )
-    _warn_profile_tier_escalation(
+    warn_profile_tier_escalation(
         profile=profile,
         inferred_tier=resolved_tier,
-        default_tier=supervisor_default_tier,
+        default_tier=primary_default_tier,
         warning_logger=logger,
     )
-    # Supervisor settings only apply to this workspace supervisor launch path.
+    # Primary settings only apply to this primary agent launch path.
     # Subagent runs are assembled in lib/ops/run.py and do not read this config.
     permission_config = build_permission_config(
         resolved_tier,
         unsafe=False,
-        default_tier=supervisor_default_tier,
+        default_tier=primary_default_tier,
     )
-    command.extend(
-        permission_flags_for_harness(
-            supervisor_harness,
-            permission_config,
-        )
+    resolver = build_permission_resolver(
+        allowed_tools=profile.allowed_tools if profile is not None else (),
+        permission_config=permission_config,
+        cli_permission_override=False,
     )
+    command.extend(resolver.resolve_flags(harness))
     command.extend(passthrough_args)
     return tuple(command)
 
 
-def _build_supervisor_command(
+def _build_harness_command(
     *,
     repo_root: Path,
-    request: WorkspaceLaunchRequest,
+    request: SpaceLaunchRequest,
     prompt: str,
     config: MeridianConfig | None = None,
 ) -> tuple[str, ...]:
@@ -229,7 +230,7 @@ def _build_supervisor_command(
     autocompact_pct = (
         request.autocompact
         if request.autocompact is not None
-        else resolved_config.supervisor.autocompact_pct
+        else resolved_config.primary.autocompact_pct
     )
     passthrough.extend(["--autocompact", str(autocompact_pct)])
 
@@ -248,7 +249,7 @@ def _resolve_permission_tier_for_profile(
     default_tier: str,
 ) -> str:
     sandbox_value = profile.sandbox if profile is not None else None
-    inferred_tier = _permission_tier_from_profile(sandbox_value)
+    inferred_tier = permission_tier_from_profile(sandbox_value)
     if inferred_tier is not None:
         return inferred_tier
 
@@ -263,14 +264,14 @@ def _resolve_permission_tier_for_profile(
     return default_tier
 
 
-def _resolve_supervisor_harness(*, model: ModelId) -> HarnessId:
+def _resolve_harness(*, model: ModelId) -> HarnessId:
     decision = route_model(str(model), mode="harness")
     harness_id = decision.harness_id
     if harness_id == HarnessId("claude"):
         return harness_id
 
     message = (
-        "Workspace supervisor only supports Claude harness models. "
+        "Primary agent only supports Claude harness models. "
         f"Model '{model}' routes to harness '{harness_id}'."
     )
     if decision.warning:
@@ -293,52 +294,44 @@ def _pid_exists(pid: int) -> bool:
     return True
 
 
-def _transition_orphaned_workspace_states(
+def _transition_orphaned_space_states(
     repo_root: Path,
-    workspace_ids: tuple[WorkspaceId, ...],
+    space_ids: tuple[SpaceId, ...],
 ) -> None:
-    if not workspace_ids:
+    if not space_ids:
         return
 
-    db_path = resolve_state_paths(repo_root).db_path
-    conn = open_connection(db_path)
-    try:
-        with conn:
-            for workspace_id in workspace_ids:
-                conn.execute(
-                    """
-                    UPDATE workspaces
-                    SET status = 'paused',
-                        last_activity_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-                    WHERE id = ? AND status = 'active'
-                    """,
-                    (str(workspace_id),),
-                )
-    finally:
-        conn.close()
+    for space_id in space_ids:
+        current = space_file.get_space(repo_root, space_id)
+        if current is None or current.status != "active":
+            continue
+        try:
+            space_file.update_space_status(repo_root, space_id, "closed")
+        except Exception:
+            logger.debug("failed to transition orphaned space", exc_info=True)
 
 
-def cleanup_orphaned_locks(repo_root: Path) -> tuple[WorkspaceId, ...]:
-    """Remove stale workspace locks and mark orphaned active workspaces paused."""
+def cleanup_orphaned_locks(repo_root: Path) -> tuple[SpaceId, ...]:
+    """Remove stale space locks and close orphaned active spaces."""
 
-    lock_dir = resolve_state_paths(repo_root).active_workspaces_dir
+    lock_dir = resolve_state_paths(repo_root).active_spaces_dir
     if not lock_dir.exists():
         return ()
 
-    orphaned: list[WorkspaceId] = []
+    orphaned: list[SpaceId] = []
     for lock_file in sorted(lock_dir.glob("*.lock")):
         if not lock_file.is_file():
             continue
 
-        workspace_id = WorkspaceId(lock_file.stem)
+        space_id = SpaceId(lock_file.stem)
         child_pid = 0
         try:
             parsed = json.loads(lock_file.read_text(encoding="utf-8"))
             if isinstance(parsed, dict):
                 payload = cast("dict[str, object]", parsed)
-                raw_workspace_id = payload.get("workspace_id")
-                if isinstance(raw_workspace_id, str) and raw_workspace_id.strip():
-                    workspace_id = WorkspaceId(raw_workspace_id.strip())
+                raw_space_id = payload.get("space_id")
+                if isinstance(raw_space_id, str) and raw_space_id.strip():
+                    space_id = SpaceId(raw_space_id.strip())
                 raw_child_pid = payload.get("child_pid")
                 if isinstance(raw_child_pid, int):
                     child_pid = raw_child_pid
@@ -349,26 +342,26 @@ def cleanup_orphaned_locks(repo_root: Path) -> tuple[WorkspaceId, ...]:
             continue
 
         lock_file.unlink(missing_ok=True)
-        orphaned.append(workspace_id)
+        orphaned.append(space_id)
 
     deduped = tuple(
-        WorkspaceId(workspace_id)
-        for workspace_id in sorted({str(workspace_id) for workspace_id in orphaned})
+        SpaceId(space_id)
+        for space_id in sorted({str(space_id) for space_id in orphaned})
     )
-    _transition_orphaned_workspace_states(repo_root, deduped)
+    _transition_orphaned_space_states(repo_root, deduped)
     return deduped
 
 
-def _build_workspace_env(
-    request: WorkspaceLaunchRequest,
+def _build_space_env(
+    request: SpaceLaunchRequest,
     prompt: str,
     *,
     default_autocompact_pct: int | None = None,
 ) -> dict[str, str]:
     env_overrides = {
-        "MERIDIAN_WORKSPACE_ID": str(request.workspace_id),
+        "MERIDIAN_SPACE_ID": str(request.space_id),
         "MERIDIAN_DEPTH": os.environ.get("MERIDIAN_DEPTH", "0"),
-        "MERIDIAN_WORKSPACE_PROMPT": prompt,
+        "MERIDIAN_SPACE_PROMPT": prompt,
     }
     autocompact_pct = (
         request.autocompact
@@ -385,33 +378,33 @@ def _build_workspace_env(
     )
 
 
-def launch_supervisor(
+def launch_primary(
     *,
     repo_root: Path,
-    request: WorkspaceLaunchRequest,
-) -> WorkspaceLaunchResult:
-    """Launch supervisor process and wait for exit."""
+    request: SpaceLaunchRequest,
+) -> SpaceLaunchResult:
+    """Launch primary agent process and wait for exit."""
 
     config = load_config(repo_root)
-    prompt = build_supervisor_prompt(request)
-    command = _build_supervisor_command(
+    prompt = build_primary_prompt(request)
+    command = _build_harness_command(
         repo_root=repo_root,
         request=request,
         prompt=prompt,
         config=config,
     )
-    lock_path = workspace_lock_path(repo_root, request.workspace_id)
-    child_env = _build_workspace_env(
+    lock_path = space_lock_path(repo_root, request.space_id)
+    child_env = _build_space_env(
         request,
         prompt,
-        default_autocompact_pct=config.supervisor.autocompact_pct,
+        default_autocompact_pct=config.primary.autocompact_pct,
     )
 
     if request.dry_run:
-        return WorkspaceLaunchResult(
+        return SpaceLaunchResult(
             command=command,
             exit_code=0,
-            final_state="paused",
+            final_state="active",
             lock_path=lock_path,
         )
 
@@ -420,12 +413,12 @@ def launch_supervisor(
         # - The lock file is intentionally left behind (PID stays the same since
         #   exec replaces the process image). cleanup_orphaned_locks() on the
         #   next CLI invocation will remove it after the child exits.
-        # - The caller's post-launch state transitions (in workspace_start_sync /
-        #   workspace_resume_sync) will never execute. The workspace row remains
+        # - The caller's post-launch state transitions (in space_start_sync /
+        #   space_resume_sync) will never execute. The space row remains
         #   in its pre-launch state until the next cleanup cycle.
         _write_lock(
             path=lock_path,
-            workspace_id=request.workspace_id,
+            space_id=request.space_id,
             command=command,
             child_pid=os.getpid(),
         )
@@ -444,10 +437,10 @@ def launch_supervisor(
                     os.environ.pop(key, None)
             os.chdir(saved_cwd)
             lock_path.unlink(missing_ok=True)
-            return WorkspaceLaunchResult(
+            return SpaceLaunchResult(
                 command=command,
                 exit_code=2,
-                final_state="abandoned",
+                final_state="active",
                 lock_path=lock_path,
             )
 
@@ -456,7 +449,7 @@ def launch_supervisor(
     try:
         _write_lock(
             path=lock_path,
-            workspace_id=request.workspace_id,
+            space_id=request.space_id,
             command=command,
             child_pid=None,
         )
@@ -468,7 +461,7 @@ def launch_supervisor(
         )
         _write_lock(
             path=lock_path,
-            workspace_id=request.workspace_id,
+            space_id=request.space_id,
             command=command,
             child_pid=process.pid,
         )
@@ -487,8 +480,8 @@ def launch_supervisor(
         if lock_path.exists():
             lock_path.unlink()
 
-    final_state: WorkspaceState = "paused" if exit_code in {0, 130, 143} else "abandoned"
-    return WorkspaceLaunchResult(
+    final_state: SpaceState = "active"
+    return SpaceLaunchResult(
         command=command,
         exit_code=exit_code,
         final_state=final_state,

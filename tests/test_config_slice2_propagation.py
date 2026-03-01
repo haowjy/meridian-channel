@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import meridian.lib.ops.run as run_ops
 from meridian.lib.ops.run import RunCreateInput
 from meridian.lib.safety.permissions import PermissionConfig, PermissionTier
+from meridian.lib.space.space_file import create_space
 
 if TYPE_CHECKING:
     import pytest
@@ -39,6 +40,7 @@ def test_custom_max_retries_flows_to_execute_with_finalization(
         tmp_path,
         "[defaults]\nmax_retries = 7\n",
     )
+    monkeypatch.setenv("MERIDIAN_SPACE_ID", create_space(tmp_path, name="cfg-prop").id)
 
     captured: dict[str, float | int] = {}
 
@@ -66,8 +68,9 @@ def test_custom_default_permission_tier_flows_through_build_permission_config(
     _clear_config_env(monkeypatch)
     _write_config(
         tmp_path,
-        "[permissions]\ndefault_tier = 'workspace-write'\n",
+        "[permissions]\ndefault_tier = 'space-write'\n",
     )
+    monkeypatch.setenv("MERIDIAN_SPACE_ID", create_space(tmp_path, name="cfg-prop").id)
 
     captured: dict[str, object] = {}
 
@@ -80,7 +83,7 @@ def test_custom_default_permission_tier_flows_through_build_permission_config(
         captured["tier"] = tier
         captured["unsafe"] = unsafe
         captured["default_tier"] = default_tier
-        return PermissionConfig(tier=PermissionTier.WORKSPACE_WRITE, unsafe=unsafe)
+        return PermissionConfig(tier=PermissionTier.SPACE_WRITE, unsafe=unsafe)
 
     async def fake_execute_with_finalization(*args: object, **kwargs: object) -> int:
         return 0
@@ -96,11 +99,11 @@ def test_custom_default_permission_tier_flows_through_build_permission_config(
         )
     )
 
-    # The built-in 'agent' profile has sandbox=workspace-write, which becomes the
+    # The built-in 'agent' profile has sandbox=space-write, which becomes the
     # inferred tier when no explicit --permission flag is passed.
-    assert captured["tier"] == "workspace-write"
+    assert captured["tier"] == "space-write"
     assert captured["unsafe"] is False
-    assert captured["default_tier"] == "workspace-write"
+    assert captured["default_tier"] == "space-write"
 
 
 def test_custom_kill_grace_seconds_flows_to_execute_with_finalization(
@@ -112,6 +115,7 @@ def test_custom_kill_grace_seconds_flows_to_execute_with_finalization(
         tmp_path,
         "[timeouts]\nkill_grace_seconds = 4.5\n",
     )
+    monkeypatch.setenv("MERIDIAN_SPACE_ID", create_space(tmp_path, name="cfg-prop").id)
 
     captured: dict[str, float | int] = {}
 

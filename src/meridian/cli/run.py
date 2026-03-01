@@ -15,14 +15,12 @@ from meridian.lib.ops.run import (
     RunContinueInput,
     RunCreateInput,
     RunListInput,
-    RunRetryInput,
     RunShowInput,
     RunStatsInput,
     RunWaitInput,
     run_continue_sync,
     run_create_sync,
     run_list_sync,
-    run_retry_sync,
     run_show_sync,
     run_stats_sync,
     run_wait_sync,
@@ -101,9 +99,9 @@ def _run_create(
         bool,
         Parameter(name="--background", help="Submit run and return immediately with run ID."),
     ] = False,
-    workspace: Annotated[
+    space: Annotated[
         str | None,
-        Parameter(name="--workspace", help="Workspace id to run within."),
+        Parameter(name=["--space-id", "--space"], help="Space id to run within."),
     ] = None,
     timeout_secs: Annotated[
         float | None,
@@ -121,9 +119,9 @@ def _run_create(
         float | None,
         Parameter(name="--budget-per-run-usd", help="Per-run budget cap in USD."),
     ] = None,
-    budget_per_workspace_usd: Annotated[
+    budget_per_space_usd: Annotated[
         float | None,
-        Parameter(name="--budget-per-workspace-usd", help="Workspace budget cap in USD."),
+        Parameter(name="--budget-per-space-usd", help="Space budget cap in USD."),
     ] = None,
     budget_usd: Annotated[
         float | None,
@@ -164,12 +162,12 @@ def _run_create(
                 quiet=quiet,
                 stream=stream,
                 background=background,
-                workspace=workspace,
+                space=space,
                 timeout_secs=timeout_secs,
                 permission_tier=permission_tier,
                 unsafe=unsafe,
                 budget_per_run_usd=resolved_budget_per_run,
-                budget_per_workspace_usd=budget_per_workspace_usd,
+                budget_per_space_usd=budget_per_space_usd,
                 guardrails=guardrails,
                 secrets=secrets,
             )
@@ -190,9 +188,9 @@ def _run_create(
 
 def _run_list(
     emit: Any,
-    workspace: Annotated[
+    space: Annotated[
         str | None,
-        Parameter(name="--workspace", help="Only list runs from this workspace."),
+        Parameter(name=["--space-id", "--space"], help="Only list runs from this space."),
     ] = None,
     status: Annotated[
         str | None,
@@ -206,9 +204,9 @@ def _run_list(
         Parameter(name="--model", help="Filter by model id."),
     ] = None,
     limit: Annotated[int, Parameter(name="--limit", help="Maximum number of runs to return.")] = 20,
-    no_workspace: Annotated[
+    no_space: Annotated[
         bool,
-        Parameter(name="--no-workspace", help="Only include runs without a workspace."),
+        Parameter(name="--no-space", help="Only include runs without a space."),
     ] = False,
     failed: Annotated[
         bool,
@@ -224,11 +222,11 @@ def _run_list(
 
     result = run_list_sync(
         RunListInput(
-            workspace=workspace,
+            space=space,
             status=normalized_status,
             model=model,
             limit=limit,
-            no_workspace=no_workspace,
+            no_space=no_space,
             failed=failed,
         )
     )
@@ -264,16 +262,16 @@ def _run_stats(
         str | None,
         Parameter(name="--session", help="Only include runs for this session id."),
     ] = None,
-    workspace: Annotated[
+    space: Annotated[
         str | None,
-        Parameter(name="--workspace", help="Only include runs from this workspace."),
+        Parameter(name=["--space-id", "--space"], help="Only include runs from this space."),
     ] = None,
 ) -> None:
     emit(
         run_stats_sync(
             RunStatsInput(
                 session=session,
-                workspace=workspace,
+                space=space,
             )
         )
     )
@@ -302,42 +300,6 @@ def _run_continue(
     emit(
         run_continue_sync(
             RunContinueInput(
-                run_id=run_id,
-                prompt=prompt,
-                model=model,
-                fork=fork,
-                timeout_secs=timeout_secs,
-            )
-        )
-    )
-
-
-def _run_retry(
-    emit: Any,
-    run_id: str,
-    prompt: Annotated[
-        str | None,
-        Parameter(name=["--prompt", "-p"], help="Override prompt text for retry."),
-    ] = None,
-    model: Annotated[
-        str,
-        Parameter(name=["--model", "-m"], help="Override model for retry."),
-    ] = "",
-    fork: Annotated[
-        bool,
-        Parameter(
-            name="--fork",
-            help="Fork a new branch from the source harness session (default: true).",
-        ),
-    ] = True,
-    timeout_secs: Annotated[
-        float | None,
-        Parameter(name="--timeout-secs", help="Maximum runtime before timeout."),
-    ] = None,
-) -> None:
-    emit(
-        run_retry_sync(
-            RunRetryInput(
                 run_id=run_id,
                 prompt=prompt,
                 model=model,
@@ -389,7 +351,6 @@ def register_run_commands(app: App, emit: Emitter) -> tuple[set[str], dict[str, 
         "run.stats": lambda: partial(_run_stats, emit),
         "run.show": lambda: partial(_run_show, emit),
         "run.continue": lambda: partial(_run_continue, emit),
-        "run.retry": lambda: partial(_run_retry, emit),
         "run.wait": lambda: partial(_run_wait, emit),
     }
 

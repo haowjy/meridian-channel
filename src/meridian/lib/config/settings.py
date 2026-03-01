@@ -9,7 +9,7 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import cast
 
-from meridian.lib.state.db import resolve_state_paths
+from meridian.lib.state.paths import resolve_state_paths
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +43,8 @@ class SearchPathConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class SupervisorConfig:
-    """Supervisor-specific harness settings."""
+class PrimaryConfig:
+    """Primary-specific harness settings."""
 
     autocompact_pct: int = 65
     permission_tier: str = "full-access"
@@ -61,9 +61,9 @@ class MeridianConfig:
     guardrail_timeout_seconds: float = 30.0
     wait_timeout_seconds: float = 600.0
     default_permission_tier: str = "read-only"
-    supervisor_agent: str = "supervisor"
+    primary_agent: str = "primary"
     default_agent: str = "agent"
-    supervisor: SupervisorConfig = SupervisorConfig()
+    primary: PrimaryConfig = PrimaryConfig()
     output: OutputConfig = OutputConfig()
     search_paths: SearchPathConfig = SearchPathConfig()
 
@@ -73,7 +73,7 @@ _SECTION_KEY_MAP: dict[str, dict[str, str]] = {
         "max_depth": "max_depth",
         "max_retries": "max_retries",
         "retry_backoff_seconds": "retry_backoff_seconds",
-        "supervisor_agent": "supervisor_agent",
+        "primary_agent": "primary_agent",
         "agent": "default_agent",
         "default_agent": "default_agent",
     },
@@ -98,7 +98,7 @@ _TOP_LEVEL_KEY_MAP: dict[str, str] = {
     "guardrail_timeout_seconds": "guardrail_timeout_seconds",
     "wait_timeout_seconds": "wait_timeout_seconds",
     "default_permission_tier": "default_permission_tier",
-    "supervisor_agent": "supervisor_agent",
+    "primary_agent": "primary_agent",
     "default_agent": "default_agent",
 }
 
@@ -110,15 +110,15 @@ _ENV_OVERRIDE_MAP: dict[str, str] = {
     "MERIDIAN_GUARDRAIL_TIMEOUT_SECONDS": "guardrail_timeout_seconds",
     "MERIDIAN_WAIT_TIMEOUT_SECONDS": "wait_timeout_seconds",
     "MERIDIAN_DEFAULT_PERMISSION_TIER": "default_permission_tier",
-    "MERIDIAN_SUPERVISOR_AGENT": "supervisor_agent",
+    "MERIDIAN_PRIMARY_AGENT": "primary_agent",
     "MERIDIAN_DEFAULT_AGENT": "default_agent",
 }
 
 _OUTPUT_VERBOSITY_PRESETS = frozenset({"quiet", "normal", "verbose", "debug"})
 _SEARCH_PATH_KEYS = frozenset({"agents", "skills", "global_agents", "global_skills"})
-_SUPERVISOR_KEYS = frozenset({"autocompact_pct", "permission_tier"})
-_SUPERVISOR_AUTOCOMPACT_PCT_MIN = 1
-_SUPERVISOR_AUTOCOMPACT_PCT_MAX = 100
+_PRIMARY_KEYS = frozenset({"autocompact_pct", "permission_tier"})
+_PRIMARY_AUTOCOMPACT_PCT_MIN = 1
+_PRIMARY_AUTOCOMPACT_PCT_MAX = 100
 
 
 def _expected_type_name(field_name: str) -> str:
@@ -266,15 +266,15 @@ def _coerce_search_path_config(*, raw_value: object, source: str) -> SearchPathC
     )
 
 
-def _coerce_supervisor_config(*, raw_value: object, source: str) -> SupervisorConfig:
+def _coerce_primary_config(*, raw_value: object, source: str) -> PrimaryConfig:
     if not isinstance(raw_value, dict):
         raise ValueError(f"Invalid value for '{source}': expected table.")
 
-    defaults = SupervisorConfig()
+    defaults = PrimaryConfig()
     autocompact_pct = defaults.autocompact_pct
     permission_tier = defaults.permission_tier
     for key, value in cast("dict[str, object]", raw_value).items():
-        if key not in _SUPERVISOR_KEYS:
+        if key not in _PRIMARY_KEYS:
             logger.warning("Ignoring unknown Meridian config key '%s.%s'.", source, key)
             continue
 
@@ -285,14 +285,14 @@ def _coerce_supervisor_config(*, raw_value: object, source: str) -> SupervisorCo
                     f"{type(value).__name__} ({value!r})."
                 )
             if not (
-                _SUPERVISOR_AUTOCOMPACT_PCT_MIN
+                _PRIMARY_AUTOCOMPACT_PCT_MIN
                 <= value
-                <= _SUPERVISOR_AUTOCOMPACT_PCT_MAX
+                <= _PRIMARY_AUTOCOMPACT_PCT_MAX
             ):
                 raise ValueError(
                     f"Invalid value for '{source}.autocompact_pct': expected int between "
-                    f"{_SUPERVISOR_AUTOCOMPACT_PCT_MIN} and "
-                    f"{_SUPERVISOR_AUTOCOMPACT_PCT_MAX}, got {value!r}."
+                    f"{_PRIMARY_AUTOCOMPACT_PCT_MIN} and "
+                    f"{_PRIMARY_AUTOCOMPACT_PCT_MAX}, got {value!r}."
                 )
             autocompact_pct = value
             continue
@@ -314,7 +314,7 @@ def _coerce_supervisor_config(*, raw_value: object, source: str) -> SupervisorCo
             )
         permission_tier = normalized
 
-    return SupervisorConfig(
+    return PrimaryConfig(
         autocompact_pct=autocompact_pct,
         permission_tier=permission_tier,
     )
@@ -367,10 +367,10 @@ def _apply_toml_payload(
                 source="search_paths",
             )
             continue
-        if key == "supervisor":
-            values["supervisor"] = _coerce_supervisor_config(
+        if key == "primary":
+            values["primary"] = _coerce_primary_config(
                 raw_value=raw_value,
-                source="supervisor",
+                source="primary",
             )
             continue
 
@@ -426,9 +426,9 @@ def _build_config(values: dict[str, object]) -> MeridianConfig:
         guardrail_timeout_seconds=cast("float", values["guardrail_timeout_seconds"]),
         wait_timeout_seconds=cast("float", values["wait_timeout_seconds"]),
         default_permission_tier=cast("str", values["default_permission_tier"]),
-        supervisor_agent=cast("str", values["supervisor_agent"]),
+        primary_agent=cast("str", values["primary_agent"]),
         default_agent=cast("str", values["default_agent"]),
-        supervisor=cast("SupervisorConfig", values["supervisor"]),
+        primary=cast("PrimaryConfig", values["primary"]),
         output=cast("OutputConfig", values["output"]),
         search_paths=cast("SearchPathConfig", values["search_paths"]),
     )

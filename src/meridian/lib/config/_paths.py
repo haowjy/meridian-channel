@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 from meridian.lib.config.settings import SearchPathConfig
-from meridian.lib.state.db import resolve_state_paths
+from meridian.lib.state.paths import resolve_state_paths
 
 
 def bundled_agents_root() -> Path | None:
@@ -85,6 +85,6 @@ def resolve_path_list(
 
 
 def default_index_db_path(repo_root: Path) -> Path:
-    """Return default SQLite index path shared across meridian state."""
+    """Return default path used for any local skill index cache file."""
 
-    return resolve_state_paths(repo_root).db_path
+    return resolve_state_paths(repo_root).root_dir / "index" / "skills.json"

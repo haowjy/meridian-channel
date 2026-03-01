@@ -10,7 +10,8 @@ from typing import Any
 
 import pytest
 
-from meridian.lib.ops.run import RunCreateInput, _run_child_env, run_create, run_create_sync
+from meridian.lib.ops._run_execute import _run_child_env
+from meridian.lib.ops.run import RunCreateInput, run_create, run_create_sync
 from meridian.lib.safety.redaction import SecretSpec
 from meridian.server.main import mcp
 
@@ -51,7 +52,7 @@ def test_run_create_sync_refuses_when_depth_limit_reached(
     assert result.current_depth == 3
     assert result.max_depth == 3
     assert result.run_id is None
-    assert not (tmp_path / ".meridian" / "index" / "runs.db").exists()
+    assert not (tmp_path / ".meridian" / ".spaces").exists()
 
 
 @pytest.mark.asyncio
@@ -75,7 +76,7 @@ async def test_run_create_async_refuses_when_depth_limit_reached(
     assert result.current_depth == 4
     assert result.max_depth == 4
     assert result.run_id is None
-    assert not (tmp_path / ".meridian" / "index" / "runs.db").exists()
+    assert not (tmp_path / ".meridian" / ".spaces").exists()
 
 
 @pytest.mark.asyncio
@@ -99,14 +100,14 @@ async def test_mcp_run_create_refuses_when_depth_limit_reached(
     assert payload["current_depth"] == 3
     assert payload["max_depth"] == 3
     assert payload["run_id"] is None
-    assert not (repo_root / ".meridian" / "index" / "runs.db").exists()
+    assert not (repo_root / ".meridian" / ".spaces").exists()
 
 
 def test_run_child_env_increments_depth(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MERIDIAN_DEPTH", "2")
-    env = _run_child_env("w9", (SecretSpec(key="API_TOKEN", value="token"),))
+    env = _run_child_env("s9", (SecretSpec(key="API_TOKEN", value="token"),))
     assert env["MERIDIAN_DEPTH"] == "3"
-    assert env["MERIDIAN_WORKSPACE_ID"] == "w9"
+    assert env["MERIDIAN_SPACE_ID"] == "s9"
 
 
 def test_cli_run_create_depth_limit_returns_structured_error(
@@ -150,4 +151,4 @@ def test_cli_run_create_depth_limit_returns_structured_error(
     assert payload["current_depth"] == 3
     assert payload["max_depth"] == 3
     assert payload["run_id"] is None
-    assert not (repo_root / ".meridian" / "index" / "runs.db").exists()
+    assert not (repo_root / ".meridian" / ".spaces").exists()

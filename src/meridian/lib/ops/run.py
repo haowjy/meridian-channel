@@ -3,38 +3,31 @@
 from __future__ import annotations
 
 import asyncio
-import sqlite3
 import time
 from dataclasses import replace
 from pathlib import Path
-from typing import cast
 
-from meridian.lib.domain import RunCreateParams
 from meridian.lib.exec.spawn import execute_with_finalization
 from meridian.lib.ops._runtime import (
     build_runtime_from_root_and_config,
     resolve_runtime_root_and_config,
-    resolve_workspace_id,
+    resolve_space_id,
 )
 from meridian.lib.ops.registry import OperationSpec, operation
 from meridian.lib.safety.permissions import (
     build_permission_config,
     validate_permission_config_for_harness,
 )
-from meridian.lib.state.db import resolve_state_paths
-from meridian.lib.types import ModelId
+from meridian.lib.state import run_store
+from meridian.lib.state.paths import resolve_space_dir
 
 from . import _run_execute as _run_execute_module
 from . import _run_prepare as _run_prepare_module
 from ._run_execute import (
     _depth_exceeded_output,
     _depth_limits,
-    _emit_subrun_event,
     _execute_run_background,
     _execute_run_blocking,
-    _execute_run_non_blocking,
-    _read_non_negative_int_env,
-    _track_task,
     logger,
 )
 from ._run_models import (
@@ -43,29 +36,23 @@ from ._run_models import (
     RunCreateInput,
     RunDetailOutput,
     RunListEntry,
-    RunListFilters,
     RunListInput,
     RunListOutput,
-    RunRetryInput,
     RunShowInput,
     RunStatsInput,
     RunStatsOutput,
     RunWaitInput,
     RunWaitMultiOutput,
 )
-from ._run_prepare import (
-    _build_create_payload,
-    _validate_create_input,
-)
-from ._run_query import (
-    _build_run_list_query,
-    _detail_from_row,
-    _read_run_row,
-    resolve_run_reference,
-    resolve_run_references,
-)
+from ._run_prepare import _build_create_payload, _validate_create_input
+from ._run_query import _detail_from_row, _read_run_row, resolve_run_reference, resolve_run_references
 
-_run_child_env = _run_execute_module._run_child_env
+
+def _require_space_dir(repo_root: Path) -> tuple[str, Path]:
+    space_id = resolve_space_id(None)
+    if space_id is None:
+        raise ValueError("Space is required. Pass --space or set MERIDIAN_SPACE_ID.")
+    return str(space_id), resolve_space_dir(repo_root, space_id)
 
 
 def run_create_sync(payload: RunCreateInput) -> RunActionOutput:
@@ -113,140 +100,39 @@ def run_create_sync(payload: RunCreateInput) -> RunActionOutput:
 
 
 async def run_create(payload: RunCreateInput) -> RunActionOutput:
-    _run_prepare_module.build_permission_config = build_permission_config
-    _run_prepare_module.validate_permission_config_for_harness = (
-        validate_permission_config_for_harness
-    )
-    _run_prepare_module.logger = logger
-    _run_execute_module.execute_with_finalization = execute_with_finalization
-    _run_execute_module.logger = logger
-
-    payload, preflight_warning = _validate_create_input(payload)
-
-    runtime = None
-    if not payload.dry_run:
-        resolved_root, config = resolve_runtime_root_and_config(payload.repo_root)
-        current_depth, max_depth = _depth_limits(config.max_depth)
-        if current_depth >= max_depth:
-            return _depth_exceeded_output(current_depth, max_depth)
-        runtime = build_runtime_from_root_and_config(resolved_root, config)
-
-    prepared = _build_create_payload(payload, runtime=runtime, preflight_warning=preflight_warning)
-    if payload.dry_run:
-        return RunActionOutput(
-            command="run.create",
-            status="dry-run",
-            model=prepared.model,
-            harness_id=prepared.harness_id,
-            warning=prepared.warning,
-            agent=prepared.agent_name,
-            skills=prepared.skills,
-            reference_files=prepared.reference_files,
-            template_vars=prepared.template_vars,
-            report_path=prepared.report_path,
-            composed_prompt=prepared.composed_prompt,
-            cli_command=prepared.cli_command,
-            message="Dry run complete.",
-        )
-
-    if runtime is None:
-        raise RuntimeError("Run runtime was not initialized.")
-    workspace_id = resolve_workspace_id(payload.workspace)
-    run = await runtime.run_store.create(
-        RunCreateParams(
-            prompt=prepared.composed_prompt,
-            model=ModelId(prepared.model),
-            workspace_id=workspace_id,
-        )
-    )
-    current_depth = _read_non_negative_int_env("MERIDIAN_DEPTH", 0)
-    run_start_event: dict[str, object] = {
-        "t": "meridian.run.start",
-        "id": str(run.run_id),
-        "model": prepared.model,
-        "d": current_depth,
-    }
-    if prepared.agent_name is not None:
-        run_start_event["agent"] = prepared.agent_name
-    _emit_subrun_event(run_start_event)
-
-    task = asyncio.create_task(
-        _execute_run_non_blocking(
-            run_id=run.run_id,
-            repo_root=runtime.repo_root,
-            timeout_secs=payload.timeout_secs,
-            skills=prepared.skills,
-            agent_name=prepared.agent_name,
-            mcp_tools=prepared.mcp_tools,
-            permission_config=prepared.permission_config,
-            budget=prepared.budget,
-            guardrails=prepared.guardrails,
-            secrets=prepared.secrets,
-            continue_session_id=prepared.continue_session_id,
-            continue_fork=prepared.continue_fork,
-        )
-    )
-    _track_task(task)
-
-    return RunActionOutput(
-        command="run.create",
-        status="running",
-        run_id=str(run.run_id),
-        message="Run started. Use run_show or run_wait for completion.",
-        model=prepared.model,
-        harness_id=prepared.harness_id,
-        warning=prepared.warning,
-        agent=prepared.agent_name,
-        skills=prepared.skills,
-        reference_files=prepared.reference_files,
-        template_vars=prepared.template_vars,
-        report_path=prepared.report_path,
-        cli_command=prepared.cli_command,
-    )
+    return await asyncio.to_thread(run_create_sync, payload)
 
 
 def run_list_sync(payload: RunListInput) -> RunListOutput:
     repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
-    filters = RunListFilters(
-        model=(
-            payload.model.strip()
-            if payload.model is not None and payload.model.strip()
-            else None
-        ),
-        workspace=(
-            payload.workspace.strip()
-            if payload.workspace is not None and payload.workspace.strip()
-            else None
-        ),
-        no_workspace=payload.no_workspace,
-        status=payload.status,
-        failed=payload.failed,
-        limit=payload.limit,
-    )
-    query, params = _build_run_list_query(filters)
+    current_space_id, space_dir = _require_space_dir(repo_root)
 
-    db_path = resolve_state_paths(repo_root).db_path
-    if not db_path.is_file():
+    if payload.no_space:
+        return RunListOutput(runs=())
+    if payload.space is not None and payload.space.strip() and payload.space.strip() != current_space_id:
         return RunListOutput(runs=())
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        rows = conn.execute(query, tuple(params)).fetchall()
-    finally:
-        conn.close()
+    runs = list(reversed(run_store.list_runs(space_dir)))
+    if payload.status is not None:
+        runs = [row for row in runs if row.status == payload.status]
+    if payload.failed:
+        runs = [row for row in runs if row.status == "failed"]
+    if payload.model is not None and payload.model.strip():
+        wanted_model = payload.model.strip()
+        runs = [row for row in runs if row.model == wanted_model]
 
+    limit = payload.limit if payload.limit > 0 else 20
     return RunListOutput(
         runs=tuple(
             RunListEntry(
-                run_id=str(row["id"]),
-                status=str(row["status"]),
-                model=str(row["model"]),
-                workspace_id=cast("str | None", row["workspace_id"]),
-                duration_secs=cast("float | None", row["duration_secs"]),
-                cost_usd=cast("float | None", row["total_cost_usd"]),
+                run_id=row.id,
+                status=row.status,
+                model=row.model or "",
+                space_id=current_space_id,
+                duration_secs=row.duration_secs,
+                cost_usd=row.total_cost_usd,
             )
-            for row in rows
+            for row in runs[:limit]
         )
     )
 
@@ -255,27 +141,11 @@ async def run_list(payload: RunListInput) -> RunListOutput:
     return await asyncio.to_thread(run_list_sync, payload)
 
 
-def _runs_table_columns(conn: sqlite3.Connection) -> set[str]:
-    rows = conn.execute("PRAGMA table_info(runs)").fetchall()
-    return {
-        str(row["name"])
-        for row in rows
-        if row["name"] is not None
-    }
-
-
-def _resolve_run_session_column(columns: set[str]) -> str | None:
-    if "session_id" in columns:
-        return "session_id"
-    if "harness_session_id" in columns:
-        return "harness_session_id"
-    return None
-
-
 def run_stats_sync(payload: RunStatsInput) -> RunStatsOutput:
     repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
-    db_path = resolve_state_paths(repo_root).db_path
-    if not db_path.is_file():
+    current_space_id, space_dir = _require_space_dir(repo_root)
+
+    if payload.space is not None and payload.space.strip() and payload.space.strip() != current_space_id:
         return RunStatsOutput(
             total_runs=0,
             succeeded=0,
@@ -287,79 +157,45 @@ def run_stats_sync(payload: RunStatsInput) -> RunStatsOutput:
             models={},
         )
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        columns = _runs_table_columns(conn)
-        where: list[str] = []
-        params: list[object] = []
+    runs = run_store.list_runs(space_dir)
+    if payload.session is not None and payload.session.strip():
+        wanted_session = payload.session.strip()
+        runs = [row for row in runs if row.session_id == wanted_session]
 
-        workspace = payload.workspace.strip() if payload.workspace is not None else ""
-        if workspace:
-            where.append("workspace_id = ?")
-            params.append(workspace)
+    models: dict[str, int] = {}
+    total_duration_secs = 0.0
+    total_cost_usd = 0.0
+    succeeded = 0
+    failed = 0
+    cancelled = 0
+    running = 0
 
-        session = payload.session.strip() if payload.session is not None else ""
-        if session:
-            session_column = _resolve_run_session_column(columns)
-            if session_column is not None:
-                where.append(f"{session_column} = ?")
-                params.append(session)
-            # TODO: support session filtering on legacy schemas that have no session column.
+    for row in runs:
+        if row.status == "succeeded":
+            succeeded += 1
+        elif row.status == "failed":
+            failed += 1
+        elif row.status == "cancelled":
+            cancelled += 1
+        elif row.status == "running":
+            running += 1
 
-        where_clause = f" WHERE {' AND '.join(where)}" if where else ""
-
-        aggregate_row = conn.execute(
-            (
-                "SELECT "
-                "COUNT(*) AS total_runs, "
-                "COALESCE(SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END), 0) AS succeeded, "
-                "COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed, "
-                "COALESCE(SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END), 0) AS cancelled, "
-                "COALESCE(SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END), 0) AS running, "
-                "COALESCE(SUM(COALESCE(duration_secs, 0.0)), 0.0) AS total_duration_secs, "
-                "COALESCE(SUM(COALESCE(total_cost_usd, 0.0)), 0.0) AS total_cost_usd "
-                f"FROM runs{where_clause}"
-            ),
-            tuple(params),
-        ).fetchone()
-        if aggregate_row is None:
-            return RunStatsOutput(
-                total_runs=0,
-                succeeded=0,
-                failed=0,
-                cancelled=0,
-                running=0,
-                total_duration_secs=0.0,
-                total_cost_usd=0.0,
-                models={},
-            )
-
-        model_rows = conn.execute(
-            (
-                "SELECT model, COUNT(*) AS run_count "
-                f"FROM runs{where_clause} "
-                "GROUP BY model "
-                "ORDER BY run_count DESC, model ASC"
-            ),
-            tuple(params),
-        ).fetchall()
-    finally:
-        conn.close()
+        if row.model is not None:
+            models[row.model] = models.get(row.model, 0) + 1
+        if row.duration_secs is not None:
+            total_duration_secs += row.duration_secs
+        if row.total_cost_usd is not None:
+            total_cost_usd += row.total_cost_usd
 
     return RunStatsOutput(
-        total_runs=int(aggregate_row["total_runs"] or 0),
-        succeeded=int(aggregate_row["succeeded"] or 0),
-        failed=int(aggregate_row["failed"] or 0),
-        cancelled=int(aggregate_row["cancelled"] or 0),
-        running=int(aggregate_row["running"] or 0),
-        total_duration_secs=float(aggregate_row["total_duration_secs"] or 0.0),
-        total_cost_usd=float(aggregate_row["total_cost_usd"] or 0.0),
-        models={
-            str(row["model"]): int(row["run_count"])
-            for row in model_rows
-            if row["model"] is not None
-        },
+        total_runs=len(runs),
+        succeeded=succeeded,
+        failed=failed,
+        cancelled=cancelled,
+        running=running,
+        total_duration_secs=total_duration_secs,
+        total_cost_usd=total_cost_usd,
+        models=models,
     )
 
 
@@ -443,14 +279,12 @@ def run_wait_sync(payload: RunWaitInput) -> RunWaitMultiOutput:
     poll = (
         payload.poll_interval_secs
         if payload.poll_interval_secs is not None
-        # run.wait polling is a read-side retry loop, so we intentionally reuse
-        # retry_backoff_seconds as the default cadence when no poll interval is set.
         else config.retry_backoff_seconds
     )
     if poll <= 0:
         poll = config.retry_backoff_seconds
 
-    completed_rows: dict[str, sqlite3.Row] = {}
+    completed_rows: dict[str, run_store.RunRecord] = {}
     pending: set[str] = set(run_ids)
 
     while True:
@@ -459,8 +293,7 @@ def run_wait_sync(payload: RunWaitInput) -> RunWaitMultiOutput:
             if row is None:
                 raise ValueError(f"Run '{run_id}' not found")
 
-            status = str(row["status"])
-            if _run_is_terminal(status):
+            if _run_is_terminal(row.status):
                 completed_rows[run_id] = row
                 pending.remove(run_id)
 
@@ -486,7 +319,7 @@ async def run_wait(payload: RunWaitInput) -> RunWaitMultiOutput:
     return await asyncio.to_thread(run_wait_sync, payload)
 
 
-def _source_run_for_follow_up(payload_run_id: str, repo_root: Path) -> tuple[str, sqlite3.Row]:
+def _source_run_for_follow_up(payload_run_id: str, repo_root: Path) -> tuple[str, run_store.RunRecord]:
     resolved_run_id = resolve_run_reference(repo_root, payload_run_id)
     row = _read_run_row(repo_root, resolved_run_id)
     if row is None:
@@ -494,20 +327,20 @@ def _source_run_for_follow_up(payload_run_id: str, repo_root: Path) -> tuple[str
     return resolved_run_id, row
 
 
-def _prompt_for_follow_up(source_run: sqlite3.Row, payload_run_id: str, prompt: str | None) -> str:
+def _prompt_for_follow_up(source_run: run_store.RunRecord, payload_run_id: str, prompt: str | None) -> str:
     if prompt is not None and prompt.strip():
         return prompt
 
-    existing_prompt = str(source_run["prompt"] or "").strip()
+    existing_prompt = (source_run.prompt or "").strip()
     if not existing_prompt:
         raise ValueError(f"Run '{payload_run_id}' has no stored prompt")
     return existing_prompt
 
 
-def _model_for_follow_up(source_run: sqlite3.Row, override_model: str) -> str:
+def _model_for_follow_up(source_run: run_store.RunRecord, override_model: str) -> str:
     if override_model.strip():
         return override_model
-    return str(source_run["model"] or "").strip()
+    return (source_run.model or "").strip()
 
 
 def _with_command(result: RunActionOutput, command: str) -> RunActionOutput:
@@ -518,12 +351,8 @@ def run_continue_sync(payload: RunContinueInput) -> RunActionOutput:
     repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
     resolved_run_id, source_run = _source_run_for_follow_up(payload.run_id, repo_root)
     derived_prompt = _prompt_for_follow_up(source_run, resolved_run_id, payload.prompt)
-    source_harness = str(source_run["harness"] or "").strip() or None
-    source_session_id = str(source_run["harness_session_id"] or "").strip() or None
-    # Note: agent is not forwarded from the original run, so
-    # agent_explicitly_requested will be False and permission-escalation
-    # warnings won't fire.  This is acceptable for continue/retry since
-    # the user already approved the original run's permissions.
+    source_harness = (source_run.harness or "").strip() or None
+    source_session_id = (source_run.harness_session_id or "").strip() or None
     create_input = RunCreateInput(
         prompt=derived_prompt,
         model=_model_for_follow_up(source_run, payload.model),
@@ -539,29 +368,6 @@ def run_continue_sync(payload: RunContinueInput) -> RunActionOutput:
 
 async def run_continue(payload: RunContinueInput) -> RunActionOutput:
     return await asyncio.to_thread(run_continue_sync, payload)
-
-
-def run_retry_sync(payload: RunRetryInput) -> RunActionOutput:
-    repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
-    resolved_run_id, source_run = _source_run_for_follow_up(payload.run_id, repo_root)
-    derived_prompt = _prompt_for_follow_up(source_run, resolved_run_id, payload.prompt)
-    source_harness = str(source_run["harness"] or "").strip() or None
-    source_session_id = str(source_run["harness_session_id"] or "").strip() or None
-    create_input = RunCreateInput(
-        prompt=derived_prompt,
-        model=_model_for_follow_up(source_run, payload.model),
-        repo_root=payload.repo_root,
-        timeout_secs=payload.timeout_secs,
-        continue_session_id=source_session_id,
-        continue_harness=source_harness,
-        continue_fork=payload.fork,
-    )
-    result = run_create_sync(create_input)
-    return _with_command(result, "run.retry")
-
-
-async def run_retry(payload: RunRetryInput) -> RunActionOutput:
-    return await asyncio.to_thread(run_retry_sync, payload)
 
 
 operation(
@@ -631,20 +437,6 @@ operation(
         cli_name="continue",
         mcp_name="run_continue",
         description="Continue a previous run.",
-    )
-)
-
-operation(
-    OperationSpec[RunRetryInput, RunActionOutput](
-        name="run.retry",
-        handler=run_retry,
-        sync_handler=run_retry_sync,
-        input_type=RunRetryInput,
-        output_type=RunActionOutput,
-        cli_group="run",
-        cli_name="retry",
-        mcp_name="run_retry",
-        description="Retry a previous run.",
     )
 )
 

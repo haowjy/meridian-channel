@@ -14,14 +14,11 @@ def test_help_lists_resource_first_groups(run_meridian) -> None:
     assert result.returncode == 0
     for expected in [
         "serve",
-        "workspace",
+        "space",
         "run",
         "skills",
         "models",
-        "context",
         "diag",
-        "export",
-        "migrate",
     ]:
         assert expected in result.stdout
 
@@ -59,7 +56,7 @@ def test_json_and_format_flags_output_stdout_only(run_meridian) -> None:
     result_format = run_meridian(["--format", "json", "start"])
     assert result_format.returncode == 0
     payload_format = json.loads(result_format.stdout)
-    assert payload_format["workspace_id"].startswith("w")
+    assert payload_format["space_id"].startswith("s")
 
 
 def test_yes_and_no_input_flags_are_wired(run_meridian) -> None:
@@ -71,11 +68,11 @@ def test_yes_and_no_input_flags_are_wired(run_meridian) -> None:
     assert payload["status"] == "dry-run"
 
 
-def test_workspace_start_supports_dry_run(run_meridian) -> None:
-    result = run_meridian(["--json", "workspace", "start", "--dry-run"])
+def test_space_start_supports_dry_run(run_meridian) -> None:
+    result = run_meridian(["--json", "space", "start", "--dry-run"])
     assert result.returncode == 0
     payload = json.loads(result.stdout)
-    assert payload["message"] == "Workspace launch dry-run."
+    assert payload["message"] == "Space launch dry-run."
     assert payload["exit_code"] == 0
     assert "mock_harness.py" in payload["command"][1]
 
@@ -91,4 +88,7 @@ def test_doctor_alias_invokes_diag_doctor(run_meridian) -> None:
     assert result.returncode == 0
     payload = json.loads(result.stdout)
     assert payload["repo_root"]
-    assert payload["db_path"]
+    assert "spaces_checked" in payload
+    assert "runs_checked" in payload
+    assert payload["agents_dir"]
+    assert payload["skills_dir"]

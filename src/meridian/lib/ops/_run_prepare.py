@@ -24,12 +24,13 @@ from meridian.lib.prompt import (
 )
 from meridian.lib.safety.budget import Budget, normalize_budget
 from meridian.lib.safety.guardrails import normalize_guardrail_paths
+from meridian.lib.harness.adapter import PermissionResolver
 from meridian.lib.safety.permissions import (
-    _permission_tier_from_profile,
-    _warn_profile_tier_escalation,
     PermissionConfig,
-    TieredPermissionResolver,
+    permission_tier_from_profile,
+    warn_profile_tier_escalation,
     build_permission_config,
+    build_permission_resolver,
     validate_permission_config_for_harness,
 )
 from meridian.lib.safety.redaction import SecretSpec, parse_secret_specs
@@ -58,6 +59,8 @@ class _PreparedCreate:
     agent_name: str | None
     cli_command: tuple[str, ...]
     permission_config: PermissionConfig
+    permission_resolver: PermissionResolver
+    allowed_tools: tuple[str, ...]
     budget: Budget | None
     guardrails: tuple[str, ...]
     secrets: tuple[SecretSpec, ...]
@@ -348,13 +351,13 @@ def _build_create_payload(
     warning = _merge_warnings(preflight_warning, warning)
     from meridian.lib.harness.adapter import RunParams
 
-    inferred_tier = _permission_tier_from_profile(profile.sandbox if profile is not None else None)
+    inferred_tier = permission_tier_from_profile(profile.sandbox if profile is not None else None)
     # Only warn about tier escalation when the user explicitly chose an
     # agent via --agent.  The implicit default agent profile often has
-    # sandbox > config default (e.g. workspace-write vs read-only), and
+    # sandbox > config default (e.g. space-write vs read-only), and
     # warning every time is noise for normal configurations.
     if payload.permission_tier is None and agent_explicitly_requested:
-        _warn_profile_tier_escalation(
+        warn_profile_tier_escalation(
             profile=profile,
             inferred_tier=inferred_tier,
             default_tier=runtime_view.config.default_permission_tier,
@@ -374,10 +377,16 @@ def _build_create_payload(
     )
     budget = normalize_budget(
         per_run_usd=payload.budget_per_run_usd,
-        per_workspace_usd=payload.budget_per_workspace_usd,
+        per_space_usd=payload.budget_per_space_usd,
     )
     guardrails = normalize_guardrail_paths(payload.guardrails, repo_root=runtime_view.repo_root)
     secrets = parse_secret_specs(payload.secrets)
+
+    resolver = build_permission_resolver(
+        allowed_tools=profile.allowed_tools if profile is not None else (),
+        permission_config=permission_config,
+        cli_permission_override=payload.permission_tier is not None,
+    )
 
     preview_command = tuple(
         harness.build_command(
@@ -391,7 +400,7 @@ def _build_create_payload(
                 continue_session_id=resolved_continue_session_id,
                 continue_fork=resolved_continue_fork,
             ),
-            TieredPermissionResolver(permission_config),
+            resolver,
         )
     )
 
@@ -408,6 +417,8 @@ def _build_create_payload(
         agent_name=defaults.agent_name,
         cli_command=preview_command,
         permission_config=permission_config,
+        permission_resolver=resolver,
+        allowed_tools=profile.allowed_tools if profile is not None else (),
         budget=budget,
         guardrails=tuple(path.as_posix() for path in guardrails),
         secrets=secrets,

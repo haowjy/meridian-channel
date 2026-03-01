@@ -29,7 +29,6 @@ def test_direct_adapter_tool_definitions_include_allowed_callers() -> None:
         assert isinstance(tool["input_schema"], dict)
 
     assert "skills_search" in by_name
-    assert "skills_reindex" in by_name
     assert "models_show" in by_name
 
 

@@ -2,7 +2,7 @@
 
 from typing import NewType
 
-WorkspaceId = NewType("WorkspaceId", str)
+SpaceId = NewType("SpaceId", str)
 RunId = NewType("RunId", str)
 HarnessId = NewType("HarnessId", str)
 ModelId = NewType("ModelId", str)

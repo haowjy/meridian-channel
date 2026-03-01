@@ -23,7 +23,7 @@ def _detail_from_status(
         status=status,
         model="gpt-5.3-codex",
         harness="codex",
-        workspace_id=None,
+        space_id=None,
         started_at="2026-02-27T00:00:00Z",
         finished_at="2026-02-27T00:00:01Z",
         duration_secs=duration_secs,
@@ -50,18 +50,18 @@ def test_run_wait_sync_waits_for_all_runs_and_returns_ordered_summary(
     )
     monkeypatch.setattr(run_ops.time, "sleep", lambda _: None)
 
-    rows_by_id: dict[str, list[dict[str, object]]] = {
+    rows_by_id: dict[str, list[SimpleNamespace]] = {
         "r1": [
-            {"id": "r1", "status": "running"},
-            {"id": "r1", "status": "succeeded", "duration_secs": 3.2, "exit_code": 0},
+            SimpleNamespace(id="r1", status="running", duration_secs=None, exit_code=None),
+            SimpleNamespace(id="r1", status="succeeded", duration_secs=3.2, exit_code=0),
         ],
         "r2": [
-            {"id": "r2", "status": "queued"},
-            {"id": "r2", "status": "failed", "duration_secs": 4.5, "exit_code": 1},
+            SimpleNamespace(id="r2", status="queued", duration_secs=None, exit_code=None),
+            SimpleNamespace(id="r2", status="failed", duration_secs=4.5, exit_code=1),
         ],
     }
 
-    def fake_read_run_row(_: Path, run_id: str) -> dict[str, object]:
+    def fake_read_run_row(_: Path, run_id: str) -> SimpleNamespace:
         sequence = rows_by_id[run_id]
         if len(sequence) > 1:
             return sequence.pop(0)
@@ -72,10 +72,10 @@ def test_run_wait_sync_waits_for_all_runs_and_returns_ordered_summary(
         run_ops,
         "_detail_from_row",
         lambda repo_root, row, include_report, include_files: _detail_from_status(
-            run_id=str(row["id"]),
-            status=str(row["status"]),
-            duration_secs=cast("float | None", row.get("duration_secs")),
-            exit_code=cast("int | None", row.get("exit_code")),
+            run_id=str(row.id),
+            status=str(row.status),
+            duration_secs=cast("float | None", row.duration_secs),
+            exit_code=cast("int | None", row.exit_code),
         ),
     )
 
@@ -120,7 +120,9 @@ def test_run_wait_sync_timeout_is_global_across_all_runs(
     monkeypatch.setattr(
         run_ops,
         "_read_run_row",
-        lambda _repo_root, run_id: {"id": run_id, "status": "running"},
+        lambda _repo_root, run_id: SimpleNamespace(
+            id=run_id, status="running", duration_secs=None, exit_code=None
+        ),
     )
 
     with pytest.raises(TimeoutError, match="Timed out waiting for run\\(s\\)"):
@@ -144,16 +146,18 @@ def test_run_wait_sync_accepts_legacy_run_id_alias_for_single_run(
     monkeypatch.setattr(
         run_ops,
         "_read_run_row",
-        lambda _repo_root, run_id: {"id": run_id, "status": "succeeded", "duration_secs": 1.0, "exit_code": 0},
+        lambda _repo_root, run_id: SimpleNamespace(
+            id=run_id, status="succeeded", duration_secs=1.0, exit_code=0
+        ),
     )
     monkeypatch.setattr(
         run_ops,
         "_detail_from_row",
         lambda repo_root, row, include_report, include_files: _detail_from_status(
-            run_id=str(row["id"]),
-            status=str(row["status"]),
-            duration_secs=cast("float | None", row.get("duration_secs")),
-            exit_code=cast("int | None", row.get("exit_code")),
+            run_id=str(row.id),
+            status=str(row.status),
+            duration_secs=cast("float | None", row.duration_secs),
+            exit_code=cast("int | None", row.exit_code),
         ),
     )
 

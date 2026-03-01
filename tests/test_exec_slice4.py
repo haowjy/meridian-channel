@@ -6,7 +6,6 @@ import asyncio
 from contextlib import contextmanager
 import os
 import signal
-import sqlite3
 import subprocess
 import sys
 import textwrap
@@ -16,8 +15,7 @@ from typing import cast
 
 import pytest
 
-from meridian.lib.adapters.sqlite import RunFinalizeRow, StateDB
-from meridian.lib.domain import RunCreateParams, TokenUsage
+from meridian.lib.domain import Run, TokenUsage
 from meridian.lib.exec.signals import (
     SignalCoordinator,
     SignalForwarder,
@@ -36,8 +34,11 @@ from meridian.lib.harness.adapter import (
 )
 from meridian.lib.harness.registry import HarnessRegistry
 from meridian.lib.safety.permissions import PermissionConfig
+from meridian.lib.space.space_file import create_space
+from meridian.lib.state import run_store
 from meridian.lib.state.artifact_store import LocalStore, make_artifact_key
-from meridian.lib.types import HarnessId, ModelId, RunId
+from meridian.lib.state.paths import resolve_space_dir
+from meridian.lib.types import HarnessId, ModelId, RunId, SpaceId
 
 
 class RecordingPermissionResolver(PermissionResolver):
@@ -109,13 +110,20 @@ class MockHarnessAdapter:
         return None
 
 
-def _fetch_run_row(state: StateDB, run_id: RunId) -> sqlite3.Row:
-    conn = sqlite3.connect(state.paths.db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        row = conn.execute("SELECT * FROM runs WHERE id = ?", (str(run_id),)).fetchone()
-    finally:
-        conn.close()
+def _create_run(repo_root: Path, *, prompt: str) -> tuple[Run, Path]:
+    space = create_space(repo_root, name="slice4")
+    run = Run(
+        run_id=RunId("r1"),
+        prompt=prompt,
+        model=ModelId("gpt-5.3-codex"),
+        status="queued",
+        space_id=SpaceId(space.id),
+    )
+    return run, resolve_space_dir(repo_root, space.id)
+
+
+def _fetch_run_row(space_dir: Path, run_id: RunId) -> run_store.RunRecord:
+    row = run_store.get_run(space_dir, run_id)
     assert row is not None
     return row
 
@@ -139,8 +147,7 @@ async def test_execute_with_finalization_captures_without_stderr_passthrough(
 ) -> None:
     import meridian.lib.exec.spawn as spawn_module
 
-    state = StateDB(tmp_path)
-    run = state.create_run(RunCreateParams(prompt="stream", model=ModelId("gpt-5.3-codex")))
+    run, space_dir = _create_run(tmp_path, prompt="stream")
     artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
     fixture = package_root / "tests" / "fixtures" / "partial.jsonl"
     adapter = MockHarnessAdapter(
@@ -176,7 +183,8 @@ async def test_execute_with_finalization_captures_without_stderr_passthrough(
 
     exit_code = await execute_with_finalization(
         run,
-        state=state,
+        repo_root=tmp_path,
+        space_dir=space_dir,
         artifacts=artifacts,
         registry=registry,
         permission_resolver=perms,
@@ -192,9 +200,9 @@ async def test_execute_with_finalization_captures_without_stderr_passthrough(
     assert perms.seen_harness_ids == [HarnessId("mock")]
     assert start_new_session_values == [True]
 
-    row = _fetch_run_row(state, run.run_id)
-    assert row["status"] == "succeeded"
-    assert row["exit_code"] == 0
+    row = _fetch_run_row(space_dir, run.run_id)
+    assert row.status == "succeeded"
+    assert row.exit_code == 0
 
     output_key = make_artifact_key(run.run_id, "output.jsonl")
     stderr_key = make_artifact_key(run.run_id, "stderr.log")
@@ -217,8 +225,7 @@ async def test_execute_with_finalization_allows_stderr_passthrough_when_enabled(
     package_root: Path,
     tmp_path: Path,
 ) -> None:
-    state = StateDB(tmp_path)
-    run = state.create_run(RunCreateParams(prompt="stream", model=ModelId("gpt-5.3-codex")))
+    run, space_dir = _create_run(tmp_path, prompt="stream")
     artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
     fixture = package_root / "tests" / "fixtures" / "partial.jsonl"
     adapter = MockHarnessAdapter(
@@ -235,7 +242,8 @@ async def test_execute_with_finalization_allows_stderr_passthrough_when_enabled(
 
     exit_code = await execute_with_finalization(
         run,
-        state=state,
+        repo_root=tmp_path,
+        space_dir=space_dir,
         artifacts=artifacts,
         registry=registry,
         harness_id=adapter.id,
@@ -251,8 +259,7 @@ async def test_execute_with_finalization_allows_stderr_passthrough_when_enabled(
 
 @pytest.mark.asyncio
 async def test_timeout_kills_child_and_finalizes_row(package_root: Path, tmp_path: Path) -> None:
-    state = StateDB(tmp_path)
-    run = state.create_run(RunCreateParams(prompt="hang", model=ModelId("gpt-5.3-codex")))
+    run, space_dir = _create_run(tmp_path, prompt="hang")
     artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
     adapter = MockHarnessAdapter(
         script=package_root / "tests" / "mock_harness.py",
@@ -263,7 +270,8 @@ async def test_timeout_kills_child_and_finalizes_row(package_root: Path, tmp_pat
 
     exit_code = await execute_with_finalization(
         run,
-        state=state,
+        repo_root=tmp_path,
+        space_dir=space_dir,
         artifacts=artifacts,
         registry=registry,
         harness_id=adapter.id,
@@ -273,11 +281,11 @@ async def test_timeout_kills_child_and_finalizes_row(package_root: Path, tmp_pat
     )
 
     assert exit_code == 3
-    row = _fetch_run_row(state, run.run_id)
-    assert row["status"] == "failed"
-    assert row["exit_code"] == 3
-    assert row["failure_reason"] == "timeout"
-    assert row["finished_at"] is not None
+    row = _fetch_run_row(space_dir, run.run_id)
+    assert row.status == "failed"
+    assert row.exit_code == 3
+    assert row.error is None
+    assert row.finished_at is not None
 
 
 @pytest.mark.asyncio
@@ -323,8 +331,7 @@ async def test_timeout_kills_grandchild_processes(package_root: Path, tmp_path: 
         encoding="utf-8",
     )
 
-    state = StateDB(tmp_path)
-    run = state.create_run(RunCreateParams(prompt="hang", model=ModelId("gpt-5.3-codex")))
+    run, space_dir = _create_run(tmp_path, prompt="hang")
     artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
     adapter = MockHarnessAdapter(
         script=package_root / "tests" / "mock_harness.py",
@@ -340,7 +347,8 @@ async def test_timeout_kills_grandchild_processes(package_root: Path, tmp_path: 
 
     exit_code = await execute_with_finalization(
         run,
-        state=state,
+        repo_root=tmp_path,
+        space_dir=space_dir,
         artifacts=artifacts,
         registry=registry,
         harness_id=adapter.id,
@@ -368,8 +376,7 @@ async def test_timeout_kills_grandchild_processes(package_root: Path, tmp_path: 
 
 @pytest.mark.asyncio
 async def test_infra_failure_still_writes_finalize_row(tmp_path: Path) -> None:
-    state = StateDB(tmp_path)
-    run = state.create_run(RunCreateParams(prompt="boom", model=ModelId("gpt-5.3-codex")))
+    run, space_dir = _create_run(tmp_path, prompt="boom")
     artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
     adapter = MockHarnessAdapter(
         script=tmp_path / "unused.py",
@@ -380,7 +387,8 @@ async def test_infra_failure_still_writes_finalize_row(tmp_path: Path) -> None:
 
     exit_code = await execute_with_finalization(
         run,
-        state=state,
+        repo_root=tmp_path,
+        space_dir=space_dir,
         artifacts=artifacts,
         registry=registry,
         harness_id=adapter.id,
@@ -389,11 +397,11 @@ async def test_infra_failure_still_writes_finalize_row(tmp_path: Path) -> None:
     )
 
     assert exit_code == 2
-    row = _fetch_run_row(state, run.run_id)
-    assert row["status"] == "failed"
-    assert row["exit_code"] == 2
-    assert row["failure_reason"] == "infra_error"
-    assert row["finished_at"] is not None
+    row = _fetch_run_row(space_dir, run.run_id)
+    assert row.status == "failed"
+    assert row.exit_code == 2
+    assert row.error is None
+    assert row.finished_at is not None
 
 
 @pytest.mark.asyncio
@@ -403,8 +411,7 @@ async def test_execute_with_finalization_ignores_sigterm_during_finalize_write(
 ) -> None:
     import meridian.lib.exec.spawn as spawn_module
 
-    state = StateDB(tmp_path)
-    run = state.create_run(RunCreateParams(prompt="boom", model=ModelId("gpt-5.3-codex")))
+    run, space_dir = _create_run(tmp_path, prompt="boom")
     artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
     adapter = MockHarnessAdapter(
         script=tmp_path / "unused.py",
@@ -431,19 +438,20 @@ async def test_execute_with_finalization_ignores_sigterm_during_finalize_write(
     monkeypatch.setattr(spawn_module, "signal_coordinator", lambda: FakeCoordinator())
 
     finalize_called = False
-    original_append_finalize_row = state.append_finalize_row
+    original_finalize = spawn_module.run_store.finalize_run
 
-    def wrapped_append_finalize_row(run_id: RunId, row: RunFinalizeRow) -> None:
+    def wrapped_finalize(*args: object, **kwargs: object) -> None:
         nonlocal finalize_called
         finalize_called = True
         assert sigterm_masked is True
-        original_append_finalize_row(run_id, row)
+        original_finalize(*args, **kwargs)
 
-    monkeypatch.setattr(state, "append_finalize_row", wrapped_append_finalize_row)
+    monkeypatch.setattr(spawn_module.run_store, "finalize_run", wrapped_finalize)
 
     exit_code = await execute_with_finalization(
         run,
-        state=state,
+        repo_root=tmp_path,
+        space_dir=space_dir,
         artifacts=artifacts,
         registry=registry,
         harness_id=adapter.id,
@@ -564,8 +572,7 @@ def test_kill_running_parent_process_still_finalizes_run(
             import sys
             from pathlib import Path
 
-            from meridian.lib.adapters.sqlite import StateDB
-            from meridian.lib.domain import RunCreateParams, TokenUsage
+            from meridian.lib.domain import Run, TokenUsage
             from meridian.lib.exec.spawn import execute_with_finalization
             from meridian.lib.harness.adapter import (
                 ArtifactStore,
@@ -576,8 +583,10 @@ def test_kill_running_parent_process_still_finalizes_run(
             )
             from meridian.lib.harness.registry import HarnessRegistry
             from meridian.lib.safety.permissions import PermissionConfig
+            from meridian.lib.space.space_file import create_space
             from meridian.lib.state.artifact_store import LocalStore
-            from meridian.lib.types import HarnessId, ModelId, RunId
+            from meridian.lib.state.paths import resolve_space_dir
+            from meridian.lib.types import HarnessId, ModelId, RunId, SpaceId
 
 
             class WorkerAdapter:
@@ -616,9 +625,14 @@ def test_kill_running_parent_process_still_finalizes_run(
 
 
             async def main() -> int:
-                state = StateDB(Path("{repo_root.as_posix()}"))
-                run = state.create_run(
-                    RunCreateParams(prompt="hang", model=ModelId("gpt-5.3-codex"))
+                repo_root = Path("{repo_root.as_posix()}")
+                space = create_space(repo_root, name="worker")
+                run = Run(
+                    run_id=RunId("r1"),
+                    prompt="hang",
+                    model=ModelId("gpt-5.3-codex"),
+                    status="queued",
+                    space_id=SpaceId(space.id),
                 )
                 artifacts = LocalStore(
                     root_dir=Path("{(tmp_path / '.artifacts-worker').as_posix()}")
@@ -627,11 +641,12 @@ def test_kill_running_parent_process_still_finalizes_run(
                 registry.register(WorkerAdapter())
                 return await execute_with_finalization(
                     run,
-                    state=state,
+                    repo_root=repo_root,
+                    space_dir=resolve_space_dir(repo_root, space.id),
                     artifacts=artifacts,
                     registry=registry,
                     harness_id=HarnessId("worker-mock"),
-                    cwd=Path("{repo_root.as_posix()}"),
+                    cwd=repo_root,
                     timeout_seconds=30.0,
                 )
 
@@ -656,21 +671,14 @@ def test_kill_running_parent_process_still_finalizes_run(
         text=True,
     )
     try:
-        db_path = repo_root / ".meridian" / "index" / "runs.db"
+        space_dir = resolve_space_dir(repo_root, "s1")
         deadline = time.time() + 10.0
         saw_running = False
         while time.time() < deadline:
-            if db_path.exists():
-                conn = sqlite3.connect(db_path)
-                try:
-                    row = conn.execute("SELECT status FROM runs WHERE id = 'r1'").fetchone()
-                except sqlite3.OperationalError:
-                    row = None
-                finally:
-                    conn.close()
-                if row is not None and row[0] == "running":
-                    saw_running = True
-                    break
+            row = run_store.get_run(space_dir, "r1")
+            if row is not None and row.status == "running":
+                saw_running = True
+                break
             time.sleep(0.05)
 
         assert saw_running is True
@@ -681,13 +689,7 @@ def test_kill_running_parent_process_still_finalizes_run(
             proc.kill()
             proc.wait(timeout=5)
 
-    conn = sqlite3.connect(repo_root / ".meridian" / "index" / "runs.db")
-    conn.row_factory = sqlite3.Row
-    try:
-        row = conn.execute("SELECT status, exit_code FROM runs WHERE id = 'r1'").fetchone()
-    finally:
-        conn.close()
-
+    row = run_store.get_run(resolve_space_dir(repo_root, "s1"), "r1")
     assert row is not None
-    assert row["status"] == "failed"
-    assert row["exit_code"] == 143
+    assert row.status == "failed"
+    assert row.exit_code == 143

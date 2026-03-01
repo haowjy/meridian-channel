@@ -37,7 +37,7 @@ def cli_env(package_root: Path) -> dict[str, str]:
     existing = env.get("PYTHONPATH", "")
     root = str(package_root / "src")
     env["PYTHONPATH"] = root if not existing else f"{root}:{existing}"
-    supervisor_cmd = " ".join(
+    harness_cmd = " ".join(
         (
             shlex.quote(sys.executable),
             shlex.quote(str(package_root / "tests" / "mock_harness.py")),
@@ -45,7 +45,7 @@ def cli_env(package_root: Path) -> dict[str, str]:
             "0",
         )
     )
-    env.setdefault("MERIDIAN_SUPERVISOR_COMMAND", supervisor_cmd)
+    env.setdefault("MERIDIAN_HARNESS_COMMAND", harness_cmd)
     return env
 
 

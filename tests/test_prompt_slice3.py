@@ -79,7 +79,7 @@ def test_run_defaults_merge_agent_profile_defaults() -> None:
         model="gpt-5.3-codex",
         variant=None,
         skills=("reviewing", "agent"),
-        tools=(),
+        allowed_tools=(),
         mcp_tools=(),
         sandbox=None,
         variant_models=(),
@@ -114,26 +114,26 @@ def test_reference_loader_errors_for_missing_file(tmp_path: Path) -> None:
         _ = load_reference_files([tmp_path / "missing.md"])
 
 
-def test_reference_loader_supports_session_at_sigil(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    session_id = "sess-ref"
-    session_file = tmp_path / ".meridian" / "sessions" / session_id / "review-prompt.md"
-    session_file.parent.mkdir(parents=True, exist_ok=True)
-    session_file.write_text("from-session", encoding="utf-8")
+def test_reference_loader_supports_space_at_sigil(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    space_id = "s1"
+    space_file = tmp_path / ".meridian" / ".spaces" / space_id / "fs" / "review-prompt.md"
+    space_file.parent.mkdir(parents=True, exist_ok=True)
+    space_file.write_text("from-space", encoding="utf-8")
 
-    monkeypatch.setenv("MERIDIAN_SESSION", session_id)
-    loaded = load_reference_files(["@review-prompt"], base_dir=tmp_path)
+    monkeypatch.setenv("MERIDIAN_SPACE_ID", space_id)
+    loaded = load_reference_files(["@review-prompt.md"], base_dir=tmp_path)
     assert len(loaded) == 1
-    assert loaded[0].path == session_file.resolve()
-    assert loaded[0].content == "from-session"
+    assert loaded[0].path == space_file.resolve()
+    assert loaded[0].content == "from-space"
 
 
-def test_reference_loader_session_at_sigil_requires_session_env(
+def test_reference_loader_space_at_sigil_requires_space_env(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.delenv("MERIDIAN_SESSION", raising=False)
-    with pytest.raises(ValueError, match="MERIDIAN_SESSION"):
-        _ = load_reference_files(["@review-prompt"], base_dir=tmp_path)
+    monkeypatch.delenv("MERIDIAN_SPACE_ID", raising=False)
+    with pytest.raises(ValueError, match="MERIDIAN_SPACE_ID"):
+        _ = load_reference_files(["@review-prompt.md"], base_dir=tmp_path)
 
 
 @pytest.mark.parametrize(

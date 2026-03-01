@@ -18,11 +18,11 @@ if TYPE_CHECKING:
         SpanId,
         TraceId,
         WorkflowEventId,
-        WorkspaceId,
+        SpaceId,
     )
 
 RunStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
-WorkspaceState = Literal["active", "paused", "completed", "abandoned"]
+SpaceState = Literal["active", "closed"]
 
 
 def _empty_mapping() -> Mapping[str, Any]:
@@ -44,14 +44,14 @@ class RunCreateParams:
 
     prompt: str
     model: ModelId
-    workspace_id: WorkspaceId | None = None
+    space_id: SpaceId | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class RunFilters:
     """Run list filter options."""
 
-    workspace_id: WorkspaceId | None = None
+    space_id: SpaceId | None = None
     status: RunStatus | None = None
 
 
@@ -72,7 +72,7 @@ class Run:
     model: ModelId
     status: RunStatus
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-    workspace_id: WorkspaceId | None = None
+    space_id: SpaceId | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,39 +82,41 @@ class RunSummary:
     run_id: RunId
     status: RunStatus
     model: ModelId
-    workspace_id: WorkspaceId | None = None
+    space_id: SpaceId | None = None
 
 
 @dataclass(frozen=True, slots=True)
-class WorkspaceCreateParams:
-    """Input fields for creating a workspace."""
+class SpaceCreateParams:
+    """Input fields for creating a space."""
 
     name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
-class WorkspaceFilters:
-    """Workspace list filter options."""
+class SpaceFilters:
+    """Space list filter options."""
 
-    state: WorkspaceState | None = None
+    state: SpaceState | None = None
 
 
 @dataclass(frozen=True, slots=True)
-class Workspace:
-    """Workspace aggregate root."""
+class Space:
+    """Space aggregate root."""
 
-    workspace_id: WorkspaceId
-    state: WorkspaceState = "active"
+    space_id: SpaceId
+    state: SpaceState = "active"
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    finished_at: datetime | None = None
     name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
-class WorkspaceSummary:
-    """Compact workspace list entry."""
+class SpaceSummary:
+    """Compact space list entry."""
 
-    workspace_id: WorkspaceId
-    state: WorkspaceState
+    space_id: SpaceId
+    state: SpaceState
+    finished_at: datetime | None = None
     name: str | None = None
 
 
@@ -122,7 +124,7 @@ class WorkspaceSummary:
 class PinnedFile:
     """Pinned context file reference."""
 
-    workspace_id: WorkspaceId
+    space_id: SpaceId
     file_path: str
 
 
@@ -165,7 +167,7 @@ class WorkflowEvent:
     """Event-sourced workflow event."""
 
     event_id: WorkflowEventId
-    workspace_id: WorkspaceId
+    space_id: SpaceId
     event_type: str
     payload: Mapping[str, Any]
     run_id: RunId | None = None

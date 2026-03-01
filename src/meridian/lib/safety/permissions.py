@@ -25,14 +25,14 @@ class PermissionTier(StrEnum):
     """Safety tiers applied to harness command construction."""
 
     READ_ONLY = "read-only"
-    WORKSPACE_WRITE = "workspace-write"
+    SPACE_WRITE = "space-write"
     FULL_ACCESS = "full-access"
     DANGER = "danger"
 
 
 _TIER_RANKS = {
     "read-only": 0,
-    "workspace-write": 1,
+    "space-write": 1,
     "full-access": 2,
     "danger": 3,
 }
@@ -68,7 +68,7 @@ def parse_permission_tier(
     return _parse_permission_tier_value(normalized)
 
 
-def _permission_tier_from_profile(agent_sandbox: str | None) -> str | None:
+def permission_tier_from_profile(agent_sandbox: str | None) -> str | None:
     if agent_sandbox is None:
         return None
     normalized = agent_sandbox.strip().lower()
@@ -76,7 +76,7 @@ def _permission_tier_from_profile(agent_sandbox: str | None) -> str | None:
         return None
     mapping = {
         "read-only": "read-only",
-        "workspace-write": "workspace-write",
+        "space-write": "space-write",
         "full-access": "full-access",
         "danger-full-access": "full-access",
         "unrestricted": "full-access",
@@ -98,7 +98,7 @@ def _parse_permission_tier_value(raw: str | PermissionTier) -> PermissionTier:
     raise ValueError(f"Unsupported permission tier '{raw}'. Expected: {allowed}.")
 
 
-def _warn_profile_tier_escalation(
+def warn_profile_tier_escalation(
     *,
     profile: AgentProfile | None,
     inferred_tier: str | None,
@@ -167,7 +167,7 @@ def _claude_allowed_tools(tier: PermissionTier) -> tuple[str, ...]:
         "Bash(git log)",
         "Bash(git diff)",
     )
-    workspace_write = (
+    space_write = (
         *read_only,
         "Edit",
         "Write",
@@ -175,15 +175,15 @@ def _claude_allowed_tools(tier: PermissionTier) -> tuple[str, ...]:
         "Bash(git commit)",
     )
     full_access = (
-        *workspace_write,
+        *space_write,
         "WebFetch",
         "WebSearch",
         "Bash",
     )
     if tier is PermissionTier.READ_ONLY:
         return read_only
-    if tier is PermissionTier.WORKSPACE_WRITE:
-        return workspace_write
+    if tier is PermissionTier.SPACE_WRITE:
+        return space_write
     return full_access
 
 
@@ -198,7 +198,7 @@ def opencode_permission_json(tier: PermissionTier) -> str:
             "glob": "allow",
             "list": "allow",
         }
-    elif tier is PermissionTier.WORKSPACE_WRITE:
+    elif tier is PermissionTier.SPACE_WRITE:
         permissions = {
             "*": "deny",
             "read": "allow",
@@ -242,8 +242,8 @@ def permission_flags_for_harness(
     if harness_id == HarnessId("codex"):
         if tier is PermissionTier.READ_ONLY:
             return ["--sandbox", "read-only"]
-        if tier is PermissionTier.WORKSPACE_WRITE:
-            return ["--sandbox", "workspace-write"]
+        if tier is PermissionTier.SPACE_WRITE:
+            return ["--sandbox", "space-write"]
         return ["--sandbox", "danger-full-access"]
 
     # OpenCode permission controls vary by backend provider; keep default behavior for
@@ -259,3 +259,47 @@ class TieredPermissionResolver:
 
     def resolve_flags(self, harness_id: HarnessId) -> list[str]:
         return permission_flags_for_harness(harness_id, self.config)
+
+
+@dataclass(frozen=True, slots=True)
+class ExplicitToolsResolver:
+    """PermissionResolver backed by an explicit tool allowlist.
+
+    For harnesses that don't support fine-grained tool lists (Codex),
+    falls back to tier-based flags using the provided fallback config.
+    """
+
+    allowed_tools: tuple[str, ...]
+    fallback_config: PermissionConfig
+
+    def resolve_flags(self, harness_id: HarnessId) -> list[str]:
+        # Codex only supports --sandbox, not per-tool allowlists.
+        if harness_id == HarnessId("codex"):
+            return permission_flags_for_harness(harness_id, self.fallback_config)
+
+        # Claude: emit explicit allowedTools list.
+        if harness_id == HarnessId("claude"):
+            return ["--allowedTools", ",".join(self.allowed_tools)]
+
+        # OpenCode / others: no fine-grained tool allowlist support yet.
+        # The tier-based path also returns [] for OpenCode (permissions are
+        # applied via env vars, not CLI flags), so no fallback is needed here.
+        return []
+
+
+def build_permission_resolver(
+    *,
+    allowed_tools: tuple[str, ...],
+    permission_config: PermissionConfig,
+    cli_permission_override: bool,
+) -> TieredPermissionResolver | ExplicitToolsResolver:
+    """Pick the right resolver: explicit tools if specified, else tier-based.
+
+    CLI --permission override always wins (forces tier-based).
+    """
+    if allowed_tools and not cli_permission_override:
+        return ExplicitToolsResolver(
+            allowed_tools=allowed_tools,
+            fallback_config=permission_config,
+        )
+    return TieredPermissionResolver(permission_config)

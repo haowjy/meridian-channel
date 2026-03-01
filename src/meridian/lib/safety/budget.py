@@ -20,14 +20,14 @@ class Budget:
     """Budget limits in USD."""
 
     per_run_usd: float | None = None
-    per_workspace_usd: float | None = None
+    per_space_usd: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class BudgetBreach:
     """Observed budget breach metadata."""
 
-    scope: Literal["run", "workspace"]
+    scope: Literal["run", "space"]
     observed_usd: float
     limit_usd: float
 
@@ -37,7 +37,7 @@ class LiveBudgetTracker:
     """Streaming budget tracker fed by harness stdout events."""
 
     budget: Budget
-    workspace_spent_usd: float = 0.0
+    space_spent_usd: float = 0.0
     run_cost_usd: float = 0.0
 
     def observe_cost(self, cost_usd: float) -> BudgetBreach | None:
@@ -58,20 +58,20 @@ class LiveBudgetTracker:
         return self.observe_cost(cost)
 
     def check(self) -> BudgetBreach | None:
-        """Evaluate per-run and per-workspace limits."""
+        """Evaluate per-run and per-space limits."""
 
         per_run = self.budget.per_run_usd
         if per_run is not None and self.run_cost_usd > per_run:
             return BudgetBreach(scope="run", observed_usd=self.run_cost_usd, limit_usd=per_run)
 
-        per_workspace = self.budget.per_workspace_usd
-        if per_workspace is not None:
-            observed_workspace = self.workspace_spent_usd + self.run_cost_usd
-            if observed_workspace > per_workspace:
+        per_space = self.budget.per_space_usd
+        if per_space is not None:
+            observed_space = self.space_spent_usd + self.run_cost_usd
+            if observed_space > per_space:
                 return BudgetBreach(
-                    scope="workspace",
-                    observed_usd=observed_workspace,
-                    limit_usd=per_workspace,
+                    scope="space",
+                    observed_usd=observed_space,
+                    limit_usd=per_space,
                 )
         return None
 
@@ -79,7 +79,7 @@ class LiveBudgetTracker:
 def normalize_budget(
     *,
     per_run_usd: float | None,
-    per_workspace_usd: float | None,
+    per_space_usd: float | None,
 ) -> Budget | None:
     """Validate numeric limits and build a Budget object."""
 
@@ -92,9 +92,9 @@ def normalize_budget(
 
     budget = Budget(
         per_run_usd=_validate("per-run budget", per_run_usd),
-        per_workspace_usd=_validate("per-workspace budget", per_workspace_usd),
+        per_space_usd=_validate("per-space budget", per_space_usd),
     )
-    if budget.per_run_usd is None and budget.per_workspace_usd is None:
+    if budget.per_run_usd is None and budget.per_space_usd is None:
         return None
     return budget
 

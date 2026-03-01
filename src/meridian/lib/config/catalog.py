@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, cast
 
 from meridian.lib.config._paths import resolve_repo_root
 from meridian.lib.config.routing import route_model
-from meridian.lib.state.db import resolve_state_paths
+from meridian.lib.state.paths import resolve_state_paths
 from meridian.lib.types import HarnessId, ModelId
 
 if TYPE_CHECKING:
@@ -71,7 +71,7 @@ def builtin_model_catalog() -> tuple[CatalogModel, ...]:
             model_id="claude-opus-4-6",
             aliases=("opus",),
             role="Default / all-rounder",
-            strengths="Best supervisor brain",
+            strengths="Best primary agent brain",
             cost_tier="$$$",
         ),
         _entry(

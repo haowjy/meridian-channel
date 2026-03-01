@@ -2,7 +2,7 @@
 max_depth = 7
 max_retries = 4
 retry_backoff_seconds = 0.5
-supervisor_agent = "lead-supervisor"
+primary_agent = "lead-primary"
 agent = "worker-agent"
 
 [timeouts]
@@ -11,8 +11,8 @@ guardrail_seconds = 45.0
 wait_seconds = 900.0
 
 [permissions]
-default_tier = "workspace-write"
+default_tier = "space-write"
 
-[supervisor]
+[primary]
 autocompact_pct = 61
-permission_tier = "workspace-write"
+permission_tier = "space-write"

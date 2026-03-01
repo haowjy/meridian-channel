@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import sqlite3
 import sys
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -14,18 +13,15 @@ from cyclopts import App, Parameter
 
 from meridian import __version__
 from meridian.cli.config_cmd import register_config_commands
-from meridian.cli.context import register_context_commands
 from meridian.cli.diag import register_diag_commands
-from meridian.cli.export import register_export_commands
-from meridian.cli.migrate import register_migrate_commands
 from meridian.cli.models_cmd import register_models_commands
 from meridian.cli.output import OutputConfig, normalize_output_format
 from meridian.cli.output import emit as emit_output
 from meridian.cli.run import register_run_commands
 from meridian.cli.skills_cmd import register_skills_commands
-from meridian.cli.workspace import register_workspace_commands
+from meridian.cli.space import register_space_commands
 from meridian.lib.config._paths import resolve_repo_root
-from meridian.lib.workspace.launch import cleanup_orphaned_locks
+from meridian.lib.space.launch import cleanup_orphaned_locks
 from meridian.server.main import run_server
 
 if TYPE_CHECKING:
@@ -175,30 +171,22 @@ def serve() -> None:
     run_server()
 
 
-workspace_app = App(name="workspace", help="Workspace lifecycle commands", help_formatter="plain")
+space_app = App(name="space", help="Space lifecycle commands", help_formatter="plain")
 run_app = App(name="run", help="Run management commands", help_formatter="plain")
 skills_app = App(name="skills", help="Skills catalog commands", help_formatter="plain")
 models_app = App(name="models", help="Model catalog commands", help_formatter="plain")
-context_app = App(
-    name="context", help="Workspace context pinning commands", help_formatter="plain"
-)
 diag_app = App(name="diag", help="Diagnostics commands", help_formatter="plain")
 config_app = App(name="config", help="Repository config commands", help_formatter="plain")
 
-export_app = App(name="export", help="Export commands", help_formatter="plain")
-migrate_app = App(name="migrate", help="Migration commands", help_formatter="plain")
 completion_app = App(name="completion", help="Shell completion helpers", help_formatter="plain")
 
 
-app.command(workspace_app, name="workspace")
+app.command(space_app, name="space")
 app.command(run_app, name="run")
 app.command(skills_app, name="skills")
 app.command(models_app, name="models")
-app.command(context_app, name="context")
 app.command(diag_app, name="diag")
 app.command(config_app, name="config")
-app.command(export_app, name="export")
-app.command(migrate_app, name="migrate")
 app.command(completion_app, name="completion")
 
 
@@ -260,13 +248,13 @@ def start_alias(
         Parameter(
             allow_leading_hyphen=True,
             negative_iterable=(),
-            help="Arguments forwarded to `workspace start`.",
+            help="Arguments forwarded to `space start`.",
         ),
     ] = (),
 ) -> None:
-    """Alias for workspace start."""
+    """Alias for space start."""
 
-    workspace_app(["start", *passthrough_args])
+    space_app(["start", *passthrough_args])
 
 
 @app.command(name="list")
@@ -310,14 +298,12 @@ _REGISTERED_CLI_DESCRIPTIONS: dict[str, str] = {}
 
 def _register_group_commands() -> None:
     modules = (
-        register_workspace_commands(workspace_app, emit),
+        register_space_commands(space_app, emit),
         register_run_commands(run_app, emit),
         register_skills_commands(skills_app, emit),
         register_models_commands(models_app, emit),
-        register_context_commands(context_app, emit),
         register_diag_commands(diag_app, emit),
         register_config_commands(config_app, emit),
-        register_migrate_commands(migrate_app, emit),
     )
     for commands, descriptions in modules:
         _REGISTERED_CLI_COMMANDS.update(commands)
@@ -398,7 +384,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         except TimeoutError as exc:
             print(f"error: {_operation_error_message(exc)}", file=sys.stderr)
             raise SystemExit(124) from None
-        except (KeyError, ValueError, FileNotFoundError, sqlite3.OperationalError) as exc:
+        except (KeyError, ValueError, FileNotFoundError, OSError) as exc:
             print(f"error: {_operation_error_message(exc)}", file=sys.stderr)
             raise SystemExit(1) from None
     finally:
@@ -406,4 +392,3 @@ def main(argv: Sequence[str] | None = None) -> None:
 
 
 _register_group_commands()
-register_export_commands(export_app, emit)

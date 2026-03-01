@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from meridian.cli import run as run_cli
 from meridian.lib.ops.run import RunStatsInput, RunStatsOutput
+from meridian.lib.space.space_file import create_space
 
 
-def test_run_stats_passes_session_and_workspace_filters(monkeypatch) -> None:
+def test_run_stats_passes_session_and_space_filters(monkeypatch) -> None:
     captured: dict[str, RunStatsInput] = {}
     emitted: list[RunStatsOutput] = []
 
@@ -30,15 +32,23 @@ def test_run_stats_passes_session_and_workspace_filters(monkeypatch) -> None:
     run_cli._run_stats(
         emitted.append,
         session="sess-1",
-        workspace="w1",
+        space="s1",
     )
 
-    assert captured["payload"] == RunStatsInput(session="sess-1", workspace="w1")
+    assert captured["payload"] == RunStatsInput(session="sess-1", space="s1")
     assert emitted[0].total_runs == 1
     assert emitted[0].models == {"gpt-5.3-codex": 1}
 
 
-def test_cli_run_stats_json_output(run_meridian) -> None:
+def test_cli_run_stats_json_output(
+    run_meridian,
+    cli_env: dict[str, str],
+    tmp_path: Path,
+) -> None:
+    cli_env["MERIDIAN_REPO_ROOT"] = tmp_path.as_posix()
+    space = create_space(tmp_path, name="cli-stats")
+    cli_env["MERIDIAN_SPACE_ID"] = space.id
+
     result = run_meridian(["--json", "run", "stats"])
     assert result.returncode == 0
     payload = json.loads(result.stdout)

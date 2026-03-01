@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from meridian.lib.harness._common import categorize_stream_event, parse_json_stream_event
-from meridian.lib.ops.run import _emit_subrun_event, _run_child_env
+from meridian.lib.ops._run_execute import _emit_subrun_event, _run_child_env
 
 
 def test_emit_subrun_event_enriches_protocol(
@@ -14,7 +14,7 @@ def test_emit_subrun_event_enriches_protocol(
 ) -> None:
     monkeypatch.setenv("MERIDIAN_DEPTH", "1")
     monkeypatch.setenv("MERIDIAN_PARENT_RUN_ID", "r33")
-    monkeypatch.setattr("meridian.lib.ops.run.time.time", lambda: 1740000000.123)
+    monkeypatch.setattr("meridian.lib.ops._run_execute.time.time", lambda: 1740000000.123)
 
     _emit_subrun_event(
         {"t": "meridian.run.start", "id": "r34", "model": "claude-haiku-4-5", "d": 1}
@@ -34,10 +34,10 @@ def test_run_child_env_sets_parent_run_id(monkeypatch) -> None:
     monkeypatch.setenv("MERIDIAN_DEPTH", "2")
     monkeypatch.setenv("MERIDIAN_PARENT_RUN_ID", "ancestor")
 
-    env = _run_child_env("w9", (), "r34")
+    env = _run_child_env("s9", (), "r34")
 
     assert env["MERIDIAN_DEPTH"] == "3"
-    assert env["MERIDIAN_WORKSPACE_ID"] == "w9"
+    assert env["MERIDIAN_SPACE_ID"] == "s9"
     assert env["MERIDIAN_PARENT_RUN_ID"] == "r34"
 
 

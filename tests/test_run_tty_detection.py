@@ -8,6 +8,7 @@ from typing import Any
 import meridian.lib.ops._run_execute as run_execute
 import meridian.lib.ops.run as run_ops
 from meridian.lib.ops.run import RunCreateInput
+from meridian.lib.space.space_file import create_space
 
 
 def _run_with_captured_stream_flags(
@@ -25,6 +26,7 @@ def _run_with_captured_stream_flags(
 
     monkeypatch.setattr(run_ops, "execute_with_finalization", fake_execute_with_finalization)
     monkeypatch.setattr(run_execute, "_stdout_is_tty", lambda: stdout_is_tty)
+    monkeypatch.setenv("MERIDIAN_SPACE_ID", create_space(tmp_path, name="tty").id)
 
     run_ops.run_create_sync(
         RunCreateInput(

@@ -10,8 +10,7 @@ from pathlib import Path
 import pytest
 
 import meridian.lib.safety.permissions as permissions_module
-from meridian.lib.adapters.sqlite import StateDB
-from meridian.lib.domain import RunCreateParams, TokenUsage
+from meridian.lib.domain import Run, TokenUsage
 from meridian.lib.exec.spawn import execute_with_finalization
 from meridian.lib.harness.adapter import (
     ArtifactStore as HarnessArtifactStore,
@@ -33,8 +32,10 @@ from meridian.lib.safety.permissions import (
     opencode_permission_json,
     validate_permission_config_for_harness,
 )
+from meridian.lib.space.space_file import create_space
 from meridian.lib.state.artifact_store import LocalStore, make_artifact_key
-from meridian.lib.types import HarnessId, ModelId, RunId
+from meridian.lib.state.paths import resolve_space_dir
+from meridian.lib.types import HarnessId, ModelId, RunId, SpaceId
 
 
 class _EnvOverrideHarness:
@@ -81,7 +82,7 @@ class _EnvOverrideHarness:
             {"*": "deny", "read": "allow", "grep": "allow", "glob": "allow", "list": "allow"},
         ),
         (
-            PermissionTier.WORKSPACE_WRITE,
+            PermissionTier.SPACE_WRITE,
             {
                 "*": "deny",
                 "read": "allow",
@@ -153,7 +154,7 @@ def test_validate_permission_config_for_harness_warns_on_opencode_danger(
 
 
 def test_standard_harnesses_only_opencode_sets_env_overrides() -> None:
-    config = PermissionConfig(tier=PermissionTier.WORKSPACE_WRITE, unsafe=False)
+    config = PermissionConfig(tier=PermissionTier.SPACE_WRITE, unsafe=False)
 
     assert ClaudeAdapter().env_overrides(config) == {}
     assert CodexAdapter().env_overrides(config) == {}
@@ -222,8 +223,15 @@ async def test_execute_with_finalization_merges_adapter_env_overrides(
         encoding="utf-8",
     )
 
-    state = StateDB(tmp_path)
-    run = state.create_run(RunCreateParams(prompt="env", model=ModelId("gpt-5.3-codex")))
+    space = create_space(tmp_path, name="env-overrides")
+    run = Run(
+        run_id=RunId("r1"),
+        prompt="env",
+        model=ModelId("gpt-5.3-codex"),
+        status="queued",
+        space_id=SpaceId(space.id),
+    )
+    space_dir = resolve_space_dir(tmp_path, space.id)
     artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
 
     adapter = _EnvOverrideHarness(script=script)
@@ -231,12 +239,13 @@ async def test_execute_with_finalization_merges_adapter_env_overrides(
     registry.register(adapter)
 
     permission_config = PermissionConfig(
-        tier=PermissionTier.WORKSPACE_WRITE,
+        tier=PermissionTier.SPACE_WRITE,
         unsafe=False,
     )
     exit_code = await execute_with_finalization(
         run,
-        state=state,
+        repo_root=tmp_path,
+        space_dir=space_dir,
         artifacts=artifacts,
         registry=registry,
         permission_resolver=TieredPermissionResolver(permission_config),
@@ -253,7 +262,7 @@ async def test_execute_with_finalization_merges_adapter_env_overrides(
     payload = json.loads(output.strip())
     assert payload == {
         "caller": "caller-value",
-        "adapter": PermissionTier.WORKSPACE_WRITE.value,
+        "adapter": PermissionTier.SPACE_WRITE.value,
         "repo_root": tmp_path.as_posix(),
         "state_root": (tmp_path / ".meridian").as_posix(),
     }

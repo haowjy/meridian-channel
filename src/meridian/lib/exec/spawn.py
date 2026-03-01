@@ -15,7 +15,6 @@ from typing import cast
 
 import structlog
 
-from meridian.lib.adapters.sqlite import RunFinalizeRow, RunStartRow, StateDB
 from meridian.lib.config.settings import MeridianConfig
 from meridian.lib.domain import Run
 from meridian.lib.exec.errors import ErrorCategory, classify_error, should_retry
@@ -44,8 +43,9 @@ from meridian.lib.safety.guardrails import GuardrailFailure, run_guardrails
 from meridian.lib.safety.permissions import PermissionConfig
 from meridian.lib.safety.redaction import SecretSpec, redact_secret_bytes
 from meridian.lib.state.artifact_store import ArtifactStore, make_artifact_key
-from meridian.lib.state.db import resolve_run_log_dir
-from meridian.lib.types import HarnessId, RunId, WorkspaceId
+from meridian.lib.state import run_store
+from meridian.lib.state.paths import resolve_run_log_dir, resolve_state_paths
+from meridian.lib.types import HarnessId, RunId, SpaceId
 
 OUTPUT_FILENAME = "output.jsonl"
 STDERR_FILENAME = "stderr.log"
@@ -153,10 +153,10 @@ class SpawnResult:
     budget_breach: BudgetBreach | None = None
 
 
-def run_log_dir(repo_root: Path, run_id: RunId, workspace_id: WorkspaceId | None) -> Path:
-    """Resolve run artifact directory from run/workspace IDs."""
+def run_log_dir(repo_root: Path, run_id: RunId, space_id: SpaceId | None) -> Path:
+    """Resolve run artifact directory from run/space IDs."""
 
-    return resolve_run_log_dir(repo_root, run_id, workspace_id)
+    return resolve_run_log_dir(repo_root, run_id, space_id)
 
 
 def _extract_tokens_payload(raw_line: bytes) -> bytes | None:
@@ -396,22 +396,15 @@ async def spawn_and_stream(
 
 def _append_budget_exceeded_event(
     *,
-    state: StateDB,
     run: Run,
     breach: BudgetBreach,
 ) -> None:
-    if run.workspace_id is None:
-        return
-
-    state.append_workflow_event(
-        workspace_id=run.workspace_id,
-        event_type="budget_exceeded",
-        run_id=run.run_id,
-        payload={
-            "scope": breach.scope,
-            "observed_usd": breach.observed_usd,
-            "limit_usd": breach.limit_usd,
-        },
+    logger.warning(
+        "Run budget exceeded.",
+        run_id=str(run.run_id),
+        scope=breach.scope,
+        observed_usd=breach.observed_usd,
+        limit_usd=breach.limit_usd,
     )
 
 
@@ -442,7 +435,8 @@ def _append_text_to_stderr_artifact(
 async def execute_with_finalization(
     run: Run,
     *,
-    state: StateDB,
+    repo_root: Path,
+    space_dir: Path,
     artifacts: ArtifactStore,
     registry: HarnessRegistry,
     permission_resolver: PermissionResolver | None = None,
@@ -459,7 +453,7 @@ async def execute_with_finalization(
     max_retries: int = DEFAULT_MAX_RETRIES,
     retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
     budget: Budget | None = None,
-    workspace_spent_usd: float = 0.0,
+    space_spent_usd: float = 0.0,
     guardrails: tuple[Path, ...] = (),
     guardrail_timeout_seconds: float = DEFAULT_GUARDRAIL_TIMEOUT_SECONDS,
     secrets: tuple[SecretSpec, ...] = (),
@@ -472,8 +466,7 @@ async def execute_with_finalization(
     """Execute one run and always append a finalize row via try/finally."""
 
     execution_cwd = (cwd or Path.cwd()).resolve()
-    repo_root = state.paths.root_dir.parent
-    log_dir = resolve_run_log_dir(repo_root, run.run_id, run.workspace_id)
+    log_dir = resolve_run_log_dir(repo_root, run.run_id, run.space_id)
     output_log_path = log_dir / OUTPUT_FILENAME
     report_path = log_dir / REPORT_FILENAME
 
@@ -502,7 +495,7 @@ async def execute_with_finalization(
         adapter_env_overrides.update(mcp_config.env_overrides)
     runtime_env_overrides = {
         "MERIDIAN_REPO_ROOT": execution_cwd.as_posix(),
-        "MERIDIAN_STATE_ROOT": state.paths.root_dir.resolve().as_posix(),
+        "MERIDIAN_STATE_ROOT": resolve_state_paths(repo_root).root_dir.resolve().as_posix(),
     }
     merged_env_overrides = dict(env_overrides or {})
     merged_env_overrides.update(runtime_env_overrides)
@@ -512,23 +505,20 @@ async def execute_with_finalization(
         env_overrides=merged_env_overrides,
         pass_through=HARNESS_ENV_PASS_THROUGH,
     )
-    start_session_id = str(run.run_id)
-    state.append_start_row(
-        RunStartRow(
+    if run_store.get_run(space_dir, run.run_id) is None:
+        run_store.start_run(
+            space_dir,
             run_id=run.run_id,
-            model=run.model,
-            harness=harness.id,
-            cwd=execution_cwd,
-            log_dir=log_dir,
-            session_id=start_session_id,
-            workspace_id=run.workspace_id,
-            agent=agent,
-            skills=skills,
+            session_id=os.getenv("MERIDIAN_SESSION_ID", "").strip() or "c0",
+            model=str(run.model),
+            agent=agent or "",
+            harness=str(harness.id),
+            prompt=run.prompt,
+            harness_session_id=continue_session_id,
         )
-    )
 
     budget_tracker = (
-        LiveBudgetTracker(budget=budget, workspace_spent_usd=workspace_spent_usd)
+        LiveBudgetTracker(budget=budget, space_spent_usd=space_spent_usd)
         if budget is not None
         else None
     )
@@ -536,7 +526,6 @@ async def execute_with_finalization(
 
     started_at = time.monotonic()
     exit_code = DEFAULT_INFRA_EXIT_CODE
-    finalized_session_id = start_session_id
     extracted: FinalizeExtraction | None = None
     failure_reason: str | None = None
 
@@ -554,7 +543,7 @@ async def execute_with_finalization(
             if preflight_breach is not None:
                 exit_code = DEFAULT_INFRA_EXIT_CODE
                 failure_reason = "budget_exceeded"
-                _append_budget_exceeded_event(state=state, run=run, breach=preflight_breach)
+                _append_budget_exceeded_event(run=run, breach=preflight_breach)
                 break
 
             spawn_result = await spawn_and_stream(
@@ -595,13 +584,9 @@ async def execute_with_finalization(
                 log_dir=log_dir,
                 secrets=secrets,
             )
-            if extracted.session_id:
-                finalized_session_id = extracted.session_id
-
             if spawn_result.budget_breach is not None:
                 failure_reason = "budget_exceeded"
                 _append_budget_exceeded_event(
-                    state=state,
                     run=run,
                     breach=spawn_result.budget_breach,
                 )
@@ -616,12 +601,12 @@ async def execute_with_finalization(
                 failure_reason = "budget_exceeded"
                 breach = budget_tracker.check()
                 if breach is not None:
-                    _append_budget_exceeded_event(state=state, run=run, breach=breach)
+                    _append_budget_exceeded_event(run=run, breach=breach)
                 exit_code = DEFAULT_INFRA_EXIT_CODE
                 break
 
             if exit_code == 0 and extracted.output_is_empty:
-                # Successful exit with no content is unusable; fail fast so supervisors can react.
+                # Successful exit with no content is unusable; fail fast so primary agents can react.
                 exit_code = 1
                 failure_reason = "empty_output"
                 break
@@ -709,23 +694,23 @@ async def execute_with_finalization(
         exit_code = DEFAULT_INFRA_EXIT_CODE
     finally:
         duration_seconds = time.monotonic() - started_at
-        finalized_report = extracted.report_path if extracted is not None else None
         finalized_usage = extracted.usage if extracted is not None else None
-        files_touched_count = len(extracted.files_touched) if extracted is not None else None
-        finalize_row = RunFinalizeRow(
-            exit_code=exit_code,
-            duration_seconds=duration_seconds,
-            failure_reason=failure_reason,
-            output_log=output_log_path,
-            report_path=finalized_report,
-            harness_session_id=finalized_session_id,
-            input_tokens=finalized_usage.input_tokens if finalized_usage is not None else None,
-            output_tokens=finalized_usage.output_tokens if finalized_usage is not None else None,
-            total_cost_usd=finalized_usage.total_cost_usd if finalized_usage is not None else None,
-            files_touched_count=files_touched_count,
-        )
+        status = "succeeded" if exit_code == 0 else "failed"
         with signal_coordinator().mask_sigterm():
-            # Keep finalize-row persistence atomic against parent SIGTERM.
-            state.append_finalize_row(run.run_id, finalize_row)
+            run_store.finalize_run(
+                space_dir,
+                run.run_id,
+                status=status,
+                exit_code=exit_code,
+                duration_secs=duration_seconds,
+                total_cost_usd=(
+                    finalized_usage.total_cost_usd if finalized_usage is not None else None
+                ),
+                input_tokens=finalized_usage.input_tokens if finalized_usage is not None else None,
+                output_tokens=(
+                    finalized_usage.output_tokens if finalized_usage is not None else None
+                ),
+                error=failure_reason,
+            )
 
     return exit_code

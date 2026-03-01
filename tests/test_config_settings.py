@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from meridian.lib.config.settings import MeridianConfig, SupervisorConfig, load_config
+from meridian.lib.config.settings import MeridianConfig, PrimaryConfig, load_config
 
 
 def _install_config(repo_root: Path, content: str) -> None:
@@ -33,12 +33,12 @@ def test_load_config_from_fixture_toml(package_root: Path, tmp_path: Path) -> No
         kill_grace_seconds=1.5,
         guardrail_timeout_seconds=45.0,
         wait_timeout_seconds=900.0,
-        default_permission_tier="workspace-write",
-        supervisor_agent="lead-supervisor",
+        default_permission_tier="space-write",
+        primary_agent="lead-primary",
         default_agent="worker-agent",
-        supervisor=SupervisorConfig(
+        primary=PrimaryConfig(
             autocompact_pct=61,
-            permission_tier="workspace-write",
+            permission_tier="space-write",
         ),
     )
 
@@ -113,15 +113,15 @@ def test_load_config_rejects_danger_default_tier(tmp_path: Path) -> None:
         load_config(repo_root)
 
 
-def test_load_config_rejects_danger_supervisor_permission_tier(tmp_path: Path) -> None:
+def test_load_config_rejects_danger_primary_permission_tier(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     _install_config(
         repo_root,
-        "[supervisor]\n"
+        "[primary]\n"
         "permission_tier = 'danger'\n",
     )
 
-    with pytest.raises(ValueError, match=r"supervisor\.permission_tier"):
+    with pytest.raises(ValueError, match=r"primary\.permission_tier"):
         load_config(repo_root)
 
 
@@ -144,36 +144,36 @@ def test_load_config_rejects_type_errors(
         load_config(repo_root)
 
 
-def test_load_config_rejects_supervisor_section_type_errors(tmp_path: Path) -> None:
+def test_load_config_rejects_primary_section_type_errors(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     _install_config(
         repo_root,
-        "[supervisor]\n"
+        "[primary]\n"
         "autocompact_pct = 'sixty-five'\n",
     )
-    with pytest.raises(ValueError, match=r"supervisor\.autocompact_pct.*expected int"):
+    with pytest.raises(ValueError, match=r"primary\.autocompact_pct.*expected int"):
         load_config(repo_root)
 
     _install_config(
         repo_root,
-        "[supervisor]\n"
+        "[primary]\n"
         "permission_tier = 1\n",
     )
-    with pytest.raises(ValueError, match=r"supervisor\.permission_tier.*expected str"):
+    with pytest.raises(ValueError, match=r"primary\.permission_tier.*expected str"):
         load_config(repo_root)
 
 
 @pytest.mark.parametrize("value", (-1, 0, 101))
-def test_load_config_rejects_supervisor_autocompact_out_of_range(
+def test_load_config_rejects_primary_autocompact_out_of_range(
     tmp_path: Path,
     value: int,
 ) -> None:
     repo_root = tmp_path / "repo"
     _install_config(
         repo_root,
-        "[supervisor]\n"
+        "[primary]\n"
         f"autocompact_pct = {value}\n",
     )
 
-    with pytest.raises(ValueError, match=r"supervisor\.autocompact_pct.*between 1 and 100"):
+    with pytest.raises(ValueError, match=r"primary\.autocompact_pct.*between 1 and 100"):
         load_config(repo_root)

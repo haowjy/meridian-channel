@@ -1,88 +1,66 @@
-"""Counter-based ID generation for workspaces and runs."""
+"""File-backed ID generation for spaces, runs, and sessions."""
 
 from __future__ import annotations
 
-import sqlite3
-from dataclasses import dataclass
+import json
+from pathlib import Path
 
-from meridian.lib.types import RunId, WorkspaceId
-
-_WORKSPACE_COUNTER_KEY = "counter:workspace"
-_GLOBAL_RUN_COUNTER_KEY = "counter:run:global"
+from meridian.lib.types import RunId, SpaceId
 
 
-@dataclass(frozen=True, slots=True)
-class GeneratedRunId:
-    """Run ID parts used for DB and filesystem layouts."""
+def _count_start_events(path: Path) -> int:
+    if not path.exists():
+        return 0
 
-    full_id: RunId
-    local_id: RunId
-    workspace_id: WorkspaceId | None
+    count = 0
+    with path.open("r", encoding="utf-8") as handle:
+        lines = handle.readlines()
 
-
-def _ensure_counter_key(conn: sqlite3.Connection, key: str) -> None:
-    conn.execute(
-        """
-        INSERT INTO schema_info(key, value)
-        VALUES(?, '0')
-        ON CONFLICT(key) DO NOTHING
-        """,
-        (key,),
-    )
-
-
-def _next_counter(conn: sqlite3.Connection, key: str) -> int:
-    _ensure_counter_key(conn, key)
-    row = conn.execute(
-        """
-        UPDATE schema_info
-        SET value = CAST(value AS INTEGER) + 1
-        WHERE key = ?
-        RETURNING value
-        """,
-        (key,),
-    ).fetchone()
-    if row is None:
-        raise RuntimeError(f"Counter key missing: {key}")
-    return int(row[0])
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            payload = json.loads(stripped)
+        except json.JSONDecodeError:
+            # Self-heal truncated trailing line from interrupted append.
+            if index == len(lines) - 1:
+                continue
+            continue
+        if isinstance(payload, dict) and payload.get("event") == "start":
+            count += 1
+    return count
 
 
-def next_workspace_id(conn: sqlite3.Connection) -> WorkspaceId:
-    """Return the next monotonic workspace ID (`w1`, `w2`, ...)."""
+def next_space_id(repo_root: Path) -> SpaceId:
+    """Return the next monotonic space ID (`s1`, `s2`, ...)."""
 
-    return WorkspaceId(f"w{_next_counter(conn, _WORKSPACE_COUNTER_KEY)}")
+    spaces_dir = repo_root / ".meridian" / ".spaces"
+    if not spaces_dir.exists():
+        return SpaceId("s1")
+
+    max_suffix = 0
+    for child in spaces_dir.iterdir():
+        if not child.is_dir():
+            continue
+        name = child.name
+        if not name.startswith("s"):
+            continue
+        suffix = name[1:]
+        if suffix.isdigit():
+            max_suffix = max(max_suffix, int(suffix))
+    return SpaceId(f"s{max_suffix + 1}")
 
 
-def next_run_id(
-    conn: sqlite3.Connection,
-    workspace_id: WorkspaceId | None,
-) -> GeneratedRunId:
-    """Return the next run ID.
+def next_run_id(space_dir: Path) -> RunId:
+    """Return the next run ID (`r1`, `r2`, ...) for a space."""
 
-    Workspace-scoped IDs are generated as `w3/r1` with local part `r1`.
-    Standalone run IDs are generated as `r1` where full and local ID match.
-    """
+    starts = _count_start_events(space_dir / "runs.jsonl")
+    return RunId(f"r{starts + 1}")
 
-    if workspace_id is None:
-        local = RunId(f"r{_next_counter(conn, _GLOBAL_RUN_COUNTER_KEY)}")
-        return GeneratedRunId(full_id=local, local_id=local, workspace_id=None)
 
-    row = conn.execute(
-        """
-        UPDATE workspaces
-        SET run_counter = run_counter + 1,
-            last_activity_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-        WHERE id = ?
-        RETURNING run_counter
-        """,
-        (str(workspace_id),),
-    ).fetchone()
-    if row is None:
-        raise ValueError(f"Unknown workspace ID: {workspace_id}")
+def next_session_id(space_dir: Path) -> str:
+    """Return the next session/chat ID (`c1`, `c2`, ...) for a space."""
 
-    local = RunId(f"r{int(row[0])}")
-    return GeneratedRunId(
-        full_id=RunId(f"{workspace_id}/{local}"),
-        local_id=local,
-        workspace_id=workspace_id,
-    )
+    starts = _count_start_events(space_dir / "sessions.jsonl")
+    return f"c{starts + 1}"

@@ -20,7 +20,7 @@ _BUILTIN_PATH = Path("<builtin>")
 _KNOWN_SANDBOX_VALUES = frozenset(
     {
         "read-only",
-        "workspace-write",
+        "space-write",
         "full-access",
         "danger-full-access",
         "unrestricted",
@@ -37,7 +37,7 @@ class AgentProfile:
     model: str | None
     variant: str | None
     skills: tuple[str, ...]
-    tools: tuple[str, ...]
+    allowed_tools: tuple[str, ...]
     mcp_tools: tuple[str, ...]
     sandbox: str | None
     variant_models: tuple[str, ...]
@@ -122,7 +122,7 @@ def parse_agent_profile(path: Path) -> AgentProfile:
         model=str(model_value).strip() if model_value is not None else None,
         variant=str(variant_value).strip() if variant_value is not None else None,
         skills=_normalize_string_list(frontmatter.get("skills")),
-        tools=_normalize_string_list(frontmatter.get("tools")),
+        allowed_tools=_normalize_string_list(frontmatter.get("allowed-tools")),
         mcp_tools=_normalize_mcp_tools(frontmatter.get("mcp-tools"), profile_name=profile_name),
         sandbox=sandbox,
         variant_models=_normalize_string_list(frontmatter.get("variant-models")),
@@ -140,20 +140,20 @@ def _builtin_profiles() -> dict[str, AgentProfile]:
             model="gpt-5.3-codex",
             variant=None,
             skills=(),
-            tools=(),
+            allowed_tools=(),
             mcp_tools=("run_list", "run_show", "skills_list"),
-            sandbox="workspace-write",
+            sandbox="space-write",
             variant_models=(),
             body="",
             path=_BUILTIN_PATH,
         ),
-        "supervisor": AgentProfile(
-            name="supervisor",
-            description="Workspace supervisor",
+        "primary": AgentProfile(
+            name="primary",
+            description="Primary agent",
             model="claude-opus-4-6",
             variant=None,
-            skills=("run-agent", "supervise"),
-            tools=(),
+            skills=(),
+            allowed_tools=(),
             mcp_tools=(
                 "run_create",
                 "run_list",

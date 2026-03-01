@@ -6,6 +6,8 @@ import json
 import re
 from pathlib import Path
 
+from meridian.lib.space.space_file import create_space
+
 
 def test_run_create_background_prints_run_id_in_text_mode(
     run_meridian,
@@ -13,6 +15,8 @@ def test_run_create_background_prints_run_id_in_text_mode(
     tmp_path: Path,
 ) -> None:
     cli_env["MERIDIAN_REPO_ROOT"] = tmp_path.as_posix()
+    space = create_space(tmp_path, name="cli-bg")
+    cli_env["MERIDIAN_SPACE_ID"] = space.id
 
     created = run_meridian(
         [

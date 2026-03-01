@@ -15,7 +15,7 @@ from meridian.lib.config._paths import resolve_repo_root
 from meridian.lib.config.settings import MeridianConfig, load_config
 from meridian.lib.ops.registry import OperationSpec, operation
 from meridian.lib.serialization import to_jsonable
-from meridian.lib.state.db import resolve_state_paths
+from meridian.lib.state.paths import resolve_state_paths
 
 if TYPE_CHECKING:
     from meridian.lib.formatting import FormatContext
@@ -65,13 +65,13 @@ _CONFIG_KEY_SPECS: tuple[_ConfigKeySpec, ...] = (
         aliases=("retry_backoff_seconds",),
     ),
     _ConfigKeySpec(
-        canonical_key="defaults.supervisor_agent",
+        canonical_key="defaults.primary_agent",
         section="defaults",
-        file_key="supervisor_agent",
-        field_path=("supervisor_agent",),
+        file_key="primary_agent",
+        field_path=("primary_agent",),
         value_kind="str",
-        env_var="MERIDIAN_SUPERVISOR_AGENT",
-        aliases=("supervisor_agent",),
+        env_var="MERIDIAN_PRIMARY_AGENT",
+        aliases=("primary_agent",),
     ),
     _ConfigKeySpec(
         canonical_key="defaults.agent",
@@ -558,7 +558,7 @@ def _scaffold_template() -> str:
         f"# max_depth = {defaults['defaults.max_depth']}",
         f"# max_retries = {defaults['defaults.max_retries']}",
         f"# retry_backoff_seconds = {defaults['defaults.retry_backoff_seconds']}",
-        f"# supervisor_agent = {_toml_literal(cast('str', defaults['defaults.supervisor_agent']))}",
+        f"# primary_agent = {_toml_literal(cast('str', defaults['defaults.primary_agent']))}",
         f"# agent = {_toml_literal(cast('str', defaults['defaults.agent']))}",
         "",
         "[timeouts]",

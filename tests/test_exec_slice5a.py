@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import sqlite3
 import sys
 import textwrap
 from pathlib import Path
 
 import pytest
 
-from meridian.lib.adapters.sqlite import StateDB
-from meridian.lib.domain import RunCreateParams, TokenUsage
+from meridian.lib.domain import Run, TokenUsage
 from meridian.lib.exec.spawn import execute_with_finalization
 from meridian.lib.harness._common import (
     extract_session_id_from_artifacts,
@@ -27,8 +25,11 @@ from meridian.lib.harness.adapter import (
 )
 from meridian.lib.harness.registry import HarnessRegistry
 from meridian.lib.safety.permissions import PermissionConfig
-from meridian.lib.state.artifact_store import LocalStore
-from meridian.lib.types import HarnessId, ModelId, RunId
+from meridian.lib.space.space_file import create_space
+from meridian.lib.state import run_store
+from meridian.lib.state.artifact_store import LocalStore, make_artifact_key
+from meridian.lib.state.paths import resolve_space_dir
+from meridian.lib.types import HarnessId, ModelId, RunId, SpaceId
 
 
 class ScriptHarnessAdapter:
@@ -61,13 +62,20 @@ class ScriptHarnessAdapter:
         return extract_session_id_from_artifacts(artifacts, run_id)
 
 
-def _fetch_run_row(state: StateDB, run_id: RunId) -> sqlite3.Row:
-    conn = sqlite3.connect(state.paths.db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        row = conn.execute("SELECT * FROM runs WHERE id = ?", (str(run_id),)).fetchone()
-    finally:
-        conn.close()
+def _create_run(repo_root: Path, *, prompt: str) -> tuple[Run, Path]:
+    space = create_space(repo_root, name="slice5")
+    run = Run(
+        run_id=RunId("r1"),
+        prompt=prompt,
+        model=ModelId("gpt-5.3-codex"),
+        status="queued",
+        space_id=SpaceId(space.id),
+    )
+    return run, resolve_space_dir(repo_root, space.id)
+
+
+def _fetch_run_row(space_dir: Path, run_id: RunId) -> run_store.RunRecord:
+    row = run_store.get_run(space_dir, run_id)
     assert row is not None
     return row
 
@@ -78,8 +86,7 @@ def _write_script(path: Path, source: str) -> None:
 
 @pytest.mark.asyncio
 async def test_execute_retries_retryable_errors_up_to_max(tmp_path: Path) -> None:
-    state = StateDB(tmp_path)
-    run = state.create_run(RunCreateParams(prompt="retry me", model=ModelId("gpt-5.3-codex")))
+    run, space_dir = _create_run(tmp_path, prompt="retry me")
     artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
 
     counter = tmp_path / "retryable-count.txt"
@@ -107,7 +114,8 @@ async def test_execute_retries_retryable_errors_up_to_max(tmp_path: Path) -> Non
 
     exit_code = await execute_with_finalization(
         run,
-        state=state,
+        repo_root=tmp_path,
+        space_dir=space_dir,
         artifacts=artifacts,
         registry=registry,
         harness_id=adapter.id,
@@ -118,15 +126,14 @@ async def test_execute_retries_retryable_errors_up_to_max(tmp_path: Path) -> Non
 
     assert exit_code == 1
     assert counter.read_text(encoding="utf-8") == "4"
-    row = _fetch_run_row(state, run.run_id)
-    assert row["status"] == "failed"
-    assert row["failure_reason"] == "agent_error"
+    row = _fetch_run_row(space_dir, run.run_id)
+    assert row.status == "failed"
+    assert row.error is None
 
 
 @pytest.mark.asyncio
 async def test_execute_does_not_retry_unrecoverable_errors(tmp_path: Path) -> None:
-    state = StateDB(tmp_path)
-    run = state.create_run(RunCreateParams(prompt="fail once", model=ModelId("gpt-5.3-codex")))
+    run, space_dir = _create_run(tmp_path, prompt="fail once")
     artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
 
     counter = tmp_path / "unrecoverable-count.txt"
@@ -154,7 +161,8 @@ async def test_execute_does_not_retry_unrecoverable_errors(tmp_path: Path) -> No
 
     exit_code = await execute_with_finalization(
         run,
-        state=state,
+        repo_root=tmp_path,
+        space_dir=space_dir,
         artifacts=artifacts,
         registry=registry,
         harness_id=adapter.id,
@@ -169,8 +177,7 @@ async def test_execute_does_not_retry_unrecoverable_errors(tmp_path: Path) -> No
 
 @pytest.mark.asyncio
 async def test_execute_marks_empty_success_output_as_failed(tmp_path: Path) -> None:
-    state = StateDB(tmp_path)
-    run = state.create_run(RunCreateParams(prompt="empty", model=ModelId("gpt-5.3-codex")))
+    run, space_dir = _create_run(tmp_path, prompt="empty")
     artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
 
     script = tmp_path / "empty-success.py"
@@ -186,7 +193,8 @@ async def test_execute_marks_empty_success_output_as_failed(tmp_path: Path) -> N
 
     exit_code = await execute_with_finalization(
         run,
-        state=state,
+        repo_root=tmp_path,
+        space_dir=space_dir,
         artifacts=artifacts,
         registry=registry,
         harness_id=adapter.id,
@@ -196,17 +204,14 @@ async def test_execute_marks_empty_success_output_as_failed(tmp_path: Path) -> N
     )
 
     assert exit_code == 1
-    row = _fetch_run_row(state, run.run_id)
-    assert row["status"] == "failed"
-    assert row["failure_reason"] == "empty_output"
+    row = _fetch_run_row(space_dir, run.run_id)
+    assert row.status == "failed"
+    assert row.error == "empty_output"
 
 
 @pytest.mark.asyncio
 async def test_retry_does_not_reuse_stale_fallback_report(tmp_path: Path) -> None:
-    state = StateDB(tmp_path)
-    run = state.create_run(
-        RunCreateParams(prompt="retry stale fallback", model=ModelId("gpt-5.3-codex"))
-    )
+    run, space_dir = _create_run(tmp_path, prompt="retry stale fallback")
     artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
 
     counter = tmp_path / "attempt-count.txt"
@@ -240,7 +245,8 @@ async def test_retry_does_not_reuse_stale_fallback_report(tmp_path: Path) -> Non
 
     exit_code = await execute_with_finalization(
         run,
-        state=state,
+        repo_root=tmp_path,
+        space_dir=space_dir,
         artifacts=artifacts,
         registry=registry,
         harness_id=adapter.id,
@@ -250,19 +256,18 @@ async def test_retry_does_not_reuse_stale_fallback_report(tmp_path: Path) -> Non
     )
 
     assert exit_code == 1
-    row = _fetch_run_row(state, run.run_id)
-    assert row["status"] == "failed"
-    assert row["failure_reason"] == "empty_output"
-    assert row["report_path"] is None
+    row = _fetch_run_row(space_dir, run.run_id)
+    assert row.status == "failed"
+    assert row.error == "empty_output"
+    assert not artifacts.exists(make_artifact_key(run.run_id, "report.md"))
 
 
 @pytest.mark.asyncio
-async def test_finalize_row_enriched_with_usage_cost_session_and_files(
+async def test_finalize_row_enriched_with_usage_cost_and_report(
     package_root: Path,
     tmp_path: Path,
 ) -> None:
-    state = StateDB(tmp_path)
-    run = state.create_run(RunCreateParams(prompt="enrich", model=ModelId("gpt-5.3-codex")))
+    run, space_dir = _create_run(tmp_path, prompt="enrich")
     artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
 
     stream_fixture = tmp_path / "slice5-stream.jsonl"
@@ -290,7 +295,8 @@ async def test_finalize_row_enriched_with_usage_cost_session_and_files(
 
     exit_code = await execute_with_finalization(
         run,
-        state=state,
+        repo_root=tmp_path,
+        space_dir=space_dir,
         artifacts=artifacts,
         registry=registry,
         harness_id=adapter.id,
@@ -299,14 +305,12 @@ async def test_finalize_row_enriched_with_usage_cost_session_and_files(
     )
 
     assert exit_code == 0
-    row = _fetch_run_row(state, run.run_id)
-    assert row["status"] == "succeeded"
-    assert row["input_tokens"] == 22
-    assert row["output_tokens"] == 7
-    assert row["total_cost_usd"] == pytest.approx(0.014)
-    assert row["harness_session_id"] == "sess-7"
-    assert row["files_touched_count"] == 2
+    row = _fetch_run_row(space_dir, run.run_id)
+    assert row.status == "succeeded"
+    assert row.input_tokens == 22
+    assert row.output_tokens == 7
+    assert row.total_cost_usd == pytest.approx(0.014)
 
-    report_path = tmp_path / str(row["report_path"])
-    assert report_path.exists()
-    assert "Final summary." in report_path.read_text(encoding="utf-8")
+    report_key = make_artifact_key(run.run_id, "report.md")
+    assert artifacts.exists(report_key)
+    assert "Final summary." in artifacts.get(report_key).decode("utf-8")

@@ -1,0 +1,172 @@
+from __future__ import annotations
+
+import json
+
+from meridian.lib.state.run_store import finalize_run, get_run, list_runs, run_stats, start_run
+
+
+def _space_dir(tmp_path):
+    space_dir = tmp_path / ".meridian" / ".spaces" / "s1"
+    space_dir.mkdir(parents=True, exist_ok=True)
+    return space_dir
+
+
+def test_start_and_finalize_run_round_trip(tmp_path):
+    space_dir = _space_dir(tmp_path)
+
+    run_id = start_run(
+        space_dir,
+        session_id="c1",
+        model="gpt-5.3-codex",
+        agent="coder",
+        harness="codex",
+        prompt="hello",
+        harness_session_id="hs-1",
+    )
+    finalize_run(
+        space_dir,
+        run_id,
+        "succeeded",
+        0,
+        duration_secs=12.5,
+        total_cost_usd=0.05,
+        input_tokens=42,
+        output_tokens=17,
+    )
+
+    loaded = get_run(space_dir, run_id)
+    assert loaded is not None
+    assert loaded.id == "r1"
+    assert loaded.status == "succeeded"
+    assert loaded.model == "gpt-5.3-codex"
+    assert loaded.session_id == "c1"
+    assert loaded.exit_code == 0
+    assert loaded.duration_secs == 12.5
+    assert loaded.total_cost_usd == 0.05
+    assert loaded.input_tokens == 42
+    assert loaded.output_tokens == 17
+
+
+def test_start_run_writes_schema_version(tmp_path):
+    space_dir = _space_dir(tmp_path)
+    start_run(
+        space_dir,
+        session_id="c1",
+        model="claude-sonnet-4-6",
+        agent="coder",
+        harness="claude",
+        prompt="test",
+    )
+
+    first = (space_dir / "runs.jsonl").read_text(encoding="utf-8").splitlines()[0]
+    payload = json.loads(first)
+    assert payload["v"] == 1
+    assert payload["event"] == "start"
+    assert payload["id"] == "r1"
+
+
+def test_list_runs_filters_by_model_and_status(tmp_path):
+    space_dir = _space_dir(tmp_path)
+    r1 = start_run(
+        space_dir,
+        session_id="c1",
+        model="gpt-5.3-codex",
+        agent="coder",
+        harness="codex",
+        prompt="p1",
+    )
+    r2 = start_run(
+        space_dir,
+        session_id="c1",
+        model="claude-sonnet-4-6",
+        agent="coder",
+        harness="claude",
+        prompt="p2",
+    )
+    finalize_run(space_dir, r1, "failed", 1)
+    finalize_run(space_dir, r2, "succeeded", 0)
+
+    failed = list_runs(space_dir, filters={"status": "failed"})
+    claude = list_runs(space_dir, filters={"model": "claude-sonnet-4-6"})
+
+    assert [run.id for run in failed] == ["r1"]
+    assert [run.id for run in claude] == ["r2"]
+
+
+def test_list_runs_skips_truncated_trailing_json(tmp_path):
+    space_dir = _space_dir(tmp_path)
+    runs_jsonl = space_dir / "runs.jsonl"
+    with runs_jsonl.open("w", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(
+                {
+                    "v": 1,
+                    "event": "start",
+                    "id": "r1",
+                    "session_id": "c1",
+                    "model": "gpt-5.3-codex",
+                    "agent": "coder",
+                    "harness": "codex",
+                    "status": "running",
+                    "started_at": "2026-03-01T00:00:00Z",
+                    "prompt": "hello",
+                }
+            )
+            + "\n"
+        )
+        handle.write('{"v":1,"event":"finalize","id":"r1","status":"succeeded"')
+
+    runs = list_runs(space_dir)
+    assert len(runs) == 1
+    assert runs[0].id == "r1"
+    assert runs[0].status == "running"
+
+
+def test_run_stats_aggregates_model_status_cost_duration_and_tokens(tmp_path):
+    space_dir = _space_dir(tmp_path)
+
+    r1 = start_run(
+        space_dir,
+        session_id="c1",
+        model="gpt-5.3-codex",
+        agent="coder",
+        harness="codex",
+        prompt="a",
+    )
+    r2 = start_run(
+        space_dir,
+        session_id="c2",
+        model="claude-sonnet-4-6",
+        agent="reviewer",
+        harness="claude",
+        prompt="b",
+    )
+    finalize_run(
+        space_dir,
+        r1,
+        "succeeded",
+        0,
+        duration_secs=4.0,
+        total_cost_usd=0.1,
+        input_tokens=100,
+        output_tokens=50,
+    )
+    finalize_run(
+        space_dir,
+        r2,
+        "failed",
+        1,
+        duration_secs=6.0,
+        total_cost_usd=0.2,
+        input_tokens=20,
+        output_tokens=10,
+    )
+
+    stats = run_stats(space_dir)
+    assert stats["total_runs"] == 2
+    assert stats["by_status"] == {"failed": 1, "succeeded": 1}
+    assert stats["by_model"] == {"claude-sonnet-4-6": 1, "gpt-5.3-codex": 1}
+    assert stats["total_duration_secs"] == 10.0
+    assert stats["total_cost_usd"] == 0.30000000000000004
+    assert stats["total_input_tokens"] == 120
+    assert stats["total_output_tokens"] == 60

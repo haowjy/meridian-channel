@@ -1,21 +1,19 @@
-"""Diagnostics operations."""
+"""Diagnostics operations for file-authoritative state."""
 
 from __future__ import annotations
 
 import asyncio
-import json
-import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from meridian.lib.config._paths import resolve_path_list
 from meridian.lib.ops._runtime import build_runtime
 from meridian.lib.ops.registry import OperationSpec, operation
-from meridian.lib.state.db import open_connection, resolve_state_paths
-from meridian.lib.state.schema import REQUIRED_TABLES, list_tables
-from meridian.lib.types import WorkspaceId
-from meridian.lib.workspace.launch import workspace_lock_path
+from meridian.lib.space import space_file
+from meridian.lib.space.session_store import cleanup_stale_sessions, list_active_sessions
+from meridian.lib.state import run_store
+from meridian.lib.state.paths import resolve_all_spaces_dir
 
 if TYPE_CHECKING:
     from meridian.lib.formatting import FormatContext
@@ -35,10 +33,8 @@ class DiagRepairInput:
 class DiagDoctorOutput:
     ok: bool
     repo_root: str
-    db_path: str
-    schema_version: int
-    run_count: int
-    workspace_count: int
+    spaces_checked: int
+    runs_checked: int
     agents_dir: str
     skills_dir: str
     warnings: tuple[str, ...] = ()
@@ -51,16 +47,14 @@ class DiagDoctorOutput:
         pairs: list[tuple[str, str | None]] = [
             ("ok", status),
             ("repo_root", self.repo_root),
-            ("db_path", self.db_path),
-            ("schema_version", str(self.schema_version)),
-            ("runs", str(self.run_count)),
-            ("workspaces", str(self.workspace_count)),
+            ("spaces_checked", str(self.spaces_checked)),
+            ("runs_checked", str(self.runs_checked)),
             ("agents_dir", self.agents_dir),
             ("skills_dir", self.skills_dir),
         ]
         result = kv_block(pairs)
-        for w in self.warnings:
-            result += f"\nwarning: {w}"
+        for warning in self.warnings:
+            result += f"\nwarning: {warning}"
         return result
 
 
@@ -77,22 +71,32 @@ class DiagRepairOutput:
         return f"ok: repaired {items}"
 
 
+def _space_dirs(repo_root: Path) -> list[Path]:
+    spaces_dir = resolve_all_spaces_dir(repo_root)
+    if not spaces_dir.is_dir():
+        return []
+    return [child for child in sorted(spaces_dir.iterdir()) if child.is_dir()]
+
+
+def _detect_missing_or_corrupt_spaces(repo_root: Path) -> list[str]:
+    bad: list[str] = []
+    for space_dir in _space_dirs(repo_root):
+        if space_file.get_space(repo_root, space_dir.name) is None:
+            bad.append(space_dir.name)
+    return bad
+
+
+def _count_runs(repo_root: Path) -> int:
+    total = 0
+    for space_dir in _space_dirs(repo_root):
+        if space_file.get_space(repo_root, space_dir.name) is None:
+            continue
+        total += len(run_store.list_runs(space_dir))
+    return total
+
+
 def diag_doctor_sync(payload: DiagDoctorInput) -> DiagDoctorOutput:
     runtime = build_runtime(payload.repo_root)
-    conn = sqlite3.connect(runtime.state.paths.db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        schema_row = conn.execute(
-            "SELECT value FROM schema_info WHERE key = 'version'"
-        ).fetchone()
-        run_row = conn.execute("SELECT COUNT(*) AS count FROM runs").fetchone()
-        workspace_row = conn.execute("SELECT COUNT(*) AS count FROM workspaces").fetchone()
-    finally:
-        conn.close()
-
-    schema_version = int(schema_row["value"]) if schema_row is not None else 0
-    run_count = int(run_row["count"]) if run_row is not None else 0
-    workspace_count = int(workspace_row["count"]) if workspace_row is not None else 0
     search_paths = runtime.config.search_paths
     agents_dirs = resolve_path_list(
         search_paths.agents,
@@ -104,11 +108,30 @@ def diag_doctor_sync(payload: DiagDoctorInput) -> DiagDoctorOutput:
         search_paths.global_skills,
         runtime.repo_root,
     )
+
     warnings: list[str] = []
     if not skills_dirs:
         warnings.append("No configured skills directories were found.")
     if not agents_dirs:
         warnings.append("No configured agent profile directories were found.")
+
+    bad_spaces = _detect_missing_or_corrupt_spaces(runtime.repo_root)
+    if bad_spaces:
+        warnings.append(
+            "Missing/corrupt space.json detected for spaces: " + ", ".join(sorted(bad_spaces))
+        )
+
+    for space_dir in _space_dirs(runtime.repo_root):
+        record = space_file.get_space(runtime.repo_root, space_dir.name)
+        if record is None:
+            continue
+        active_sessions = list_active_sessions(space_dir)
+        if record.status == "active" and not active_sessions:
+            warnings.append(f"Space '{record.id}' is marked active with no live sessions.")
+
+        running = [row.id for row in run_store.list_runs(space_dir) if row.status == "running"]
+        if running:
+            warnings.append(f"Space '{record.id}' has orphan candidate running runs: {', '.join(running)}")
 
     agents_dir = agents_dirs[0] if agents_dirs else runtime.repo_root
     skills_dir = skills_dirs[0] if skills_dirs else runtime.repo_root
@@ -116,10 +139,8 @@ def diag_doctor_sync(payload: DiagDoctorInput) -> DiagDoctorOutput:
     return DiagDoctorOutput(
         ok=not warnings,
         repo_root=runtime.repo_root.as_posix(),
-        db_path=runtime.state.paths.db_path.as_posix(),
-        schema_version=schema_version,
-        run_count=run_count,
-        workspace_count=workspace_count,
+        spaces_checked=len(_space_dirs(runtime.repo_root)),
+        runs_checked=_count_runs(runtime.repo_root),
         agents_dir=agents_dir.as_posix(),
         skills_dir=skills_dir.as_posix(),
         warnings=tuple(warnings),
@@ -130,123 +151,52 @@ async def diag_doctor(payload: DiagDoctorInput) -> DiagDoctorOutput:
     return await asyncio.to_thread(diag_doctor_sync, payload)
 
 
-def _jsonl_is_corrupt(path: Path) -> bool:
-    if not path.exists():
-        return True
-
-    with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            stripped = line.strip()
-            if not stripped:
-                continue
-            try:
-                payload = json.loads(stripped)
-            except json.JSONDecodeError:
-                return True
-            if not isinstance(payload, dict):
-                return True
-    return False
-
-
-def _rebuild_runs_jsonl(conn: sqlite3.Connection, path: Path) -> None:
-    rows = conn.execute(
-        """
-        SELECT
-            id,
-            workspace_id,
-            status,
-            started_at,
-            finished_at,
-            duration_secs,
-            exit_code,
-            failure_reason,
-            report_path,
-            model,
-            harness,
-            total_cost_usd,
-            input_tokens,
-            output_tokens,
-            files_touched_count
-        FROM runs
-        ORDER BY started_at ASC
-        """
-    ).fetchall()
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as handle:
-        for row in rows:
-            payload: dict[str, object] = {
-                "run_id": str(row["id"]),
-                "status": str(row["status"]),
-                "created_at_utc": str(row["started_at"]),
-                "finished_at_utc": cast("str | None", row["finished_at"]),
-                "duration_seconds": cast("float | None", row["duration_secs"]),
-                "exit_code": cast("int | None", row["exit_code"]),
-                "failure_reason": cast("str | None", row["failure_reason"]),
-                "report_path": cast("str | None", row["report_path"]),
-                "model": str(row["model"]),
-                "harness": str(row["harness"]),
-                "total_cost_usd": cast("float | None", row["total_cost_usd"]),
-                "input_tokens": cast("int | None", row["input_tokens"]),
-                "output_tokens": cast("int | None", row["output_tokens"]),
-                "files_touched_count": cast("int | None", row["files_touched_count"]),
-            }
-            workspace_id = cast("str | None", row["workspace_id"])
-            if workspace_id:
-                payload["workspace_id"] = workspace_id
-
-            handle.write(json.dumps(payload, sort_keys=True) + "\n")
-
-
-def _repair_workspace_locks(repo_root: Path) -> bool:
-    lock_dir = resolve_state_paths(repo_root).active_workspaces_dir
-    if not lock_dir.exists():
-        return False
-
-    removed = False
-    for lock_file in sorted(lock_dir.glob("*.lock")):
-        if not lock_file.is_file():
+def _repair_stale_session_locks(repo_root: Path) -> int:
+    repaired = 0
+    for space_dir in _space_dirs(repo_root):
+        if space_file.get_space(repo_root, space_dir.name) is None:
             continue
-        try:
-            payload = json.loads(lock_file.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            lock_file.unlink(missing_ok=True)
-            removed = True
+        repaired += len(cleanup_stale_sessions(space_dir))
+    return repaired
+
+
+def _repair_orphan_runs(repo_root: Path) -> int:
+    repaired = 0
+    for space_dir in _space_dirs(repo_root):
+        record = space_file.get_space(repo_root, space_dir.name)
+        if record is None:
             continue
 
-        child_pid = payload.get("child_pid")
-        if isinstance(child_pid, int) and child_pid > 0:
-            proc_path = Path("/proc") / str(child_pid)
-            if proc_path.exists():
+        active_sessions = set(list_active_sessions(space_dir))
+        for run in run_store.list_runs(space_dir):
+            if run.status != "running":
+                continue
+            if run.session_id is not None and run.session_id in active_sessions:
                 continue
 
-        lock_file.unlink(missing_ok=True)
-        removed = True
-
-    return removed
-
-
-def _repair_stuck_active_workspaces(conn: sqlite3.Connection, repo_root: Path) -> bool:
-    rows = conn.execute("SELECT id FROM workspaces WHERE status = 'active'").fetchall()
-    repaired = False
-
-    with conn:
-        for row in rows:
-            workspace_id = WorkspaceId(str(row["id"]))
-            if workspace_lock_path(repo_root, workspace_id).is_file():
-                continue
-
-            result = conn.execute(
-                """
-                UPDATE workspaces
-                SET status = 'abandoned',
-                    last_activity_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-                WHERE id = ? AND status = 'active'
-                """,
-                (str(workspace_id),),
+            run_store.finalize_run(
+                space_dir,
+                run.id,
+                status="failed",
+                exit_code=1,
+                error="orphan_run",
             )
-            repaired = repaired or result.rowcount > 0
+            repaired += 1
+    return repaired
 
+
+def _repair_stale_space_status(repo_root: Path) -> int:
+    repaired = 0
+    for space_dir in _space_dirs(repo_root):
+        record = space_file.get_space(repo_root, space_dir.name)
+        if record is None:
+            continue
+
+        active_sessions = list_active_sessions(space_dir)
+        desired = "active" if active_sessions else "closed"
+        if record.status != desired:
+            space_file.update_space_status(repo_root, record.id, desired)
+            repaired += 1
     return repaired
 
 
@@ -254,34 +204,21 @@ def diag_repair_sync(payload: DiagRepairInput) -> DiagRepairOutput:
     runtime = build_runtime(payload.repo_root)
     repaired: list[str] = []
 
-    existing_before: set[str]
-    conn_before = sqlite3.connect(runtime.state.paths.db_path)
-    try:
-        existing_before = list_tables(conn_before)
-    finally:
-        conn_before.close()
+    stale_locks = _repair_stale_session_locks(runtime.repo_root)
+    if stale_locks > 0:
+        repaired.append("stale_session_locks")
 
-    if _repair_workspace_locks(runtime.repo_root):
-        repaired.append("workspace_locks")
+    orphan_runs = _repair_orphan_runs(runtime.repo_root)
+    if orphan_runs > 0:
+        repaired.append("orphan_runs")
 
-    conn = open_connection(runtime.state.paths.db_path)
-    try:
-        existing_after = list_tables(conn)
-        if REQUIRED_TABLES - existing_before and not (REQUIRED_TABLES - existing_after):
-            repaired.append("schema_tables")
+    stale_status = _repair_stale_space_status(runtime.repo_root)
+    if stale_status > 0:
+        repaired.append("stale_space_status")
 
-        if _jsonl_is_corrupt(runtime.state.paths.jsonl_path):
-            _rebuild_runs_jsonl(conn, runtime.state.paths.jsonl_path)
-            repaired.append("runs_jsonl")
-
-        if _repair_stuck_active_workspaces(conn, runtime.repo_root):
-            repaired.append("workspace_stuck_active")
-
-        checkpoint = conn.execute("PRAGMA wal_checkpoint(FULL)").fetchone()
-        if checkpoint is not None:
-            repaired.append("wal_checkpoint")
-    finally:
-        conn.close()
+    bad_spaces = _detect_missing_or_corrupt_spaces(runtime.repo_root)
+    if bad_spaces:
+        repaired.append("missing_or_corrupt_space_json")
 
     return DiagRepairOutput(ok=True, repaired=tuple(sorted(set(repaired))))
 

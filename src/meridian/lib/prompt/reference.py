@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import re
+import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from meridian.lib.workspace.session_files import (
-    resolve_workspace_session_id,
-    workspace_session_file_path,
-)
+from meridian.lib.state.paths import resolve_space_dir
 
 _TEMPLATE_VAR_RE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
 
@@ -111,13 +109,17 @@ def load_reference_files(
     loaded: list[ReferenceFile] = []
     for raw_path in file_paths:
         if isinstance(raw_path, str) and raw_path.startswith("@"):
-            session_id = resolve_workspace_session_id()
-            if session_id is None:
+            space_id = os.getenv("MERIDIAN_SPACE_ID", "").strip()
+            if not space_id:
                 raise ValueError(
-                    "Session reference requires MERIDIAN_SESSION. "
-                    "Set MERIDIAN_SESSION before using '-f @name'."
+                    "Space reference requires MERIDIAN_SPACE_ID. "
+                    "Set MERIDIAN_SPACE_ID before using '-f @name'."
                 )
-            resolved = workspace_session_file_path(root, session_id, raw_path).resolve()
+            space_fs_dir = resolve_space_dir(root, space_id) / "fs"
+            relative = raw_path[1:]
+            if not relative:
+                raise ValueError("Reference path after '@' must not be empty.")
+            resolved = (space_fs_dir / relative).resolve()
         else:
             path_obj = raw_path if isinstance(raw_path, Path) else Path(raw_path)
             expanded = path_obj.expanduser()

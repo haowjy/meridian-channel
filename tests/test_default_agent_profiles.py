@@ -8,12 +8,12 @@ import pytest
 
 import meridian.lib.ops.run as run_ops
 import meridian.lib.safety.permissions as permission_safety
-import meridian.lib.workspace.launch as workspace_launch
+import meridian.lib.space.launch as space_launch
 from meridian.lib.config._paths import bundled_agents_root
 from meridian.lib.config.agent import _BUILTIN_PATH, load_agent_profile
 from meridian.lib.ops.run import RunCreateInput
-from meridian.lib.types import WorkspaceId
-from meridian.lib.workspace.launch import WorkspaceLaunchRequest, _build_interactive_command
+from meridian.lib.types import SpaceId
+from meridian.lib.space.launch import SpaceLaunchRequest, _build_interactive_command
 
 
 def _write(path: Path, content: str) -> None:
@@ -46,6 +46,7 @@ def _write_agent(
     skills: list[str],
     sandbox: str | None = None,
     mcp_tools: list[str] | None = None,
+    allowed_tools: list[str] | None = None,
 ) -> None:
     lines = [
         "---",
@@ -57,6 +58,8 @@ def _write_agent(
         lines.append(f"sandbox: {sandbox}")
     if mcp_tools is not None:
         lines.append(f"mcp-tools: [{', '.join(mcp_tools)}]")
+    if allowed_tools is not None:
+        lines.append(f"allowed-tools: [{', '.join(allowed_tools)}]")
     lines.append("---")
     lines.extend(["", f"# {name}", "", "Agent body."])
     _write(repo_root / ".agents" / "agents" / f"{name}.md", "\n".join(lines) + "\n")
@@ -81,7 +84,7 @@ def test_run_uses_default_agent_profile_and_profile_skills(tmp_path: Path) -> No
         name="reviewer",
         model="gpt-5.3-codex",
         skills=["reviewing"],
-        sandbox="workspace-write",
+        sandbox="space-write",
     )
     _write_skill(tmp_path, "reviewing", "Review skill content")
 
@@ -122,82 +125,82 @@ def test_run_falls_back_to_legacy_defaults_when_configured_profile_missing(tmp_p
     assert result.skills == ()
 
 
-def test_workspace_supervisor_profile_controls_model_skills_and_sandbox(tmp_path: Path) -> None:
+def test_space_primary_profile_controls_model_skills_and_sandbox(tmp_path: Path) -> None:
     _write_config(
         tmp_path,
-        "[defaults]\nsupervisor_agent = 'lead-supervisor'\n",
+        "[defaults]\nprimary_agent = 'lead-primary'\n",
     )
     _write_agent(
         tmp_path,
-        name="lead-supervisor",
+        name="lead-primary",
         model="claude-sonnet-4-6",
         skills=["orchestrate"],
         sandbox="unrestricted",
     )
-    _write_skill(tmp_path, "orchestrate", "Supervisor orchestration content")
+    _write_skill(tmp_path, "orchestrate", "Primary orchestration content")
 
-    request = WorkspaceLaunchRequest(workspace_id=WorkspaceId("w1"))
+    request = SpaceLaunchRequest(space_id=SpaceId("w1"))
     command = _build_interactive_command(
         repo_root=tmp_path,
         request=request,
-        prompt="workspace prompt",
+        prompt="space prompt",
         passthrough_args=(),
     )
 
     assert command[command.index("--model") + 1] == "claude-sonnet-4-6"
     assert "--allowedTools" in command
     prompt_payload = command[command.index("--system-prompt") + 1]
-    assert "# Supervisor Skills" in prompt_payload
-    assert "Supervisor orchestration content" in prompt_payload
+    assert "# Primary Skills" in prompt_payload
+    assert "Primary orchestration content" in prompt_payload
 
 
-def test_workspace_supervisor_profile_missing_uses_default_permission_tier(tmp_path: Path) -> None:
+def test_space_primary_profile_missing_uses_default_permission_tier(tmp_path: Path) -> None:
     _write_config(
         tmp_path,
-        "[defaults]\nsupervisor_agent = 'missing-supervisor'\n",
+        "[defaults]\nprimary_agent = 'missing-primary'\n",
     )
 
-    request = WorkspaceLaunchRequest(workspace_id=WorkspaceId("w1"))
+    request = SpaceLaunchRequest(space_id=SpaceId("w1"))
     command = _build_interactive_command(
         repo_root=tmp_path,
         request=request,
-        prompt="workspace prompt",
+        prompt="space prompt",
         passthrough_args=(),
     )
 
     assert command[command.index("--model") + 1] == "claude-opus-4-6"
     assert "--allowedTools" in command
-    assert command[command.index("--system-prompt") + 1] == "workspace prompt"
+    assert command[command.index("--system-prompt") + 1] == "space prompt"
 
 
-def test_workspace_supervisor_profile_missing_sandbox_uses_default_permission_tier(
+def test_space_primary_profile_missing_sandbox_uses_default_permission_tier(
     tmp_path: Path,
 ) -> None:
     _write_config(
         tmp_path,
         (
             "[defaults]\n"
-            "supervisor_agent = 'lead-supervisor'\n"
+            "primary_agent = 'lead-primary'\n"
             "\n"
             "[permissions]\n"
-            "default_tier = 'workspace-write'\n"
+            "default_tier = 'space-write'\n"
             "\n"
-            "[supervisor]\n"
-            "permission_tier = 'workspace-write'\n"
+            "[primary]\n"
+            "permission_tier = 'space-write'\n"
         ),
     )
     _write_agent(
         tmp_path,
-        name="lead-supervisor",
+        name="lead-primary",
         model="claude-sonnet-4-6",
         skills=["orchestrate"],
     )
-    _write_skill(tmp_path, "orchestrate", "Supervisor orchestration content")
+    _write_skill(tmp_path, "orchestrate", "Primary orchestration content")
 
     command = _build_interactive_command(
         repo_root=tmp_path,
-        request=WorkspaceLaunchRequest(workspace_id=WorkspaceId("w1")),
-        prompt="workspace prompt",
+        request=SpaceLaunchRequest(space_id=SpaceId("w1")),
+        prompt="space prompt",
         passthrough_args=(),
     )
 
@@ -207,7 +210,7 @@ def test_workspace_supervisor_profile_missing_sandbox_uses_default_permission_ti
     assert "Write" in allowed_tools
 
 
-def test_workspace_supervisor_profile_unknown_sandbox_uses_default_permission_tier_with_warning(
+def test_space_primary_profile_unknown_sandbox_uses_default_permission_tier_with_warning(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -215,23 +218,23 @@ def test_workspace_supervisor_profile_unknown_sandbox_uses_default_permission_ti
         tmp_path,
         (
             "[defaults]\n"
-            "supervisor_agent = 'lead-supervisor'\n"
+            "primary_agent = 'lead-primary'\n"
             "\n"
             "[permissions]\n"
             "default_tier = 'read-only'\n"
             "\n"
-            "[supervisor]\n"
+            "[primary]\n"
             "permission_tier = 'read-only'\n"
         ),
     )
     _write_agent(
         tmp_path,
-        name="lead-supervisor",
+        name="lead-primary",
         model="claude-sonnet-4-6",
         skills=["orchestrate"],
         sandbox="full_access",
     )
-    _write_skill(tmp_path, "orchestrate", "Supervisor orchestration content")
+    _write_skill(tmp_path, "orchestrate", "Primary orchestration content")
 
     class _Logger:
         def __init__(self) -> None:
@@ -241,12 +244,12 @@ def test_workspace_supervisor_profile_unknown_sandbox_uses_default_permission_ti
             self.messages.append(message % args if args else message)
 
     stub_logger = _Logger()
-    monkeypatch.setattr(workspace_launch, "logger", stub_logger)
+    monkeypatch.setattr(space_launch, "logger", stub_logger)
 
     command = _build_interactive_command(
         repo_root=tmp_path,
-        request=WorkspaceLaunchRequest(workspace_id=WorkspaceId("w1")),
-        prompt="workspace prompt",
+        request=SpaceLaunchRequest(space_id=SpaceId("w1")),
+        prompt="space prompt",
         passthrough_args=(),
     )
 
@@ -257,37 +260,37 @@ def test_workspace_supervisor_profile_unknown_sandbox_uses_default_permission_ti
     assert any(
         message
         == (
-            "Agent profile 'lead-supervisor' has unsupported sandbox 'full_access'; "
+            "Agent profile 'lead-primary' has unsupported sandbox 'full_access'; "
             "falling back to default permission tier 'read-only'."
         )
         for message in stub_logger.messages
     )
 
 
-def test_workspace_supervisor_profile_non_claude_model_raises_clear_error(tmp_path: Path) -> None:
+def test_space_primary_profile_non_claude_model_raises_clear_error(tmp_path: Path) -> None:
     _write_config(
         tmp_path,
-        "[defaults]\nsupervisor_agent = 'lead-supervisor'\n",
+        "[defaults]\nprimary_agent = 'lead-primary'\n",
     )
     _write_agent(
         tmp_path,
-        name="lead-supervisor",
+        name="lead-primary",
         model="gpt-5.3-codex",
         skills=[],
-        sandbox="workspace-write",
+        sandbox="space-write",
     )
 
     with pytest.raises(
         ValueError,
         match=(
-            r"Workspace supervisor only supports Claude harness models. "
+            r"Primary agent only supports Claude harness models. "
             "Model 'gpt-5.3-codex' routes to harness 'codex'."
         ),
     ):
         _build_interactive_command(
             repo_root=tmp_path,
-            request=WorkspaceLaunchRequest(workspace_id=WorkspaceId("w1")),
-            prompt="workspace prompt",
+            request=SpaceLaunchRequest(space_id=SpaceId("w1")),
+            prompt="space prompt",
             passthrough_args=(),
         )
 
@@ -321,21 +324,21 @@ def test_builtin_agent_profile_used_when_no_file_on_disk(tmp_path: Path) -> None
     assert bundled_root is not None
     assert profile.name == "agent"
     assert profile.model == "gpt-5.3-codex"
-    assert profile.sandbox == "workspace-write"
+    assert profile.sandbox == "space-write"
     assert profile.path == (bundled_root / "agents" / "agent.md").resolve()
     assert profile.path != _BUILTIN_PATH
 
 
-def test_builtin_supervisor_profile_used_when_no_file_on_disk(tmp_path: Path) -> None:
-    """When no supervisor.md exists on disk, load_agent_profile returns bundled defaults."""
-    profile = load_agent_profile("supervisor", repo_root=tmp_path)
+def test_builtin_primary_profile_used_when_no_file_on_disk(tmp_path: Path) -> None:
+    """When no primary.md exists on disk, load_agent_profile returns bundled defaults."""
+    profile = load_agent_profile("primary", repo_root=tmp_path)
     bundled_root = bundled_agents_root()
     assert bundled_root is not None
-    assert profile.name == "supervisor"
+    assert profile.name == "primary"
     assert profile.model == "claude-opus-4-6"
     assert profile.sandbox == "unrestricted"
-    assert "supervise" in profile.skills
-    assert profile.path == (bundled_root / "agents" / "supervisor.md").resolve()
+    assert profile.skills == ()
+    assert profile.path == (bundled_root / "agents" / "primary.md").resolve()
     assert profile.path != _BUILTIN_PATH
 
 
@@ -380,7 +383,7 @@ def test_claude_command_merges_permission_and_mcp_allowed_tools(tmp_path: Path) 
         name="claude-reviewer",
         model="claude-sonnet-4-6",
         skills=[],
-        sandbox="workspace-write",
+        sandbox="space-write",
         mcp_tools=["run_list", "run_show"],
     )
 
@@ -457,3 +460,153 @@ def test_run_logs_warning_when_profile_sandbox_exceeds_config_default(
         )
         for message in stub_logger.messages
     )
+
+
+def test_explicit_allowed_tools_replace_tier_tools_for_claude(tmp_path: Path) -> None:
+    """When allowed-tools is set, Claude gets exactly those tools instead of tier-derived ones."""
+    _write_agent(
+        tmp_path,
+        name="researcher",
+        model="claude-sonnet-4-6",
+        skills=[],
+        sandbox="read-only",
+        allowed_tools=["Read", "Glob", "Grep", "WebSearch", "WebFetch"],
+    )
+
+    result = run_ops.run_create_sync(
+        RunCreateInput(
+            prompt="research task",
+            dry_run=True,
+            agent="researcher",
+            repo_root=tmp_path.as_posix(),
+        )
+    )
+
+    assert result.status == "dry-run"
+    assert result.harness_id == "claude"
+    allowed_tools = _allowed_tools_from_command(result.cli_command)
+    # Should have exactly the profile tools (plus MCP tools), NOT tier tools
+    assert "Read" in allowed_tools
+    assert "Glob" in allowed_tools
+    assert "WebSearch" in allowed_tools
+    assert "WebFetch" in allowed_tools
+    # Tier read-only tools that are NOT in the explicit list should be absent
+    assert "Bash(git status)" not in allowed_tools
+    assert "Bash(git log)" not in allowed_tools
+
+
+def test_explicit_allowed_tools_codex_falls_back_to_sandbox(tmp_path: Path) -> None:
+    """Codex doesn't support per-tool allowlists; sandbox tier is used as fallback."""
+    _write_agent(
+        tmp_path,
+        name="codex-researcher",
+        model="gpt-5.3-codex",
+        skills=[],
+        sandbox="read-only",
+        allowed_tools=["Read", "Glob", "WebSearch"],
+    )
+
+    result = run_ops.run_create_sync(
+        RunCreateInput(
+            prompt="research task",
+            dry_run=True,
+            agent="codex-researcher",
+            repo_root=tmp_path.as_posix(),
+        )
+    )
+
+    assert result.status == "dry-run"
+    assert result.harness_id == "codex"
+    # Codex should use --sandbox from the sandbox field, not --allowedTools
+    assert "--sandbox" in result.cli_command
+    sandbox_value = result.cli_command[result.cli_command.index("--sandbox") + 1]
+    assert sandbox_value == "read-only"
+    assert "--allowedTools" not in result.cli_command
+
+
+def test_cli_permission_overrides_explicit_allowed_tools(tmp_path: Path) -> None:
+    """CLI --permission flag takes precedence over profile allowed-tools."""
+    _write_agent(
+        tmp_path,
+        name="restricted",
+        model="claude-sonnet-4-6",
+        skills=[],
+        sandbox="read-only",
+        allowed_tools=["Read", "Glob"],
+    )
+
+    result = run_ops.run_create_sync(
+        RunCreateInput(
+            prompt="override test",
+            dry_run=True,
+            agent="restricted",
+            permission_tier="full-access",
+            repo_root=tmp_path.as_posix(),
+        )
+    )
+
+    assert result.status == "dry-run"
+    allowed_tools = _allowed_tools_from_command(result.cli_command)
+    # Full-access tier tools should be present, not the explicit list
+    assert "Bash" in allowed_tools
+    assert "WebFetch" in allowed_tools
+    assert "Edit" in allowed_tools
+
+
+def test_explicit_allowed_tools_merge_with_mcp_tools(tmp_path: Path) -> None:
+    """Profile allowed-tools and mcp-tools should both appear in --allowedTools."""
+    _write_agent(
+        tmp_path,
+        name="mcp-researcher",
+        model="claude-sonnet-4-6",
+        skills=[],
+        sandbox="read-only",
+        allowed_tools=["Read", "Glob", "Grep"],
+        mcp_tools=["run_list", "run_show"],
+    )
+
+    result = run_ops.run_create_sync(
+        RunCreateInput(
+            prompt="merge test",
+            dry_run=True,
+            agent="mcp-researcher",
+            repo_root=tmp_path.as_posix(),
+        )
+    )
+
+    assert result.status == "dry-run"
+    assert _flag_count(result.cli_command, "--allowedTools") == 1
+    allowed_tools = _allowed_tools_from_command(result.cli_command)
+    # Explicit profile tools
+    assert "Read" in allowed_tools
+    assert "Glob" in allowed_tools
+    assert "Grep" in allowed_tools
+    # MCP tools
+    assert "mcp__meridian__run_list" in allowed_tools
+    assert "mcp__meridian__run_show" in allowed_tools
+
+
+def test_empty_allowed_tools_falls_back_to_tier(tmp_path: Path) -> None:
+    """When no allowed-tools are specified, tier-based behavior is unchanged."""
+    _write_agent(
+        tmp_path,
+        name="tier-agent",
+        model="claude-sonnet-4-6",
+        skills=[],
+        sandbox="space-write",
+    )
+
+    result = run_ops.run_create_sync(
+        RunCreateInput(
+            prompt="tier test",
+            dry_run=True,
+            agent="tier-agent",
+            repo_root=tmp_path.as_posix(),
+        )
+    )
+
+    assert result.status == "dry-run"
+    allowed_tools = _allowed_tools_from_command(result.cli_command)
+    assert "Edit" in allowed_tools
+    assert "Write" in allowed_tools
+    assert "Bash(git add)" in allowed_tools

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from meridian.lib.config.skill_registry import SkillRegistry
-from meridian.lib.domain import IndexReport, SkillContent, SkillManifest
+from meridian.lib.domain import SkillContent, SkillManifest
 from meridian.lib.ops.registry import OperationSpec, operation
 
 if TYPE_CHECKING:
@@ -28,11 +28,6 @@ class SkillsSearchInput:
 @dataclass(frozen=True, slots=True)
 class SkillsLoadInput:
     name: str = ""
-    repo_root: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class SkillsReindexInput:
     repo_root: str | None = None
 
 
@@ -71,10 +66,6 @@ def skills_load_sync(payload: SkillsLoadInput) -> SkillContent:
     return registry.show(name)
 
 
-def skills_reindex_sync(payload: SkillsReindexInput) -> IndexReport:
-    return _registry(payload.repo_root).reindex()
-
-
 async def skills_list(payload: SkillsListInput) -> SkillsQueryOutput:
     return skills_list_sync(payload)
 
@@ -85,10 +76,6 @@ async def skills_search(payload: SkillsSearchInput) -> SkillsQueryOutput:
 
 async def skills_load(payload: SkillsLoadInput) -> SkillContent:
     return skills_load_sync(payload)
-
-
-async def skills_reindex(payload: SkillsReindexInput) -> IndexReport:
-    return skills_reindex_sync(payload)
 
 
 operation(
@@ -133,16 +120,3 @@ operation(
     )
 )
 
-operation(
-    OperationSpec[SkillsReindexInput, IndexReport](
-        name="skills.reindex",
-        handler=skills_reindex,
-        sync_handler=skills_reindex_sync,
-        input_type=SkillsReindexInput,
-        output_type=IndexReport,
-        cli_group="skills",
-        cli_name="reindex",
-        mcp_name="skills_reindex",
-        description="Reindex skills from .agents/skills.",
-    )
-)
