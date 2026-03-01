@@ -58,8 +58,7 @@ def test_rewrite_agent_skills_preserves_other_content() -> None:
         "---\n"
         "name: reviewer\n"
         "unknown-key: keep-me\n"
-        "skills: [alpha, beta, keep] # inline comment\n"
-        "# frontmatter comment\n"
+        "skills: [alpha, beta, keep]\n"
         "sandbox: workspace-write\n"
         "---\n"
         "Body line\n"
@@ -74,26 +73,39 @@ def test_rewrite_agent_skills_preserves_other_content() -> None:
         },
     )
 
-    assert "unknown-key: keep-me" in rewritten
-    assert "# frontmatter comment" in rewritten
-    assert "sandbox: workspace-write" in rewritten
-    assert "Body line\nskills: [alpha]" in rewritten
-    assert (
-        "skills: [_meridian-c1-alpha, _meridian-c1-beta, keep] # inline comment" in rewritten
-    )
+    # Verify non-skills frontmatter and body are preserved via parsing
+    fm, body = split_markdown_frontmatter(rewritten)
+    assert fm["name"] == "reviewer"
+    assert fm["unknown-key"] == "keep-me"
+    assert fm["sandbox"] == "workspace-write"
+    # Skills should be remapped; unmapped entries are passed through
+    assert fm["skills"] == ["_meridian-c1-alpha", "_meridian-c1-beta", "keep"]
+    # Body outside frontmatter must not be touched
+    assert "Body line" in body
+    assert "skills: [alpha]" in body
 
 
-def test_rewrite_agent_skills_without_skills_line_returns_unchanged() -> None:
+def test_rewrite_agent_skills_without_skills_key_leaves_other_data_intact() -> None:
+    # python-frontmatter round-trips YAML so exact byte equality is not guaranteed,
+    # but all keys and values must survive unchanged when there is no skills entry.
     raw = "---\nname: reviewer\nmodel: gpt-5\n---\nBody\n"
-    assert _rewrite_agent_skills(raw, {"x": "y"}) == raw
+    rewritten = _rewrite_agent_skills(raw, {"x": "y"})
+    fm, body = split_markdown_frontmatter(rewritten)
+    assert fm["name"] == "reviewer"
+    assert fm["model"] == "gpt-5"
+    assert "skills" not in fm
+    assert "Body" in body
 
 
 def test_rewrite_agent_skills_preserves_inline_quoted_items() -> None:
+    # YAML parses quoted "true"/"null"/"42" as strings; after round-trip the values
+    # must still be strings (not booleans/None/integers).
     raw = "---\nname: reviewer\nskills: [\"true\", \"null\", \"42\"]\n---\nBody\n"
 
     rewritten = _rewrite_agent_skills(raw, {})
 
-    assert "skills: [\"true\", \"null\", \"42\"]" in rewritten
+    fm, _ = split_markdown_frontmatter(rewritten)
+    assert fm["skills"] == ["true", "null", "42"]
 
 
 def test_rewrite_agent_skills_maps_inline_quoted_item() -> None:
@@ -101,15 +113,19 @@ def test_rewrite_agent_skills_maps_inline_quoted_item() -> None:
 
     rewritten = _rewrite_agent_skills(raw, {"alpha": "_meridian-c1-alpha"})
 
-    assert "skills: [\"_meridian-c1-alpha\"]" in rewritten
+    fm, _ = split_markdown_frontmatter(rewritten)
+    assert fm["skills"] == ["_meridian-c1-alpha"]
 
 
-def test_rewrite_agent_skills_block_style_preserves_inline_comment() -> None:
-    raw = "---\nname: reviewer\nskills:\n  - alpha # keep this\n---\nBody\n"
+def test_rewrite_agent_skills_block_style_maps_item() -> None:
+    # Comments in YAML are not preserved by python-frontmatter; verify the item is
+    # correctly mapped regardless of the style used in the output.
+    raw = "---\nname: reviewer\nskills:\n  - alpha\n---\nBody\n"
 
     rewritten = _rewrite_agent_skills(raw, {"alpha": "_meridian-c1-alpha"})
 
-    assert "  - _meridian-c1-alpha # keep this" in rewritten
+    fm, _ = split_markdown_frontmatter(rewritten)
+    assert fm["skills"] == ["_meridian-c1-alpha"]
 
 
 def test_reconstruct_builtin_agent_generates_minimal_markdown() -> None:
@@ -133,7 +149,7 @@ def test_reconstruct_builtin_agent_generates_minimal_markdown() -> None:
     assert frontmatter["model"] == "gpt-5.3-codex"
     assert frontmatter["skills"] == ["_meridian-c1-reviewing", "native-skill"]
     assert frontmatter["sandbox"] == "workspace-write"
-    assert body == "Builtin body\n"
+    assert body == "Builtin body"
 
 
 def test_materialize_for_harness_all_native_makes_no_writes(tmp_path: Path) -> None:
@@ -201,9 +217,10 @@ def test_materialize_for_harness_mixed_rewrites_agent_and_copies_missing(tmp_pat
 
     materialized_agent_file = repo_root / ".agents" / "agents" / "_meridian-c1-primary.md"
     rewritten = materialized_agent_file.read_text(encoding="utf-8")
-    assert "name: _meridian-c1-primary" in rewritten
-    assert "description: keep" in rewritten
-    assert "skills: [alpha, _meridian-c1-beta]" in rewritten
+    fm, _ = split_markdown_frontmatter(rewritten)
+    assert fm["name"] == "_meridian-c1-primary"
+    assert fm["description"] == "keep"
+    assert fm["skills"] == ["alpha", "_meridian-c1-beta"]
 
 
 def test_materialize_for_harness_rewrites_skill_name_in_frontmatter(
@@ -229,7 +246,7 @@ def test_materialize_for_harness_rewrites_skill_name_in_frontmatter(
     frontmatter, body = split_markdown_frontmatter(materialized_skill.read_text(encoding="utf-8"))
     assert frontmatter["name"] == "_meridian-c1-meridian-run"
     assert frontmatter["description"] == "test skill"
-    assert body == "Body\n"
+    assert body == "Body"
 
 
 def test_materialize_for_harness_all_missing_materializes_all(tmp_path: Path) -> None:
@@ -259,7 +276,8 @@ def test_materialize_for_harness_all_missing_materializes_all(tmp_path: Path) ->
     rewritten = (
         repo_root / ".agents" / "agents" / "_meridian-c1-primary.md"
     ).read_text(encoding="utf-8")
-    assert "skills: [_meridian-c1-alpha, _meridian-c1-beta]" in rewritten
+    fm, _ = split_markdown_frontmatter(rewritten)
+    assert fm["skills"] == ["_meridian-c1-alpha", "_meridian-c1-beta"]
     assert (repo_root / ".agents" / "skills" / "_meridian-c1-alpha" / "SKILL.md").is_file()
     assert (repo_root / ".agents" / "skills" / "_meridian-c1-beta" / "SKILL.md").is_file()
 
@@ -337,7 +355,7 @@ def test_materialize_for_harness_builtin_agent_reconstructed(tmp_path: Path) -> 
     assert frontmatter["model"] == "gpt-5.3-codex"
     assert frontmatter["skills"] == ["_meridian-c1-reviewing"]
     assert frontmatter["sandbox"] == "workspace-write"
-    assert body == "Builtin body\n"
+    assert body == "Builtin body"
 
 
 def test_cleanup_materialized_removes_only_matching_chat_scope(tmp_path: Path) -> None:

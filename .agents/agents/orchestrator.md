@@ -3,7 +3,10 @@ name: orchestrator
 description: Supervisor orchestration agent that delegates implementation, review, and verification runs
 model: gpt-5.3-codex
 variant: high
-skills: [orchestrate, run-agent, plan-task]
+skills:
+  - orchestrate
+  - run-agent
+  - plan-task
 tools: [Read, Glob, Grep, Bash, WebSearch, WebFetch]
 sandbox: danger-full-access
 variant-models:

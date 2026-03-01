@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -11,8 +10,6 @@ from typing import cast
 from meridian.lib.config._paths import resolve_path_list, resolve_repo_root
 from meridian.lib.config.settings import load_config
 
-_INT_RE = re.compile(r"^-?[0-9]+$")
-_FLOAT_RE = re.compile(r"^-?(?:[0-9]+\.[0-9]*|\.[0-9]+)$")
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
@@ -30,140 +27,17 @@ class SkillDocument:
     frontmatter: dict[str, object]
 
 
-def _split_inline_list_items(raw: str) -> list[str]:
-    items: list[str] = []
-    current: list[str] = []
-    quote: str | None = None
-
-    for char in raw:
-        if quote is not None:
-            if char == quote:
-                quote = None
-            else:
-                current.append(char)
-            continue
-
-        if char in {'"', "'"}:
-            quote = char
-            continue
-        if char == ",":
-            items.append("".join(current).strip())
-            current = []
-            continue
-        current.append(char)
-
-    items.append("".join(current).strip())
-    return [item for item in items if item]
-
-
-def _parse_scalar(raw: str) -> object:
-    value = raw.strip()
-    if not value:
-        return ""
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
-        return value[1:-1]
-
-    lowered = value.lower()
-    if lowered == "true":
-        return True
-    if lowered == "false":
-        return False
-    if lowered in {"null", "none"}:
-        return None
-    if _INT_RE.fullmatch(value):
-        return int(value)
-    if _FLOAT_RE.fullmatch(value):
-        return float(value)
-    return value
-
-
-def _parse_value(raw: str) -> object:
-    value = raw.strip()
-    if value.startswith("[") and value.endswith("]"):
-        inner = value[1:-1].strip()
-        if not inner:
-            return []
-        return [_parse_scalar(part) for part in _split_inline_list_items(inner)]
-    return _parse_scalar(value)
-
-
-def parse_frontmatter(frontmatter_text: str) -> dict[str, object]:
-    """Parse a constrained YAML frontmatter subset used by SKILL.md and agents."""
-
-    parsed: dict[str, object] = {}
-    lines = frontmatter_text.splitlines()
-    index = 0
-
-    while index < len(lines):
-        line = lines[index]
-        stripped = line.strip()
-
-        if not stripped or stripped.startswith("#"):
-            index += 1
-            continue
-        if ":" not in line:
-            index += 1
-            continue
-
-        key_text, value_text = line.split(":", 1)
-        key = key_text.strip()
-        value = value_text.strip()
-        if not key:
-            index += 1
-            continue
-
-        if value:
-            parsed[key] = _parse_value(value)
-            index += 1
-            continue
-
-        items: list[object] = []
-        next_index = index + 1
-        while next_index < len(lines):
-            next_line = lines[next_index]
-            next_stripped = next_line.strip()
-            if not next_stripped:
-                next_index += 1
-                continue
-            left_trimmed = next_line.lstrip()
-            if left_trimmed.startswith("- "):
-                items.append(_parse_scalar(left_trimmed[2:].strip()))
-                next_index += 1
-                continue
-            break
-
-        if items:
-            parsed[key] = items
-            index = next_index
-        else:
-            parsed[key] = ""
-            index += 1
-
-    return parsed
-
-
 def split_markdown_frontmatter(markdown: str) -> tuple[dict[str, object], str]:
     """Split markdown into YAML frontmatter and body."""
+    import frontmatter  # type: ignore[import-untyped]
+    import yaml
 
-    lines = markdown.splitlines()
-    if not lines or lines[0].strip() != "---":
+    try:
+        post = frontmatter.loads(markdown)
+    except yaml.YAMLError:
+        logger.warning("Malformed YAML frontmatter, treating as plain markdown")
         return {}, markdown
-
-    frontmatter_end = None
-    for index, line in enumerate(lines[1:], start=1):
-        if line.strip() == "---":
-            frontmatter_end = index
-            break
-
-    if frontmatter_end is None:
-        return {}, markdown
-
-    frontmatter = parse_frontmatter("\n".join(lines[1:frontmatter_end]))
-    body_lines = lines[frontmatter_end + 1 :]
-    body = "\n".join(body_lines)
-    if markdown.endswith("\n"):
-        body = f"{body}\n"
-    return frontmatter, body
+    return dict(post.metadata), post.content
 
 
 def _coerce_string_list(value: object) -> tuple[str, ...]:

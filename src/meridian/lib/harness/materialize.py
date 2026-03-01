@@ -32,224 +32,55 @@ def _materialized_name(chat_id: str, name: str) -> str:
     return f"_meridian-{chat_id}-{name}"
 
 
-def _split_inline_list_items(raw: str) -> list[str]:
-    items: list[str] = []
-    current: list[str] = []
-    quote: str | None = None
-    escaped = False
-
-    for char in raw:
-        if quote is not None:
-            current.append(char)
-            if escaped:
-                escaped = False
-                continue
-            if char == "\\":
-                escaped = True
-                continue
-            if char == quote:
-                quote = None
-            continue
-
-        if char in {'"', "'"}:
-            quote = char
-            current.append(char)
-            continue
-        if char == ",":
-            items.append("".join(current).strip())
-            current = []
-            continue
-        current.append(char)
-
-    items.append("".join(current).strip())
-    return [item for item in items if item]
-
-
-def _split_inline_comment(raw: str) -> tuple[str, str]:
-    quote: str | None = None
-    for index, char in enumerate(raw):
-        if quote is not None:
-            if char == quote:
-                quote = None
-            continue
-        if char in {'"', "'"}:
-            quote = char
-            continue
-        if char == "#":
-            value = raw[:index].strip()
-            comment = raw[index:].rstrip()
-            return value, f" {comment}" if comment else ""
-    return raw.strip(), ""
-
-
-def _map_skill_name(raw_name: str, skill_mapping: dict[str, str]) -> str:
-    token = raw_name.strip()
-    if not token:
-        return token
-
-    quote: str | None = None
-    if len(token) >= 2 and token[0] == token[-1] and token[0] in {'"', "'"}:
-        quote = token[0]
-        token = token[1:-1]
-
-    mapped = skill_mapping.get(token, token)
-    if quote is not None:
-        return f"{quote}{mapped}{quote}"
-    return mapped
-
-
 def _rewrite_agent_skills(raw_content: str, skill_mapping: dict[str, str]) -> str:
-    """Rewrite `skills:` frontmatter values while preserving the rest of the file."""
+    """Rewrite `skills:` frontmatter values using python-frontmatter round-trip."""
+    import frontmatter  # type: ignore[import-untyped]
+    import yaml
 
-    lines = raw_content.splitlines(keepends=True)
-    if not lines or lines[0].strip() != "---":
+    try:
+        post = frontmatter.loads(raw_content)
+    except yaml.YAMLError:
         return raw_content
-
-    frontmatter_end: int | None = None
-    for index, line in enumerate(lines[1:], start=1):
-        if line.strip() == "---":
-            frontmatter_end = index
-            break
-    if frontmatter_end is None:
-        return raw_content
-
-    skills_line_index: int | None = None
-    skills_indent = ""
-    for index in range(1, frontmatter_end):
-        line = lines[index]
-        line_no_nl = line.rstrip("\r\n")
-        stripped = line_no_nl.lstrip()
-        if not stripped.startswith("skills"):
-            continue
-        if ":" not in stripped:
-            continue
-        key, _rest = stripped.split(":", 1)
-        if key.strip() != "skills":
-            continue
-
-        skills_line_index = index
-        skills_indent = line_no_nl[: len(line_no_nl) - len(stripped)]
-        break
-
-    if skills_line_index is None:
-        return raw_content
-
-    skills_line = lines[skills_line_index]
-    skills_no_nl = skills_line.rstrip("\r\n")
-    line_ending = skills_line[len(skills_no_nl) :]
-    stripped = skills_no_nl[len(skills_indent) :]
-    _key, raw_value = stripped.split(":", 1)
-    value = raw_value.strip()
-
-    block_style = not value or value.startswith("#")
-    if block_style:
-        base_indent = len(skills_indent)
-        index = skills_line_index + 1
-        while index < frontmatter_end:
-            line = lines[index]
-            line_no_nl = line.rstrip("\r\n")
-            item_line_ending = line[len(line_no_nl) :]
-
-            if not line_no_nl.strip():
-                index += 1
-                continue
-
-            current_indent = len(line_no_nl) - len(line_no_nl.lstrip(" "))
-            if current_indent <= base_indent:
-                break
-
-            stripped_item = line_no_nl.lstrip()
-            if stripped_item.startswith("-"):
-                prefix, raw_item = stripped_item.split("-", 1)
-                del prefix
-                item_content = raw_item.strip()
-                value_text, comment = _split_inline_comment(item_content)
-                mapped_item = _map_skill_name(value_text, skill_mapping)
-                item_indent = line_no_nl[: len(line_no_nl) - len(stripped_item)]
-                lines[index] = f"{item_indent}- {mapped_item}{comment}{item_line_ending}"
-
-            index += 1
-
-        return "".join(lines)
-
-    value_text, comment = _split_inline_comment(value)
-    rewritten_value = value_text
-    if value_text.startswith("[") and value_text.endswith("]"):
-        inner = value_text[1:-1].strip()
-        if inner:
-            rewritten_items = [
-                _map_skill_name(item, skill_mapping) for item in _split_inline_list_items(inner)
-            ]
-            rewritten_value = f"[{', '.join(rewritten_items)}]"
-        else:
-            rewritten_value = "[]"
-    else:
-        rewritten_value = _map_skill_name(value_text, skill_mapping)
-
-    lines[skills_line_index] = f"{skills_indent}skills: {rewritten_value}{comment}{line_ending}"
-    return "".join(lines)
-
+    skills: object = post.metadata.get("skills")
+    if isinstance(skills, list):
+        from typing import cast
+        items = cast("list[object]", skills)
+        post.metadata["skills"] = [skill_mapping.get(str(s), str(s)) for s in items]
+    elif isinstance(skills, str):
+        post.metadata["skills"] = skill_mapping.get(skills, skills)
+    return str(frontmatter.dumps(post))
 
 
 def _rewrite_frontmatter_name(raw_content: str, new_name: str) -> str:
-    """Rewrite the `name:` field in frontmatter to the materialized agent name.
+    """Rewrite the `name:` field in frontmatter to the materialized agent name."""
+    import frontmatter  # type: ignore[import-untyped]
+    import yaml
 
-    Claude Code resolves agents by the `name:` field in frontmatter, not the filename.
-    Without this rewrite, the materialized agent would still advertise the original name
-    and Claude Code wouldn't activate it via `--agent <materialized-name>`.
-    """
-
-    lines = raw_content.splitlines(keepends=True)
-    if not lines or lines[0].strip() != "---":
+    try:
+        post = frontmatter.loads(raw_content)
+    except yaml.YAMLError:
         return raw_content
-
-    frontmatter_end: int | None = None
-    for index, line in enumerate(lines[1:], start=1):
-        if line.strip() == "---":
-            frontmatter_end = index
-            break
-    if frontmatter_end is None:
+    if not post.metadata:
         return raw_content
-
-    for index in range(1, frontmatter_end):
-        line = lines[index]
-        line_no_nl = line.rstrip("\r\n")
-        line_ending = line[len(line_no_nl):]
-        stripped = line_no_nl.lstrip()
-        if ":" not in stripped:
-            continue
-        key, _rest = stripped.split(":", 1)
-        if key.strip() != "name":
-            continue
-        indent = line_no_nl[: len(line_no_nl) - len(stripped)]
-        lines[index] = f"{indent}name: {new_name}{line_ending}"
-        break
-
-    return "".join(lines)
-
-
-def _format_skills_inline(skill_names: list[str]) -> str:
-    if not skill_names:
-        return "[]"
-    return f"[{', '.join(skill_names)}]"
+    post.metadata["name"] = new_name
+    return str(frontmatter.dumps(post))
 
 
 def _reconstruct_builtin_agent(profile: AgentProfile, skill_names: list[str], *, materialized_name: str = "") -> str:
     """Reconstruct a minimal markdown profile for built-in agents."""
+    import frontmatter  # type: ignore[import-untyped]
 
     agent_name = materialized_name if materialized_name else profile.name
-    frontmatter_lines = ["---", f"name: {agent_name}"]
+    # frontmatter.Post(content, **metadata) — pass body as content, set metadata separately
+    post = frontmatter.Post(profile.body or "")
+    post.metadata["name"] = agent_name
     if profile.model is not None:
-        frontmatter_lines.append(f"model: {profile.model}")
-    frontmatter_lines.append(f"skills: {_format_skills_inline(skill_names)}")
+        post.metadata["model"] = profile.model
+    post.metadata["skills"] = skill_names
     if profile.sandbox is not None:
-        frontmatter_lines.append(f"sandbox: {profile.sandbox}")
-    frontmatter_lines.append("---")
+        post.metadata["sandbox"] = profile.sandbox
 
-    content = "\n".join(frontmatter_lines) + "\n"
-    if profile.body:
-        content += profile.body
-    return content
+    return str(frontmatter.dumps(post))
 
 
 def _skill_final_name(skill_name: str, chat_id: str, native: bool) -> str:

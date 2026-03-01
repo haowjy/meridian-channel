@@ -3,7 +3,8 @@ name: reviewer
 description: Code review with read-only access and web lookup
 model: gpt-5.3-codex
 variant: high
-skills: [reviewing]
+skills:
+  - reviewing
 tools: [Read, Glob, Grep, Bash, WebSearch, WebFetch]
 sandbox: danger-full-access
 variant-models:
