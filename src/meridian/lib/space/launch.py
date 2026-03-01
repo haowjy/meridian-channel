@@ -8,7 +8,6 @@ import os
 import shlex
 import signal
 import subprocess
-import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -203,14 +202,7 @@ def _build_interactive_command(
     command: list[str] = ["claude"]
     if materialized.agent_name:
         command.extend(["--agent", materialized.agent_name])
-    command.extend(
-        [
-            "--append-system-prompt",
-            prompt,
-            "--model",
-            str(model),
-        ]
-    )
+    command.extend(["--model", str(model)])
     primary_default_tier = resolved_config.primary.permission_tier
     resolved_tier = _resolve_permission_tier_for_profile(
         profile=profile,
@@ -515,65 +507,8 @@ def launch_primary(
     command: tuple[str, ...] = ()
     chat_id: str | None = None
 
-    if sys.stdin.isatty():
-        # execvp replaces this process entirely on success, so:
-        # - The lock file is intentionally left behind (PID stays the same since
-        #   exec replaces the process image). cleanup_orphaned_locks() on the
-        #   next CLI invocation will remove it after the child exits.
-        # - The caller's post-launch state transitions (in space_start_sync /
-        #   space_resume_sync) will never execute. The space row remains
-        #   in its pre-launch state until the next cleanup cycle.
-        chat_id = start_session(
-            space_dir,
-            harness=session_metadata.harness,
-            harness_session_id="",
-            model=session_metadata.model,
-            agent=session_metadata.agent,
-            agent_path=session_metadata.agent_path,
-            skills=session_metadata.skills,
-            skill_paths=session_metadata.skill_paths,
-        )
-        command = _build_harness_command(
-            repo_root=repo_root,
-            request=request,
-            prompt=prompt,
-            chat_id=chat_id,
-            config=config,
-        )
-        saved_cwd = os.getcwd()
-        try:
-            _write_lock(
-                path=lock_path,
-                space_id=request.space_id,
-                command=command,
-                child_pid=os.getpid(),
-            )
-            os.environ.update(child_env)
-            os.chdir(repo_root)
-            os.execvp(command[0], list(command))
-        except OSError:
-            # execvp failed — restore environment and cwd so the caller
-            # can continue without corrupted process state.
-            for key in child_env:
-                if key not in os.environ:
-                    continue
-                if key.startswith("MERIDIAN_") or key == "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE":
-                    os.environ.pop(key, None)
-            os.chdir(saved_cwd)
-            lock_path.unlink(missing_ok=True)
-            stop_session(space_dir, chat_id)
-            _cleanup_launch_materialized(
-                repo_root=repo_root,
-                harness_id=session_metadata.harness,
-                chat_id=chat_id,
-            )
-            return SpaceLaunchResult(
-                command=command,
-                exit_code=2,
-                final_state="active",
-                lock_path=lock_path,
-            )
-
+    # Always use Popen (not execvp) so the finally block can clean up
+    # materialized harness files after the child exits.
     exit_code = 2
     process: subprocess.Popen[str] | None = None
     try:

@@ -190,16 +190,55 @@ def _rewrite_agent_skills(raw_content: str, skill_mapping: dict[str, str]) -> st
     return "".join(lines)
 
 
+
+def _rewrite_frontmatter_name(raw_content: str, new_name: str) -> str:
+    """Rewrite the `name:` field in frontmatter to the materialized agent name.
+
+    Claude Code resolves agents by the `name:` field in frontmatter, not the filename.
+    Without this rewrite, the materialized agent would still advertise the original name
+    and Claude Code wouldn't activate it via `--agent <materialized-name>`.
+    """
+
+    lines = raw_content.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        return raw_content
+
+    frontmatter_end: int | None = None
+    for index, line in enumerate(lines[1:], start=1):
+        if line.strip() == "---":
+            frontmatter_end = index
+            break
+    if frontmatter_end is None:
+        return raw_content
+
+    for index in range(1, frontmatter_end):
+        line = lines[index]
+        line_no_nl = line.rstrip("\r\n")
+        line_ending = line[len(line_no_nl):]
+        stripped = line_no_nl.lstrip()
+        if ":" not in stripped:
+            continue
+        key, _rest = stripped.split(":", 1)
+        if key.strip() != "name":
+            continue
+        indent = line_no_nl[: len(line_no_nl) - len(stripped)]
+        lines[index] = f"{indent}name: {new_name}{line_ending}"
+        break
+
+    return "".join(lines)
+
+
 def _format_skills_inline(skill_names: list[str]) -> str:
     if not skill_names:
         return "[]"
     return f"[{', '.join(skill_names)}]"
 
 
-def _reconstruct_builtin_agent(profile: AgentProfile, skill_names: list[str]) -> str:
+def _reconstruct_builtin_agent(profile: AgentProfile, skill_names: list[str], *, materialized_name: str = "") -> str:
     """Reconstruct a minimal markdown profile for built-in agents."""
 
-    frontmatter_lines = ["---", f"name: {profile.name}"]
+    agent_name = materialized_name if materialized_name else profile.name
+    frontmatter_lines = ["---", f"name: {agent_name}"]
     if profile.model is not None:
         frontmatter_lines.append(f"model: {profile.model}")
     frontmatter_lines.append(f"skills: {_format_skills_inline(skill_names)}")
@@ -272,8 +311,9 @@ def _materialize_agent(
     final_skill_names = [skill_mapping.get(skill_name, skill_name) for skill_name in profile.skills]
     if profile.raw_content:
         rewritten = _rewrite_agent_skills(profile.raw_content, skill_mapping)
+        rewritten = _rewrite_frontmatter_name(rewritten, materialized_name)
     else:
-        rewritten = _reconstruct_builtin_agent(profile, final_skill_names)
+        rewritten = _reconstruct_builtin_agent(profile, final_skill_names, materialized_name=materialized_name)
 
     (target_agents_root / f"{materialized_name}.md").write_text(rewritten, encoding="utf-8")
     return materialized_name

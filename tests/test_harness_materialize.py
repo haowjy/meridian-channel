@@ -125,10 +125,11 @@ def test_reconstruct_builtin_agent_generates_minimal_markdown() -> None:
     rendered = _reconstruct_builtin_agent(
         profile,
         ["_meridian-c1-reviewing", "native-skill"],
+        materialized_name="_meridian-c1-agent",
     )
     frontmatter, body = split_markdown_frontmatter(rendered)
 
-    assert frontmatter["name"] == "agent"
+    assert frontmatter["name"] == "_meridian-c1-agent"
     assert frontmatter["model"] == "gpt-5.3-codex"
     assert frontmatter["skills"] == ["_meridian-c1-reviewing", "native-skill"]
     assert frontmatter["sandbox"] == "workspace-write"
@@ -200,6 +201,7 @@ def test_materialize_for_harness_mixed_rewrites_agent_and_copies_missing(tmp_pat
 
     materialized_agent_file = repo_root / ".agents" / "agents" / "_meridian-c1-primary.md"
     rewritten = materialized_agent_file.read_text(encoding="utf-8")
+    assert "name: _meridian-c1-primary" in rewritten
     assert "description: keep" in rewritten
     assert "skills: [alpha, _meridian-c1-beta]" in rewritten
 
@@ -305,7 +307,7 @@ def test_materialize_for_harness_builtin_agent_reconstructed(tmp_path: Path) -> 
         repo_root / ".agents" / "agents" / "_meridian-c1-agent.md"
     ).read_text(encoding="utf-8")
     frontmatter, body = split_markdown_frontmatter(rendered)
-    assert frontmatter["name"] == "agent"
+    assert frontmatter["name"] == "_meridian-c1-agent"
     assert frontmatter["model"] == "gpt-5.3-codex"
     assert frontmatter["skills"] == ["_meridian-c1-reviewing"]
     assert frontmatter["sandbox"] == "workspace-write"

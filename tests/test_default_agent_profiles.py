@@ -157,8 +157,7 @@ def test_space_primary_profile_controls_model_skills_and_sandbox(tmp_path: Path)
     assert "--allowedTools" in command
     assert "--agent" in command
     assert command[command.index("--agent") + 1] == "_meridian-c1-lead-primary"
-    assert "--append-system-prompt" in command
-    assert command[command.index("--append-system-prompt") + 1] == "space prompt"
+    assert "--append-system-prompt" not in command
     assert "--system-prompt" not in command
 
 
