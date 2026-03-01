@@ -10,6 +10,7 @@ from meridian.lib.space.session_store import (
     resolve_session_ref,
     start_session,
     stop_session,
+    update_session_harness_id,
 )
 from meridian.lib.state.paths import SpacePaths
 
@@ -27,6 +28,10 @@ def test_start_session_creates_start_event_and_lock_file(tmp_path):
         harness="codex",
         harness_session_id="hs-1",
         model="gpt-5.3-codex",
+        agent="coder",
+        agent_path="/tmp/agents/coder.md",
+        skills=("run-agent", "orchestrate"),
+        skill_paths=("/tmp/skills/run-agent/SKILL.md", "/tmp/skills/orchestrate/SKILL.md"),
         params=("--system-prompt", "Be concise."),
     )
 
@@ -42,6 +47,13 @@ def test_start_session_creates_start_event_and_lock_file(tmp_path):
     assert payload["harness"] == "codex"
     assert payload["harness_session_id"] == "hs-1"
     assert payload["model"] == "gpt-5.3-codex"
+    assert payload["agent"] == "coder"
+    assert payload["agent_path"] == "/tmp/agents/coder.md"
+    assert payload["skills"] == ["run-agent", "orchestrate"]
+    assert payload["skill_paths"] == [
+        "/tmp/skills/run-agent/SKILL.md",
+        "/tmp/skills/orchestrate/SKILL.md",
+    ]
     assert payload["params"] == ["--system-prompt", "Be concise."]
 
     stop_session(space_dir, chat_id)
@@ -108,6 +120,10 @@ def test_get_last_session_returns_most_recent_start(tmp_path):
     assert last.harness == "codex"
     assert last.harness_session_id == "hs-b"
     assert last.model == "gpt-5.3-codex"
+    assert last.agent == ""
+    assert last.agent_path == ""
+    assert last.skills == ()
+    assert last.skill_paths == ()
     assert last.params == ("--append-system-prompt", "Focus on tests")
 
     stop_session(space_dir, c1)
@@ -145,6 +161,120 @@ def test_resolve_session_ref_by_alias_and_harness_session_id(tmp_path):
 
     stop_session(space_dir, c1)
     stop_session(space_dir, c2)
+
+
+def test_start_stop_round_trip_persists_agent_and_skill_metadata(tmp_path):
+    space_dir = _space_dir(tmp_path)
+    chat_id = start_session(
+        space_dir,
+        harness="codex",
+        harness_session_id="",
+        model="gpt-5.3-codex",
+        agent="coder",
+        agent_path="/repo/.agents/agents/coder.md",
+        skills=("run-agent", "reviewing"),
+        skill_paths=(
+            "/repo/.agents/skills/run-agent/SKILL.md",
+            "/repo/.agents/skills/reviewing/SKILL.md",
+        ),
+    )
+
+    stop_session(space_dir, chat_id)
+    record = get_last_session(space_dir)
+    assert record is not None
+    assert record.chat_id == chat_id
+    assert record.agent == "coder"
+    assert record.agent_path == "/repo/.agents/agents/coder.md"
+    assert record.skills == ("run-agent", "reviewing")
+    assert record.skill_paths == (
+        "/repo/.agents/skills/run-agent/SKILL.md",
+        "/repo/.agents/skills/reviewing/SKILL.md",
+    )
+    assert record.stopped_at is not None
+
+
+def test_update_session_harness_id_writes_update_event_and_replays(tmp_path):
+    space_dir = _space_dir(tmp_path)
+    chat_id = start_session(
+        space_dir,
+        harness="codex",
+        harness_session_id="",
+        model="gpt-5.3-codex",
+    )
+
+    update_session_harness_id(space_dir, chat_id, "hs-updated")
+    resolved = resolve_session_ref(space_dir, chat_id)
+
+    assert resolved is not None
+    assert resolved.harness_session_id == "hs-updated"
+    assert get_session_harness_id(space_dir, chat_id) == "hs-updated"
+
+    rows = [
+        json.loads(line)
+        for line in (space_dir / "sessions.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    update_rows = [row for row in rows if row.get("event") == "update"]
+    assert len(update_rows) == 1
+    assert update_rows[0]["chat_id"] == chat_id
+    assert update_rows[0]["harness_session_id"] == "hs-updated"
+
+    stop_session(space_dir, chat_id)
+
+
+def test_resolve_session_ref_returns_newest_harness_session_match(tmp_path):
+    space_dir = _space_dir(tmp_path)
+    c1 = start_session(
+        space_dir,
+        harness="claude",
+        harness_session_id="dup-session",
+        model="claude-opus-4-6",
+    )
+    c2 = start_session(
+        space_dir,
+        harness="codex",
+        harness_session_id="dup-session",
+        model="gpt-5.3-codex",
+    )
+
+    resolved = resolve_session_ref(space_dir, "dup-session")
+    assert resolved is not None
+    assert resolved.chat_id == c2
+    assert resolved.harness == "codex"
+
+    stop_session(space_dir, c1)
+    stop_session(space_dir, c2)
+
+
+def test_backward_compat_old_start_event_defaults_new_fields(tmp_path):
+    space_dir = _space_dir(tmp_path)
+    with (space_dir / "sessions.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(
+                {
+                    "v": 1,
+                    "event": "start",
+                    "chat_id": "c1",
+                    "harness": "claude",
+                    "harness_session_id": "hs-old",
+                    "model": "claude-opus-4-6",
+                    "params": ["--foo", "bar"],
+                    "started_at": "2026-03-01T00:00:00Z",
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            + "\n"
+        )
+
+    record = get_last_session(space_dir)
+    assert record is not None
+    assert record.chat_id == "c1"
+    assert record.agent == ""
+    assert record.agent_path == ""
+    assert record.skills == ()
+    assert record.skill_paths == ()
+    assert record.params == ("--foo", "bar")
 
 
 def test_cleanup_stale_sessions_removes_dead_locks_and_writes_stop_events(tmp_path):

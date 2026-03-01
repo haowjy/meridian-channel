@@ -58,6 +58,9 @@ class _PreparedCreate:
     report_path: str
     mcp_tools: tuple[str, ...]
     agent_name: str | None
+    session_agent: str
+    session_agent_path: str
+    skill_paths: tuple[str, ...]
     cli_command: tuple[str, ...]
     permission_config: PermissionConfig
     permission_resolver: PermissionResolver
@@ -443,6 +446,12 @@ def _build_create_payload(
             resolver,
         )
     )
+    session_agent_path = ""
+    if profile is not None and profile.path.is_absolute() and profile.path.exists():
+        session_agent_path = profile.path.resolve().as_posix()
+    session_skill_paths = tuple(
+        Path(skill.path).expanduser().resolve().as_posix() for skill in loaded_skills
+    )
 
     return _PreparedCreate(
         model=defaults.model,
@@ -455,6 +464,9 @@ def _build_create_payload(
         report_path=Path(payload.report_path).expanduser().resolve().as_posix(),
         mcp_tools=profile.mcp_tools if profile is not None else (),
         agent_name=agent_for_params,
+        session_agent=profile.name if profile is not None else "",
+        session_agent_path=session_agent_path,
+        skill_paths=session_skill_paths,
         cli_command=preview_command,
         permission_config=permission_config,
         permission_resolver=resolver,

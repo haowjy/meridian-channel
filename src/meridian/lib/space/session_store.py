@@ -26,6 +26,10 @@ class SessionRecord:
     harness: str
     harness_session_id: str
     model: str
+    agent: str
+    agent_path: str
+    skills: tuple[str, ...]
+    skill_paths: tuple[str, ...]
     params: tuple[str, ...]
     started_at: str
     stopped_at: str | None
@@ -87,6 +91,12 @@ def _coerce_params(value: JSONValue | None) -> tuple[str, ...]:
     return tuple(result)
 
 
+def _coerce_string_or_empty(value: JSONValue | None) -> str:
+    if isinstance(value, str):
+        return value
+    return ""
+
+
 def _record_from_start_event(event: JSONRow) -> SessionRecord | None:
     chat_id = event.get("chat_id")
     harness = event.get("harness")
@@ -108,6 +118,10 @@ def _record_from_start_event(event: JSONRow) -> SessionRecord | None:
         harness=harness,
         harness_session_id=harness_session_id,
         model=model,
+        agent=_coerce_string_or_empty(event.get("agent")),
+        agent_path=_coerce_string_or_empty(event.get("agent_path")),
+        skills=_coerce_params(event.get("skills")),
+        skill_paths=_coerce_params(event.get("skill_paths")),
         params=_coerce_params(event.get("params")),
         started_at=started_at,
         stopped_at=None,
@@ -138,9 +152,35 @@ def _records_by_session(space_dir: Path) -> dict[str, SessionRecord]:
                 harness=existing.harness,
                 harness_session_id=existing.harness_session_id,
                 model=existing.model,
+                agent=existing.agent,
+                agent_path=existing.agent_path,
+                skills=existing.skills,
+                skill_paths=existing.skill_paths,
                 params=existing.params,
                 started_at=existing.started_at,
                 stopped_at=str(stopped_at) if stopped_at is not None else existing.stopped_at,
+            )
+            continue
+        if event_type == "update":
+            chat_id = event.get("chat_id")
+            harness_session_id = event.get("harness_session_id")
+            if not isinstance(chat_id, str) or not isinstance(harness_session_id, str):
+                continue
+            existing = records.get(chat_id)
+            if existing is None:
+                continue
+            records[chat_id] = SessionRecord(
+                chat_id=existing.chat_id,
+                harness=existing.harness,
+                harness_session_id=harness_session_id,
+                model=existing.model,
+                agent=existing.agent,
+                agent_path=existing.agent_path,
+                skills=existing.skills,
+                skill_paths=existing.skill_paths,
+                params=existing.params,
+                started_at=existing.started_at,
+                stopped_at=existing.stopped_at,
             )
     return records
 
@@ -176,6 +216,10 @@ def start_session(
     harness_session_id: str,
     model: str,
     params: tuple[str, ...] = (),
+    agent: str = "",
+    agent_path: str = "",
+    skills: tuple[str, ...] = (),
+    skill_paths: tuple[str, ...] = (),
 ) -> str:
     """Append a session start event and acquire a lifetime session lock."""
 
@@ -191,6 +235,10 @@ def start_session(
             "harness": harness,
             "harness_session_id": harness_session_id,
             "model": model,
+            "agent": agent,
+            "agent_path": agent_path,
+            "skills": list(skills),
+            "skill_paths": list(skill_paths),
             "params": list(params),
             "started_at": started_at,
         }
@@ -215,6 +263,20 @@ def stop_session(space_dir: Path, chat_id: str) -> None:
     with _lock_file(paths.sessions_lock):
         _append_event(paths.sessions_jsonl, event)
         _release_session_lock(space_dir, chat_id)
+
+
+def update_session_harness_id(space_dir: Path, chat_id: str, harness_session_id: str) -> None:
+    """Append a session update event carrying the resolved harness session ID."""
+
+    paths = SpacePaths.from_space_dir(space_dir)
+    event: JSONRow = {
+        "v": 1,
+        "event": "update",
+        "chat_id": chat_id,
+        "harness_session_id": harness_session_id,
+    }
+    with _lock_file(paths.sessions_lock):
+        _append_event(paths.sessions_jsonl, event)
 
 
 def list_active_sessions(space_dir: Path) -> list[str]:
@@ -266,11 +328,12 @@ def resolve_session_ref(space_dir: Path, ref: str) -> SessionRecord | None:
     if direct is not None:
         return direct
 
-    for chat_id in sorted(records, key=_session_sort_key):
-        record = records[chat_id]
-        if record.harness_session_id == normalized:
-            return record
-    return None
+    matches = [
+        record for record in records.values() if record.harness_session_id == normalized
+    ]
+    if not matches:
+        return None
+    return max(matches, key=lambda item: (item.started_at, _session_sort_key(item.chat_id)))
 
 
 def get_session_harness_id(space_dir: Path, chat_id: str) -> str | None:

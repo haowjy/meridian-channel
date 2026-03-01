@@ -32,6 +32,11 @@ from meridian.lib.safety.permissions import (
     parse_permission_tier,
 )
 from meridian.lib.safety.redaction import SecretSpec, secrets_env_overrides
+from meridian.lib.space.session_store import (
+    start_session,
+    stop_session,
+    update_session_harness_id,
+)
 from meridian.lib.state import run_store
 from meridian.lib.state.paths import resolve_run_log_dir, resolve_space_dir
 from meridian.lib.types import ModelId, RunId, SpaceId
@@ -59,6 +64,9 @@ class _PreparedCreateLike(Protocol):
     report_path: str
     mcp_tools: tuple[str, ...]
     agent_name: str | None
+    session_agent: str
+    session_agent_path: str
+    skill_paths: tuple[str, ...]
     cli_command: tuple[str, ...]
     permission_config: PermissionConfig
     permission_resolver: PermissionResolver
@@ -194,6 +202,9 @@ async def _execute_existing_run(
     continue_harness_session_id: str | None = None,
     continue_fork: bool = False,
     space_id_hint: str | None = None,
+    session_agent: str = "",
+    session_agent_path: str = "",
+    session_skill_paths: tuple[str, ...] = (),
 ) -> int:
     runtime = build_runtime(str(repo_root))
     space_id_text = (space_id_hint or os.getenv("MERIDIAN_SPACE_ID", "")).strip()
@@ -220,35 +231,53 @@ async def _execute_existing_run(
         cli_permission_override=cli_permission_override,
     )
 
-    return await execute_with_finalization(
-        run,
-        repo_root=runtime.repo_root,
-        space_dir=space_dir,
-        artifacts=runtime.artifacts,
-        registry=runtime.harness_registry,
-        permission_resolver=resolver,
-        permission_config=permission_config,
-        cwd=runtime.repo_root,
-        timeout_seconds=timeout_secs,
-        kill_grace_seconds=runtime.config.kill_grace_seconds,
+    chat_id = start_session(
+        space_dir,
+        harness=run_record.harness or "",
+        harness_session_id=run_record.harness_session_id or "",
+        model=run_record.model,
+        agent=session_agent,
+        agent_path=session_agent_path,
         skills=skills,
-        agent=agent_name,
-        mcp_tools=mcp_tools,
-        env_overrides=_run_child_env(
-            space_id_text,
-            secrets,
-            str(run.run_id),
-        ),
-        budget=budget,
-        space_spent_usd=_space_spend_usd(space_dir),
-        max_retries=runtime.config.max_retries,
-        retry_backoff_seconds=runtime.config.retry_backoff_seconds,
-        guardrails=tuple(Path(item) for item in guardrails),
-        guardrail_timeout_seconds=runtime.config.guardrail_timeout_seconds,
-        secrets=secrets,
-        continue_harness_session_id=continue_harness_session_id,
-        continue_fork=continue_fork,
+        skill_paths=session_skill_paths,
     )
+    try:
+        return await execute_with_finalization(
+            run,
+            repo_root=runtime.repo_root,
+            space_dir=space_dir,
+            artifacts=runtime.artifacts,
+            registry=runtime.harness_registry,
+            permission_resolver=resolver,
+            permission_config=permission_config,
+            cwd=runtime.repo_root,
+            timeout_seconds=timeout_secs,
+            kill_grace_seconds=runtime.config.kill_grace_seconds,
+            skills=skills,
+            agent=agent_name,
+            mcp_tools=mcp_tools,
+            env_overrides=_run_child_env(
+                space_id_text,
+                secrets,
+                str(run.run_id),
+            ),
+            budget=budget,
+            space_spent_usd=_space_spend_usd(space_dir),
+            max_retries=runtime.config.max_retries,
+            retry_backoff_seconds=runtime.config.retry_backoff_seconds,
+            guardrails=tuple(Path(item) for item in guardrails),
+            guardrail_timeout_seconds=runtime.config.guardrail_timeout_seconds,
+            secrets=secrets,
+            continue_harness_session_id=continue_harness_session_id,
+            continue_fork=continue_fork,
+            harness_session_id_observer=lambda session_id: update_session_harness_id(
+                space_dir,
+                chat_id,
+                session_id,
+            ),
+        )
+    finally:
+        stop_session(space_dir, chat_id)
 
 
 def _build_background_worker_command(
@@ -267,6 +296,9 @@ def _build_background_worker_command(
     guardrails: tuple[str, ...],
     continue_harness_session_id: str | None,
     continue_fork: bool,
+    session_agent: str,
+    session_agent_path: str,
+    session_skill_paths: tuple[str, ...],
 ) -> tuple[str, ...]:
     command: list[str] = [
         sys.executable,
@@ -308,6 +340,12 @@ def _build_background_worker_command(
         command.extend(["--continue-harness-session-id", continue_harness_session_id.strip()])
     if continue_fork:
         command.append("--continue-fork")
+    if session_agent:
+        command.extend(["--session-agent", session_agent])
+    if session_agent_path:
+        command.extend(["--session-agent-path", session_agent_path])
+    for skill_path in session_skill_paths:
+        command.extend(["--session-skill-path", skill_path])
     return tuple(command)
 
 
@@ -365,6 +403,9 @@ def _execute_run_background(
         guardrails=prepared.guardrails,
         continue_harness_session_id=prepared.continue_harness_session_id,
         continue_fork=prepared.continue_fork,
+        session_agent=prepared.session_agent,
+        session_agent_path=prepared.session_agent_path,
+        session_skill_paths=prepared.skill_paths,
     )
     log_dir = resolve_run_log_dir(runtime.repo_root, run.run_id, run.space_id)
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -386,6 +427,7 @@ def _execute_run_background(
                 stdout=stdout_handle,
                 stderr=stderr_handle,
                 start_new_session=True,
+                close_fds=True,
             )
     except OSError as exc:
         run_store.finalize_run(
@@ -490,40 +532,58 @@ def _execute_run_blocking(
         )
         event_observer = event_filter.observe
 
-    exit_code = asyncio.run(
-        execute_with_finalization(
-            run,
-            repo_root=runtime.repo_root,
-            space_dir=space_dir,
-            artifacts=runtime.artifacts,
-            registry=runtime.harness_registry,
-            permission_resolver=prepared.permission_resolver,
-            permission_config=prepared.permission_config,
-            cwd=runtime.repo_root,
-            timeout_seconds=payload.timeout_secs,
-            kill_grace_seconds=runtime.config.kill_grace_seconds,
-            skills=prepared.skills,
-            agent=prepared.agent_name,
-            mcp_tools=prepared.mcp_tools,
-            env_overrides=_run_child_env(
-                space_id_str,
-                prepared.secrets,
-                str(run.run_id),
-            ),
-            budget=prepared.budget,
-            space_spent_usd=_space_spend_usd(space_dir),
-            max_retries=runtime.config.max_retries,
-            retry_backoff_seconds=runtime.config.retry_backoff_seconds,
-            guardrails=tuple(Path(item) for item in prepared.guardrails),
-            guardrail_timeout_seconds=runtime.config.guardrail_timeout_seconds,
-            secrets=prepared.secrets,
-            continue_harness_session_id=prepared.continue_harness_session_id,
-            continue_fork=prepared.continue_fork,
-            event_observer=event_observer,
-            stream_stdout_to_terminal=stream_stdout_to_terminal,
-            stream_stderr_to_terminal=payload.stream or payload.verbose or not stdout_is_tty,
-        )
+    chat_id = start_session(
+        space_dir,
+        harness=prepared.harness_id,
+        harness_session_id=prepared.continue_harness_session_id or "",
+        model=prepared.model,
+        agent=prepared.session_agent,
+        agent_path=prepared.session_agent_path,
+        skills=prepared.skills,
+        skill_paths=prepared.skill_paths,
     )
+    try:
+        exit_code = asyncio.run(
+            execute_with_finalization(
+                run,
+                repo_root=runtime.repo_root,
+                space_dir=space_dir,
+                artifacts=runtime.artifacts,
+                registry=runtime.harness_registry,
+                permission_resolver=prepared.permission_resolver,
+                permission_config=prepared.permission_config,
+                cwd=runtime.repo_root,
+                timeout_seconds=payload.timeout_secs,
+                kill_grace_seconds=runtime.config.kill_grace_seconds,
+                skills=prepared.skills,
+                agent=prepared.agent_name,
+                mcp_tools=prepared.mcp_tools,
+                env_overrides=_run_child_env(
+                    space_id_str,
+                    prepared.secrets,
+                    str(run.run_id),
+                ),
+                budget=prepared.budget,
+                space_spent_usd=_space_spend_usd(space_dir),
+                max_retries=runtime.config.max_retries,
+                retry_backoff_seconds=runtime.config.retry_backoff_seconds,
+                guardrails=tuple(Path(item) for item in prepared.guardrails),
+                guardrail_timeout_seconds=runtime.config.guardrail_timeout_seconds,
+                secrets=prepared.secrets,
+                continue_harness_session_id=prepared.continue_harness_session_id,
+                continue_fork=prepared.continue_fork,
+                event_observer=event_observer,
+                stream_stdout_to_terminal=stream_stdout_to_terminal,
+                stream_stderr_to_terminal=payload.stream or payload.verbose or not stdout_is_tty,
+                harness_session_id_observer=lambda session_id: update_session_harness_id(
+                    space_dir,
+                    chat_id,
+                    session_id,
+                ),
+            )
+        )
+    finally:
+        stop_session(space_dir, chat_id)
     duration = time.monotonic() - started
 
     row = _read_run_row(runtime.repo_root, str(run.run_id))
@@ -586,6 +646,9 @@ async def _execute_run_non_blocking(
     secrets: tuple[SecretSpec, ...],
     continue_harness_session_id: str | None,
     continue_fork: bool,
+    session_agent: str = "",
+    session_agent_path: str = "",
+    session_skill_paths: tuple[str, ...] = (),
 ) -> None:
     _ = await _execute_existing_run(
         run_id=run_id,
@@ -602,6 +665,9 @@ async def _execute_run_non_blocking(
         secrets=secrets,
         continue_harness_session_id=continue_harness_session_id,
         continue_fork=continue_fork,
+        session_agent=session_agent,
+        session_agent_path=session_agent_path,
+        session_skill_paths=session_skill_paths,
     )
 
 
@@ -639,6 +705,9 @@ def _build_background_worker_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cli-permission-override", action="store_true")
     parser.add_argument("--continue-harness-session-id", default=None)
     parser.add_argument("--continue-fork", action="store_true")
+    parser.add_argument("--session-agent", default="")
+    parser.add_argument("--session-agent-path", default="")
+    parser.add_argument("--session-skill-path", action="append", default=[])
     return parser
 
 
@@ -675,6 +744,9 @@ def _background_worker_main(argv: Sequence[str] | None = None) -> int:
             secrets=secrets,
             continue_harness_session_id=cast("str | None", parsed.continue_harness_session_id),
             continue_fork=bool(parsed.continue_fork),
+            session_agent=str(parsed.session_agent),
+            session_agent_path=str(parsed.session_agent_path),
+            session_skill_paths=tuple(str(item) for item in parsed.session_skill_path),
         )
     )
 

@@ -56,6 +56,7 @@ def test_build_interactive_command_uses_system_prompt_model_and_passthrough(
 
 def test_build_space_env_sanitizes_parent_env_and_keeps_space_overrides(
     monkeypatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setenv("PATH", "/usr/local/bin:/usr/bin")
     monkeypatch.setenv("HOME", "/home/sliceb")
@@ -68,7 +69,7 @@ def test_build_space_env_sanitizes_parent_env_and_keeps_space_overrides(
         space_id=SpaceId("s99"),
         autocompact=80,
     )
-    env = _build_space_env(request, "space prompt")
+    env = _build_space_env(tmp_path, request, "space prompt")
 
     assert env["PATH"] == "/usr/local/bin:/usr/bin"
     assert env["HOME"] == "/home/sliceb"
@@ -78,6 +79,7 @@ def test_build_space_env_sanitizes_parent_env_and_keeps_space_overrides(
     assert env["MERIDIAN_SPACE_ID"] == "s99"
     assert env["MERIDIAN_DEPTH"] == "5"
     assert env["MERIDIAN_SPACE_PROMPT"] == "space prompt"
+    assert env["MERIDIAN_STATE_ROOT"] == (tmp_path / ".meridian").as_posix()
     assert env["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"] == "80"
 
 
@@ -108,11 +110,13 @@ def test_primary_settings_apply_to_harness_command_and_env(tmp_path: Path) -> No
     assert "Write" in allowed_tools
 
     env = _build_space_env(
+        tmp_path,
         request,
         "space prompt",
         default_autocompact_pct=67,
     )
     assert env["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"] == "67"
+    assert env["MERIDIAN_STATE_ROOT"] == (tmp_path / ".meridian").as_posix()
 
 
 def test_cleanup_orphaned_locks_removes_stale_lock_and_pauses_space(tmp_path: Path) -> None:

@@ -14,8 +14,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
-from meridian.lib.config._paths import resolve_repo_root
-from meridian.lib.config.agent import AgentProfile, load_agent_profile
+from meridian.lib.config._paths import bundled_agents_root, resolve_repo_root
+from meridian.lib.config.agent import AgentProfile, _BUILTIN_PATH, load_agent_profile
 from meridian.lib.config.routing import route_model
 from meridian.lib.config.settings import MeridianConfig, load_config
 from meridian.lib.domain import SpaceState
@@ -27,8 +27,9 @@ from meridian.lib.safety.permissions import (
     build_permission_config,
     build_permission_resolver,
 )
+from meridian.lib.space.session_store import start_session, stop_session
 from meridian.lib.space import space_file
-from meridian.lib.state.paths import resolve_state_paths
+from meridian.lib.state.paths import resolve_space_dir, resolve_state_paths
 from meridian.lib.types import HarnessId, ModelId, SpaceId
 
 _CONTINUATION_GUIDANCE = (
@@ -61,6 +62,16 @@ class SpaceLaunchResult:
     exit_code: int
     final_state: SpaceState
     lock_path: Path
+
+
+@dataclass(frozen=True, slots=True)
+class _PrimarySessionMetadata:
+    harness: str
+    model: str
+    agent: str
+    agent_path: str
+    skills: tuple[str, ...]
+    skill_paths: tuple[str, ...]
 
 
 def space_lock_path(repo_root: Path, space_id: SpaceId) -> Path:
@@ -153,43 +164,65 @@ def _build_interactive_command(
     )
     model = ModelId(defaults.model)
     harness = _resolve_harness(model=model)
+    bundled_root = bundled_agents_root()
+    profile_is_native = (
+        profile is not None
+        and profile.path != _BUILTIN_PATH
+        and profile.path.exists()
+        and harness == HarnessId("claude")
+        and (
+            bundled_root is None
+            or not str(profile.path.resolve()).startswith(str(bundled_root.resolve()))
+        )
+    )
 
-    prompt_with_profile_skills = prompt
-    if profile is not None and defaults.skills:
-        from meridian.lib.config.skill_registry import SkillRegistry
+    if profile_is_native:
+        command: list[str] = [
+            "claude",
+            "--agent",
+            profile.name,
+            "--append-system-prompt",
+            prompt,
+            "--model",
+            str(model),
+        ]
+    else:
+        prompt_with_profile_skills = prompt
+        if profile is not None and defaults.skills:
+            from meridian.lib.config.skill_registry import SkillRegistry
 
-        registry = SkillRegistry(
-            repo_root=resolved_root,
-            search_paths=resolved_config.search_paths,
-            readonly=True,
-        )
-        manifests = registry.list()
-        available_skills = {item.name for item in manifests}
-        skill_names = tuple(
-            skill_name for skill_name in defaults.skills if skill_name in available_skills
-        )
-        missing_skills = tuple(
-            skill_name for skill_name in defaults.skills if skill_name not in available_skills
-        )
-        if missing_skills:
-            logger.warning(
-                "Skipping unavailable primary profile skills: %s.",
-                ", ".join(missing_skills),
+            registry = SkillRegistry(
+                repo_root=resolved_root,
+                search_paths=resolved_config.search_paths,
+                readonly=True,
             )
-        loaded_skills = load_skill_contents(registry, skill_names)
-        if loaded_skills:
-            sections = [prompt_with_profile_skills, "", "# Primary Skills"]
-            for skill in loaded_skills:
-                sections.extend(["", f"## Skill: {skill.name}", "", skill.content.strip()])
-            prompt_with_profile_skills = "\n".join(sections).strip()
+            manifests = registry.list()
+            available_skills = {item.name for item in manifests}
+            skill_names = tuple(
+                skill_name for skill_name in defaults.skills if skill_name in available_skills
+            )
+            missing_skills = tuple(
+                skill_name for skill_name in defaults.skills if skill_name not in available_skills
+            )
+            if missing_skills:
+                logger.warning(
+                    "Skipping unavailable primary profile skills: %s.",
+                    ", ".join(missing_skills),
+                )
+            loaded_skills = load_skill_contents(registry, skill_names)
+            if loaded_skills:
+                sections = [prompt_with_profile_skills, "", "# Primary Skills"]
+                for skill in loaded_skills:
+                    sections.extend(["", f"## Skill: {skill.name}", "", skill.content.strip()])
+                prompt_with_profile_skills = "\n".join(sections).strip()
 
-    command: list[str] = [
-        "claude",
-        "--system-prompt",
-        prompt_with_profile_skills,
-        "--model",
-        str(model),
-    ]
+        command = [
+            "claude",
+            "--system-prompt",
+            prompt_with_profile_skills,
+            "--model",
+            str(model),
+        ]
     primary_default_tier = resolved_config.primary.permission_tier
     resolved_tier = _resolve_permission_tier_for_profile(
         profile=profile,
@@ -232,6 +265,65 @@ def _build_harness_command(
         prompt=prompt,
         passthrough_args=request.passthrough_args,
         config=resolved_config,
+    )
+
+
+def _resolve_primary_session_metadata(
+    *,
+    repo_root: Path,
+    request: SpaceLaunchRequest,
+    config: MeridianConfig,
+) -> _PrimarySessionMetadata:
+    profile: AgentProfile | None = None
+    configured_profile = config.primary_agent.strip()
+    if configured_profile:
+        try:
+            profile = load_agent_profile(
+                configured_profile,
+                repo_root=repo_root,
+                search_paths=config.search_paths,
+            )
+        except FileNotFoundError:
+            profile = None
+
+    defaults = resolve_run_defaults(
+        request.model,
+        (),
+        profile=profile,
+    )
+    model = ModelId(defaults.model)
+    harness = _resolve_harness(model=model)
+
+    skill_names: tuple[str, ...] = ()
+    skill_paths: tuple[str, ...] = ()
+    if defaults.skills:
+        from meridian.lib.config.skill_registry import SkillRegistry
+
+        registry = SkillRegistry(
+            repo_root=repo_root,
+            search_paths=config.search_paths,
+            readonly=True,
+        )
+        manifests = registry.list()
+        available_skills = {item.name for item in manifests}
+        resolved_skills = tuple(
+            skill_name for skill_name in defaults.skills if skill_name in available_skills
+        )
+        loaded_skills = load_skill_contents(registry, resolved_skills)
+        skill_names = tuple(skill.name for skill in loaded_skills)
+        skill_paths = tuple(Path(skill.path).expanduser().resolve().as_posix() for skill in loaded_skills)
+
+    agent_path = ""
+    if profile is not None and profile.path.is_absolute() and profile.path.exists():
+        agent_path = profile.path.resolve().as_posix()
+
+    return _PrimarySessionMetadata(
+        harness=str(harness),
+        model=str(model),
+        agent=profile.name if profile is not None else "",
+        agent_path=agent_path,
+        skills=skill_names,
+        skill_paths=skill_paths,
     )
 
 
@@ -345,6 +437,7 @@ def cleanup_orphaned_locks(repo_root: Path) -> tuple[SpaceId, ...]:
 
 
 def _build_space_env(
+    repo_root: Path,
     request: SpaceLaunchRequest,
     prompt: str,
     *,
@@ -354,6 +447,7 @@ def _build_space_env(
         "MERIDIAN_SPACE_ID": str(request.space_id),
         "MERIDIAN_DEPTH": os.environ.get("MERIDIAN_DEPTH", "0"),
         "MERIDIAN_SPACE_PROMPT": prompt,
+        "MERIDIAN_STATE_ROOT": resolve_state_paths(repo_root).root_dir.resolve().as_posix(),
     }
     autocompact_pct = (
         request.autocompact
@@ -385,8 +479,15 @@ def launch_primary(
         prompt=prompt,
         config=config,
     )
+    session_metadata = _resolve_primary_session_metadata(
+        repo_root=repo_root,
+        request=request,
+        config=config,
+    )
+    space_dir = resolve_space_dir(repo_root, request.space_id)
     lock_path = space_lock_path(repo_root, request.space_id)
     child_env = _build_space_env(
+        repo_root,
         request,
         prompt,
         default_autocompact_pct=config.primary.autocompact_pct,
@@ -408,16 +509,27 @@ def launch_primary(
         # - The caller's post-launch state transitions (in space_start_sync /
         #   space_resume_sync) will never execute. The space row remains
         #   in its pre-launch state until the next cleanup cycle.
-        _write_lock(
-            path=lock_path,
-            space_id=request.space_id,
-            command=command,
-            child_pid=os.getpid(),
+        chat_id = start_session(
+            space_dir,
+            harness=session_metadata.harness,
+            harness_session_id="",
+            model=session_metadata.model,
+            agent=session_metadata.agent,
+            agent_path=session_metadata.agent_path,
+            skills=session_metadata.skills,
+            skill_paths=session_metadata.skill_paths,
+            params=command,
         )
         saved_cwd = os.getcwd()
-        os.environ.update(child_env)
-        os.chdir(repo_root)
         try:
+            _write_lock(
+                path=lock_path,
+                space_id=request.space_id,
+                command=command,
+                child_pid=os.getpid(),
+            )
+            os.environ.update(child_env)
+            os.chdir(repo_root)
             os.execvp(command[0], list(command))
         except OSError:
             # execvp failed — restore environment and cwd so the caller
@@ -429,6 +541,7 @@ def launch_primary(
                     os.environ.pop(key, None)
             os.chdir(saved_cwd)
             lock_path.unlink(missing_ok=True)
+            stop_session(space_dir, chat_id)
             return SpaceLaunchResult(
                 command=command,
                 exit_code=2,
@@ -438,7 +551,19 @@ def launch_primary(
 
     exit_code = 2
     process: subprocess.Popen[str] | None = None
+    chat_id: str | None = None
     try:
+        chat_id = start_session(
+            space_dir,
+            harness=session_metadata.harness,
+            harness_session_id="",
+            model=session_metadata.model,
+            agent=session_metadata.agent,
+            agent_path=session_metadata.agent_path,
+            skills=session_metadata.skills,
+            skill_paths=session_metadata.skill_paths,
+            params=command,
+        )
         _write_lock(
             path=lock_path,
             space_id=request.space_id,
@@ -469,6 +594,8 @@ def launch_primary(
     except FileNotFoundError:
         exit_code = 2
     finally:
+        if chat_id is not None:
+            stop_session(space_dir, chat_id)
         if lock_path.exists():
             lock_path.unlink()
 

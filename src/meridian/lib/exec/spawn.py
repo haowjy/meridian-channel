@@ -459,6 +459,7 @@ async def execute_with_finalization(
     secrets: tuple[SecretSpec, ...] = (),
     continue_harness_session_id: str | None = None,
     continue_fork: bool = False,
+    harness_session_id_observer: Callable[[str], None] | None = None,
     event_observer: Callable[[StreamEvent], None] | None = None,
     stream_stdout_to_terminal: bool = False,
     stream_stderr_to_terminal: bool = False,
@@ -528,6 +529,7 @@ async def execute_with_finalization(
     exit_code = DEFAULT_INFRA_EXIT_CODE
     extracted: FinalizeExtraction | None = None
     failure_reason: str | None = None
+    observed_harness_session_id: str | None = None
 
     try:
         command = tuple(harness.build_command(run_params, resolved_perms))
@@ -584,6 +586,26 @@ async def execute_with_finalization(
                 log_dir=log_dir,
                 secrets=secrets,
             )
+            extracted_harness_session_id = (
+                extracted.harness_session_id.strip()
+                if extracted.harness_session_id is not None
+                else ""
+            )
+            if (
+                extracted_harness_session_id
+                and extracted_harness_session_id != observed_harness_session_id
+                and harness_session_id_observer is not None
+            ):
+                try:
+                    harness_session_id_observer(extracted_harness_session_id)
+                    observed_harness_session_id = extracted_harness_session_id
+                except Exception:
+                    logger.warning(
+                        "Harness session ID observer failed.",
+                        run_id=str(run.run_id),
+                        harness_id=str(harness.id),
+                        exc_info=True,
+                    )
             if spawn_result.budget_breach is not None:
                 failure_reason = "budget_exceeded"
                 _append_budget_exceeded_event(

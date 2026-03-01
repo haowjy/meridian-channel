@@ -26,7 +26,9 @@ from meridian.lib.config._paths import resolve_repo_root
 from meridian.lib.ops.space import SpaceActionOutput
 from meridian.lib.space import space_file
 from meridian.lib.space.launch import SpaceLaunchRequest, cleanup_orphaned_locks, launch_primary
+from meridian.lib.space.session_store import cleanup_stale_sessions
 from meridian.lib.space.summary import generate_space_summary
+from meridian.lib.state.paths import resolve_all_spaces_dir
 from meridian.lib.types import SpaceId
 from meridian.server.main import run_server
 
@@ -563,8 +565,15 @@ def main(argv: Sequence[str] | None = None) -> None:
     # can mark concurrent runs as failed and close the parent space.
     if not os.environ.get("MERIDIAN_SPACE_ID"):
         try:
+            repo_root = resolve_repo_root()
             # Cleanup is best-effort and should never block CLI usage.
-            cleanup_orphaned_locks(resolve_repo_root())
+            cleanup_orphaned_locks(repo_root)
+            spaces_dir = resolve_all_spaces_dir(repo_root)
+            if spaces_dir.is_dir():
+                for space_dir in sorted(spaces_dir.iterdir()):
+                    if not space_dir.is_dir():
+                        continue
+                    cleanup_stale_sessions(space_dir)
         except Exception:
             logger.debug("orphaned lock cleanup failed", exc_info=True)
 
