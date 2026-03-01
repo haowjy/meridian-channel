@@ -46,7 +46,7 @@ def test_run_create_non_tty_uses_append_only_streaming(monkeypatch, tmp_path: Pa
     )
     assert captured["event_observer"] is None
     assert captured["stream_stdout_to_terminal"] is True
-    assert captured["stream_stderr_to_terminal"] is True
+    assert captured["stream_stderr_to_terminal"] is False
 
 
 def test_run_create_tty_uses_terminal_event_observer(monkeypatch, tmp_path: Path) -> None:

@@ -574,7 +574,7 @@ def _execute_run_blocking(
                 continue_fork=prepared.continue_fork,
                 event_observer=event_observer,
                 stream_stdout_to_terminal=stream_stdout_to_terminal,
-                stream_stderr_to_terminal=payload.stream or payload.verbose or not stdout_is_tty,
+                stream_stderr_to_terminal=payload.stream or payload.verbose,
                 harness_session_id_observer=lambda session_id: update_session_harness_id(
                     space_dir,
                     chat_id,
