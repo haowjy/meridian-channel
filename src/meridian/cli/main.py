@@ -529,7 +529,17 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = list(sys.argv[1:] if argv is None else argv)
 
     # Configure logging early so structlog warnings go to stderr, not stdout.
-    json_mode = "--json" in args or "--format" in args
+    # Check if structured output is requested — only JSON format suppresses
+    # human-readable log formatting.  "--format text" or "--format porcelain"
+    # should NOT switch logging to JSON mode.
+    json_mode = "--json" in args
+    if not json_mode and "--format" in args:
+        try:
+            fmt_idx = args.index("--format")
+            fmt_val = args[fmt_idx + 1] if fmt_idx + 1 < len(args) else ""
+            json_mode = fmt_val.lower() == "json"
+        except (IndexError, ValueError):
+            pass
     verbose_count = args.count("--verbose") + args.count("-v")
     configure_logging(json_mode=json_mode, verbosity=verbose_count)
 
