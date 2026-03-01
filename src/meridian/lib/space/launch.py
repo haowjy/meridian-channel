@@ -15,16 +15,18 @@ from typing import cast
 from uuid import uuid4
 
 from meridian.lib.config._paths import resolve_repo_root
-from meridian.lib.config.agent import AgentProfile, load_agent_profile
-from meridian.lib.config.skill_registry import SkillRegistry
 from meridian.lib.config.routing import route_model
 from meridian.lib.config.settings import MeridianConfig, load_config
 from meridian.lib.domain import SpaceState
 from meridian.lib.exec.spawn import HARNESS_ENV_PASS_THROUGH, sanitize_child_env
 from meridian.lib.harness.materialize import cleanup_materialized, materialize_for_harness
-from meridian.lib.prompt.assembly import load_skill_contents, resolve_run_defaults
+from meridian.lib.launch_resolve import (
+    load_agent_profile_with_fallback,
+    resolve_permission_tier_from_profile,
+    resolve_skills_from_profile,
+)
+from meridian.lib.prompt.assembly import resolve_run_defaults
 from meridian.lib.safety.permissions import (
-    permission_tier_from_profile,
     warn_profile_tier_escalation,
     build_permission_config,
     build_permission_resolver,
@@ -153,10 +155,12 @@ def _build_interactive_command(
 
     resolved_root = resolve_repo_root(repo_root)
     resolved_config = config if config is not None else load_config(resolved_root)
-    profile = _load_primary_agent_profile(
+    profile = load_agent_profile_with_fallback(
         repo_root=resolved_root,
-        config=resolved_config,
+        search_paths=resolved_config.search_paths,
         requested_agent=request.agent,
+        configured_default=resolved_config.default_primary_agent,
+        fallback_name="primary",
     )
 
     defaults = resolve_run_defaults(
@@ -165,22 +169,13 @@ def _build_interactive_command(
     )
     model = ModelId(defaults.model)
     harness = _resolve_harness(model=model)
-    resolved_skill_sources: dict[str, Path] = {}
-    if defaults.skills:
-        registry = SkillRegistry(
-            repo_root=resolved_root,
-            search_paths=resolved_config.search_paths,
-            readonly=True,
-        )
-        manifests = registry.list()
-        available_skills = {item.name for item in manifests}
-        resolved_skills = tuple(
-            skill_name for skill_name in defaults.skills if skill_name in available_skills
-        )
-        loaded_skills = load_skill_contents(registry, resolved_skills)
-        resolved_skill_sources = {
-            skill.name: Path(skill.path).expanduser().resolve().parent for skill in loaded_skills
-        }
+    resolved_skills = resolve_skills_from_profile(
+        profile_skills=defaults.skills,
+        repo_root=resolved_root,
+        search_paths=resolved_config.search_paths,
+        readonly=True,
+    )
+    resolved_skill_sources = resolved_skills.skill_sources
 
     materialization_chat_id = chat_id.strip() or f"tmp-{uuid4().hex[:8]}"
     materialized = materialize_for_harness(
@@ -197,9 +192,10 @@ def _build_interactive_command(
         command.extend(["--agent", materialized.agent_name])
     command.extend(["--model", str(model)])
     primary_default_tier = resolved_config.primary.permission_tier
-    inferred_tier = _resolve_permission_tier_for_profile(
+    inferred_tier = resolve_permission_tier_from_profile(
         profile=profile,
         default_tier=primary_default_tier,
+        warning_logger=logger,
     )
     permission_tier_override = (
         request.permission_tier.strip()
@@ -256,10 +252,12 @@ def _resolve_primary_session_metadata(
     request: SpaceLaunchRequest,
     config: MeridianConfig,
 ) -> _PrimarySessionMetadata:
-    profile = _load_primary_agent_profile(
+    profile = load_agent_profile_with_fallback(
         repo_root=repo_root,
-        config=config,
+        search_paths=config.search_paths,
         requested_agent=request.agent,
+        configured_default=config.default_primary_agent,
+        fallback_name="primary",
     )
 
     defaults = resolve_run_defaults(
@@ -269,22 +267,17 @@ def _resolve_primary_session_metadata(
     model = ModelId(defaults.model)
     harness = _resolve_harness(model=model)
 
-    skill_names: tuple[str, ...] = ()
-    skill_paths: tuple[str, ...] = ()
-    if defaults.skills:
-        registry = SkillRegistry(
-            repo_root=repo_root,
-            search_paths=config.search_paths,
-            readonly=True,
-        )
-        manifests = registry.list()
-        available_skills = {item.name for item in manifests}
-        resolved_skills = tuple(
-            skill_name for skill_name in defaults.skills if skill_name in available_skills
-        )
-        loaded_skills = load_skill_contents(registry, resolved_skills)
-        skill_names = tuple(skill.name for skill in loaded_skills)
-        skill_paths = tuple(Path(skill.path).expanduser().resolve().as_posix() for skill in loaded_skills)
+    resolved_skills = resolve_skills_from_profile(
+        profile_skills=defaults.skills,
+        repo_root=repo_root,
+        search_paths=config.search_paths,
+        readonly=True,
+    )
+    skill_names = resolved_skills.skill_names
+    skill_paths = tuple(
+        Path(skill.path).expanduser().resolve().as_posix()
+        for skill in resolved_skills.loaded_skills
+    )
 
     agent_path = ""
     if profile is not None and profile.path.is_absolute() and profile.path.exists():
@@ -298,63 +291,6 @@ def _resolve_primary_session_metadata(
         skills=skill_names,
         skill_paths=skill_paths,
     )
-
-
-def _resolve_permission_tier_for_profile(
-    *,
-    profile: AgentProfile | None,
-    default_tier: str,
-) -> str:
-    sandbox_value = profile.sandbox if profile is not None else None
-    inferred_tier = permission_tier_from_profile(sandbox_value)
-    if inferred_tier is not None:
-        return inferred_tier
-
-    if profile is not None and sandbox_value is not None and sandbox_value.strip():
-        logger.warning(
-            "Agent profile '%s' has unsupported sandbox '%s'; "
-            "falling back to default permission tier '%s'.",
-            profile.name,
-            sandbox_value.strip(),
-            default_tier,
-        )
-    return default_tier
-
-
-def _load_primary_agent_profile(
-    *,
-    repo_root: Path,
-    config: MeridianConfig,
-    requested_agent: str | None,
-) -> AgentProfile | None:
-    requested_profile = requested_agent.strip() if requested_agent is not None else ""
-    if requested_profile:
-        return load_agent_profile(
-            requested_profile,
-            repo_root=repo_root,
-            search_paths=config.search_paths,
-        )
-
-    profile: AgentProfile | None = None
-    configured_profile = config.default_primary_agent.strip()
-    if configured_profile:
-        try:
-            profile = load_agent_profile(
-                configured_profile,
-                repo_root=repo_root,
-                search_paths=config.search_paths,
-            )
-        except FileNotFoundError:
-            if configured_profile != "primary":
-                try:
-                    profile = load_agent_profile(
-                        "primary",
-                        repo_root=repo_root,
-                        search_paths=config.search_paths,
-                    )
-                except FileNotFoundError:
-                    profile = None
-    return profile
 
 
 def _resolve_harness(*, model: ModelId) -> HarnessId:
