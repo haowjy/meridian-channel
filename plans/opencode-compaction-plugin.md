@@ -1,6 +1,6 @@
 # OpenCode Compaction Plugin + Session Recording + Run Output Fix
 
-**Status:** draft
+**Status:** done
 
 ## Problem
 
