@@ -82,7 +82,7 @@ class _EnvOverrideHarness:
             {"*": "deny", "read": "allow", "grep": "allow", "glob": "allow", "list": "allow"},
         ),
         (
-            PermissionTier.SPACE_WRITE,
+            PermissionTier.WORKSPACE_WRITE,
             {
                 "*": "deny",
                 "read": "allow",
@@ -154,7 +154,7 @@ def test_validate_permission_config_for_harness_warns_on_opencode_danger(
 
 
 def test_standard_harnesses_only_opencode_sets_env_overrides() -> None:
-    config = PermissionConfig(tier=PermissionTier.SPACE_WRITE, unsafe=False)
+    config = PermissionConfig(tier=PermissionTier.WORKSPACE_WRITE, unsafe=False)
 
     assert ClaudeAdapter().env_overrides(config) == {}
     assert CodexAdapter().env_overrides(config) == {}
@@ -239,7 +239,7 @@ async def test_execute_with_finalization_merges_adapter_env_overrides(
     registry.register(adapter)
 
     permission_config = PermissionConfig(
-        tier=PermissionTier.SPACE_WRITE,
+        tier=PermissionTier.WORKSPACE_WRITE,
         unsafe=False,
     )
     exit_code = await execute_with_finalization(
@@ -262,7 +262,7 @@ async def test_execute_with_finalization_merges_adapter_env_overrides(
     payload = json.loads(output.strip())
     assert payload == {
         "caller": "caller-value",
-        "adapter": PermissionTier.SPACE_WRITE.value,
+        "adapter": PermissionTier.WORKSPACE_WRITE.value,
         "repo_root": tmp_path.as_posix(),
         "state_root": (tmp_path / ".meridian").as_posix(),
     }

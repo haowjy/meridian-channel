@@ -11,8 +11,8 @@ guardrail_seconds = 45.0
 wait_seconds = 900.0
 
 [permissions]
-default_tier = "space-write"
+default_tier = "workspace-write"
 
 [primary]
 autocompact_pct = 61
-permission_tier = "space-write"
+permission_tier = "workspace-write"

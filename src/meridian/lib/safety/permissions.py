@@ -25,14 +25,14 @@ class PermissionTier(StrEnum):
     """Safety tiers applied to harness command construction."""
 
     READ_ONLY = "read-only"
-    SPACE_WRITE = "space-write"
+    WORKSPACE_WRITE = "workspace-write"
     FULL_ACCESS = "full-access"
     DANGER = "danger"
 
 
 _TIER_RANKS = {
     "read-only": 0,
-    "space-write": 1,
+    "workspace-write": 1,
     "full-access": 2,
     "danger": 3,
 }
@@ -76,7 +76,7 @@ def permission_tier_from_profile(agent_sandbox: str | None) -> str | None:
         return None
     mapping = {
         "read-only": "read-only",
-        "space-write": "space-write",
+        "workspace-write": "workspace-write",
         "full-access": "full-access",
         "danger-full-access": "full-access",
         "unrestricted": "full-access",
@@ -167,7 +167,7 @@ def _claude_allowed_tools(tier: PermissionTier) -> tuple[str, ...]:
         "Bash(git log)",
         "Bash(git diff)",
     )
-    space_write = (
+    workspace_write = (
         *read_only,
         "Edit",
         "Write",
@@ -175,15 +175,15 @@ def _claude_allowed_tools(tier: PermissionTier) -> tuple[str, ...]:
         "Bash(git commit)",
     )
     full_access = (
-        *space_write,
+        *workspace_write,
         "WebFetch",
         "WebSearch",
         "Bash",
     )
     if tier is PermissionTier.READ_ONLY:
         return read_only
-    if tier is PermissionTier.SPACE_WRITE:
-        return space_write
+    if tier is PermissionTier.WORKSPACE_WRITE:
+        return workspace_write
     return full_access
 
 
@@ -198,7 +198,7 @@ def opencode_permission_json(tier: PermissionTier) -> str:
             "glob": "allow",
             "list": "allow",
         }
-    elif tier is PermissionTier.SPACE_WRITE:
+    elif tier is PermissionTier.WORKSPACE_WRITE:
         permissions = {
             "*": "deny",
             "read": "allow",
@@ -242,8 +242,7 @@ def permission_flags_for_harness(
     if harness_id == HarnessId("codex"):
         if tier is PermissionTier.READ_ONLY:
             return ["--sandbox", "read-only"]
-        if tier is PermissionTier.SPACE_WRITE:
-            # Codex CLI uses "workspace-write" (not "space-write").
+        if tier is PermissionTier.WORKSPACE_WRITE:
             return ["--sandbox", "workspace-write"]
         return ["--sandbox", "danger-full-access"]
 

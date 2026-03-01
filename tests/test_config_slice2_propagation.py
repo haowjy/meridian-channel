@@ -68,7 +68,7 @@ def test_custom_default_permission_tier_flows_through_build_permission_config(
     _clear_config_env(monkeypatch)
     _write_config(
         tmp_path,
-        "[permissions]\ndefault_tier = 'space-write'\n",
+        "[permissions]\ndefault_tier = 'workspace-write'\n",
     )
     monkeypatch.setenv("MERIDIAN_SPACE_ID", create_space(tmp_path, name="cfg-prop").id)
 
@@ -83,7 +83,7 @@ def test_custom_default_permission_tier_flows_through_build_permission_config(
         captured["tier"] = tier
         captured["unsafe"] = unsafe
         captured["default_tier"] = default_tier
-        return PermissionConfig(tier=PermissionTier.SPACE_WRITE, unsafe=unsafe)
+        return PermissionConfig(tier=PermissionTier.WORKSPACE_WRITE, unsafe=unsafe)
 
     async def fake_execute_with_finalization(*args: object, **kwargs: object) -> int:
         return 0
@@ -99,11 +99,11 @@ def test_custom_default_permission_tier_flows_through_build_permission_config(
         )
     )
 
-    # The built-in 'agent' profile has sandbox=space-write, which becomes the
+    # The built-in 'agent' profile has sandbox=workspace-write, which becomes the
     # inferred tier when no explicit --permission flag is passed.
-    assert captured["tier"] == "space-write"
+    assert captured["tier"] == "workspace-write"
     assert captured["unsafe"] is False
-    assert captured["default_tier"] == "space-write"
+    assert captured["default_tier"] == "workspace-write"
 
 
 def test_custom_kill_grace_seconds_flows_to_execute_with_finalization(

@@ -33,12 +33,12 @@ def test_load_config_from_fixture_toml(package_root: Path, tmp_path: Path) -> No
         kill_grace_seconds=1.5,
         guardrail_timeout_seconds=45.0,
         wait_timeout_seconds=900.0,
-        default_permission_tier="space-write",
+        default_permission_tier="workspace-write",
         primary_agent="lead-primary",
         default_agent="worker-agent",
         primary=PrimaryConfig(
             autocompact_pct=61,
-            permission_tier="space-write",
+            permission_tier="workspace-write",
         ),
     )
 

@@ -92,7 +92,7 @@ def test_primary_settings_apply_to_harness_command_and_env(tmp_path: Path) -> No
             "\n"
             "[primary]\n"
             "autocompact_pct = 67\n"
-            "permission_tier = 'space-write'\n"
+            "permission_tier = 'workspace-write'\n"
         ),
     )
     request = SpaceLaunchRequest(space_id=SpaceId("s100"))

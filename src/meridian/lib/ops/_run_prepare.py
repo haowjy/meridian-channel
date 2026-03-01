@@ -396,7 +396,7 @@ def _build_create_payload(
     inferred_tier = permission_tier_from_profile(profile.sandbox if profile is not None else None)
     # Only warn about tier escalation when the user explicitly chose an
     # agent via --agent.  The implicit default agent profile often has
-    # sandbox > config default (e.g. space-write vs read-only), and
+    # sandbox > config default (e.g. workspace-write vs read-only), and
     # warning every time is noise for normal configurations.
     if payload.permission_tier is None and agent_explicitly_requested:
         warn_profile_tier_escalation(

@@ -20,7 +20,7 @@ _BUILTIN_PATH = Path("<builtin>")
 _KNOWN_SANDBOX_VALUES = frozenset(
     {
         "read-only",
-        "space-write",
+        "workspace-write",
         "full-access",
         "danger-full-access",
         "unrestricted",
@@ -142,7 +142,7 @@ def _builtin_profiles() -> dict[str, AgentProfile]:
             skills=(),
             allowed_tools=(),
             mcp_tools=("run_list", "run_show", "skills_list"),
-            sandbox="space-write",
+            sandbox="workspace-write",
             variant_models=(),
             body="",
             path=_BUILTIN_PATH,

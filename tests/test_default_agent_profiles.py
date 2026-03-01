@@ -84,7 +84,7 @@ def test_run_uses_default_agent_profile_and_profile_skills(tmp_path: Path) -> No
         name="reviewer",
         model="gpt-5.3-codex",
         skills=["reviewing"],
-        sandbox="space-write",
+        sandbox="workspace-write",
     )
     _write_skill(tmp_path, "reviewing", "Review skill content")
 
@@ -149,9 +149,11 @@ def test_space_primary_profile_controls_model_skills_and_sandbox(tmp_path: Path)
 
     assert command[command.index("--model") + 1] == "claude-sonnet-4-6"
     assert "--allowedTools" in command
-    prompt_payload = command[command.index("--system-prompt") + 1]
-    assert "# Primary Skills" in prompt_payload
-    assert "Primary orchestration content" in prompt_payload
+    assert "--agent" in command
+    assert command[command.index("--agent") + 1] == "lead-primary"
+    assert "--append-system-prompt" in command
+    assert command[command.index("--append-system-prompt") + 1] == "space prompt"
+    assert "--system-prompt" not in command
 
 
 def test_space_primary_profile_missing_uses_default_permission_tier(tmp_path: Path) -> None:
@@ -183,10 +185,10 @@ def test_space_primary_profile_missing_sandbox_uses_default_permission_tier(
             "primary_agent = 'lead-primary'\n"
             "\n"
             "[permissions]\n"
-            "default_tier = 'space-write'\n"
+            "default_tier = 'workspace-write'\n"
             "\n"
             "[primary]\n"
-            "permission_tier = 'space-write'\n"
+            "permission_tier = 'workspace-write'\n"
         ),
     )
     _write_agent(
@@ -277,7 +279,7 @@ def test_space_primary_profile_non_claude_model_raises_clear_error(tmp_path: Pat
         name="lead-primary",
         model="gpt-5.3-codex",
         skills=[],
-        sandbox="space-write",
+        sandbox="workspace-write",
     )
 
     with pytest.raises(
@@ -324,7 +326,7 @@ def test_builtin_agent_profile_used_when_no_file_on_disk(tmp_path: Path) -> None
     assert bundled_root is not None
     assert profile.name == "agent"
     assert profile.model == "gpt-5.3-codex"
-    assert profile.sandbox == "space-write"
+    assert profile.sandbox == "workspace-write"
     assert profile.path == (bundled_root / "agents" / "agent.md").resolve()
     assert profile.path != _BUILTIN_PATH
 
@@ -383,7 +385,7 @@ def test_claude_command_merges_permission_and_mcp_allowed_tools(tmp_path: Path) 
         name="claude-reviewer",
         model="claude-sonnet-4-6",
         skills=[],
-        sandbox="space-write",
+        sandbox="workspace-write",
         mcp_tools=["run_list", "run_show"],
     )
 
@@ -398,6 +400,10 @@ def test_claude_command_merges_permission_and_mcp_allowed_tools(tmp_path: Path) 
 
     assert result.status == "dry-run"
     assert result.harness_id == "claude"
+    assert "--agent" in result.cli_command
+    assert (
+        result.cli_command[result.cli_command.index("--agent") + 1] == "claude-reviewer"
+    )
     assert "--mcp-config" in result.cli_command
     assert _flag_count(result.cli_command, "--allowedTools") == 1
     allowed_tools = _allowed_tools_from_command(result.cli_command)
@@ -593,7 +599,7 @@ def test_empty_allowed_tools_falls_back_to_tier(tmp_path: Path) -> None:
         name="tier-agent",
         model="claude-sonnet-4-6",
         skills=[],
-        sandbox="space-write",
+        sandbox="workspace-write",
     )
 
     result = run_ops.run_create_sync(
