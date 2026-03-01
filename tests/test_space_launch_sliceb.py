@@ -46,8 +46,12 @@ def test_build_interactive_command_uses_system_prompt_model_and_passthrough(
 
     assert command[0] == "claude"
     assert "-p" not in command
-    assert "--system-prompt" in command
-    assert prompt in command[command.index("--system-prompt") + 1]
+    # Bundled profile uses ad-hoc agent + append-system-prompt (not --system-prompt).
+    assert "--agents" in command
+    assert "--agent" in command
+    assert command[command.index("--agent") + 1] == "meridian-primary"
+    assert "--append-system-prompt" in command
+    assert prompt in command[command.index("--append-system-prompt") + 1]
     assert "--model" in command
     assert command[command.index("--model") + 1] == "claude-opus-4-6"
     assert "--permission-mode" in command
@@ -165,4 +169,4 @@ def test_space_start_dry_run_returns_interactive_command(
     assert not Path(result.lock_path).exists()
     assert result.command[0] == "claude"
     assert "-p" not in result.command
-    assert "--system-prompt" in result.command
+    assert "--append-system-prompt" in result.command

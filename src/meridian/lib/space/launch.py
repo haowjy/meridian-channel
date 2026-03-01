@@ -184,7 +184,10 @@ def _build_interactive_command(
         )
     )
 
+    is_claude = harness == HarnessId("claude")
+
     if profile_is_native:
+        # On-disk profile Claude can find natively.
         command: list[str] = [
             "claude",
             "--agent",
@@ -194,40 +197,31 @@ def _build_interactive_command(
             "--model",
             str(model),
         ]
-    else:
-        prompt_with_profile_skills = prompt
-        if profile is not None and defaults.skills:
-            from meridian.lib.config.skill_registry import SkillRegistry
-
-            registry = SkillRegistry(
-                repo_root=resolved_root,
-                search_paths=resolved_config.search_paths,
-                readonly=True,
-            )
-            manifests = registry.list()
-            available_skills = {item.name for item in manifests}
-            skill_names = tuple(
-                skill_name for skill_name in defaults.skills if skill_name in available_skills
-            )
-            missing_skills = tuple(
-                skill_name for skill_name in defaults.skills if skill_name not in available_skills
-            )
-            if missing_skills:
-                logger.warning(
-                    "Skipping unavailable primary profile skills: %s.",
-                    ", ".join(missing_skills),
-                )
-            loaded_skills = load_skill_contents(registry, skill_names)
-            if loaded_skills:
-                sections = [prompt_with_profile_skills, "", "# Primary Skills"]
-                for skill in loaded_skills:
-                    sections.extend(["", f"## Skill: {skill.name}", "", skill.content.strip()])
-                prompt_with_profile_skills = "\n".join(sections).strip()
-
+    elif is_claude and profile is not None:
+        # Bundled or non-native profile — pass as ad-hoc agent so Claude
+        # loads it natively (survives context compaction) instead of
+        # jamming everything into --system-prompt.
+        adhoc_agent: dict[str, Any] = {"prompt": profile.body.strip()}
+        if defaults.skills:
+            adhoc_agent["skills"] = list(defaults.skills)
+        adhoc_json = json.dumps({"meridian-primary": adhoc_agent})
         command = [
             "claude",
-            "--system-prompt",
-            prompt_with_profile_skills,
+            "--agents",
+            adhoc_json,
+            "--agent",
+            "meridian-primary",
+            "--append-system-prompt",
+            prompt,
+            "--model",
+            str(model),
+        ]
+    else:
+        # No profile or non-Claude harness — fall back to system prompt.
+        command = [
+            "claude",
+            "--append-system-prompt",
+            prompt,
             "--model",
             str(model),
         ]

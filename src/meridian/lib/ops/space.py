@@ -81,10 +81,9 @@ class SpaceActionOutput:
             if skip_next:
                 skip_next = False
                 continue
-            if token in ("--system-prompt", "--append-system-prompt") and i + 1 < len(self.command):
-                prompt_len = len(self.command[i + 1])
+            if token in ("--system-prompt", "--append-system-prompt", "--agents") and i + 1 < len(self.command):
                 abbreviated.append(token)
-                abbreviated.append(f"<{prompt_len} chars>")
+                abbreviated.append(f"<{len(self.command[i + 1])} chars>")
                 skip_next = True
             else:
                 abbreviated.append(token)
