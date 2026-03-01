@@ -18,7 +18,6 @@ DEFAULT_ARGS: tuple[str, ...] = (
     "--maxfail=1",
     "-r",
     "fE",
-    "--no-header",
     "--force-short-summary",
 )
 LAST_FAILED_ARGS: tuple[str, ...] = ("--lf", "--lfnf=all")
@@ -52,4 +51,3 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

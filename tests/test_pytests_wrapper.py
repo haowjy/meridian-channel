@@ -22,7 +22,6 @@ def test_build_pytest_args_defaults() -> None:
         "--maxfail=1",
         "-r",
         "fE",
-        "--no-header",
         "--force-short-summary",
         "tests/test_cli_run_wait_multi.py",
     ]
@@ -39,7 +38,6 @@ def test_build_pytest_args_with_last_failed() -> None:
         "--maxfail=1",
         "-r",
         "fE",
-        "--no-header",
         "--force-short-summary",
         "--lf",
         "--lfnf=all",
@@ -70,10 +68,8 @@ def test_main_reads_last_failed_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "--maxfail=1",
         "-r",
         "fE",
-        "--no-header",
         "--force-short-summary",
         "--lf",
         "--lfnf=all",
         "tests/test_surface_parity.py",
     ]
-

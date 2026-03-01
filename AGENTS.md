@@ -28,14 +28,8 @@ There are no users and there is no real user data. No need for backwards compati
 # Install from source
 uv sync --extra dev
 
-# Run tests
-uv run pytest
-
 # Run tests with token-efficient output (preferred for agents)
-uv run pytests
-
-# Only prioritize last-failed tests first
-PYTESTS_LAST_FAILED=1 uv run pytests
+uv run pytest-llm
 
 # Type check
 uv run pyright
@@ -58,6 +52,13 @@ Make sure you use the `/mermaid` skill to plan your work. It will help you write
 2. Verify tests pass (via `/run-agent` or directly)
 3. Commit with a descriptive message
 4. Move to the next step
+
+### Never Delete Untracked Files
+
+**NEVER delete or remove untracked files without asking the user first.** Untracked files may be the user's in-progress work. If you need to clean up files you believe are stale:
+1. Ask the user before deleting
+2. If you must proceed, `git stash --include-untracked` first so the work is recoverable
+3. When reverting codex agent changes with `git checkout`, check `git status` for untracked files the agent created vs. untracked files that existed before — only clean up agent-created files after confirming with the user
 
 ## Current Focus
 
