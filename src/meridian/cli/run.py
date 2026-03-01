@@ -8,6 +8,7 @@ from typing import Annotated, Any, cast
 
 from cyclopts import App, Parameter
 
+from meridian.cli.main import _agent_mode_enabled
 from meridian.lib.domain import RunStatus
 from meridian.lib.ops.registry import get_all_operations
 from meridian.lib.ops.run import (
@@ -25,6 +26,10 @@ from meridian.lib.ops.run import (
     run_stats_sync,
     run_wait_sync,
 )
+
+# In agent mode (MERIDIAN_SPACE_ID set), hide human-only flags from --help.
+# Flags still work when passed — show only affects help text.
+_HUMAN_ONLY = not _agent_mode_enabled()
 
 Emitter = Callable[[Any], None]
 
@@ -69,7 +74,11 @@ def _run_create(
     ] = None,
     report_path: Annotated[
         str,
-        Parameter(name="--report-path", help="Relative path for generated run report."),
+        Parameter(
+            name="--report-path",
+            help="Relative path for generated run report.",
+            show=_HUMAN_ONLY,
+        ),
     ] = "report.md",
     dry_run: Annotated[
         bool,
@@ -77,11 +86,11 @@ def _run_create(
     ] = False,
     verbose: Annotated[
         bool,
-        Parameter(name="--verbose", help="Enable verbose run logging."),
+        Parameter(name="--verbose", help="Enable verbose run logging.", show=_HUMAN_ONLY),
     ] = False,
     quiet: Annotated[
         bool,
-        Parameter(name="--quiet", help="Reduce non-essential command output."),
+        Parameter(name="--quiet", help="Reduce non-essential command output.", show=_HUMAN_ONLY),
     ] = False,
     stream: Annotated[
         bool,
@@ -105,7 +114,7 @@ def _run_create(
     ] = None,
     unsafe: Annotated[
         bool,
-        Parameter(name="--unsafe", help="Allow unsafe execution mode."),
+        Parameter(name="--unsafe", help="Allow unsafe execution mode.", show=_HUMAN_ONLY),
     ] = False,
     budget_per_run_usd: Annotated[
         float | None,
@@ -117,7 +126,11 @@ def _run_create(
     ] = None,
     budget_usd: Annotated[
         float | None,
-        Parameter(name="--budget-usd", help="Legacy alias for per-run budget in USD."),
+        Parameter(
+            name="--budget-usd",
+            help="Legacy alias for per-run budget in USD.",
+            show=_HUMAN_ONLY,
+        ),
     ] = None,
     guardrails: Annotated[
         tuple[str, ...],

@@ -44,6 +44,9 @@ def test_help_is_restricted_in_agent_mode(package_root, cli_env) -> None:
     assert "space" not in completed.stdout
     assert "config" not in completed.stdout
     assert "completion" not in completed.stdout
+    assert "start" not in completed.stdout
+    assert "serve" not in completed.stdout
+    assert "init" not in completed.stdout
 
 
 def test_hidden_human_flag_restores_full_help(package_root, cli_env) -> None:
@@ -133,3 +136,50 @@ def test_doctor_command_runs_standalone(run_meridian) -> None:
     assert "runs_checked" in payload
     assert payload["agents_dir"]
     assert payload["skills_dir"]
+
+
+def test_run_spawn_help_hides_human_flags_in_agent_mode(package_root, cli_env) -> None:
+    env = dict(cli_env)
+    env["MERIDIAN_SPACE_ID"] = "s-test"
+    completed = subprocess.run(
+        [sys.executable, "-m", "meridian", "run", "spawn", "--help"],
+        cwd=package_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=15,
+    )
+    assert completed.returncode == 0
+    # Agent-relevant flags should be visible
+    assert "--prompt" in completed.stdout
+    assert "--model" in completed.stdout
+    assert "--agent" in completed.stdout
+    assert "--background" in completed.stdout
+    assert "--permission" in completed.stdout
+    assert "--budget-per-run-usd" in completed.stdout
+    # Human-only flags should be hidden
+    assert "--verbose" not in completed.stdout
+    assert "--quiet" not in completed.stdout
+    assert "--report-path" not in completed.stdout
+    assert "--budget-usd" not in completed.stdout
+    assert "--unsafe" not in completed.stdout
+    assert "--stream" not in completed.stdout
+
+
+def test_run_spawn_help_shows_all_flags_in_human_mode(package_root, cli_env) -> None:
+    # No MERIDIAN_SPACE_ID = human mode, all flags visible
+    completed = subprocess.run(
+        [sys.executable, "-m", "meridian", "run", "spawn", "--help"],
+        cwd=package_root,
+        env=cli_env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=15,
+    )
+    assert completed.returncode == 0
+    assert "--verbose" in completed.stdout
+    assert "--quiet" in completed.stdout
+    assert "--report-path" in completed.stdout
+    assert "--unsafe" in completed.stdout

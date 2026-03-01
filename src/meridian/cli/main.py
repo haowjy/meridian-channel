@@ -20,7 +20,6 @@ from meridian.cli.grep_cmd import register_grep_command
 from meridian.cli.models_cmd import register_models_commands
 from meridian.cli.output import OutputConfig, normalize_output_format
 from meridian.cli.output import emit as emit_output
-from meridian.cli.run import register_run_commands
 from meridian.cli.skills_cmd import register_skills_commands
 from meridian.cli.space import register_space_commands
 from meridian.lib.config._paths import resolve_repo_root
@@ -606,6 +605,10 @@ _REGISTERED_CLI_DESCRIPTIONS: dict[str, str] = {}
 
 
 def _register_group_commands() -> None:
+    # Import lazily to avoid a circular import with meridian.cli.run, which
+    # reads agent-mode state from this module during import.
+    from meridian.cli.run import register_run_commands
+
     modules = (
         register_space_commands(space_app, emit),
         register_run_commands(run_app, emit),
