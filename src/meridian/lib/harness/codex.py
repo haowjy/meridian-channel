@@ -86,13 +86,17 @@ class CodexAdapter:
         repo_root = (run.repo_root or "").strip()
         if not repo_root:
             return None
-        command_literal = json.dumps(
-            ["uv", "run", "--directory", repo_root, "meridian", "serve"],
+        # Codex expects command as a string and args as a separate array,
+        # not command as an array like Claude's MCP config.
+        args_literal = json.dumps(
+            ["run", "--directory", repo_root, "meridian", "serve"],
             separators=(",", ":"),
         )
         config_args = [
             "--config",
-            f"mcp_servers.meridian.command={command_literal}",
+            'mcp_servers.meridian.command="uv"',
+            "--config",
+            f"mcp_servers.meridian.args={args_literal}",
         ]
 
         if run.mcp_tools:

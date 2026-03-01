@@ -13,7 +13,7 @@ from meridian.lib.types import SpaceId
 
 _ALLOWED_TRANSITIONS: Mapping[SpaceState, frozenset[SpaceState]] = {
     "active": frozenset({"closed"}),
-    "closed": frozenset(),
+    "closed": frozenset({"active"}),  # resume reopens a closed space
 }
 
 

@@ -533,11 +533,15 @@ def main(argv: Sequence[str] | None = None) -> None:
     verbose_count = args.count("--verbose") + args.count("-v")
     configure_logging(json_mode=json_mode, verbosity=verbose_count)
 
-    try:
-        # Cleanup is best-effort and should never block CLI usage.
-        cleanup_orphaned_locks(resolve_repo_root())
-    except Exception:
-        logger.debug("orphaned lock cleanup failed", exc_info=True)
+    # Skip orphan cleanup when running as a subagent (MERIDIAN_SPACE_ID set).
+    # Subagents should never clean up their parent space's state — doing so
+    # can mark concurrent runs as failed and close the parent space.
+    if not os.environ.get("MERIDIAN_SPACE_ID"):
+        try:
+            # Cleanup is best-effort and should never block CLI usage.
+            cleanup_orphaned_locks(resolve_repo_root())
+        except Exception:
+            logger.debug("orphaned lock cleanup failed", exc_info=True)
 
     args, force_human = _extract_human_flag(args)
     cleaned_args, options = _extract_global_options(args)

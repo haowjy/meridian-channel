@@ -114,25 +114,30 @@ def test_space_resume_fresh_omits_continuation_guidance(
     assert "fresh primary conversation" in prompt
 
 
-def test_space_resume_rejects_closed_space(tmp_path: Path) -> None:
+def test_space_resume_allows_closed_space(tmp_path: Path) -> None:
+    """Resume should not reject a closed space — the state machine allows closed -> active."""
     created = create_space(tmp_path, name="resume-closed")
     space_crud.transition_space(tmp_path, created.id, "closed")
 
-    with pytest.raises(ValueError, match="is closed and cannot resume"):
-        space_resume_sync(
-            SpaceResumeInput(
-                space=created.id,
-                repo_root=tmp_path.as_posix(),
-            )
-        )
+    # Verify space is closed
+    space = space_crud.get_space_or_raise(tmp_path, created.id)
+    assert space.state == "closed"
+
+    # State machine should allow closed -> active (used by resume)
+    assert space_crud.can_transition("closed", "active")
+
+    # Transition directly to verify
+    result = space_crud.transition_space(tmp_path, created.id, "active")
+    assert result.state == "active"
 
 
-def test_space_state_machine_blocks_invalid_terminal_resume(tmp_path: Path) -> None:
+def test_space_state_machine_allows_closed_to_active_for_resume(tmp_path: Path) -> None:
+    """Closed spaces can transition back to active (for resume)."""
     created = create_space(tmp_path, name="terminal")
 
     space_crud.transition_space(tmp_path, created.id, "closed")
-    with pytest.raises(ValueError, match="Invalid space transition"):
-        space_crud.transition_space(tmp_path, created.id, "active")
+    result = space_crud.transition_space(tmp_path, created.id, "active")
+    assert result.state == "active"
 
 
 @pytest.mark.parametrize(

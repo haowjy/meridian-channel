@@ -243,7 +243,8 @@ def permission_flags_for_harness(
         if tier is PermissionTier.READ_ONLY:
             return ["--sandbox", "read-only"]
         if tier is PermissionTier.SPACE_WRITE:
-            return ["--sandbox", "space-write"]
+            # Codex CLI uses "workspace-write" (not "space-write").
+            return ["--sandbox", "workspace-write"]
         return ["--sandbox", "danger-full-access"]
 
     # OpenCode permission controls vary by backend provider; keep default behavior for

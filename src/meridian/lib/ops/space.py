@@ -176,8 +176,8 @@ def space_resume_sync(payload: SpaceResumeInput) -> SpaceActionOutput:
     space_id = space_crud.resolve_space_for_resume(runtime.repo_root, payload.space)
     space = space_crud.get_space_or_raise(runtime.repo_root, space_id)
 
-    if space.state == "closed":
-        raise ValueError(f"Space '{space_id}' is closed and cannot resume")
+    # Resume reopens a closed space — only reject truly invalid states.
+    # (Currently the only states are "active" and "closed", so no rejection needed.)
 
     summary_path = generate_space_summary(
         repo_root=runtime.repo_root,
