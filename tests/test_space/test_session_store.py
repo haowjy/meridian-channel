@@ -22,7 +22,7 @@ def _space_dir(tmp_path):
 
 def test_start_session_creates_start_event_and_lock_file(tmp_path):
     space_dir = _space_dir(tmp_path)
-    session_id = start_session(
+    chat_id = start_session(
         space_dir,
         harness="codex",
         harness_session_id="hs-1",
@@ -30,7 +30,7 @@ def test_start_session_creates_start_event_and_lock_file(tmp_path):
         params=("--system-prompt", "Be concise."),
     )
 
-    assert session_id == "c1"
+    assert chat_id == "c1"
     paths = SpacePaths.from_space_dir(space_dir)
     assert (paths.sessions_dir / "c1.lock").exists()
 
@@ -38,32 +38,32 @@ def test_start_session_creates_start_event_and_lock_file(tmp_path):
     payload = json.loads(first)
     assert payload["v"] == 1
     assert payload["event"] == "start"
-    assert payload["session_id"] == "c1"
+    assert payload["chat_id"] == "c1"
     assert payload["harness"] == "codex"
     assert payload["harness_session_id"] == "hs-1"
     assert payload["model"] == "gpt-5.3-codex"
     assert payload["params"] == ["--system-prompt", "Be concise."]
 
-    stop_session(space_dir, session_id)
+    stop_session(space_dir, chat_id)
 
 
 def test_stop_session_appends_stop_event(tmp_path):
     space_dir = _space_dir(tmp_path)
-    session_id = start_session(
+    chat_id = start_session(
         space_dir,
         harness="claude",
         harness_session_id="claude-123",
         model="claude-opus-4-6",
     )
 
-    stop_session(space_dir, session_id)
+    stop_session(space_dir, chat_id)
 
     lines = (space_dir / "sessions.jsonl").read_text(encoding="utf-8").splitlines()
     assert len(lines) == 2
     stop_payload = json.loads(lines[1])
     assert stop_payload["v"] == 1
     assert stop_payload["event"] == "stop"
-    assert stop_payload["session_id"] == "c1"
+    assert stop_payload["chat_id"] == "c1"
     assert isinstance(stop_payload["stopped_at"], str)
 
 
@@ -104,7 +104,7 @@ def test_get_last_session_returns_most_recent_start(tmp_path):
 
     last = get_last_session(space_dir)
     assert last is not None
-    assert last.session_id == c2
+    assert last.chat_id == c2
     assert last.harness == "codex"
     assert last.harness_session_id == "hs-b"
     assert last.model == "gpt-5.3-codex"
@@ -134,10 +134,10 @@ def test_resolve_session_ref_by_alias_and_harness_session_id(tmp_path):
     missing = resolve_session_ref(space_dir, "unknown")
 
     assert by_alias is not None
-    assert by_alias.session_id == c1
+    assert by_alias.chat_id == c1
     assert by_alias.harness_session_id == "claude-thread-1"
     assert by_harness is not None
-    assert by_harness.session_id == c2
+    assert by_harness.chat_id == c2
     assert by_harness.harness == "codex"
     assert get_session_harness_id(space_dir, c2) == "codex-thread-2"
     assert get_session_harness_id(space_dir, "c404") is None
@@ -166,7 +166,7 @@ def test_cleanup_stale_sessions_removes_dead_locks_and_writes_stop_events(tmp_pa
                 {
                     "v": 1,
                     "event": "start",
-                    "session_id": "c2",
+                    "chat_id": "c2",
                     "harness": "claude",
                     "harness_session_id": "stale-thread",
                     "model": "claude-opus-4-6",
@@ -189,7 +189,7 @@ def test_cleanup_stale_sessions_removes_dead_locks_and_writes_stop_events(tmp_pa
         for line in (space_dir / "sessions.jsonl").read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    stop_rows = [row for row in rows if row.get("event") == "stop" and row.get("session_id") == "c2"]
+    stop_rows = [row for row in rows if row.get("event") == "stop" and row.get("chat_id") == "c2"]
     assert len(stop_rows) == 1
     assert stop_rows[0]["v"] == 1
     assert isinstance(stop_rows[0]["stopped_at"], str)

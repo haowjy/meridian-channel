@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import BinaryIO
 
-from meridian.lib.state.id_gen import next_session_id
+from meridian.lib.state.id_gen import next_chat_id
 from meridian.lib.state.paths import SpacePaths
 
 type JSONScalar = str | int | float | bool | None
@@ -22,7 +22,7 @@ _SESSION_LOCK_HANDLES: dict[tuple[Path, str], BinaryIO] = {}
 
 @dataclass(frozen=True, slots=True)
 class SessionRecord:
-    session_id: str
+    chat_id: str
     harness: str
     harness_session_id: str
     model: str
@@ -88,12 +88,12 @@ def _coerce_params(value: JSONValue | None) -> tuple[str, ...]:
 
 
 def _record_from_start_event(event: JSONRow) -> SessionRecord | None:
-    session_id = event.get("session_id")
+    chat_id = event.get("chat_id")
     harness = event.get("harness")
     harness_session_id = event.get("harness_session_id")
     model = event.get("model")
     started_at = event.get("started_at")
-    if not isinstance(session_id, str):
+    if not isinstance(chat_id, str):
         return None
     if not isinstance(harness, str):
         return None
@@ -104,7 +104,7 @@ def _record_from_start_event(event: JSONRow) -> SessionRecord | None:
     if not isinstance(started_at, str):
         return None
     return SessionRecord(
-        session_id=session_id,
+        chat_id=chat_id,
         harness=harness,
         harness_session_id=harness_session_id,
         model=model,
@@ -123,18 +123,18 @@ def _records_by_session(space_dir: Path) -> dict[str, SessionRecord]:
         if event_type == "start":
             record = _record_from_start_event(event)
             if record is not None:
-                records[record.session_id] = record
+                records[record.chat_id] = record
             continue
         if event_type == "stop":
-            session_id = event.get("session_id")
-            if not isinstance(session_id, str):
+            chat_id = event.get("chat_id")
+            if not isinstance(chat_id, str):
                 continue
-            existing = records.get(session_id)
+            existing = records.get(chat_id)
             if existing is None:
                 continue
             stopped_at = event.get("stopped_at")
-            records[session_id] = SessionRecord(
-                session_id=existing.session_id,
+            records[chat_id] = SessionRecord(
+                chat_id=existing.chat_id,
                 harness=existing.harness,
                 harness_session_id=existing.harness_session_id,
                 model=existing.model,
@@ -145,14 +145,14 @@ def _records_by_session(space_dir: Path) -> dict[str, SessionRecord]:
     return records
 
 
-def _session_sort_key(session_id: str) -> tuple[int, str]:
-    if session_id.startswith("c") and session_id[1:].isdigit():
-        return (int(session_id[1:]), session_id)
-    return (10**9, session_id)
+def _session_sort_key(chat_id: str) -> tuple[int, str]:
+    if chat_id.startswith("c") and chat_id[1:].isdigit():
+        return (int(chat_id[1:]), chat_id)
+    return (10**9, chat_id)
 
 
-def _session_lock_key(space_dir: Path, session_id: str) -> tuple[Path, str]:
-    return (space_dir.resolve(), session_id)
+def _session_lock_key(space_dir: Path, chat_id: str) -> tuple[Path, str]:
+    return (space_dir.resolve(), chat_id)
 
 
 def _acquire_session_lock(lock_path: Path) -> BinaryIO:
@@ -162,8 +162,8 @@ def _acquire_session_lock(lock_path: Path) -> BinaryIO:
     return handle
 
 
-def _release_session_lock(space_dir: Path, session_id: str) -> None:
-    handle = _SESSION_LOCK_HANDLES.pop(_session_lock_key(space_dir, session_id), None)
+def _release_session_lock(space_dir: Path, chat_id: str) -> None:
+    handle = _SESSION_LOCK_HANDLES.pop(_session_lock_key(space_dir, chat_id), None)
     if handle is None:
         return
     fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
@@ -183,11 +183,11 @@ def start_session(
     started_at = _utc_now_iso()
 
     with _lock_file(paths.sessions_lock):
-        session_id = next_session_id(space_dir)
+        chat_id = next_chat_id(space_dir)
         event: JSONRow = {
             "v": 1,
             "event": "start",
-            "session_id": session_id,
+            "chat_id": chat_id,
             "harness": harness,
             "harness_session_id": harness_session_id,
             "model": model,
@@ -196,25 +196,25 @@ def start_session(
         }
         _append_event(paths.sessions_jsonl, event)
 
-        lock_path = paths.sessions_dir / f"{session_id}.lock"
+        lock_path = paths.sessions_dir / f"{chat_id}.lock"
         handle = _acquire_session_lock(lock_path)
-        _SESSION_LOCK_HANDLES[_session_lock_key(space_dir, session_id)] = handle
-        return session_id
+        _SESSION_LOCK_HANDLES[_session_lock_key(space_dir, chat_id)] = handle
+        return chat_id
 
 
-def stop_session(space_dir: Path, session_id: str) -> None:
+def stop_session(space_dir: Path, chat_id: str) -> None:
     """Append a session stop event and release the lifetime session lock."""
 
     paths = SpacePaths.from_space_dir(space_dir)
     event: JSONRow = {
         "v": 1,
         "event": "stop",
-        "session_id": session_id,
+        "chat_id": chat_id,
         "stopped_at": _utc_now_iso(),
     }
     with _lock_file(paths.sessions_lock):
         _append_event(paths.sessions_jsonl, event)
-        _release_session_lock(space_dir, session_id)
+        _release_session_lock(space_dir, chat_id)
 
 
 def list_active_sessions(space_dir: Path) -> list[str]:
@@ -226,12 +226,12 @@ def list_active_sessions(space_dir: Path) -> list[str]:
 
     active: list[str] = []
     for lock_path in paths.sessions_dir.glob("*.lock"):
-        session_id = lock_path.stem
+        chat_id = lock_path.stem
         with lock_path.open("a+b") as handle:
             try:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
-                active.append(session_id)
+                active.append(chat_id)
                 continue
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
     return sorted(active, key=_session_sort_key)
@@ -245,7 +245,7 @@ def get_last_session(space_dir: Path) -> SessionRecord | None:
     for event in _read_events(paths.sessions_jsonl):
         if event.get("event") != "start":
             continue
-        candidate = event.get("session_id")
+        candidate = event.get("chat_id")
         if isinstance(candidate, str):
             last_session_id = candidate
 
@@ -266,17 +266,17 @@ def resolve_session_ref(space_dir: Path, ref: str) -> SessionRecord | None:
     if direct is not None:
         return direct
 
-    for session_id in sorted(records, key=_session_sort_key):
-        record = records[session_id]
+    for chat_id in sorted(records, key=_session_sort_key):
+        record = records[chat_id]
         if record.harness_session_id == normalized:
             return record
     return None
 
 
-def get_session_harness_id(space_dir: Path, session_id: str) -> str | None:
+def get_session_harness_id(space_dir: Path, chat_id: str) -> str | None:
     """Return harness session ID for a meridian chat/session ID."""
 
-    record = _records_by_session(space_dir).get(session_id)
+    record = _records_by_session(space_dir).get(chat_id)
     if record is None:
         return None
     return record.harness_session_id
@@ -291,39 +291,39 @@ def cleanup_stale_sessions(space_dir: Path) -> list[str]:
 
     stale: list[tuple[str, Path, BinaryIO]] = []
     for lock_path in paths.sessions_dir.glob("*.lock"):
-        session_id = lock_path.stem
+        chat_id = lock_path.stem
         handle = lock_path.open("a+b")
         try:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             handle.close()
             continue
-        stale.append((session_id, lock_path, handle))
+        stale.append((chat_id, lock_path, handle))
 
     if not stale:
         return []
 
-    cleaned_ids = sorted((session_id for session_id, _, _ in stale), key=_session_sort_key)
+    cleaned_ids = sorted((chat_id for chat_id, _, _ in stale), key=_session_sort_key)
     with _lock_file(paths.sessions_lock):
         records = _records_by_session(space_dir)
         stopped_at = _utc_now_iso()
-        for session_id, lock_path, _ in stale:
-            existing = records.get(session_id)
+        for chat_id, lock_path, _ in stale:
+            existing = records.get(chat_id)
             if existing is not None and existing.stopped_at is None:
                 _append_event(
                     paths.sessions_jsonl,
                     {
                         "v": 1,
                         "event": "stop",
-                        "session_id": session_id,
+                        "chat_id": chat_id,
                         "stopped_at": stopped_at,
                     },
                 )
             lock_path.unlink(missing_ok=True)
 
-    for session_id, _, handle in stale:
+    for chat_id, _, handle in stale:
         fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
         handle.close()
-        _SESSION_LOCK_HANDLES.pop(_session_lock_key(space_dir, session_id), None)
+        _SESSION_LOCK_HANDLES.pop(_session_lock_key(space_dir, chat_id), None)
 
     return cleaned_ids

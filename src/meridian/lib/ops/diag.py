@@ -99,7 +99,7 @@ def _repair_orphan_runs(repo_root: Path) -> int:
         for run in run_store.list_runs(space_dir):
             if run.status != "running":
                 continue
-            if run.session_id is not None and run.session_id in active_sessions:
+            if run.chat_id is not None and run.chat_id in active_sessions:
                 continue
 
             run_store.finalize_run(

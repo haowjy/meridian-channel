@@ -59,7 +59,7 @@ def next_run_id(space_dir: Path) -> RunId:
     return RunId(f"r{starts + 1}")
 
 
-def next_session_id(space_dir: Path) -> str:
+def next_chat_id(space_dir: Path) -> str:
     """Return the next session/chat ID (`c1`, `c2`, ...) for a space."""
 
     starts = _count_start_events(space_dir / "sessions.jsonl")

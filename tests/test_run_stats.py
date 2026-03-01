@@ -15,13 +15,13 @@ def _start_and_finalize(
     *,
     model: str,
     status: str,
-    session_id: str,
+    chat_id: str,
     duration_secs: float | None = None,
     total_cost_usd: float | None = None,
 ) -> str:
     run_id = run_store.start_run(
         space_dir,
-        session_id=session_id,
+        chat_id=chat_id,
         model=model,
         agent="coder",
         harness="codex",
@@ -48,7 +48,7 @@ def test_run_stats_sync_aggregates_all_runs(tmp_path: Path, monkeypatch) -> None
         space_dir,
         model="gpt-5.3-codex",
         status="succeeded",
-        session_id="c1",
+        chat_id="c1",
         duration_secs=2.5,
         total_cost_usd=0.25,
     )
@@ -56,7 +56,7 @@ def test_run_stats_sync_aggregates_all_runs(tmp_path: Path, monkeypatch) -> None
         space_dir,
         model="gpt-5.3-codex",
         status="failed",
-        session_id="c1",
+        chat_id="c1",
         duration_secs=3.0,
         total_cost_usd=0.0,
     )
@@ -64,7 +64,7 @@ def test_run_stats_sync_aggregates_all_runs(tmp_path: Path, monkeypatch) -> None
         space_dir,
         model="claude-sonnet-4-6",
         status="cancelled",
-        session_id="c2",
+        chat_id="c2",
         duration_secs=1.0,
         total_cost_usd=0.1,
     )
@@ -72,7 +72,7 @@ def test_run_stats_sync_aggregates_all_runs(tmp_path: Path, monkeypatch) -> None
         space_dir,
         model="claude-sonnet-4-6",
         status="running",
-        session_id="c2",
+        chat_id="c2",
     )
 
     result = run_stats_sync(RunStatsInput(repo_root=tmp_path.as_posix()))
@@ -98,7 +98,7 @@ def test_run_stats_sync_filters_by_space_and_session(tmp_path: Path, monkeypatch
         space_dir,
         model="gpt-5.3-codex",
         status="succeeded",
-        session_id="c1",
+        chat_id="c1",
         duration_secs=1.0,
         total_cost_usd=0.1,
     )
@@ -106,7 +106,7 @@ def test_run_stats_sync_filters_by_space_and_session(tmp_path: Path, monkeypatch
         space_dir,
         model="gpt-5.3-codex",
         status="failed",
-        session_id="c2",
+        chat_id="c2",
         duration_secs=2.0,
         total_cost_usd=0.2,
     )
@@ -139,7 +139,7 @@ def test_run_stats_sync_returns_empty_for_non_current_space(tmp_path: Path, monk
         first_dir,
         model="gpt-5.3-codex",
         status="succeeded",
-        session_id="c1",
+        chat_id="c1",
         duration_secs=1.0,
         total_cost_usd=0.1,
     )

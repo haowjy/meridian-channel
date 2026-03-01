@@ -22,7 +22,7 @@ from meridian.lib.state.paths import resolve_space_dir
 def _create_run(space_dir: Path, *, prompt: str, status: str) -> str:
     run_id = run_store.start_run(
         space_dir,
-        session_id="c1",
+        chat_id="c1",
         model="gpt-5.3-codex",
         agent="coder",
         harness="codex",

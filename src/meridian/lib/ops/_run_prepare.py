@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from difflib import get_close_matches
 from dataclasses import dataclass, replace
+from difflib import get_close_matches
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -64,7 +65,7 @@ class _PreparedCreate:
     budget: Budget | None
     guardrails: tuple[str, ...]
     secrets: tuple[SecretSpec, ...]
-    continue_session_id: str | None
+    continue_harness_session_id: str | None
     continue_fork: bool
 
 
@@ -306,23 +307,61 @@ def _build_create_payload(
         else ""
     )
 
+    harness, route_warning = runtime_view.harness_registry.route(defaults.model)
+    # --- Native agent passthrough for Claude ---
+    # When the harness supports native agents, skip injecting agent body and
+    # skill content into the composed prompt. Instead, pass agent name and
+    # skill names via RunParams so the harness loads them natively.
+    # This keeps skills persistent across context compaction.
+    native_agents = harness.capabilities.supports_native_agents
+
+    # Determine ad-hoc agent JSON (only for native-agent harnesses)
+    adhoc_agent_json = ""
+    agent_for_params = defaults.agent_name
+
+    if native_agents:
+        if profile is not None:
+            profile_skill_set = set(profile.skills)
+            extra_skills = [s for s in defaults.skills if s not in profile_skill_set]
+            if extra_skills:
+                # Case 2: Named agent + extra skills -> ad-hoc agent with all skills
+                adhoc_agent_json = json.dumps(
+                    {
+                        "meridian-adhoc": {
+                            "prompt": profile.body.strip(),
+                            "skills": list(defaults.skills),
+                        }
+                    }
+                )
+                agent_for_params = "meridian-adhoc"
+            # else Case 1: Named agent, no extra skills -> native passthrough (agent_for_params already set)
+        elif defaults.skills:
+            # Case 3: No agent, just skills -> ad-hoc agent with skills only
+            adhoc_agent_json = json.dumps(
+                {
+                    "meridian-adhoc": {
+                        "skills": list(defaults.skills),
+                    }
+                }
+            )
+            agent_for_params = "meridian-adhoc"
+        # else Case 4: No agent, no skills -> bare prompt (agent_for_params stays None)
+
     composed_prompt = compose_run_prompt_text(
-        skills=loaded_skills,
+        skills=() if native_agents else loaded_skills,
         references=loaded_references,
         user_prompt=payload.prompt,
         report_path=payload.report_path,
-        agent_body=defaults.agent_body,
+        agent_body="" if native_agents else defaults.agent_body,
         model_guidance=model_guidance,
         template_variables=parsed_template_vars,
     )
-
-    harness, route_warning = runtime_view.harness_registry.route(defaults.model)
-    requested_session_id = (payload.continue_session_id or "").strip()
+    requested_harness_session_id = (payload.continue_harness_session_id or "").strip()
     requested_harness = (payload.continue_harness or "").strip()
-    resolved_continue_session_id: str | None = None
+    resolved_continue_harness_session_id: str | None = None
     resolved_continue_fork = False
     continuation_warning: str | None = None
-    if requested_session_id:
+    if requested_harness_session_id:
         if requested_harness and requested_harness != str(harness.id):
             continuation_warning = (
                 "Continuation session ignored because target harness differs from source run."
@@ -332,7 +371,7 @@ def _build_create_payload(
                 f"Harness '{harness.id}' does not support session resume; starting fresh."
             )
         else:
-            resolved_continue_session_id = requested_session_id
+            resolved_continue_harness_session_id = requested_harness_session_id
             if payload.continue_fork:
                 if harness.capabilities.supports_session_fork:
                     resolved_continue_fork = True
@@ -394,10 +433,11 @@ def _build_create_payload(
                 prompt=composed_prompt,
                 model=ModelId(defaults.model),
                 skills=tuple(skill.name for skill in loaded_skills),
-                agent=defaults.agent_name,
+                agent=agent_for_params,
+                adhoc_agent_json=adhoc_agent_json,
                 repo_root=runtime_view.repo_root.as_posix(),
                 mcp_tools=profile.mcp_tools if profile is not None else (),
-                continue_session_id=resolved_continue_session_id,
+                continue_harness_session_id=resolved_continue_harness_session_id,
                 continue_fork=resolved_continue_fork,
             ),
             resolver,
@@ -414,7 +454,7 @@ def _build_create_payload(
         template_vars=parsed_template_vars,
         report_path=Path(payload.report_path).expanduser().resolve().as_posix(),
         mcp_tools=profile.mcp_tools if profile is not None else (),
-        agent_name=defaults.agent_name,
+        agent_name=agent_for_params,
         cli_command=preview_command,
         permission_config=permission_config,
         permission_resolver=resolver,
@@ -422,6 +462,6 @@ def _build_create_payload(
         budget=budget,
         guardrails=tuple(path.as_posix() for path in guardrails),
         secrets=secrets,
-        continue_session_id=resolved_continue_session_id,
+        continue_harness_session_id=resolved_continue_harness_session_id,
         continue_fork=resolved_continue_fork,
     )

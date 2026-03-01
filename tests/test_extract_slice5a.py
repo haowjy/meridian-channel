@@ -120,6 +120,6 @@ def test_enrich_finalize_materializes_report_from_assistant_message(tmp_path: Pa
     assert enrichment.report_path is not None
     assert enrichment.report_path.exists()
     assert "final result" in enrichment.report_path.read_text(encoding="utf-8")
-    assert enrichment.session_id == "sess-42"
+    assert enrichment.harness_session_id == "sess-42"
     assert enrichment.files_touched == ("src/chapters/ch03.md",)
     assert enrichment.output_is_empty is False

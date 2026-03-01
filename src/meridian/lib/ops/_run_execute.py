@@ -66,7 +66,7 @@ class _PreparedCreateLike(Protocol):
     budget: Budget | None
     guardrails: tuple[str, ...]
     secrets: tuple[SecretSpec, ...]
-    continue_session_id: str | None
+    continue_harness_session_id: str | None
     continue_fork: bool
 
 
@@ -148,10 +148,10 @@ def _secrets_from_env() -> tuple[SecretSpec, ...]:
     return tuple(parsed)
 
 
-def _resolve_session_id() -> str:
-    session_id = os.getenv("MERIDIAN_SESSION_ID", "").strip()
-    if session_id:
-        return session_id
+def _resolve_chat_id() -> str:
+    chat_id = os.getenv("MERIDIAN_CHAT_ID", "").strip()
+    if chat_id:
+        return chat_id
     return "c0"
 
 
@@ -191,7 +191,7 @@ async def _execute_existing_run(
     budget: Budget | None = None,
     guardrails: tuple[str, ...] = (),
     secrets: tuple[SecretSpec, ...] = (),
-    continue_session_id: str | None = None,
+    continue_harness_session_id: str | None = None,
     continue_fork: bool = False,
     space_id_hint: str | None = None,
 ) -> int:
@@ -246,7 +246,7 @@ async def _execute_existing_run(
         guardrails=tuple(Path(item) for item in guardrails),
         guardrail_timeout_seconds=runtime.config.guardrail_timeout_seconds,
         secrets=secrets,
-        continue_session_id=continue_session_id,
+        continue_harness_session_id=continue_harness_session_id,
         continue_fork=continue_fork,
     )
 
@@ -265,7 +265,7 @@ def _build_background_worker_command(
     cli_permission_override: bool,
     budget: Budget | None,
     guardrails: tuple[str, ...],
-    continue_session_id: str | None,
+    continue_harness_session_id: str | None,
     continue_fork: bool,
 ) -> tuple[str, ...]:
     command: list[str] = [
@@ -304,8 +304,8 @@ def _build_background_worker_command(
         command.append("--cli-permission-override")
     for guardrail in guardrails:
         command.extend(["--guardrail", guardrail])
-    if continue_session_id is not None and continue_session_id.strip():
-        command.extend(["--continue-session-id", continue_session_id.strip()])
+    if continue_harness_session_id is not None and continue_harness_session_id.strip():
+        command.extend(["--continue-harness-session-id", continue_harness_session_id.strip()])
     if continue_fork:
         command.append("--continue-fork")
     return tuple(command)
@@ -322,12 +322,12 @@ def _execute_run_background(
     space_id, space_dir = _resolve_space(runtime.repo_root, payload.space)
     run_id = run_store.start_run(
         space_dir,
-        session_id=_resolve_session_id(),
+        chat_id=_resolve_chat_id(),
         model=prepared.model,
         agent=prepared.agent_name or "",
         harness=prepared.harness_id,
         prompt=prepared.composed_prompt,
-        harness_session_id=prepared.continue_session_id,
+        harness_session_id=prepared.continue_harness_session_id,
     )
     run = Run(
         run_id=RunId(run_id),
@@ -363,7 +363,7 @@ def _execute_run_background(
         cli_permission_override=payload.permission_tier is not None,
         budget=prepared.budget,
         guardrails=prepared.guardrails,
-        continue_session_id=prepared.continue_session_id,
+        continue_harness_session_id=prepared.continue_harness_session_id,
         continue_fork=prepared.continue_fork,
     )
     log_dir = resolve_run_log_dir(runtime.repo_root, run.run_id, run.space_id)
@@ -449,12 +449,12 @@ def _execute_run_blocking(
     space_id, space_dir = _resolve_space(runtime.repo_root, payload.space)
     run_id = run_store.start_run(
         space_dir,
-        session_id=_resolve_session_id(),
+        chat_id=_resolve_chat_id(),
         model=prepared.model,
         agent=prepared.agent_name or "",
         harness=prepared.harness_id,
         prompt=prepared.composed_prompt,
-        harness_session_id=prepared.continue_session_id,
+        harness_session_id=prepared.continue_harness_session_id,
     )
     run = Run(
         run_id=RunId(run_id),
@@ -517,7 +517,7 @@ def _execute_run_blocking(
             guardrails=tuple(Path(item) for item in prepared.guardrails),
             guardrail_timeout_seconds=runtime.config.guardrail_timeout_seconds,
             secrets=prepared.secrets,
-            continue_session_id=prepared.continue_session_id,
+            continue_harness_session_id=prepared.continue_harness_session_id,
             continue_fork=prepared.continue_fork,
             event_observer=event_observer,
             stream_stdout_to_terminal=stream_stdout_to_terminal,
@@ -584,7 +584,7 @@ async def _execute_run_non_blocking(
     budget: Budget | None,
     guardrails: tuple[str, ...],
     secrets: tuple[SecretSpec, ...],
-    continue_session_id: str | None,
+    continue_harness_session_id: str | None,
     continue_fork: bool,
 ) -> None:
     _ = await _execute_existing_run(
@@ -600,7 +600,7 @@ async def _execute_run_non_blocking(
         budget=budget,
         guardrails=guardrails,
         secrets=secrets,
-        continue_session_id=continue_session_id,
+        continue_harness_session_id=continue_harness_session_id,
         continue_fork=continue_fork,
     )
 
@@ -637,7 +637,7 @@ def _build_background_worker_parser() -> argparse.ArgumentParser:
     parser.add_argument("--budget-per-space-usd", type=float, default=None)
     parser.add_argument("--guardrail", action="append", default=[])
     parser.add_argument("--cli-permission-override", action="store_true")
-    parser.add_argument("--continue-session-id", default=None)
+    parser.add_argument("--continue-harness-session-id", default=None)
     parser.add_argument("--continue-fork", action="store_true")
     return parser
 
@@ -673,7 +673,7 @@ def _background_worker_main(argv: Sequence[str] | None = None) -> int:
             budget=budget,
             guardrails=tuple(str(item) for item in parsed.guardrail),
             secrets=secrets,
-            continue_session_id=cast("str | None", parsed.continue_session_id),
+            continue_harness_session_id=cast("str | None", parsed.continue_harness_session_id),
             continue_fork=bool(parsed.continue_fork),
         )
     )

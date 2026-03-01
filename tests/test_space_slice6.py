@@ -159,7 +159,7 @@ def test_run_continue_works_for_running_failed_and_succeeded(
 
     run_id = run_store.start_run(
         space_dir,
-        session_id="c1",
+        chat_id="c1",
         model="gpt-5.3-codex",
         agent="coder",
         harness="codex",
@@ -202,7 +202,7 @@ def test_run_continue_works_for_running_failed_and_succeeded(
     assert forwarded.prompt == "original prompt"
     assert forwarded.model == "gpt-5.3-codex"
     assert forwarded.continue_harness == "codex"
-    assert forwarded.continue_session_id == "sess-source"
+    assert forwarded.continue_harness_session_id == "sess-source"
     assert forwarded.continue_fork is True
 
 
@@ -215,7 +215,7 @@ def test_run_create_dry_run_fallbacks_for_harness_mismatch_and_missing_fork_supp
             model="gpt-5.3-codex",
             dry_run=True,
             repo_root=tmp_path.as_posix(),
-            continue_session_id="sess-a",
+            continue_harness_session_id="sess-a",
             continue_harness="claude",
             continue_fork=True,
         )
@@ -231,7 +231,7 @@ def test_run_create_dry_run_fallbacks_for_harness_mismatch_and_missing_fork_supp
             model="gpt-5.3-codex",
             dry_run=True,
             repo_root=tmp_path.as_posix(),
-            continue_session_id="sess-b",
+            continue_harness_session_id="sess-b",
             continue_harness="codex",
             continue_fork=True,
         )
@@ -248,7 +248,7 @@ def test_doctor_rebuilds_stale_state_and_orphan_runs(tmp_path: Path) -> None:
 
     _ = run_store.start_run(
         space_dir,
-        session_id="c1",
+        chat_id="c1",
         model="gpt-5.3-codex",
         agent="coder",
         harness="codex",

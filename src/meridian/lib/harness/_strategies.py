@@ -41,7 +41,9 @@ class PromptMode(StrEnum):
 type StrategyMap = dict[str, FlagStrategy]
 
 
-_SKIP_FIELDS = frozenset({"prompt", "extra_args", "repo_root", "mcp_tools"})
+_SKIP_FIELDS = frozenset(
+    {"prompt", "extra_args", "repo_root", "mcp_tools", "adhoc_agent_json"}
+)
 
 
 def _append_cli_flag(*, args: list[str], flag: str, value: object) -> None:

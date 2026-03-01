@@ -26,6 +26,7 @@ class HarnessCapabilities:
     supports_session_resume: bool = False
     supports_session_fork: bool = False
     supports_native_skills: bool = False
+    supports_native_agents: bool = False
     supports_programmatic_tools: bool = False
 
 
@@ -37,10 +38,12 @@ class RunParams:
     model: ModelId
     skills: tuple[str, ...] = ()
     agent: str | None = None
+    # Pre-built --agents JSON for Claude ad-hoc agent passthrough. Empty string when not used.
+    adhoc_agent_json: str = ""
     extra_args: tuple[str, ...] = ()
     repo_root: str | None = None
     mcp_tools: tuple[str, ...] = ()
-    continue_session_id: str | None = None
+    continue_harness_session_id: str | None = None
     continue_fork: bool = False
 
 
@@ -71,7 +74,7 @@ class RunResult:
     status: str
     output: str
     usage: TokenUsage = field(default_factory=TokenUsage)
-    session_id: str | None = None
+    harness_session_id: str | None = None
     raw_response: dict[str, object] | None = None
 
 

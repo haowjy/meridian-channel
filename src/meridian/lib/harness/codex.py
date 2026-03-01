@@ -37,7 +37,7 @@ class CodexAdapter:
         "model": FlagStrategy(effect=FlagEffect.CLI_FLAG, cli_flag="--model"),
         "agent": FlagStrategy(effect=FlagEffect.DROP),
         "skills": FlagStrategy(effect=FlagEffect.DROP),
-        "continue_session_id": FlagStrategy(effect=FlagEffect.DROP),
+        "continue_harness_session_id": FlagStrategy(effect=FlagEffect.DROP),
         "continue_fork": FlagStrategy(effect=FlagEffect.DROP),
     }
     PROMPT_MODE: ClassVar[PromptMode] = PromptMode.POSITIONAL
@@ -66,10 +66,10 @@ class CodexAdapter:
 
     def build_command(self, run: RunParams, perms: PermissionResolver) -> list[str]:
         mcp_config = self.mcp_config(run)
-        session_id = (run.continue_session_id or "").strip()
+        harness_session_id = (run.continue_harness_session_id or "").strip()
         base_command = (
-            ("codex", "exec", "resume", session_id)
-            if session_id
+            ("codex", "exec", "resume", harness_session_id)
+            if harness_session_id
             else self.BASE_COMMAND
         )
         return build_harness_command(

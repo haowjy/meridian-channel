@@ -23,7 +23,7 @@ _TOKENS_FILENAME = "tokens.json"
 @dataclass(frozen=True, slots=True)
 class FinalizeExtraction:
     usage: TokenUsage
-    session_id: str | None
+    harness_session_id: str | None
     files_touched: tuple[str, ...]
     report_path: Path | None
     report: ExtractedReport
@@ -99,7 +99,7 @@ def enrich_finalize(
     """Run all extraction steps and return one enriched finalization payload."""
 
     usage = adapter.extract_usage(artifacts, run_id)
-    session_id = adapter.extract_session_id(artifacts, run_id)
+    harness_session_id = adapter.extract_session_id(artifacts, run_id)
     files_touched = extract_files_touched(artifacts, run_id)
     report = extract_or_fallback_report(artifacts, run_id)
     report_path = _persist_report(
@@ -112,7 +112,7 @@ def enrich_finalize(
 
     return FinalizeExtraction(
         usage=usage,
-        session_id=session_id,
+        harness_session_id=harness_session_id,
         files_touched=files_touched,
         report_path=report_path,
         report=report,

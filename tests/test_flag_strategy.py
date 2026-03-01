@@ -29,7 +29,7 @@ def _sample_run(*, model: str) -> RunParams:
 
 
 def test_every_run_params_field_is_mapped_for_each_adapter() -> None:
-    skip = {"prompt", "extra_args", "repo_root", "mcp_tools"}
+    skip = {"prompt", "extra_args", "repo_root", "mcp_tools", "adhoc_agent_json"}
     required = {field.name for field in dataclasses.fields(RunParams)} - skip
     adapter_classes = (ClaudeAdapter, CodexAdapter, OpenCodeAdapter)
 
@@ -39,7 +39,7 @@ def test_every_run_params_field_is_mapped_for_each_adapter() -> None:
         assert not missing, f"{adapter_class.__name__} missing strategy for {sorted(missing)}"
 
 
-def test_claude_build_command_drops_agent_and_uses_prompt_flag() -> None:
+def test_claude_build_command_passes_agent_natively() -> None:
     command = ClaudeAdapter().build_command(
         _sample_run(model="claude-opus-4-6"),
         StubPermissionResolver(),
@@ -51,12 +51,32 @@ def test_claude_build_command_drops_agent_and_uses_prompt_flag() -> None:
         "Implement feature X.",
         "--model",
         "claude-opus-4-6",
+        "--agent",
+        "reviewer",
         "--perm",
         "claude",
         "--json",
     ]
-    assert "--agent" not in command
     assert "--skills" not in command
+
+
+def test_claude_build_command_adhoc_agent_json() -> None:
+    import json as _json
+
+    adhoc = _json.dumps({"meridian-adhoc": {"skills": ["review"]}})
+    command = ClaudeAdapter().build_command(
+        RunParams(
+            prompt="Review code.",
+            model=ModelId("claude-opus-4-6"),
+            agent="meridian-adhoc",
+            adhoc_agent_json=adhoc,
+        ),
+        StubPermissionResolver(),
+    )
+    assert "--agent" in command
+    assert command[command.index("--agent") + 1] == "meridian-adhoc"
+    assert "--agents" in command
+    assert command[command.index("--agents") + 1] == adhoc
 
 
 def test_codex_build_command_drops_agent_and_uses_positional_prompt() -> None:
@@ -84,7 +104,7 @@ def test_claude_build_command_resume_and_fork() -> None:
         RunParams(
             prompt="Follow up.",
             model=ModelId("claude-opus-4-6"),
-            continue_session_id="session-123",
+            continue_harness_session_id="session-123",
             continue_fork=True,
         ),
         StubPermissionResolver(),
@@ -100,7 +120,7 @@ def test_codex_build_command_uses_resume_subcommand_when_session_available() -> 
         RunParams(
             prompt="Retry this task.",
             model=ModelId("gpt-5.3-codex"),
-            continue_session_id="session-456",
+            continue_harness_session_id="session-456",
             continue_fork=True,
         ),
         StubPermissionResolver(),
@@ -136,7 +156,7 @@ def test_opencode_build_command_resume_and_fork() -> None:
         RunParams(
             prompt="Retry this task.",
             model=ModelId("opencode-gpt-5.3-codex"),
-            continue_session_id="session-789",
+            continue_harness_session_id="session-789",
             continue_fork=True,
         ),
         StubPermissionResolver(),

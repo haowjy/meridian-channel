@@ -38,7 +38,7 @@ class RunCreateInput:
     budget_per_space_usd: float | None = None
     guardrails: tuple[str, ...] = ()
     secrets: tuple[str, ...] = ()
-    continue_session_id: str | None = None
+    continue_harness_session_id: str | None = None
     continue_harness: str | None = None
     continue_fork: bool = False
 

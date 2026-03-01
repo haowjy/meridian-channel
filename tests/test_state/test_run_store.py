@@ -16,7 +16,7 @@ def test_start_and_finalize_run_round_trip(tmp_path):
 
     run_id = start_run(
         space_dir,
-        session_id="c1",
+        chat_id="c1",
         model="gpt-5.3-codex",
         agent="coder",
         harness="codex",
@@ -39,7 +39,7 @@ def test_start_and_finalize_run_round_trip(tmp_path):
     assert loaded.id == "r1"
     assert loaded.status == "succeeded"
     assert loaded.model == "gpt-5.3-codex"
-    assert loaded.session_id == "c1"
+    assert loaded.chat_id == "c1"
     assert loaded.exit_code == 0
     assert loaded.duration_secs == 12.5
     assert loaded.total_cost_usd == 0.05
@@ -51,7 +51,7 @@ def test_start_run_writes_schema_version(tmp_path):
     space_dir = _space_dir(tmp_path)
     start_run(
         space_dir,
-        session_id="c1",
+        chat_id="c1",
         model="claude-sonnet-4-6",
         agent="coder",
         harness="claude",
@@ -69,7 +69,7 @@ def test_list_runs_filters_by_model_and_status(tmp_path):
     space_dir = _space_dir(tmp_path)
     r1 = start_run(
         space_dir,
-        session_id="c1",
+        chat_id="c1",
         model="gpt-5.3-codex",
         agent="coder",
         harness="codex",
@@ -77,7 +77,7 @@ def test_list_runs_filters_by_model_and_status(tmp_path):
     )
     r2 = start_run(
         space_dir,
-        session_id="c1",
+        chat_id="c1",
         model="claude-sonnet-4-6",
         agent="coder",
         harness="claude",
@@ -103,7 +103,7 @@ def test_list_runs_skips_truncated_trailing_json(tmp_path):
                     "v": 1,
                     "event": "start",
                     "id": "r1",
-                    "session_id": "c1",
+                    "chat_id": "c1",
                     "model": "gpt-5.3-codex",
                     "agent": "coder",
                     "harness": "codex",
@@ -127,7 +127,7 @@ def test_run_stats_aggregates_model_status_cost_duration_and_tokens(tmp_path):
 
     r1 = start_run(
         space_dir,
-        session_id="c1",
+        chat_id="c1",
         model="gpt-5.3-codex",
         agent="coder",
         harness="codex",
@@ -135,7 +135,7 @@ def test_run_stats_aggregates_model_status_cost_duration_and_tokens(tmp_path):
     )
     r2 = start_run(
         space_dir,
-        session_id="c2",
+        chat_id="c2",
         model="claude-sonnet-4-6",
         agent="reviewer",
         harness="claude",

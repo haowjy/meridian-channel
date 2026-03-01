@@ -24,7 +24,7 @@ class RunRecord:
     """Derived run state assembled from run JSONL events."""
 
     id: str
-    session_id: str | None
+    chat_id: str | None
     model: str | None
     agent: str | None
     harness: str | None
@@ -90,7 +90,7 @@ def _read_events(path: Path) -> list[JSONRow]:
 def start_run(
     space_dir: Path,
     *,
-    session_id: str,
+    chat_id: str,
     model: str,
     agent: str,
     harness: str,
@@ -110,7 +110,7 @@ def start_run(
             "v": 1,
             "event": "start",
             "id": str(resolved_run_id),
-            "session_id": session_id,
+            "chat_id": chat_id,
             "model": model,
             "agent": agent,
             "harness": harness,
@@ -166,7 +166,7 @@ def finalize_run(
 def _empty_record(run_id: str) -> RunRecord:
     return RunRecord(
         id=run_id,
-        session_id=None,
+        chat_id=None,
         model=None,
         agent=None,
         harness=None,
@@ -197,7 +197,7 @@ def _record_from_events(events: list[JSONRow]) -> dict[str, RunRecord]:
         if event_type == "start":
             records[run_id] = RunRecord(
                 id=run_id,
-                session_id=str(event["session_id"]) if "session_id" in event else current.session_id,
+                chat_id=str(event["chat_id"]) if "chat_id" in event else current.chat_id,
                 model=str(event["model"]) if "model" in event else current.model,
                 agent=str(event["agent"]) if "agent" in event else current.agent,
                 harness=str(event["harness"]) if "harness" in event else current.harness,
@@ -242,7 +242,7 @@ def _record_from_events(events: list[JSONRow]) -> dict[str, RunRecord]:
 
             records[run_id] = RunRecord(
                 id=run_id,
-                session_id=current.session_id,
+                chat_id=current.chat_id,
                 model=current.model,
                 agent=current.agent,
                 harness=current.harness,

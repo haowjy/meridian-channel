@@ -183,7 +183,7 @@ def run_stats_sync(payload: RunStatsInput) -> RunStatsOutput:
     runs = run_store.list_runs(space_dir)
     if payload.session is not None and payload.session.strip():
         wanted_session = payload.session.strip()
-        runs = [row for row in runs if row.session_id == wanted_session]
+        runs = [row for row in runs if row.chat_id == wanted_session]
 
     models: dict[str, int] = {}
     total_duration_secs = 0.0
@@ -381,7 +381,7 @@ def run_continue_sync(payload: RunContinueInput) -> RunActionOutput:
         model=_model_for_follow_up(source_run, payload.model),
         repo_root=payload.repo_root,
         timeout_secs=payload.timeout_secs,
-        continue_session_id=source_session_id,
+        continue_harness_session_id=source_session_id,
         continue_harness=source_harness,
         continue_fork=payload.fork,
     )

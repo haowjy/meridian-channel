@@ -14,7 +14,7 @@ from meridian.lib.domain import PinnedFile, Run, Space, Span, WorkflowEvent
 from meridian.lib.space.session_store import get_last_session, start_session, stop_session
 from meridian.lib.space.space_file import create_space, get_space, update_space_status
 from meridian.lib.state.artifact_store import InMemoryStore, LocalStore, make_artifact_key
-from meridian.lib.state.id_gen import next_run_id, next_session_id, next_space_id
+from meridian.lib.state.id_gen import next_run_id, next_chat_id, next_space_id
 from meridian.lib.state.run_store import finalize_run, get_run, list_runs, run_stats, start_run
 from meridian.lib.state.paths import resolve_space_dir
 from meridian.lib.types import RunId, SpanId, TraceId
@@ -27,7 +27,7 @@ def _write_start_and_finalize(repo_root: str, space_id: str, idx: int) -> None:
     start_run(
         space_dir,
         run_id=run_id,
-        session_id=f"c{idx}",
+        chat_id=f"c{idx}",
         model="gpt-5.3-codex",
         agent="coder",
         harness="codex",
@@ -53,7 +53,7 @@ def test_space_and_run_crud_with_file_backed_stores(tmp_path: Path) -> None:
 
     run_1 = start_run(
         space_dir,
-        session_id="c1",
+        chat_id="c1",
         model="claude-opus-4-6",
         agent="planner",
         harness="claude",
@@ -61,7 +61,7 @@ def test_space_and_run_crud_with_file_backed_stores(tmp_path: Path) -> None:
     )
     run_2 = start_run(
         space_dir,
-        session_id="c1",
+        chat_id="c1",
         model="gpt-5.3-codex",
         agent="coder",
         harness="codex",
@@ -100,7 +100,7 @@ def test_run_stats_aggregate_duration_cost_and_tokens(tmp_path: Path) -> None:
 
     r1 = start_run(
         space_dir,
-        session_id="c1",
+        chat_id="c1",
         model="gpt-5.3-codex",
         agent="coder",
         harness="codex",
@@ -108,7 +108,7 @@ def test_run_stats_aggregate_duration_cost_and_tokens(tmp_path: Path) -> None:
     )
     r2 = start_run(
         space_dir,
-        session_id="c2",
+        chat_id="c2",
         model="claude-sonnet-4-6",
         agent="reviewer",
         harness="claude",
@@ -150,7 +150,7 @@ def test_session_store_round_trip(tmp_path: Path) -> None:
     space = create_space(tmp_path, name="sessions")
     space_dir = resolve_space_dir(tmp_path, space.id)
 
-    session_id = start_session(
+    chat_id = start_session(
         space_dir,
         harness="codex",
         harness_session_id="sess-1",
@@ -160,11 +160,11 @@ def test_session_store_round_trip(tmp_path: Path) -> None:
 
     last = get_last_session(space_dir)
     assert last is not None
-    assert last.session_id == session_id
+    assert last.chat_id == chat_id
     assert last.harness_session_id == "sess-1"
     assert last.stopped_at is None
 
-    stop_session(space_dir, session_id)
+    stop_session(space_dir, chat_id)
     stopped = get_last_session(space_dir)
     assert stopped is not None
     assert stopped.stopped_at is not None
@@ -203,11 +203,11 @@ def test_id_generation_uses_s_r_c_prefixes(tmp_path: Path) -> None:
     space_dir = resolve_space_dir(tmp_path, space.id)
 
     assert str(next_run_id(space_dir)) == "r1"
-    assert next_session_id(space_dir) == "c1"
+    assert next_chat_id(space_dir) == "c1"
 
     start_run(
         space_dir,
-        session_id="c1",
+        chat_id="c1",
         model="gpt-5.3-codex",
         agent="coder",
         harness="codex",

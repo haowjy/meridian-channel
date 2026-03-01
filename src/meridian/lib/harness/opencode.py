@@ -51,7 +51,7 @@ class OpenCodeAdapter:
         "model": FlagStrategy(effect=FlagEffect.TRANSFORM, transform=_opencode_model_transform),
         "agent": FlagStrategy(effect=FlagEffect.DROP),
         "skills": FlagStrategy(effect=FlagEffect.DROP),
-        "continue_session_id": FlagStrategy(effect=FlagEffect.DROP),
+        "continue_harness_session_id": FlagStrategy(effect=FlagEffect.DROP),
         "continue_fork": FlagStrategy(effect=FlagEffect.DROP),
     }
     PROMPT_MODE: ClassVar[PromptMode] = PromptMode.POSITIONAL
@@ -90,10 +90,10 @@ class OpenCodeAdapter:
             harness_id=self.id,
             mcp_config=mcp_config,
         )
-        session_id = (run.continue_session_id or "").strip()
-        if not session_id:
+        harness_session_id = (run.continue_harness_session_id or "").strip()
+        if not harness_session_id:
             return command
-        command.extend(["--session", session_id])
+        command.extend(["--session", harness_session_id])
         if run.continue_fork:
             command.append("--fork")
         return command

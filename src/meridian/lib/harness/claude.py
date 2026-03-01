@@ -108,9 +108,9 @@ class ClaudeAdapter:
 
     STRATEGIES: ClassVar[StrategyMap] = {
         "model": FlagStrategy(effect=FlagEffect.CLI_FLAG, cli_flag="--model"),
-        "agent": FlagStrategy(effect=FlagEffect.DROP),
+        "agent": FlagStrategy(effect=FlagEffect.CLI_FLAG, cli_flag="--agent"),
         "skills": FlagStrategy(effect=FlagEffect.DROP),
-        "continue_session_id": FlagStrategy(effect=FlagEffect.DROP),
+        "continue_harness_session_id": FlagStrategy(effect=FlagEffect.DROP),
         "continue_fork": FlagStrategy(effect=FlagEffect.DROP),
     }
     PROMPT_MODE: ClassVar[PromptMode] = PromptMode.FLAG
@@ -135,6 +135,7 @@ class ClaudeAdapter:
             supports_session_resume=True,
             supports_session_fork=True,
             supports_native_skills=True,
+            supports_native_agents=True,
             supports_programmatic_tools=False,
         )
 
@@ -149,10 +150,14 @@ class ClaudeAdapter:
             harness_id=self.id,
             mcp_config=mcp_config,
         )
-        session_id = (run.continue_session_id or "").strip()
-        if not session_id:
+        # Ad-hoc agent JSON for native skill loading via Claude --agents flag
+        adhoc_json = run.adhoc_agent_json.strip()
+        if adhoc_json:
+            command.extend(["--agents", adhoc_json])
+        harness_session_id = (run.continue_harness_session_id or "").strip()
+        if not harness_session_id:
             return command
-        command.extend(["--resume", session_id])
+        command.extend(["--resume", harness_session_id])
         if run.continue_fork:
             command.append("--fork-session")
         return command
