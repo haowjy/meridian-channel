@@ -12,7 +12,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 
 from meridian.lib.config._paths import resolve_repo_root
-from meridian.lib.config.settings import MeridianConfig, load_config
+from meridian.lib.config.settings import (
+    MeridianConfig,
+    PrimaryConfig,
+    SearchPathConfig,
+    load_config,
+)
 from meridian.lib.ops.registry import OperationSpec, operation
 from meridian.lib.serialization import to_jsonable
 from meridian.lib.state.paths import resolve_state_paths
@@ -549,29 +554,73 @@ def _format_value_for_text(value: object) -> str:
 def _scaffold_template() -> str:
     defaults = _default_values()
     output_show = defaults["output.show"]
+    output_verbosity = defaults["output.verbosity"]
+    primary_defaults = PrimaryConfig()
+    search_path_defaults = SearchPathConfig()
 
     lines = [
-        "# Meridian operational configuration.",
-        "# Uncomment keys to override built-in defaults.",
+        "# Meridian configuration.",
+        "# All values shown are built-in defaults. Uncomment to override.",
+        "# Environment variables (MERIDIAN_*) take precedence over file values.",
         "",
+        "# -- Execution defaults -----------------------------------------------------",
         "[defaults]",
+        "# Maximum agent nesting depth (int).",
         f"# max_depth = {defaults['defaults.max_depth']}",
+        "# Retry attempts per failed run-agent call (int).",
         f"# max_retries = {defaults['defaults.max_retries']}",
+        "# Delay multiplier between retries in seconds (float).",
         f"# retry_backoff_seconds = {defaults['defaults.retry_backoff_seconds']}",
+        "# Profile name for the primary agent (str).",
         f"# primary_agent = {_toml_literal(cast('str', defaults['defaults.primary_agent']))}",
+        "# Profile name for the default non-primary agent (str).",
         f"# agent = {_toml_literal(cast('str', defaults['defaults.agent']))}",
         "",
+        "# -- Timeout behavior -------------------------------------------------------",
         "[timeouts]",
+        "# Grace period before force-killing processes (float seconds).",
         f"# kill_grace_seconds = {defaults['timeouts.kill_grace_seconds']}",
+        "# Max seconds to wait for guardrail checks (float seconds).",
         f"# guardrail_seconds = {defaults['timeouts.guardrail_seconds']}",
+        "# Max seconds to wait on run completion operations (float seconds).",
         f"# wait_seconds = {defaults['timeouts.wait_seconds']}",
         "",
+        "# -- Permission defaults ----------------------------------------------------",
         "[permissions]",
+        "# Default permission tier for non-primary sessions (str; valid: read-only,",
+        "# space-write, full-access; 'danger' is not allowed in config).",
         f"# default_tier = {_toml_literal(cast('str', defaults['permissions.default_tier']))}",
         "",
+        "# -- Primary agent defaults -------------------------------------------------",
+        "[primary]",
+        "# Context compaction threshold for the primary agent (int 1-100).",
+        f"# autocompact_pct = {primary_defaults.autocompact_pct}",
+        "# Permission tier for primary sessions (str; valid: read-only,",
+        "# space-write, full-access; 'danger' is not allowed in config).",
+        f"# permission_tier = {_toml_literal(primary_defaults.permission_tier)}",
+        "",
+        "# -- Output streaming -------------------------------------------------------",
         "[output]",
+        "# Event categories shown while streaming output (array[str]).",
         f"# show = {_toml_literal(cast('tuple[str, ...]', output_show))}",
-        "# verbosity = \"normal\"",
+        "# Output verbosity preset (str; valid: quiet, normal, verbose, debug).",
+        (
+            "# verbosity = "
+            f"{_toml_literal(cast('str', output_verbosity))}"
+            if isinstance(output_verbosity, str)
+            else "# verbosity = \"normal\"  # example override; default is unset"
+        ),
+        "",
+        "# -- Profile and skill discovery paths -------------------------------------",
+        "[search_paths]",
+        "# Agent profile search directories (array[str]; first match wins).",
+        f"# agents = {_toml_literal(search_path_defaults.agents)}",
+        "# Skill definition search directories (array[str]).",
+        f"# skills = {_toml_literal(search_path_defaults.skills)}",
+        "# Global/user-level agent profile directories (array[str]).",
+        f"# global_agents = {_toml_literal(search_path_defaults.global_agents)}",
+        "# Global/user-level skill directories (array[str]).",
+        f"# global_skills = {_toml_literal(search_path_defaults.global_skills)}",
         "",
     ]
     return "\n".join(lines)
