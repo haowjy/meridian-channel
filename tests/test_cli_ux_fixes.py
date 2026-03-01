@@ -110,7 +110,12 @@ def test_bug8_unknown_model_fails_fast_with_clean_error(
     assert result.returncode != 0
     assert "Unknown model 'nonexistent-model'" in result.stderr
     assert "Traceback" not in result.stderr
-    assert result.stdout == ""
+    # In JSON mode, a structured error is also emitted to stdout for agent callers.
+    import json as _json
+    if result.stdout.strip():
+        error_obj = _json.loads(result.stdout.strip())
+        assert "error" in error_obj
+        assert "Unknown model" in error_obj["error"]
 
 
 def test_ol10_unknown_model_error_includes_available_models_and_suggestion(

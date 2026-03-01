@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
@@ -485,6 +486,20 @@ def _operation_error_message(exc: Exception) -> str:
     return exc.__class__.__name__
 
 
+
+def _emit_error(message: str, *, exit_code: int = 1) -> None:
+    """Emit an error in the current output format and exit.
+
+    In JSON/porcelain mode, emits a structured error object to stdout so
+    callers (especially agent-mode subprocesses) can parse it reliably.
+    Always prints human-readable text to stderr for logs/humans.
+    """
+    print(f"error: {message}", file=sys.stderr)
+    opts = _GLOBAL_OPTIONS.get()
+    if opts is not None and opts.output.format == "json":
+        print(json.dumps({"error": message, "exit_code": exit_code}))
+    raise SystemExit(exit_code)
+
 def _first_positional_token(argv: Sequence[str]) -> str | None:
     for token in argv:
         if token == "--":
@@ -575,11 +590,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         try:
             app(cleaned_args)
         except TimeoutError as exc:
-            print(f"error: {_operation_error_message(exc)}", file=sys.stderr)
-            raise SystemExit(124) from None
+            _emit_error(_operation_error_message(exc), exit_code=124)
         except (KeyError, ValueError, FileNotFoundError, OSError) as exc:
-            print(f"error: {_operation_error_message(exc)}", file=sys.stderr)
-            raise SystemExit(1) from None
+            _emit_error(_operation_error_message(exc))
     finally:
         if options.config_file is not None:
             if prior_user_config is None:
