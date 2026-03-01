@@ -175,7 +175,7 @@ def _run_create(
     except KeyError as exc:
         message = str(exc.args[0]) if exc.args else "Unknown skills."
         result = RunActionOutput(
-            command="run.create",
+            command="run.spawn",
             status="failed",
             error="unknown_skills",
             message=message,
@@ -346,7 +346,7 @@ def register_run_commands(app: App, emit: Emitter) -> tuple[set[str], dict[str, 
     """Register run CLI commands using registry metadata as source of truth."""
 
     handlers: dict[str, Callable[[], Callable[..., None]]] = {
-        "run.create": lambda: partial(_run_create, emit),
+        "run.spawn": lambda: partial(_run_create, emit),
         "run.list": lambda: partial(_run_list, emit),
         "run.stats": lambda: partial(_run_stats, emit),
         "run.show": lambda: partial(_run_show, emit),

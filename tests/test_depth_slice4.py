@@ -80,7 +80,7 @@ async def test_run_create_async_refuses_when_depth_limit_reached(
 
 
 @pytest.mark.asyncio
-async def test_mcp_run_create_refuses_when_depth_limit_reached(
+async def test_mcp_run_spawn_refuses_when_depth_limit_reached(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -91,7 +91,7 @@ async def test_mcp_run_create_refuses_when_depth_limit_reached(
     monkeypatch.setenv("MERIDIAN_MAX_DEPTH", "3")
 
     raw = await mcp.call_tool(
-        "run_create",
+        "run_spawn",
         {"prompt": "blocked-mcp", "model": "gpt-5.3-codex"},
     )
     payload = _payload_from_result(raw)
@@ -110,7 +110,7 @@ def test_run_child_env_increments_depth(monkeypatch: pytest.MonkeyPatch) -> None
     assert env["MERIDIAN_SPACE_ID"] == "s9"
 
 
-def test_cli_run_create_depth_limit_returns_structured_error(
+def test_cli_run_spawn_depth_limit_returns_structured_error(
     package_root: Path,
     cli_env: dict[str, str],
     tmp_path: Path,
@@ -130,7 +130,7 @@ def test_cli_run_create_depth_limit_returns_structured_error(
             "meridian",
             "--json",
             "run",
-            "create",
+            "spawn",
             "--prompt",
             "blocked-cli",
             "--model",

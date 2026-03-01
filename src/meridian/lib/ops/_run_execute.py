@@ -19,7 +19,12 @@ from meridian.lib.domain import Run
 from meridian.lib.exec.spawn import execute_with_finalization
 from meridian.lib.exec.terminal import TerminalEventFilter, resolve_visible_categories
 from meridian.lib.harness.adapter import PermissionResolver
-from meridian.lib.ops._runtime import OperationRuntime, build_runtime, resolve_space_id
+from meridian.lib.ops._runtime import (
+    SPACE_REQUIRED_ERROR,
+    OperationRuntime,
+    build_runtime,
+    resolve_space_id,
+)
 from meridian.lib.safety.budget import Budget
 from meridian.lib.safety.permissions import (
     PermissionConfig,
@@ -98,7 +103,7 @@ def _emit_subrun_event(payload: dict[str, Any]) -> None:
 
 def _depth_exceeded_output(current_depth: int, max_depth: int) -> RunActionOutput:
     return RunActionOutput(
-        command="run.create",
+        command="run.spawn",
         status="failed",
         message=f"Max agent depth ({max_depth}) reached. Complete this task directly.",
         error="max_depth_exceeded",
@@ -153,7 +158,7 @@ def _resolve_session_id() -> str:
 def _resolve_space(repo_root: Path, payload_space: str | None) -> tuple[SpaceId, Path]:
     resolved = resolve_space_id(payload_space)
     if resolved is None:
-        raise ValueError("Space is required. Pass --space or set MERIDIAN_SPACE_ID.")
+        raise ValueError(SPACE_REQUIRED_ERROR)
     return resolved, resolve_space_dir(repo_root, resolved)
 
 
@@ -396,7 +401,7 @@ def _execute_run_background(
             command=list(launch_command),
         )
         return RunActionOutput(
-            command="run.create",
+            command="run.spawn",
             status="failed",
             run_id=run_id_text,
             message=f"Failed to launch background run: {exc}",
@@ -418,7 +423,7 @@ def _execute_run_background(
     # the child runs in its own session (start_new_session=True) and is
     # re-parented to init/systemd. We only need the PID for diagnostics.
     return RunActionOutput(
-        command="run.create",
+        command="run.spawn",
         status="running",
         run_id=run_id_text,
         message=_BACKGROUND_SUBMIT_MESSAGE,
@@ -547,7 +552,7 @@ def _execute_run_blocking(
     )
 
     return RunActionOutput(
-        command="run.create",
+        command="run.spawn",
         status=status,
         run_id=str(run.run_id),
         message="Run completed.",

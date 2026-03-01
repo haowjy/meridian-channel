@@ -35,7 +35,7 @@ def register_skills_commands(app: Any, emit: Emitter) -> tuple[set[str], dict[st
     handlers: dict[str, Callable[[], Callable[..., None]]] = {
         "skills.list": lambda: partial(_skills_list, emit),
         "skills.search": lambda: partial(_skills_search, emit),
-        "skills.load": lambda: partial(_skills_show, emit),
+        "skills.show": lambda: partial(_skills_show, emit),
     }
 
     registered: set[str] = set()

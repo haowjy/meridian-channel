@@ -1,4 +1,4 @@
-"""run.create blocking execution TTY/pipe behavior."""
+"""run.spawn blocking execution TTY/pipe behavior."""
 
 from __future__ import annotations
 

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Literal, cast
 
@@ -13,7 +14,7 @@ from cyclopts import App, Parameter
 
 from meridian import __version__
 from meridian.cli.config_cmd import register_config_commands
-from meridian.cli.diag import register_diag_commands
+from meridian.cli.doctor_cmd import register_doctor_command
 from meridian.cli.models_cmd import register_models_commands
 from meridian.cli.output import OutputConfig, normalize_output_format
 from meridian.cli.output import emit as emit_output
@@ -21,13 +22,39 @@ from meridian.cli.run import register_run_commands
 from meridian.cli.skills_cmd import register_skills_commands
 from meridian.cli.space import register_space_commands
 from meridian.lib.config._paths import resolve_repo_root
-from meridian.lib.space.launch import cleanup_orphaned_locks
+from meridian.lib.ops.space import SpaceActionOutput
+from meridian.lib.space import space_file
+from meridian.lib.space.launch import SpaceLaunchRequest, cleanup_orphaned_locks, launch_primary
+from meridian.lib.space.summary import generate_space_summary
+from meridian.lib.types import SpaceId
 from meridian.server.main import run_server
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
 logger = logging.getLogger(__name__)
+
+_AGENT_ROOT_HELP = """Usage: meridian COMMAND [ARGS]
+
+Meridian orchestrator CLI
+
+Commands:
+  doctor: Run diagnostics checks.
+  models: Model catalog commands
+  run: Run management commands
+  skills: Skills catalog commands
+  --help, -h: Display this message and exit.
+  --version: Display application version.
+
+Parameters:
+  JSON, --json, --no-json: Emit command output as JSON. [default: False]
+  FORMAT, --format: Set output format: text, json, or porcelain.
+  PORCELAIN, --porcelain, --no-porcelain: Emit stable tab-separated key/value
+output. [default: False]
+  YES, --yes, --no-yes: Auto-approve prompts when supported. [default: False]
+  NO-INPUT, --no-input, --no-no-input: Disable interactive prompts and fail if
+input is needed. [default: False]
+"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +64,7 @@ class GlobalOptions:
     output: OutputConfig
     yes: bool = False
     no_input: bool = False
+    output_explicit: bool = False
 
 
 _GLOBAL_OPTIONS: ContextVar[GlobalOptions | None] = ContextVar("_GLOBAL_OPTIONS", default=None)
@@ -61,6 +89,7 @@ def _extract_global_options(argv: Sequence[str]) -> tuple[list[str], GlobalOptio
     output_format: str | None = None
     yes = False
     no_input = False
+    output_explicit = False
     cleaned: list[str] = []
 
     i = 0
@@ -68,26 +97,32 @@ def _extract_global_options(argv: Sequence[str]) -> tuple[list[str], GlobalOptio
         arg = argv[i]
         if arg == "--json":
             json_mode = True
+            output_explicit = True
             i += 1
             continue
         if arg == "--no-json":
+            output_explicit = True
             i += 1
             continue
         if arg == "--porcelain":
             porcelain_mode = True
+            output_explicit = True
             i += 1
             continue
         if arg == "--no-porcelain":
+            output_explicit = True
             i += 1
             continue
         if arg == "--format":
             if i + 1 >= len(argv):
                 raise SystemExit("--format requires a value")
             output_format = argv[i + 1]
+            output_explicit = True
             i += 2
             continue
         if arg.startswith("--format="):
             output_format = arg.partition("=")[2]
+            output_explicit = True
             i += 1
             continue
         if arg == "--yes":
@@ -113,7 +148,27 @@ def _extract_global_options(argv: Sequence[str]) -> tuple[list[str], GlobalOptio
         json_mode=json_mode,
         porcelain_mode=porcelain_mode,
     )
-    return cleaned, GlobalOptions(output=OutputConfig(format=resolved), yes=yes, no_input=no_input)
+    return cleaned, GlobalOptions(
+        output=OutputConfig(format=resolved),
+        yes=yes,
+        no_input=no_input,
+        output_explicit=output_explicit,
+    )
+
+
+def _extract_human_flag(argv: Sequence[str]) -> tuple[list[str], bool]:
+    force_human = False
+    cleaned: list[str] = []
+    for arg in argv:
+        if arg == "--human":
+            force_human = True
+            continue
+        cleaned.append(arg)
+    return cleaned, force_human
+
+
+def _agent_mode_enabled() -> bool:
+    return bool(os.getenv("MERIDIAN_SPACE_ID", "").strip())
 
 
 app = App(
@@ -175,7 +230,6 @@ space_app = App(name="space", help="Space lifecycle commands", help_formatter="p
 run_app = App(name="run", help="Run management commands", help_formatter="plain")
 skills_app = App(name="skills", help="Skills catalog commands", help_formatter="plain")
 models_app = App(name="models", help="Model catalog commands", help_formatter="plain")
-diag_app = App(name="diag", help="Diagnostics commands", help_formatter="plain")
 config_app = App(name="config", help="Repository config commands", help_formatter="plain")
 
 completion_app = App(name="completion", help="Shell completion helpers", help_formatter="plain")
@@ -185,7 +239,6 @@ app.command(space_app, name="space")
 app.command(run_app, name="run")
 app.command(skills_app, name="skills")
 app.command(models_app, name="models")
-app.command(diag_app, name="diag")
 app.command(config_app, name="config")
 app.command(completion_app, name="completion")
 
@@ -241,48 +294,123 @@ def completion_install(
     emit({"shell": normalized_shell, "path": destination.as_posix()})
 
 
+def _start_space_record(
+    *,
+    repo_root: Path,
+    force_new: bool,
+    explicit_space: str | None,
+) -> space_file.SpaceRecord:
+    if force_new and explicit_space is not None:
+        raise ValueError("Cannot combine --new with --space.")
+
+    if explicit_space is not None:
+        record = space_file.get_space(repo_root, explicit_space)
+        if record is None:
+            raise ValueError(f"Space '{explicit_space}' not found")
+        return record
+
+    if force_new:
+        return space_file.create_space(repo_root)
+
+    spaces = space_file.list_spaces(repo_root)
+    active = [record for record in spaces if record.status == "active"]
+    if active:
+        return max(active, key=lambda record: record.created_at)
+    return space_file.create_space(repo_root)
+
+
+def _summary_text(path: str) -> str:
+    summary_path = Path(path)
+    if not summary_path.is_file():
+        return ""
+    return summary_path.read_text(encoding="utf-8")
+
+
 @app.command(name="start")
-def start_alias(
-    passthrough_args: Annotated[
+def start(
+    new: Annotated[
+        bool,
+        Parameter(name="--new", help="Force create a new space before launch."),
+    ] = False,
+    space: Annotated[
+        str | None,
+        Parameter(name="--space", help="Use an explicit existing space id."),
+    ] = None,
+    continue_mode: Annotated[
+        bool,
+        Parameter(name="--continue", help="Continue mode (currently stubbed)."),
+    ] = False,
+    model: Annotated[
+        str,
+        Parameter(name="--model", help="Model id or alias for primary harness."),
+    ] = "",
+    autocompact: Annotated[
+        int | None,
+        Parameter(name="--autocompact", help="Auto-compact threshold in messages."),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        Parameter(name="--dry-run", help="Preview launch command without starting harness."),
+    ] = False,
+    harness_args: Annotated[
         tuple[str, ...],
         Parameter(
-            allow_leading_hyphen=True,
+            name="--harness-arg",
+            help="Additional harness arguments (repeatable).",
             negative_iterable=(),
-            help="Arguments forwarded to `space start`.",
         ),
     ] = (),
 ) -> None:
-    """Alias for space start."""
+    """Resolve/start a space and launch the primary harness."""
 
-    space_app(["start", *passthrough_args])
+    if continue_mode:
+        raise ValueError(
+            "ERROR [NOT_IMPLEMENTED]: --continue is not wired yet. "
+            "Next: use `meridian start` without --continue."
+        )
 
+    repo_root = resolve_repo_root()
+    explicit_space = space.strip() if space is not None and space.strip() else None
+    selected = _start_space_record(
+        repo_root=repo_root,
+        force_new=new,
+        explicit_space=explicit_space,
+    )
+    summary_path = generate_space_summary(
+        repo_root=repo_root,
+        space_id=SpaceId(selected.id),
+    )
 
-@app.command(name="list")
-def list_alias() -> None:
-    """Alias for run list."""
+    launch_result = launch_primary(
+        repo_root=repo_root,
+        request=SpaceLaunchRequest(
+            space_id=SpaceId(selected.id),
+            model=model,
+            autocompact=autocompact,
+            passthrough_args=harness_args,
+            fresh=True,
+            summary_text=_summary_text(summary_path.as_posix()),
+            pinned_context="",
+            dry_run=dry_run,
+        ),
+    )
 
-    run_app(["list"])
-
-
-@app.command(name="show")
-def show_alias(run_id: str = "r1") -> None:
-    """Alias for run show."""
-
-    run_app(["show", run_id])
-
-
-@app.command(name="wait")
-def wait_alias(run_id: str = "r1") -> None:
-    """Alias for run wait."""
-
-    run_app(["wait", run_id])
-
-
-@app.command(name="doctor")
-def doctor_alias() -> None:
-    """Alias for diag doctor."""
-
-    diag_app(["doctor"])
+    transitioned = space_file.update_space_status(
+        repo_root,
+        selected.id,
+        launch_result.final_state,
+    )
+    emit(
+        SpaceActionOutput(
+            space_id=selected.id,
+            state=transitioned.status,
+            message=("Space launch dry-run." if dry_run else "Space session finished."),
+            exit_code=launch_result.exit_code,
+            command=launch_result.command,
+            lock_path=launch_result.lock_path.as_posix(),
+            summary_path=summary_path.as_posix(),
+        )
+    )
 
 
 @app.command(name="init")
@@ -302,8 +430,8 @@ def _register_group_commands() -> None:
         register_run_commands(run_app, emit),
         register_skills_commands(skills_app, emit),
         register_models_commands(models_app, emit),
-        register_diag_commands(diag_app, emit),
         register_config_commands(config_app, emit),
+        register_doctor_command(app, emit),
     )
     for commands, descriptions in modules:
         _REGISTERED_CLI_COMMANDS.update(commands)
@@ -357,6 +485,16 @@ def _validate_top_level_command(argv: Sequence[str]) -> None:
     raise SystemExit(1)
 
 
+def _is_root_help_request(argv: Sequence[str]) -> bool:
+    if not any(token in {"--help", "-h"} for token in argv):
+        return False
+    return _first_positional_token(argv) is None
+
+
+def _print_agent_root_help() -> None:
+    print(_AGENT_ROOT_HELP, end="")
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     """CLI entry point used by `meridian` and `python -m meridian`."""
 
@@ -374,7 +512,18 @@ def main(argv: Sequence[str] | None = None) -> None:
         cleanup_orphaned_locks(resolve_repo_root())
     except Exception:
         logger.debug("orphaned lock cleanup failed", exc_info=True)
+
+    args, force_human = _extract_human_flag(args)
     cleaned_args, options = _extract_global_options(args)
+
+    agent_mode = _agent_mode_enabled() and not force_human
+    if agent_mode and not options.output_explicit:
+        options = replace(options, output=OutputConfig(format="json"))
+
+    if agent_mode and (not cleaned_args or _is_root_help_request(cleaned_args)):
+        _print_agent_root_help()
+        return
+
     _validate_top_level_command(cleaned_args)
 
     token = _GLOBAL_OPTIONS.set(options)

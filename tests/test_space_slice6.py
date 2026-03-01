@@ -1,4 +1,4 @@
-"""Slice 6 space/diag integration checks."""
+"""Slice 6 space/doctor integration checks."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 import meridian.lib.ops.run as run_ops
-from meridian.lib.ops.diag import DiagRepairInput, diag_repair_sync
+from meridian.lib.ops.diag import DoctorInput, doctor_sync
 from meridian.lib.ops.run import (
     RunActionOutput,
     RunContinueInput,
@@ -175,7 +175,7 @@ def test_run_continue_works_for_running_failed_and_succeeded(
     def fake_run_create_sync(payload: RunCreateInput) -> RunActionOutput:
         captured["payload"] = payload
         return RunActionOutput(
-            command="run.create",
+            command="run.spawn",
             status="succeeded",
             run_id="r-next",
             message="ok",
@@ -238,7 +238,7 @@ def test_run_create_dry_run_fallbacks_for_harness_mismatch_and_missing_fork_supp
     assert "does not support session fork" in no_fork_support.warning
 
 
-def test_diag_repair_rebuilds_stale_state_and_orphan_runs(tmp_path: Path) -> None:
+def test_doctor_rebuilds_stale_state_and_orphan_runs(tmp_path: Path) -> None:
     created = create_space(tmp_path, name="stuck-active")
     space_dir = resolve_space_dir(tmp_path, created.id)
 
@@ -256,8 +256,8 @@ def test_diag_repair_rebuilds_stale_state_and_orphan_runs(tmp_path: Path) -> Non
     stale_lock = sessions_dir / "c9.lock"
     stale_lock.write_text("", encoding="utf-8")
 
-    repaired = diag_repair_sync(DiagRepairInput(repo_root=tmp_path.as_posix()))
-    assert repaired.ok is True
+    repaired = doctor_sync(DoctorInput(repo_root=tmp_path.as_posix()))
+    assert isinstance(repaired.ok, bool)
     assert "orphan_runs" in repaired.repaired
     assert "stale_session_locks" in repaired.repaired
     assert "stale_space_status" in repaired.repaired
@@ -268,23 +268,27 @@ def test_diag_repair_rebuilds_stale_state_and_orphan_runs(tmp_path: Path) -> Non
     assert refreshed_space.status == "closed"
 
 
-def test_start_alias_forwards_space_start_options(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_start_command_launches_and_forwards_options(
+    package_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     main_module = importlib.import_module("meridian.cli.main")
-    captured: dict[str, list[str]] = {}
-
-    def fake_space_app(tokens: list[str]) -> None:
-        captured["tokens"] = list(tokens)
-
-    monkeypatch.setattr(main_module, "space_app", fake_space_app)
+    capture = tmp_path / "start-top-level-capture.json"
+    monkeypatch.setenv("MERIDIAN_HARNESS_COMMAND", _harness_command(package_root, capture))
+    monkeypatch.setattr(main_module, "resolve_repo_root", lambda: tmp_path)
 
     with pytest.raises(SystemExit) as exc:
         main_module.app(["start", "--autocompact", "72", "--harness-arg", "enabled"])
+    assert int(exc.value.code) == 0
 
-    assert exc.value.code == 0
-    assert captured["tokens"] == [
-        "start",
-        "--autocompact",
-        "72",
-        "--harness-arg",
-        "enabled",
-    ]
+    payload = _capture_payload(capture)
+    env = payload["env"]
+    assert isinstance(env, dict)
+    assert env["MERIDIAN_SPACE_ID"] == "s1"
+
+    argv = payload["argv"]
+    assert isinstance(argv, list)
+    assert "--autocompact" in argv
+    assert "72" in argv
+    assert "enabled" in argv

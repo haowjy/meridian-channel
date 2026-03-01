@@ -55,24 +55,29 @@ async def test_mcp_tools_registered_and_callable(package_root, cli_env, tmp_path
         listed = await session.list_tools()
         names = {tool.name for tool in listed.tools}
         expected = {
-            "run_create",
+            "run_spawn",
+            "run_continue",
             "run_list",
-            "space_start",
-            "skills_search",
+            "run_show",
+            "run_stats",
+            "run_wait",
+            "skills_list",
+            "skills_show",
             "models_list",
-            "diag_doctor",
+            "models_show",
+            "doctor",
         }
-        assert expected.issubset(names)
+        assert names == expected
 
-        doctor = await session.call_tool("diag_doctor", {})
+        doctor = await session.call_tool("doctor", {})
         assert doctor.isError is False
         doctor_payload = _payload_from_call_result(doctor)
         assert isinstance(doctor_payload["ok"], bool)
 
         created = await session.call_tool(
-            "run_create",
+            "run_spawn",
             {
-                "prompt": "MCP non-blocking run_create verification",
+                "prompt": "MCP non-blocking run_spawn verification",
                 "model": "gpt-5.3-codex",
                 "timeout_secs": 5,
                 "dry_run": True,

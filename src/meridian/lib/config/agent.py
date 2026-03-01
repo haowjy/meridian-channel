@@ -155,7 +155,7 @@ def _builtin_profiles() -> dict[str, AgentProfile]:
             skills=(),
             allowed_tools=(),
             mcp_tools=(
-                "run_create",
+                "run_spawn",
                 "run_list",
                 "run_show",
                 "run_wait",

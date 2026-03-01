@@ -90,7 +90,7 @@ def test_run_create_dry_run_outputs_composed_prompt_and_command(
 
     assert completed.returncode == 0, completed.stderr
     payload = json.loads(completed.stdout)
-    assert payload["command"] == "run.create"
+    assert payload["command"] == "run.spawn"
     assert payload["status"] == "dry-run"
     assert payload["model"] == "gpt-5.3-codex"
     assert payload["harness_id"] == "codex"

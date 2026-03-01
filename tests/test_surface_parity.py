@@ -60,14 +60,14 @@ def test_duplicate_operation_name_guard() -> None:
                 _DupInput,
                 _DupOutput,
             ](
-                name="diag.doctor",
+                name="doctor",
                 handler=_dup_async,
                 sync_handler=_dup_sync,
                 input_type=_DupInput,
                 output_type=_DupOutput,
-                cli_group="diag",
+                cli_group="doctor",
                 cli_name="dup",
-                mcp_name="diag_dup",
+                mcp_name="doctor_dup",
                 description="duplicate",
             )
         )

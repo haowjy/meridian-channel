@@ -1,4 +1,4 @@
-"""CLI run.create streaming flag plumbing tests."""
+"""CLI run.spawn streaming flag plumbing tests."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ def test_run_create_passes_verbose_and_quiet_flags(
 
     def fake_run_create_sync(payload: RunCreateInput) -> RunActionOutput:
         captured["payload"] = payload
-        return RunActionOutput(command="run.create", status="dry-run")
+        return RunActionOutput(command="run.spawn", status="dry-run")
 
     monkeypatch.setattr(run_cli, "run_create_sync", fake_run_create_sync)
     run_cli._run_create(
@@ -40,7 +40,7 @@ def test_run_create_passes_stream_flag(monkeypatch) -> None:
 
     def fake_run_create_sync(payload: RunCreateInput) -> RunActionOutput:
         captured["payload"] = payload
-        return RunActionOutput(command="run.create", status="dry-run")
+        return RunActionOutput(command="run.spawn", status="dry-run")
 
     monkeypatch.setattr(run_cli, "run_create_sync", fake_run_create_sync)
     run_cli._run_create(
@@ -64,7 +64,7 @@ def test_run_create_passes_background_flag(monkeypatch) -> None:
 
     def fake_run_create_sync(payload: RunCreateInput) -> RunActionOutput:
         captured["payload"] = payload
-        return RunActionOutput(command="run.create", status="running", run_id="r1")
+        return RunActionOutput(command="run.spawn", status="running", run_id="r1")
 
     monkeypatch.setattr(run_cli, "run_create_sync", fake_run_create_sync)
     run_cli._run_create(
@@ -81,7 +81,7 @@ def test_run_create_passes_background_flag(monkeypatch) -> None:
 def test_run_create_propagates_failed_run_exit_code(monkeypatch) -> None:
     def fake_run_create_sync(payload: RunCreateInput) -> RunActionOutput:
         _ = payload
-        return RunActionOutput(command="run.create", status="failed", exit_code=7)
+        return RunActionOutput(command="run.spawn", status="failed", exit_code=7)
 
     monkeypatch.setattr(run_cli, "run_create_sync", fake_run_create_sync)
 
@@ -97,7 +97,7 @@ def test_run_create_propagates_failed_run_exit_code(monkeypatch) -> None:
 def test_run_create_uses_nonzero_exit_for_failed_result_without_exit_code(monkeypatch) -> None:
     def fake_run_create_sync(payload: RunCreateInput) -> RunActionOutput:
         _ = payload
-        return RunActionOutput(command="run.create", status="failed")
+        return RunActionOutput(command="run.spawn", status="failed")
 
     monkeypatch.setattr(run_cli, "run_create_sync", fake_run_create_sync)
 

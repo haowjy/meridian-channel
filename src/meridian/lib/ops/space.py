@@ -300,6 +300,7 @@ operation(
         cli_name="start",
         mcp_name="space_start",
         description="Create a space and launch the primary agent harness.",
+        cli_only=True,
     )
 )
 
@@ -314,6 +315,7 @@ operation(
         cli_name="resume",
         mcp_name="space_resume",
         description="Resume a space.",
+        cli_only=True,
     )
 )
 
@@ -328,6 +330,7 @@ operation(
         cli_name="list",
         mcp_name="space_list",
         description="List spaces.",
+        cli_only=True,
     )
 )
 
@@ -342,6 +345,7 @@ operation(
         cli_name="show",
         mcp_name="space_show",
         description="Show one space.",
+        cli_only=True,
     )
 )
 
@@ -356,5 +360,6 @@ operation(
         cli_name="close",
         mcp_name="space_close",
         description="Close a space.",
+        cli_only=True,
     )
 )

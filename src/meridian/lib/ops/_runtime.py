@@ -13,6 +13,11 @@ from meridian.lib.state.artifact_store import LocalStore
 from meridian.lib.state.paths import resolve_state_paths
 from meridian.lib.types import SpaceId
 
+SPACE_REQUIRED_ERROR = (
+    "ERROR [SPACE_REQUIRED]: No MERIDIAN_SPACE_ID set. "
+    "Next: run 'meridian run spawn' to auto-create a space."
+)
+
 
 @dataclass(frozen=True, slots=True)
 class OperationRuntime:
@@ -71,7 +76,5 @@ def require_space_id(space: str | None) -> SpaceId:
 
     resolved = resolve_space_id(space)
     if resolved is None:
-        raise ValueError(
-            "Space is required. Pass --space or set MERIDIAN_SPACE_ID."
-        )
+        raise ValueError(SPACE_REQUIRED_ERROR)
     return resolved

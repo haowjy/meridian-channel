@@ -89,19 +89,20 @@ operation(
         cli_name="search",
         mcp_name="skills_search",
         description="Search skills by keyword/tag.",
+        cli_only=True,
     )
 )
 
 operation(
     OperationSpec[SkillsLoadInput, SkillContent](
-        name="skills.load",
+        name="skills.show",
         handler=skills_load,
         sync_handler=skills_load_sync,
         input_type=SkillsLoadInput,
         output_type=SkillContent,
         cli_group="skills",
         cli_name="show",
-        mcp_name="skills_load",
+        mcp_name="skills_show",
         description="Load full SKILL.md content for a skill.",
     )
 )
@@ -119,4 +120,3 @@ operation(
         description="List all indexed skills.",
     )
 )
-

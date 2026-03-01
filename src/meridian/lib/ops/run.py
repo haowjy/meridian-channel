@@ -10,6 +10,7 @@ from pathlib import Path
 from meridian.lib.exec.spawn import execute_with_finalization
 from meridian.lib.ops._runtime import (
     build_runtime_from_root_and_config,
+    require_space_id,
     resolve_runtime_root_and_config,
     resolve_space_id,
 )
@@ -20,6 +21,7 @@ from meridian.lib.safety.permissions import (
 )
 from meridian.lib.state import run_store
 from meridian.lib.state.paths import resolve_space_dir
+from meridian.lib.space import space_file
 
 from . import _run_execute as _run_execute_module
 from . import _run_prepare as _run_prepare_module
@@ -49,10 +51,29 @@ from ._run_query import _detail_from_row, _read_run_row, resolve_run_reference, 
 
 
 def _require_space_dir(repo_root: Path) -> tuple[str, Path]:
-    space_id = resolve_space_id(None)
-    if space_id is None:
-        raise ValueError("Space is required. Pass --space or set MERIDIAN_SPACE_ID.")
+    space_id = require_space_id(None)
     return str(space_id), resolve_space_dir(repo_root, space_id)
+
+
+def _merge_warnings(*warnings: str | None) -> str | None:
+    parts = [item.strip() for item in warnings if item and item.strip()]
+    if not parts:
+        return None
+    return "; ".join(parts)
+
+
+def _ensure_space_for_spawn(payload: RunCreateInput) -> tuple[RunCreateInput, str | None]:
+    if resolve_space_id(payload.space) is not None:
+        return payload, None
+
+    repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
+    created_space = space_file.create_space(repo_root)
+    warning = (
+        "WARNING [SPACE_AUTO_CREATED]: No MERIDIAN_SPACE_ID set. "
+        f"Created space {created_space.id}. Next: set MERIDIAN_SPACE_ID={created_space.id} "
+        "for subsequent commands."
+    )
+    return replace(payload, space=created_space.id), warning
 
 
 def run_create_sync(payload: RunCreateInput) -> RunActionOutput:
@@ -74,10 +95,12 @@ def run_create_sync(payload: RunCreateInput) -> RunActionOutput:
             return _depth_exceeded_output(current_depth, max_depth)
         runtime = build_runtime_from_root_and_config(resolved_root, config)
 
-    prepared = _build_create_payload(payload, runtime=runtime, preflight_warning=preflight_warning)
+    payload, auto_space_warning = _ensure_space_for_spawn(payload)
+    combined_warning = _merge_warnings(preflight_warning, auto_space_warning)
+    prepared = _build_create_payload(payload, runtime=runtime, preflight_warning=combined_warning)
     if payload.dry_run:
         return RunActionOutput(
-            command="run.create",
+            command="run.spawn",
             status="dry-run",
             model=prepared.model,
             harness_id=prepared.harness_id,
@@ -372,14 +395,14 @@ async def run_continue(payload: RunContinueInput) -> RunActionOutput:
 
 operation(
     OperationSpec[RunCreateInput, RunActionOutput](
-        name="run.create",
+        name="run.spawn",
         handler=run_create,
         sync_handler=run_create_sync,
         input_type=RunCreateInput,
         output_type=RunActionOutput,
         cli_group="run",
-        cli_name="create",
-        mcp_name="run_create",
+        cli_name="spawn",
+        mcp_name="run_spawn",
         description="Create and start a run.",
     )
 )

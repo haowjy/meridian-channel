@@ -159,7 +159,7 @@ def test_bug9_unknown_skill_returns_structured_error_payload(
 
     assert result.returncode == 1
     payload = json.loads(result.stdout)
-    assert payload["command"] == "run.create"
+    assert payload["command"] == "run.spawn"
     assert payload["status"] == "failed"
     assert payload["error"] == "unknown_skills"
     assert payload["message"] == "Unknown skills: nonexistent-skill"
@@ -241,7 +241,7 @@ def test_bug3_no_prefixed_global_flags_are_accepted(
 
     assert result.returncode == 0
     payload = json.loads(result.stdout)
-    assert payload["command"] == "run.create"
+    assert payload["command"] == "run.spawn"
     assert payload["status"] == "dry-run"
 
 
@@ -290,7 +290,7 @@ def test_dx3_help_uses_descriptions_and_hides_empty_flags(
         package_root=package_root,
         cli_env=cli_env,
         repo_root=repo_root,
-        args=["run", "create", "--help"],
+        args=["run", "spawn", "--help"],
     )
 
     assert result.returncode == 0

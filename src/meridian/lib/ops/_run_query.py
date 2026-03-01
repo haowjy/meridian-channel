@@ -8,6 +8,7 @@ from pathlib import Path
 from meridian.lib.state import run_store
 from meridian.lib.state.paths import resolve_space_dir, resolve_state_paths
 
+from ._runtime import SPACE_REQUIRED_ERROR
 from ._run_models import RunDetailOutput
 
 _RUN_REFERENCE_STATUS_FILTERS: dict[str, tuple[str, ...] | None] = {
@@ -20,7 +21,7 @@ _RUN_REFERENCE_STATUS_FILTERS: dict[str, tuple[str, ...] | None] = {
 def _require_space_id() -> str:
     resolved = os.getenv("MERIDIAN_SPACE_ID", "").strip()
     if not resolved:
-        raise ValueError("Space is required. Set MERIDIAN_SPACE_ID.")
+        raise ValueError(SPACE_REQUIRED_ERROR)
     return resolved
 
 

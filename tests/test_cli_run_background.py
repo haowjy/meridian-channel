@@ -1,4 +1,4 @@
-"""CLI integration checks for run.create --background behavior."""
+"""CLI integration checks for run.spawn --background behavior."""
 
 from __future__ import annotations
 
@@ -20,6 +20,8 @@ def test_run_create_background_prints_run_id_in_text_mode(
 
     created = run_meridian(
         [
+            "--format",
+            "text",
             "run",
             "--background",
             "--timeout-secs",

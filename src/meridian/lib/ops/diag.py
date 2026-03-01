@@ -1,4 +1,4 @@
-"""Diagnostics operations for file-authoritative state."""
+"""Doctor operation for file-authoritative state health and repair."""
 
 from __future__ import annotations
 
@@ -20,17 +20,12 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True, slots=True)
-class DiagDoctorInput:
+class DoctorInput:
     repo_root: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
-class DiagRepairInput:
-    repo_root: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class DiagDoctorOutput:
+class DoctorOutput:
     ok: bool
     repo_root: str
     spaces_checked: int
@@ -38,6 +33,7 @@ class DiagDoctorOutput:
     agents_dir: str
     skills_dir: str
     warnings: tuple[str, ...] = ()
+    repaired: tuple[str, ...] = ()
 
     def format_text(self, ctx: FormatContext | None = None) -> str:
         """Key-value health check output for text output mode."""
@@ -51,24 +47,12 @@ class DiagDoctorOutput:
             ("runs_checked", str(self.runs_checked)),
             ("agents_dir", self.agents_dir),
             ("skills_dir", self.skills_dir),
+            ("repaired", ", ".join(self.repaired) if self.repaired else "none"),
         ]
         result = kv_block(pairs)
         for warning in self.warnings:
             result += f"\nwarning: {warning}"
         return result
-
-
-@dataclass(frozen=True, slots=True)
-class DiagRepairOutput:
-    ok: bool
-    repaired: tuple[str, ...]
-
-    def format_text(self, ctx: FormatContext | None = None) -> str:
-        """Repair summary for text output mode."""
-        if not self.repaired:
-            return "ok: no repairs needed"
-        items = ", ".join(self.repaired)
-        return f"ok: repaired {items}"
 
 
 def _space_dirs(repo_root: Path) -> list[Path]:
@@ -93,62 +77,6 @@ def _count_runs(repo_root: Path) -> int:
             continue
         total += len(run_store.list_runs(space_dir))
     return total
-
-
-def diag_doctor_sync(payload: DiagDoctorInput) -> DiagDoctorOutput:
-    runtime = build_runtime(payload.repo_root)
-    search_paths = runtime.config.search_paths
-    agents_dirs = resolve_path_list(
-        search_paths.agents,
-        search_paths.global_agents,
-        runtime.repo_root,
-    )
-    skills_dirs = resolve_path_list(
-        search_paths.skills,
-        search_paths.global_skills,
-        runtime.repo_root,
-    )
-
-    warnings: list[str] = []
-    if not skills_dirs:
-        warnings.append("No configured skills directories were found.")
-    if not agents_dirs:
-        warnings.append("No configured agent profile directories were found.")
-
-    bad_spaces = _detect_missing_or_corrupt_spaces(runtime.repo_root)
-    if bad_spaces:
-        warnings.append(
-            "Missing/corrupt space.json detected for spaces: " + ", ".join(sorted(bad_spaces))
-        )
-
-    for space_dir in _space_dirs(runtime.repo_root):
-        record = space_file.get_space(runtime.repo_root, space_dir.name)
-        if record is None:
-            continue
-        active_sessions = list_active_sessions(space_dir)
-        if record.status == "active" and not active_sessions:
-            warnings.append(f"Space '{record.id}' is marked active with no live sessions.")
-
-        running = [row.id for row in run_store.list_runs(space_dir) if row.status == "running"]
-        if running:
-            warnings.append(f"Space '{record.id}' has orphan candidate running runs: {', '.join(running)}")
-
-    agents_dir = agents_dirs[0] if agents_dirs else runtime.repo_root
-    skills_dir = skills_dirs[0] if skills_dirs else runtime.repo_root
-
-    return DiagDoctorOutput(
-        ok=not warnings,
-        repo_root=runtime.repo_root.as_posix(),
-        spaces_checked=len(_space_dirs(runtime.repo_root)),
-        runs_checked=_count_runs(runtime.repo_root),
-        agents_dir=agents_dir.as_posix(),
-        skills_dir=skills_dir.as_posix(),
-        warnings=tuple(warnings),
-    )
-
-
-async def diag_doctor(payload: DiagDoctorInput) -> DiagDoctorOutput:
-    return await asyncio.to_thread(diag_doctor_sync, payload)
 
 
 def _repair_stale_session_locks(repo_root: Path) -> int:
@@ -200,10 +128,10 @@ def _repair_stale_space_status(repo_root: Path) -> int:
     return repaired
 
 
-def diag_repair_sync(payload: DiagRepairInput) -> DiagRepairOutput:
+def doctor_sync(payload: DoctorInput) -> DoctorOutput:
     runtime = build_runtime(payload.repo_root)
-    repaired: list[str] = []
 
+    repaired: list[str] = []
     stale_locks = _repair_stale_session_locks(runtime.repo_root)
     if stale_locks > 0:
         repaired.append("stale_session_locks")
@@ -216,41 +144,72 @@ def diag_repair_sync(payload: DiagRepairInput) -> DiagRepairOutput:
     if stale_status > 0:
         repaired.append("stale_space_status")
 
+    search_paths = runtime.config.search_paths
+    agents_dirs = resolve_path_list(
+        search_paths.agents,
+        search_paths.global_agents,
+        runtime.repo_root,
+    )
+    skills_dirs = resolve_path_list(
+        search_paths.skills,
+        search_paths.global_skills,
+        runtime.repo_root,
+    )
+
+    warnings: list[str] = []
+    if not skills_dirs:
+        warnings.append("No configured skills directories were found.")
+    if not agents_dirs:
+        warnings.append("No configured agent profile directories were found.")
+
     bad_spaces = _detect_missing_or_corrupt_spaces(runtime.repo_root)
     if bad_spaces:
+        warnings.append(
+            "Missing/corrupt space.json detected for spaces: " + ", ".join(sorted(bad_spaces))
+        )
         repaired.append("missing_or_corrupt_space_json")
 
-    return DiagRepairOutput(ok=True, repaired=tuple(sorted(set(repaired))))
+    for space_dir in _space_dirs(runtime.repo_root):
+        record = space_file.get_space(runtime.repo_root, space_dir.name)
+        if record is None:
+            continue
+        active_sessions = list_active_sessions(space_dir)
+        if record.status == "active" and not active_sessions:
+            warnings.append(f"Space '{record.id}' is marked active with no live sessions.")
 
+        running = [row.id for row in run_store.list_runs(space_dir) if row.status == "running"]
+        if running:
+            warnings.append(f"Space '{record.id}' has orphan candidate running runs: {', '.join(running)}")
 
-async def diag_repair(payload: DiagRepairInput) -> DiagRepairOutput:
-    return await asyncio.to_thread(diag_repair_sync, payload)
+    agents_dir = agents_dirs[0] if agents_dirs else runtime.repo_root
+    skills_dir = skills_dirs[0] if skills_dirs else runtime.repo_root
 
-
-operation(
-    OperationSpec[DiagDoctorInput, DiagDoctorOutput](
-        name="diag.doctor",
-        handler=diag_doctor,
-        sync_handler=diag_doctor_sync,
-        input_type=DiagDoctorInput,
-        output_type=DiagDoctorOutput,
-        cli_group="diag",
-        cli_name="doctor",
-        mcp_name="diag_doctor",
-        description="Run diagnostics checks.",
+    return DoctorOutput(
+        ok=not warnings,
+        repo_root=runtime.repo_root.as_posix(),
+        spaces_checked=len(_space_dirs(runtime.repo_root)),
+        runs_checked=_count_runs(runtime.repo_root),
+        agents_dir=agents_dir.as_posix(),
+        skills_dir=skills_dir.as_posix(),
+        warnings=tuple(warnings),
+        repaired=tuple(sorted(set(repaired))),
     )
-)
+
+
+async def doctor(payload: DoctorInput) -> DoctorOutput:
+    return await asyncio.to_thread(doctor_sync, payload)
+
 
 operation(
-    OperationSpec[DiagRepairInput, DiagRepairOutput](
-        name="diag.repair",
-        handler=diag_repair,
-        sync_handler=diag_repair_sync,
-        input_type=DiagRepairInput,
-        output_type=DiagRepairOutput,
-        cli_group="diag",
-        cli_name="repair",
-        mcp_name="diag_repair",
-        description="Repair common state issues.",
+    OperationSpec[DoctorInput, DoctorOutput](
+        name="doctor",
+        handler=doctor,
+        sync_handler=doctor_sync,
+        input_type=DoctorInput,
+        output_type=DoctorOutput,
+        cli_group="doctor",
+        cli_name="doctor",
+        mcp_name="doctor",
+        description="Run diagnostics checks.",
     )
 )

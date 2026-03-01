@@ -69,7 +69,7 @@ class RunActionOutput:
     def format_text(self, ctx: FormatContext | None = None) -> str:
         """Compact single-line summary for text output mode."""
         # Background submissions print only the run ID so callers can capture
-        # it via R1=$(meridian run create --background ...).
+        # it via R1=$(meridian run spawn --background ...).
         if self.background and self.run_id is not None and self.status == "running":
             return self.run_id
         parts: list[str] = [self.command, self.status]

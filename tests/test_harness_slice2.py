@@ -28,7 +28,7 @@ def test_direct_adapter_tool_definitions_include_allowed_callers() -> None:
         assert tool["allowed_callers"] == ["code_execution_20260120"]
         assert isinstance(tool["input_schema"], dict)
 
-    assert "skills_search" in by_name
+    assert "skills_show" in by_name
     assert "models_show" in by_name
 
 

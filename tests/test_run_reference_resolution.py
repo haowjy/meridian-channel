@@ -112,7 +112,7 @@ def test_run_continue_and_retry_accept_latest_reference(
     def fake_run_create_sync(payload: object) -> RunActionOutput:
         captured_payloads.append(payload)
         return RunActionOutput(
-            command="run.create",
+            command="run.spawn",
             status="succeeded",
             run_id=f"r-next-{len(captured_payloads)}",
         )
