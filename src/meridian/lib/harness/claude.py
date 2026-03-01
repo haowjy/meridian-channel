@@ -112,6 +112,7 @@ class ClaudeAdapter:
         "skills": FlagStrategy(effect=FlagEffect.DROP),
         "continue_harness_session_id": FlagStrategy(effect=FlagEffect.DROP),
         "continue_fork": FlagStrategy(effect=FlagEffect.DROP),
+        "appended_system_prompt": FlagStrategy(effect=FlagEffect.DROP),
     }
     PROMPT_MODE: ClassVar[PromptMode] = PromptMode.FLAG
     BASE_COMMAND: ClassVar[tuple[str, ...]] = ("claude", "-p")
@@ -150,6 +151,9 @@ class ClaudeAdapter:
             harness_id=self.id,
             mcp_config=mcp_config,
         )
+        # Inject skill content for --append-system-prompt (workaround for issue #29902).
+        if run.appended_system_prompt:
+            command.extend(["--append-system-prompt", run.appended_system_prompt])
         # Ad-hoc agent JSON for native skill loading via Claude --agents flag
         adhoc_json = run.adhoc_agent_json.strip()
         if adhoc_json:

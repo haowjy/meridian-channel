@@ -47,6 +47,24 @@ def _join_sections(sections: Sequence[str]) -> str:
     return "\n\n".join(non_empty)
 
 
+def compose_skill_injections(skills: Sequence[SkillContent]) -> str | None:
+    """Format skill content for --append-system-prompt injection.
+
+    Includes full skill filepath and content (not frontmatter).
+    Returns None when there are no skills (caller omits the flag entirely).
+    """
+    blocks: list[str] = []
+    for skill in skills:
+        content = skill.content.strip()
+        if not content:
+            continue
+        blocks.append(f"# Skill: {skill.path}\n\n{content}")
+
+    if not blocks:
+        return None
+    return _join_sections(blocks)
+
+
 def compose_run_prompt(
     *,
     skills: Sequence[SkillContent],

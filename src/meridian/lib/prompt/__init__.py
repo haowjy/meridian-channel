@@ -10,6 +10,7 @@ from meridian.lib.prompt.compose import (
     build_report_instruction,
     compose_run_prompt,
     compose_run_prompt_text,
+    compose_skill_injections,
     render_file_template,
 )
 from meridian.lib.prompt.reference import (
@@ -29,6 +30,7 @@ __all__ = [
     "build_report_instruction",
     "compose_run_prompt",
     "compose_run_prompt_text",
+    "compose_skill_injections",
     "dedupe_skill_contents",
     "dedupe_skill_names",
     "load_reference_files",

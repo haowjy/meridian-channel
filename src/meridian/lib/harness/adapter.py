@@ -45,6 +45,7 @@ class RunParams:
     mcp_tools: tuple[str, ...] = ()
     continue_harness_session_id: str | None = None
     continue_fork: bool = False
+    appended_system_prompt: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

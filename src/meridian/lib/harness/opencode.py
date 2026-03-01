@@ -53,6 +53,7 @@ class OpenCodeAdapter:
         "skills": FlagStrategy(effect=FlagEffect.DROP),
         "continue_harness_session_id": FlagStrategy(effect=FlagEffect.DROP),
         "continue_fork": FlagStrategy(effect=FlagEffect.DROP),
+        "appended_system_prompt": FlagStrategy(effect=FlagEffect.DROP),
     }
     PROMPT_MODE: ClassVar[PromptMode] = PromptMode.POSITIONAL
     BASE_COMMAND: ClassVar[tuple[str, ...]] = ("opencode", "run")
