@@ -119,6 +119,7 @@ _SEARCH_PATH_KEYS = frozenset({"agents", "skills", "global_agents", "global_skil
 _PRIMARY_KEYS = frozenset({"autocompact_pct", "permission_tier"})
 _PRIMARY_AUTOCOMPACT_PCT_MIN = 1
 _PRIMARY_AUTOCOMPACT_PCT_MAX = 100
+_USER_CONFIG_ENV_VAR = "MERIDIAN_CONFIG"
 
 
 def _expected_type_name(field_name: str) -> str:
@@ -163,11 +164,16 @@ def _coerce_file_value(*, field_name: str, raw_value: object, source: str) -> ob
     return normalized
 
 
-def _coerce_output_config(*, raw_value: object, source: str) -> OutputConfig:
+def _coerce_output_config(
+    *,
+    raw_value: object,
+    source: str,
+    base: OutputConfig | None = None,
+) -> OutputConfig:
     if not isinstance(raw_value, dict):
         raise ValueError(f"Invalid value for '{source}': expected table.")
 
-    defaults = OutputConfig()
+    defaults = base if base is not None else OutputConfig()
     show = defaults.show
     verbosity = defaults.verbosity
     for key, value in cast("dict[str, object]", raw_value).items():
@@ -240,11 +246,16 @@ def _coerce_search_path_list(*, raw_value: object, source: str) -> tuple[str, ..
     return tuple(parsed)
 
 
-def _coerce_search_path_config(*, raw_value: object, source: str) -> SearchPathConfig:
+def _coerce_search_path_config(
+    *,
+    raw_value: object,
+    source: str,
+    base: SearchPathConfig | None = None,
+) -> SearchPathConfig:
     if not isinstance(raw_value, dict):
         raise ValueError(f"Invalid value for '{source}': expected table.")
 
-    defaults = SearchPathConfig()
+    defaults = base if base is not None else SearchPathConfig()
     values: dict[str, tuple[str, ...]] = {
         "agents": defaults.agents,
         "skills": defaults.skills,
@@ -266,11 +277,16 @@ def _coerce_search_path_config(*, raw_value: object, source: str) -> SearchPathC
     )
 
 
-def _coerce_primary_config(*, raw_value: object, source: str) -> PrimaryConfig:
+def _coerce_primary_config(
+    *,
+    raw_value: object,
+    source: str,
+    base: PrimaryConfig | None = None,
+) -> PrimaryConfig:
     if not isinstance(raw_value, dict):
         raise ValueError(f"Invalid value for '{source}': expected table.")
 
-    defaults = PrimaryConfig()
+    defaults = base if base is not None else PrimaryConfig()
     autocompact_pct = defaults.autocompact_pct
     permission_tier = defaults.permission_tier
     for key, value in cast("dict[str, object]", raw_value).items():
@@ -359,18 +375,24 @@ def _apply_toml_payload(
 ) -> None:
     for key, raw_value in payload.items():
         if key == "output":
-            values["output"] = _coerce_output_config(raw_value=raw_value, source="output")
+            values["output"] = _coerce_output_config(
+                raw_value=raw_value,
+                source="output",
+                base=cast("OutputConfig", values["output"]),
+            )
             continue
         if key == "search_paths":
             values["search_paths"] = _coerce_search_path_config(
                 raw_value=raw_value,
                 source="search_paths",
+                base=cast("SearchPathConfig", values["search_paths"]),
             )
             continue
         if key == "primary":
             values["primary"] = _coerce_primary_config(
                 raw_value=raw_value,
                 source="primary",
+                base=cast("PrimaryConfig", values["primary"]),
             )
             continue
 
@@ -437,15 +459,37 @@ def _build_config(values: dict[str, object]) -> MeridianConfig:
     return config
 
 
-def load_config(repo_root: Path) -> MeridianConfig:
-    """Load `.meridian/config.toml` and apply environment overrides."""
+def _resolve_user_config_path(user_config: Path | None) -> Path | None:
+    resolved = user_config.expanduser() if user_config is not None else None
+    if resolved is None:
+        raw_env = os.getenv(_USER_CONFIG_ENV_VAR, "").strip()
+        if raw_env:
+            resolved = Path(raw_env).expanduser()
+
+    if resolved is None:
+        return None
+    if not resolved.is_file():
+        raise FileNotFoundError(
+            f"User Meridian config file not found: '{resolved.as_posix()}'."
+        )
+    return resolved
+
+
+def load_config(repo_root: Path, *, user_config: Path | None = None) -> MeridianConfig:
+    """Load config with precedence: defaults < project < user < environment."""
 
     values = _default_values()
-    path = resolve_state_paths(repo_root).config_path
-    if path.is_file():
-        payload_obj = tomllib.loads(path.read_text(encoding="utf-8"))
+    project_path = resolve_state_paths(repo_root).config_path
+    if project_path.is_file():
+        payload_obj = tomllib.loads(project_path.read_text(encoding="utf-8"))
         payload = cast("dict[str, object]", payload_obj)
-        _apply_toml_payload(values=values, payload=payload, path=path)
+        _apply_toml_payload(values=values, payload=payload, path=project_path)
+
+    resolved_user_config = _resolve_user_config_path(user_config)
+    if resolved_user_config is not None:
+        payload_obj = tomllib.loads(resolved_user_config.read_text(encoding="utf-8"))
+        payload = cast("dict[str, object]", payload_obj)
+        _apply_toml_payload(values=values, payload=payload, path=resolved_user_config)
 
     _apply_env_overrides(values)
     return _build_config(values)

@@ -62,6 +62,7 @@ class GlobalOptions:
     """Top-level options that apply to all commands."""
 
     output: OutputConfig
+    config_file: str | None = None
     yes: bool = False
     no_input: bool = False
     output_explicit: bool = False
@@ -87,6 +88,7 @@ def _extract_global_options(argv: Sequence[str]) -> tuple[list[str], GlobalOptio
     json_mode = False
     porcelain_mode = False
     output_format: str | None = None
+    config_file: str | None = None
     yes = False
     no_input = False
     output_explicit = False
@@ -125,6 +127,20 @@ def _extract_global_options(argv: Sequence[str]) -> tuple[list[str], GlobalOptio
             output_explicit = True
             i += 1
             continue
+        if arg == "--config":
+            if i + 1 >= len(argv):
+                raise SystemExit("--config requires a value")
+            config_file = argv[i + 1].strip()
+            if not config_file:
+                raise SystemExit("--config requires a non-empty value")
+            i += 2
+            continue
+        if arg.startswith("--config="):
+            config_file = arg.partition("=")[2].strip()
+            if not config_file:
+                raise SystemExit("--config requires a non-empty value")
+            i += 1
+            continue
         if arg == "--yes":
             yes = True
             i += 1
@@ -150,6 +166,7 @@ def _extract_global_options(argv: Sequence[str]) -> tuple[list[str], GlobalOptio
     )
     return cleaned, GlobalOptions(
         output=OutputConfig(format=resolved),
+        config_file=config_file,
         yes=yes,
         no_input=no_input,
         output_explicit=output_explicit,
@@ -190,6 +207,10 @@ def root(
         str | None,
         Parameter(name="--format", help="Set output format: text, json, or porcelain."),
     ] = None,
+    config_file: Annotated[
+        str | None,
+        Parameter(name="--config", help="Path to a user config TOML overlay."),
+    ] = None,
     porcelain: Annotated[
         bool,
         Parameter(name="--porcelain", help="Emit stable tab-separated key/value output."),
@@ -214,7 +235,12 @@ def root(
         porcelain_mode=porcelain,
     )
     _GLOBAL_OPTIONS.set(
-        GlobalOptions(output=OutputConfig(format=resolved), yes=yes, no_input=no_input)
+        GlobalOptions(
+            output=OutputConfig(format=resolved),
+            config_file=config_file,
+            yes=yes,
+            no_input=no_input,
+        )
     )
     app.help_print()
 
@@ -527,6 +553,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     _validate_top_level_command(cleaned_args)
 
     token = _GLOBAL_OPTIONS.set(options)
+    prior_user_config = os.environ.get("MERIDIAN_CONFIG")
+    if options.config_file is not None:
+        # Set process env so all downstream load_config() calls see --config without plumbing args everywhere.
+        os.environ["MERIDIAN_CONFIG"] = options.config_file
     try:
         try:
             app(cleaned_args)
@@ -537,6 +567,11 @@ def main(argv: Sequence[str] | None = None) -> None:
             print(f"error: {_operation_error_message(exc)}", file=sys.stderr)
             raise SystemExit(1) from None
     finally:
+        if options.config_file is not None:
+            if prior_user_config is None:
+                os.environ.pop("MERIDIAN_CONFIG", None)
+            else:
+                os.environ["MERIDIAN_CONFIG"] = prior_user_config
         _GLOBAL_OPTIONS.reset(token)
 
 

@@ -103,3 +103,24 @@ def test_config_show_warns_when_repo_root_does_not_exist(
     warning = payload.get("warning")
     assert isinstance(warning, str)
     assert "does not exist on disk" in warning
+
+
+def test_config_show_displays_user_config_source(
+    tmp_path: Path,
+    run_meridian,
+    cli_env: dict[str, str],
+) -> None:
+    cli_env["MERIDIAN_REPO_ROOT"] = tmp_path.as_posix()
+
+    assert run_meridian(["config", "set", "defaults.max_depth", "4"]).returncode == 0
+    user_config = tmp_path / "user.toml"
+    user_config.write_text("[defaults]\nmax_depth = 9\n", encoding="utf-8")
+
+    show_result = run_meridian(
+        ["--json", "--config", user_config.as_posix(), "config", "show"]
+    )
+    assert show_result.returncode == 0
+
+    payload = json.loads(show_result.stdout)
+    by_key = _source_by_key(payload)
+    assert by_key["defaults.max_depth"] == "user-config"

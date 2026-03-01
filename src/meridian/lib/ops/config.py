@@ -16,6 +16,7 @@ from meridian.lib.config.settings import (
     MeridianConfig,
     PrimaryConfig,
     SearchPathConfig,
+    _USER_CONFIG_ENV_VAR,
     load_config,
 )
 from meridian.lib.ops.registry import OperationSpec, operation
@@ -180,7 +181,7 @@ class ConfigShowInput:
 class ConfigResolvedValue:
     key: str
     value: object
-    source: Literal["builtin", "file", "env var"]
+    source: Literal["builtin", "file", "user-config", "env var"]
     env_var: str | None = None
 
 
@@ -233,7 +234,7 @@ class ConfigGetInput:
 class ConfigGetOutput:
     key: str
     value: object
-    source: Literal["builtin", "file", "env var"]
+    source: Literal["builtin", "file", "user-config", "env var"]
     env_var: str | None = None
 
     def format_text(self, ctx: FormatContext | None = None) -> str:
@@ -534,14 +535,24 @@ def _atomic_write_text(path: Path, content: str) -> None:
 def _source_for_key(
     spec: _ConfigKeySpec,
     *,
-    file_overrides: dict[str, object],
-) -> tuple[Literal["builtin", "file", "env var"], str | None]:
+    project_overrides: dict[str, object],
+    user_overrides: dict[str, object],
+) -> tuple[Literal["builtin", "file", "user-config", "env var"], str | None]:
     env_var = spec.env_var
     if env_var is not None and os.getenv(env_var) is not None:
         return "env var", env_var
-    if spec.canonical_key in file_overrides:
+    if spec.canonical_key in user_overrides:
+        return "user-config", None
+    if spec.canonical_key in project_overrides:
         return "file", None
     return "builtin", None
+
+
+def _user_config_path_from_env() -> Path | None:
+    raw_value = os.getenv(_USER_CONFIG_ENV_VAR, "").strip()
+    if not raw_value:
+        return None
+    return Path(raw_value).expanduser()
 
 
 def _format_value_for_text(value: object) -> str:
@@ -640,14 +651,24 @@ def config_init_sync(payload: ConfigInitInput) -> ConfigInitOutput:
 def config_show_sync(payload: ConfigShowInput) -> ConfigShowOutput:
     repo_root = _resolve_repo_root(payload.repo_root)
     path = _config_path(repo_root)
-    file_overrides = _extract_file_overrides(_read_file_payload(path))
+    project_overrides = _extract_file_overrides(_read_file_payload(path))
+    user_path = _user_config_path_from_env()
+    user_overrides = (
+        _extract_file_overrides(_read_file_payload(user_path))
+        if user_path is not None
+        else {}
+    )
 
     resolved_config = load_config(repo_root)
     resolved_values = _resolved_values(resolved_config)
 
     values: list[ConfigResolvedValue] = []
     for spec in _CONFIG_KEY_SPECS:
-        source, env_var = _source_for_key(spec, file_overrides=file_overrides)
+        source, env_var = _source_for_key(
+            spec,
+            project_overrides=project_overrides,
+            user_overrides=user_overrides,
+        )
         values.append(
             ConfigResolvedValue(
                 key=spec.canonical_key,
@@ -688,8 +709,18 @@ def config_get_sync(payload: ConfigGetInput) -> ConfigGetOutput:
     path = _config_path(repo_root)
     spec = _resolve_key_spec(payload.key)
 
-    file_overrides = _extract_file_overrides(_read_file_payload(path))
-    source, env_var = _source_for_key(spec, file_overrides=file_overrides)
+    project_overrides = _extract_file_overrides(_read_file_payload(path))
+    user_path = _user_config_path_from_env()
+    user_overrides = (
+        _extract_file_overrides(_read_file_payload(user_path))
+        if user_path is not None
+        else {}
+    )
+    source, env_var = _source_for_key(
+        spec,
+        project_overrides=project_overrides,
+        user_overrides=user_overrides,
+    )
 
     resolved_values = _resolved_values(load_config(repo_root))
 
