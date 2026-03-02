@@ -9,10 +9,9 @@ from pathlib import Path
 
 from meridian.lib.exec.spawn import execute_with_finalization
 from meridian.lib.ops._runtime import (
-    SPACE_REQUIRED_ERROR,
     build_runtime_from_root_and_config,
+    require_space_id,
     resolve_runtime_root_and_config,
-    resolve_space_id,
 )
 from meridian.lib.ops.registry import OperationSpec, operation
 from meridian.lib.safety.permissions import (
@@ -49,15 +48,14 @@ from ._spawn_prepare import _build_create_payload, _validate_create_input
 from ._spawn_query import (
     _detail_from_row,
     _read_spawn_row,
-    _resolve_space_id,
     resolve_spawn_reference,
     resolve_spawn_references,
 )
 
 
 def _resolve_space_dir(repo_root: Path, space: str | None = None) -> tuple[str, Path]:
-    space_id = _resolve_space_id(space)
-    return space_id, resolve_space_dir(repo_root, space_id)
+    space_id = require_space_id(space)
+    return str(space_id), resolve_space_dir(repo_root, space_id)
 
 
 def _merge_warnings(*warnings: str | None) -> str | None:
@@ -86,10 +84,7 @@ def spawn_create_sync(payload: SpawnCreateInput) -> SpawnActionOutput:
     _spawn_execute_module.logger = logger
 
     payload, preflight_warning = _validate_create_input(payload)
-    resolved_space_id = resolve_space_id(payload.space)
-    if resolved_space_id is None:
-        raise ValueError(SPACE_REQUIRED_ERROR)
-    payload = replace(payload, space=str(resolved_space_id))
+    payload = replace(payload, space=str(require_space_id(payload.space)))
 
     runtime = None
     if not payload.dry_run:

@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_space_dir, resolve_state_paths
 
-from ._runtime import SPACE_REQUIRED_ERROR
+from ._runtime import require_space_id
 from ._spawn_models import SpawnDetailOutput
 
 _SPAWN_REFERENCE_STATUS_FILTERS: dict[str, tuple[str, ...] | None] = {
@@ -18,20 +17,8 @@ _SPAWN_REFERENCE_STATUS_FILTERS: dict[str, tuple[str, ...] | None] = {
 }
 
 
-def _resolve_space_id(space: str | None = None) -> str:
-    if space is not None:
-        resolved = space.strip()
-        if resolved:
-            return resolved
-
-    resolved = os.getenv("MERIDIAN_SPACE_ID", "").strip()
-    if not resolved:
-        raise ValueError(SPACE_REQUIRED_ERROR)
-    return resolved
-
-
 def _space_dir(repo_root: Path, space: str | None = None) -> Path:
-    return resolve_space_dir(repo_root, _resolve_space_id(space))
+    return resolve_space_dir(repo_root, require_space_id(space))
 
 
 def _select_latest_spawn_id(
@@ -116,7 +103,7 @@ def _detail_from_row(
     include_files: bool,
     space_id: str | None = None,
 ) -> SpawnDetailOutput:
-    resolved_space_id = _resolve_space_id(space_id)
+    resolved_space_id = str(require_space_id(space_id))
     report_path, report_text = _read_report_text(repo_root, row.id, resolved_space_id)
     report_summary = report_text[:500] if report_text else None
 

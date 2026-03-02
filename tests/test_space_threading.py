@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from meridian.lib.ops._spawn_query import _read_spawn_row, _resolve_space_id
-from meridian.lib.ops._runtime import SPACE_REQUIRED_ERROR
+from meridian.lib.ops._spawn_query import _read_spawn_row
+from meridian.lib.ops._runtime import SPACE_REQUIRED_ERROR, require_space_id
 from meridian.lib.ops.spawn import (
     SpawnCreateInput,
     SpawnListInput,
@@ -37,23 +37,23 @@ def _start_run(space_dir: Path, *, prompt: str) -> str:
     return str(spawn_id)
 
 
-def test_resolve_space_id_uses_explicit_value_without_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_require_space_id_uses_explicit_value_without_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("MERIDIAN_SPACE_ID", raising=False)
 
-    assert _resolve_space_id("s1") == "s1"
+    assert require_space_id("s1") == "s1"
 
 
-def test_resolve_space_id_falls_back_to_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_require_space_id_falls_back_to_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MERIDIAN_SPACE_ID", "s-env")
 
-    assert _resolve_space_id(None) == "s-env"
+    assert require_space_id(None) == "s-env"
 
 
-def test_resolve_space_id_raises_without_explicit_or_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_require_space_id_raises_without_explicit_or_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("MERIDIAN_SPACE_ID", raising=False)
 
     with pytest.raises(ValueError, match=r"ERROR \[SPACE_REQUIRED\]") as exc_info:
-        _resolve_space_id(None)
+        require_space_id(None)
 
     assert str(exc_info.value) == SPACE_REQUIRED_ERROR
 

@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import re
-import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from meridian.lib.state.paths import resolve_space_dir
+from meridian.lib.types import SpaceId
 
 _TEMPLATE_VAR_RE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
 
@@ -103,6 +103,7 @@ def load_reference_files(
     *,
     base_dir: Path | None = None,
     include_content: bool = True,
+    space_id: str | None = None,
 ) -> tuple[ReferenceFile, ...]:
     """Load referenced files in input order."""
 
@@ -110,13 +111,13 @@ def load_reference_files(
     loaded: list[ReferenceFile] = []
     for raw_path in file_paths:
         if isinstance(raw_path, str) and raw_path.startswith("@"):
-            space_id = os.getenv("MERIDIAN_SPACE_ID", "").strip()
-            if not space_id:
+            normalized_space_id = (space_id or "").strip()
+            if not normalized_space_id:
                 raise ValueError(
-                    "Space reference requires MERIDIAN_SPACE_ID. "
-                    "Set MERIDIAN_SPACE_ID before using '-f @name'."
+                    "Space reference requires space context. "
+                    "Pass --space before using '-f @name'."
                 )
-            space_fs_dir = resolve_space_dir(root, space_id) / "fs"
+            space_fs_dir = resolve_space_dir(root, SpaceId(normalized_space_id)) / "fs"
             relative = raw_path[1:]
             if not relative:
                 raise ValueError("Reference path after '@' must not be empty.")

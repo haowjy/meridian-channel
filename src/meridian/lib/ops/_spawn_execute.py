@@ -26,10 +26,9 @@ from meridian.lib.exec.terminal import TerminalEventFilter, resolve_visible_cate
 from meridian.lib.harness.adapter import PermissionResolver
 from meridian.lib.harness.materialize import cleanup_materialized, materialize_for_harness
 from meridian.lib.ops._runtime import (
-    SPACE_REQUIRED_ERROR,
     OperationRuntime,
     build_runtime,
-    resolve_space_id,
+    require_space_id,
 )
 from meridian.lib.safety.permissions import (
     PermissionConfig,
@@ -257,9 +256,7 @@ def _resolve_chat_id() -> str:
 
 
 def _resolve_space(repo_root: Path, payload_space: str | None) -> tuple[SpaceId, Path]:
-    resolved = resolve_space_id(payload_space)
-    if resolved is None:
-        raise ValueError(SPACE_REQUIRED_ERROR)
+    resolved = require_space_id(payload_space)
     return resolved, resolve_space_dir(repo_root, resolved)
 
 

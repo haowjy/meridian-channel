@@ -120,8 +120,8 @@ def test_reference_loader_supports_space_at_sigil(monkeypatch: pytest.MonkeyPatc
     space_file.parent.mkdir(parents=True, exist_ok=True)
     space_file.write_text("from-space", encoding="utf-8")
 
-    monkeypatch.setenv("MERIDIAN_SPACE_ID", space_id)
-    loaded = load_reference_files(["@review-prompt.md"], base_dir=tmp_path)
+    monkeypatch.setenv("MERIDIAN_SPACE_ID", "ignored-by-explicit-space")
+    loaded = load_reference_files(["@review-prompt.md"], base_dir=tmp_path, space_id=space_id)
     assert len(loaded) == 1
     assert loaded[0].path == space_file.resolve()
     assert loaded[0].content == "from-space"
@@ -137,12 +137,12 @@ def test_reference_loader_can_skip_inline_content(tmp_path: Path) -> None:
     assert loaded[0].content == ""
 
 
-def test_reference_loader_space_at_sigil_requires_space_env(
+def test_reference_loader_space_at_sigil_requires_space_context(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     monkeypatch.delenv("MERIDIAN_SPACE_ID", raising=False)
-    with pytest.raises(ValueError, match="MERIDIAN_SPACE_ID"):
+    with pytest.raises(ValueError, match="requires space context"):
         _ = load_reference_files(["@review-prompt.md"], base_dir=tmp_path)
 
 

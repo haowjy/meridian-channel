@@ -60,21 +60,12 @@ def build_runtime(repo_root: str | None = None) -> OperationRuntime:
     return build_runtime_from_root_and_config(resolved_root, config)
 
 
-def resolve_space_id(space: str | None) -> SpaceId | None:
-    """Resolve space from explicit input or environment."""
+def require_space_id(space: str | None) -> SpaceId:
+    """Resolve space ID and raise when none is configured."""
 
     resolved = space.strip() if space is not None else ""
     if not resolved:
         resolved = os.getenv("MERIDIAN_SPACE_ID", "").strip()
     if not resolved:
-        return None
-    return SpaceId(resolved)
-
-
-def require_space_id(space: str | None) -> SpaceId:
-    """Resolve space ID and raise when none is configured."""
-
-    resolved = resolve_space_id(space)
-    if resolved is None:
         raise ValueError(SPACE_REQUIRED_ERROR)
-    return resolved
+    return SpaceId(resolved)
