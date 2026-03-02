@@ -19,3 +19,6 @@ tmp/
 
 err
 out
+
+.agents/_meridian-*
+.claude/_meridian-*
