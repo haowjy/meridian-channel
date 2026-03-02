@@ -24,7 +24,11 @@ from meridian.lib.config.agent import (
 )
 from meridian.lib.domain import Spawn
 from meridian.lib.exec.spawn import execute_with_finalization
-from meridian.lib.exec.terminal import TerminalEventFilter, resolve_visible_categories
+from meridian.lib.exec.terminal import (
+    TerminalEventFilter,
+    format_stderr_for_terminal,
+    resolve_visible_categories,
+)
 from meridian.lib.harness.adapter import PermissionResolver
 from meridian.lib.harness.materialize import cleanup_materialized, materialize_for_harness
 from meridian.lib.ops._runtime import (
@@ -689,6 +693,17 @@ def _execute_spawn_blocking(
             )
         )
     duration = time.monotonic() - started
+    if not payload.stream and not payload.verbose:
+        stderr_path = resolve_spawn_log_dir(runtime.repo_root, spawn.spawn_id, context.space_id) / "stderr.log"
+        if stderr_path.is_file():
+            stderr_text = stderr_path.read_text(encoding="utf-8", errors="ignore")
+            rendered_stderr = format_stderr_for_terminal(
+                stderr_text,
+                verbose=payload.verbose,
+                quiet=payload.quiet,
+            )
+            if rendered_stderr is not None:
+                print(rendered_stderr, file=sys.stderr, flush=True)
 
     row = _read_spawn_row(runtime.repo_root, str(spawn.spawn_id), space=space_id_str)
     status = "failed"

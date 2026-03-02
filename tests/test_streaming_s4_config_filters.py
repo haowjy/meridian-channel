@@ -8,7 +8,9 @@ from meridian.lib.config.settings import OutputConfig, load_config
 from meridian.lib.exec.terminal import (
     QUIET_VISIBLE_CATEGORIES,
     VERBOSE_VISIBLE_CATEGORIES,
+    format_stderr_for_terminal,
     resolve_visible_categories,
+    summarize_stderr,
 )
 from tests.helpers.fixtures import write_config as _write_config
 
@@ -63,3 +65,23 @@ def test_verbosity_presets_map_correctly() -> None:
         quiet=False,
         config=OutputConfig(show=("assistant",), verbosity="debug"),
     ) == VERBOSE_VISIBLE_CATEGORIES
+
+
+def test_default_stderr_formatting_returns_concise_summary() -> None:
+    stderr_text = "debug line\nERROR: request failed after retry\nnext details"
+    rendered = format_stderr_for_terminal(stderr_text, verbose=False, quiet=False)
+    assert rendered == "harness stderr: ERROR: request failed after retry"
+
+
+def test_stderr_formatting_respects_verbose_and_quiet() -> None:
+    stderr_text = "line 1\nline 2"
+    assert format_stderr_for_terminal(stderr_text, verbose=True, quiet=False) == stderr_text
+    assert format_stderr_for_terminal(stderr_text, verbose=False, quiet=True) is None
+
+
+def test_stderr_summary_truncates_long_lines() -> None:
+    long_line = "error " + ("x" * 400)
+    summary = summarize_stderr(long_line, max_chars=50)
+    assert summary is not None
+    assert len(summary) == 50
+    assert summary.endswith("...")

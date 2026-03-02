@@ -116,3 +116,37 @@ def _coerce_int(value: object) -> int | None:
 
 def _normalize_visible_categories(categories: tuple[str, ...]) -> frozenset[str]:
     return frozenset(item for item in categories if item in ALL_EVENT_CATEGORIES)
+
+
+def summarize_stderr(stderr_text: str, *, max_chars: int = 220) -> str | None:
+    """Return one concise stderr summary line for default verbosity output."""
+
+    lines = [" ".join(line.split()) for line in stderr_text.splitlines() if line.strip()]
+    if not lines:
+        return None
+    preferred = next(
+        (line for line in lines if any(token in line.lower() for token in ("error", "failed"))),
+        lines[0],
+    )
+    if len(preferred) <= max_chars:
+        return preferred
+    return f"{preferred[: max_chars - 3].rstrip()}..."
+
+
+def format_stderr_for_terminal(
+    stderr_text: str,
+    *,
+    verbose: bool,
+    quiet: bool,
+) -> str | None:
+    """Format harness stderr according to CLI verbosity tiers."""
+
+    normalized = stderr_text.strip()
+    if not normalized or quiet:
+        return None
+    if verbose:
+        return normalized
+    summary = summarize_stderr(normalized)
+    if summary is None:
+        return None
+    return f"harness stderr: {summary}"
