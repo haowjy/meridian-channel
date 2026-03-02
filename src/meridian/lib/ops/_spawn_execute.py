@@ -9,9 +9,11 @@ import os
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
+from dataclasses import dataclass
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, Callable, Iterator, Protocol, cast
 
 import structlog
 
@@ -75,6 +77,21 @@ class _PreparedCreateLike(Protocol):
     allowed_tools: tuple[str, ...]
     continue_harness_session_id: str | None
     continue_fork: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _SpawnContext:
+    spawn: Spawn
+    space_id: SpaceId
+    space_dir: Path
+    current_depth: int
+
+
+@dataclass(frozen=True, slots=True)
+class _SessionExecutionContext:
+    chat_id: str
+    resolved_agent_name: str | None
+    harness_session_id_observer: Callable[[str], None]
 
 
 def _read_non_negative_int_env(name: str, default: int) -> int:
@@ -260,6 +277,106 @@ def _resolve_space(repo_root: Path, payload_space: str | None) -> tuple[SpaceId,
     return resolved, resolve_space_dir(repo_root, resolved)
 
 
+def _init_spawn(
+    *,
+    payload: SpawnCreateInput,
+    prepared: _PreparedCreateLike,
+    runtime: OperationRuntime,
+) -> _SpawnContext:
+    space_id, space_dir = _resolve_space(runtime.repo_root, payload.space)
+    spawn_id = spawn_store.start_spawn(
+        space_dir,
+        chat_id=_resolve_chat_id(),
+        model=prepared.model,
+        agent=prepared.agent_name or "",
+        harness=prepared.harness_id,
+        kind="child",
+        prompt=prepared.composed_prompt,
+        harness_session_id=prepared.continue_harness_session_id,
+    )
+    spawn = Spawn(
+        spawn_id=SpawnId(spawn_id),
+        prompt=prepared.composed_prompt,
+        model=ModelId(prepared.model),
+        status="running",
+        space_id=space_id,
+    )
+    current_depth = _read_non_negative_int_env("MERIDIAN_DEPTH", 0)
+    run_start_event: dict[str, Any] = {
+        "t": "meridian.spawn.start",
+        "id": str(spawn.spawn_id),
+        "model": prepared.model,
+        "d": current_depth,
+    }
+    if prepared.agent_name is not None:
+        run_start_event["agent"] = prepared.agent_name
+    _emit_subrun_event(run_start_event)
+    return _SpawnContext(
+        spawn=spawn,
+        space_id=space_id,
+        space_dir=space_dir,
+        current_depth=current_depth,
+    )
+
+
+@contextmanager
+def _session_execution_context(
+    *,
+    space_dir: Path,
+    harness_id: str,
+    harness_session_id: str,
+    model: str,
+    session_agent: str,
+    session_agent_path: str,
+    skills: tuple[str, ...],
+    session_skill_paths: tuple[str, ...],
+    repo_root: Path,
+    run_agent_name: str | None,
+) -> Iterator[_SessionExecutionContext]:
+    chat_id = start_session(
+        space_dir,
+        harness=harness_id,
+        harness_session_id=harness_session_id,
+        model=model,
+        agent=session_agent,
+        agent_path=session_agent_path,
+        skills=skills,
+        skill_paths=session_skill_paths,
+    )
+    resolved_agent_name = run_agent_name
+    try:
+        materialized_agent_name = _materialize_session_agent_name(
+            repo_root=repo_root,
+            harness_id=harness_id,
+            chat_id=chat_id,
+            session_agent=session_agent,
+            session_agent_path=session_agent_path,
+            run_agent_name=run_agent_name,
+            skills=skills,
+            session_skill_paths=session_skill_paths,
+        )
+        if materialized_agent_name is not None and materialized_agent_name != resolved_agent_name:
+            resolved_agent_name = materialized_agent_name
+        yield _SessionExecutionContext(
+            chat_id=chat_id,
+            resolved_agent_name=resolved_agent_name,
+            harness_session_id_observer=lambda session_id: update_session_harness_id(
+                space_dir,
+                chat_id,
+                session_id,
+            ),
+        )
+    finally:
+        try:
+            stop_session(space_dir, chat_id)
+        finally:
+            _cleanup_session_materialized(
+                harness_id=harness_id,
+                repo_root=repo_root,
+                chat_id=chat_id,
+            )
+
+
 def _stdout_is_tty() -> bool:
     try:
         return bool(sys.stdout.isatty())
@@ -310,31 +427,18 @@ async def _execute_existing_spawn(
         cli_permission_override=cli_permission_override,
     )
 
-    chat_id = start_session(
-        space_dir,
-        harness=spawn_record.harness or "",
+    with _session_execution_context(
+        space_dir=space_dir,
+        harness_id=spawn_record.harness or "",
         harness_session_id=spawn_record.harness_session_id or "",
         model=spawn_record.model,
-        agent=session_agent,
-        agent_path=session_agent_path,
+        session_agent=session_agent,
+        session_agent_path=session_agent_path,
         skills=skills,
-        skill_paths=session_skill_paths,
-    )
-    resolved_agent_name = agent_name
-    try:
-        materialized_agent_name = _materialize_session_agent_name(
-            repo_root=runtime.repo_root,
-            harness_id=spawn_record.harness or "",
-            chat_id=chat_id,
-            session_agent=session_agent,
-            session_agent_path=session_agent_path,
-            run_agent_name=agent_name,
-            skills=skills,
-            session_skill_paths=session_skill_paths,
-        )
-        if materialized_agent_name is not None and materialized_agent_name != resolved_agent_name:
-            resolved_agent_name = materialized_agent_name
-
+        session_skill_paths=session_skill_paths,
+        repo_root=runtime.repo_root,
+        run_agent_name=agent_name,
+    ) as session_context:
         return await execute_with_finalization(
             spawn,
             repo_root=runtime.repo_root,
@@ -347,7 +451,7 @@ async def _execute_existing_spawn(
             timeout_seconds=timeout_secs,
             kill_grace_seconds=runtime.config.kill_grace_seconds,
             skills=skills,
-            agent=resolved_agent_name,
+            agent=session_context.resolved_agent_name,
             mcp_tools=mcp_tools,
             env_overrides=_spawn_child_env(
                 space_id_text,
@@ -357,21 +461,8 @@ async def _execute_existing_spawn(
             retry_backoff_seconds=runtime.config.retry_backoff_seconds,
             continue_harness_session_id=continue_harness_session_id,
             continue_fork=continue_fork,
-            harness_session_id_observer=lambda session_id: update_session_harness_id(
-                space_dir,
-                chat_id,
-                session_id,
-            ),
+            harness_session_id_observer=session_context.harness_session_id_observer,
         )
-    finally:
-        try:
-            stop_session(space_dir, chat_id)
-        finally:
-            _cleanup_session_materialized(
-                    harness_id=spawn_record.harness or "",
-                repo_root=runtime.repo_root,
-                chat_id=chat_id,
-            )
 
 
 def _build_background_worker_command(
@@ -438,37 +529,9 @@ def _execute_spawn_background(
 ) -> SpawnActionOutput:
     if payload.stream:
         logger.warning("--stream is ignored with --background; output goes to spawn log files.")
-    space_id, space_dir = _resolve_space(runtime.repo_root, payload.space)
-    spawn_id = spawn_store.start_spawn(
-        space_dir,
-        chat_id=_resolve_chat_id(),
-        model=prepared.model,
-        agent=prepared.agent_name or "",
-        harness=prepared.harness_id,
-        kind="child",
-        prompt=prepared.composed_prompt,
-        harness_session_id=prepared.continue_harness_session_id,
-    )
-    spawn = Spawn(
-        spawn_id=SpawnId(spawn_id),
-        prompt=prepared.composed_prompt,
-        model=ModelId(prepared.model),
-        status="running",
-        space_id=space_id,
-    )
-    spawn_id_text = str(spawn.spawn_id)
-    space_id_str = str(space_id)
-
-    current_depth = _read_non_negative_int_env("MERIDIAN_DEPTH", 0)
-    run_start_event: dict[str, Any] = {
-        "t": "meridian.spawn.start",
-        "id": spawn_id_text,
-        "model": prepared.model,
-        "d": current_depth,
-    }
-    if prepared.agent_name is not None:
-        run_start_event["agent"] = prepared.agent_name
-    _emit_subrun_event(run_start_event)
+    context = _init_spawn(payload=payload, prepared=prepared, runtime=runtime)
+    spawn_id_text = str(context.spawn.spawn_id)
+    space_id_str = str(context.space_id)
 
     launch_command = _build_background_worker_command(
         spawn_id=spawn_id_text,
@@ -487,7 +550,7 @@ def _execute_spawn_background(
         session_agent_path=prepared.session_agent_path,
         session_skill_paths=prepared.skill_paths,
     )
-    log_dir = resolve_spawn_log_dir(runtime.repo_root, spawn.spawn_id, spawn.space_id)
+    log_dir = resolve_spawn_log_dir(runtime.repo_root, context.spawn.spawn_id, context.spawn.space_id)
     log_dir.mkdir(parents=True, exist_ok=True)
     stdout_path = log_dir / _BACKGROUND_STDOUT_FILENAME
     stderr_path = log_dir / _BACKGROUND_STDERR_FILENAME
@@ -510,8 +573,8 @@ def _execute_spawn_background(
             )
     except OSError as exc:
         spawn_store.finalize_spawn(
-            space_dir,
-            spawn.spawn_id,
+            context.space_dir,
+            context.spawn.spawn_id,
             status="failed",
             exit_code=1,
             error=str(exc),
@@ -563,37 +626,10 @@ def _execute_spawn_blocking(
     prepared: _PreparedCreateLike,
     runtime: OperationRuntime,
 ) -> SpawnActionOutput:
-    space_id, space_dir = _resolve_space(runtime.repo_root, payload.space)
-    spawn_id = spawn_store.start_spawn(
-        space_dir,
-        chat_id=_resolve_chat_id(),
-        model=prepared.model,
-        agent=prepared.agent_name or "",
-        harness=prepared.harness_id,
-        kind="child",
-        prompt=prepared.composed_prompt,
-        harness_session_id=prepared.continue_harness_session_id,
-    )
-    spawn = Spawn(
-        spawn_id=SpawnId(spawn_id),
-        prompt=prepared.composed_prompt,
-        model=ModelId(prepared.model),
-        status="running",
-        space_id=space_id,
-    )
-    current_depth = _read_non_negative_int_env("MERIDIAN_DEPTH", 0)
-    run_start_event: dict[str, Any] = {
-        "t": "meridian.spawn.start",
-        "id": str(spawn.spawn_id),
-        "model": prepared.model,
-        "d": current_depth,
-    }
-    if prepared.agent_name is not None:
-        run_start_event["agent"] = prepared.agent_name
-    _emit_subrun_event(run_start_event)
-
+    context = _init_spawn(payload=payload, prepared=prepared, runtime=runtime)
+    spawn = context.spawn
     started = time.monotonic()
-    space_id_str = str(space_id)
+    space_id_str = str(context.space_id)
     event_observer = None
     # --stream: raw firehose (stdout+stderr piped to terminal), no filtering.
     # Otherwise (TTY or not): use TerminalEventFilter for structured output.
@@ -611,36 +647,23 @@ def _execute_spawn_blocking(
         )
         event_observer = event_filter.observe
 
-    chat_id = start_session(
-        space_dir,
-        harness=prepared.harness_id,
+    with _session_execution_context(
+        space_dir=context.space_dir,
+        harness_id=prepared.harness_id,
         harness_session_id=prepared.continue_harness_session_id or "",
         model=prepared.model,
-        agent=prepared.session_agent,
-        agent_path=prepared.session_agent_path,
+        session_agent=prepared.session_agent,
+        session_agent_path=prepared.session_agent_path,
         skills=prepared.skills,
-        skill_paths=prepared.skill_paths,
-    )
-    resolved_agent_name = prepared.agent_name
-    try:
-        materialized_agent_name = _materialize_session_agent_name(
-            repo_root=runtime.repo_root,
-            harness_id=prepared.harness_id,
-            chat_id=chat_id,
-            session_agent=prepared.session_agent,
-            session_agent_path=prepared.session_agent_path,
-            run_agent_name=prepared.agent_name,
-            skills=prepared.skills,
-            session_skill_paths=prepared.skill_paths,
-        )
-        if materialized_agent_name is not None and materialized_agent_name != resolved_agent_name:
-            resolved_agent_name = materialized_agent_name
-
+        session_skill_paths=prepared.skill_paths,
+        repo_root=runtime.repo_root,
+        run_agent_name=prepared.agent_name,
+    ) as session_context:
         exit_code = asyncio.run(
             execute_with_finalization(
                 spawn,
                 repo_root=runtime.repo_root,
-                space_dir=space_dir,
+                space_dir=context.space_dir,
                 artifacts=runtime.artifacts,
                 registry=runtime.harness_registry,
                 permission_resolver=prepared.permission_resolver,
@@ -649,7 +672,7 @@ def _execute_spawn_blocking(
                 timeout_seconds=payload.timeout_secs,
                 kill_grace_seconds=runtime.config.kill_grace_seconds,
                 skills=prepared.skills,
-                agent=resolved_agent_name,
+                agent=session_context.resolved_agent_name,
                 mcp_tools=prepared.mcp_tools,
                 env_overrides=_spawn_child_env(
                     space_id_str,
@@ -662,22 +685,9 @@ def _execute_spawn_blocking(
                 event_observer=event_observer,
                 stream_stdout_to_terminal=stream_stdout_to_terminal,
                 stream_stderr_to_terminal=payload.stream or payload.verbose,
-                harness_session_id_observer=lambda session_id: update_session_harness_id(
-                    space_dir,
-                    chat_id,
-                    session_id,
-                ),
+                harness_session_id_observer=session_context.harness_session_id_observer,
             )
         )
-    finally:
-        try:
-            stop_session(space_dir, chat_id)
-        finally:
-            _cleanup_session_materialized(
-                harness_id=prepared.harness_id,
-                repo_root=runtime.repo_root,
-                chat_id=chat_id,
-            )
     duration = time.monotonic() - started
 
     row = _read_spawn_row(runtime.repo_root, str(spawn.spawn_id), space=space_id_str)
@@ -701,7 +711,7 @@ def _execute_spawn_blocking(
             "exit": exit_code,
             "secs": done_secs,
             "tok": tokens_total,
-            "d": current_depth,
+            "d": context.current_depth,
         }
     )
 
@@ -713,7 +723,7 @@ def _execute_spawn_blocking(
         model=prepared.model,
         harness_id=prepared.harness_id,
         warning=prepared.warning,
-        agent=resolved_agent_name,
+        agent=session_context.resolved_agent_name,
         reference_files=prepared.reference_files,
         template_vars=prepared.template_vars,
         report_path=prepared.report_path,
