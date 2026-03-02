@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 from typing import ClassVar, cast
 
@@ -133,6 +134,7 @@ class ClaudeAdapter:
     def capabilities(self) -> HarnessCapabilities:
         return HarnessCapabilities(
             supports_stream_events=True,
+            supports_stdin_prompt=True,
             supports_session_resume=True,
             supports_session_fork=True,
             supports_native_skills=True,
@@ -142,10 +144,11 @@ class ClaudeAdapter:
 
     def build_command(self, run: SpawnParams, perms: PermissionResolver) -> list[str]:
         mcp_config = self.mcp_config(run)
+        command_run = replace(run, prompt="-")
         command = build_harness_command(
             base_command=self.BASE_COMMAND,
             prompt_mode=self.PROMPT_MODE,
-            run=run,
+            run=command_run,
             strategies=self.STRATEGIES,
             perms=perms,
             harness_id=self.id,

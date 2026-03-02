@@ -48,7 +48,7 @@ def test_claude_build_command_passes_agent_natively() -> None:
     assert command == [
         "claude",
         "-p",
-        "Implement feature X.",
+        "-",
         "--model",
         "claude-opus-4-6",
         "--agent",
@@ -146,7 +146,7 @@ def test_opencode_build_command_strips_model_prefix_and_uses_positional_prompt()
         "--perm",
         "opencode",
         "--json",
-        "Implement feature X.",
+        "-",
     ]
     assert "--agent" not in command
     assert "--skills" not in command
