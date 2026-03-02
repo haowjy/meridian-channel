@@ -26,10 +26,12 @@ def build_report_instruction(report_path: str) -> str:
         raise ValueError("Report path must not be empty.")
     return (
         "# Report\n\n"
-        "**IMPORTANT - Your final message should be a report of your work.**\n\n"
+        "**IMPORTANT - As your final action, create the run report with Meridian.**\n\n"
+        "Run `meridian report create --stdin` and provide a plain markdown report via stdin.\n\n"
         "Include: what was done, key decisions made, files created/modified, "
         "verification results, and any issues or blockers.\n\n"
-        "Use plain markdown. Meridian captures your final message as the run report."
+        "If `meridian report create` is unavailable or fails, provide the same markdown "
+        "as your final assistant message so fallback extraction can persist the report."
     )
 
 

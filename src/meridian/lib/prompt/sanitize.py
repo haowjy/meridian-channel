@@ -12,10 +12,13 @@ _CANONICAL_REPORT_BLOCK_RE = re.compile(
       write\s+a\s+report\s+of\s+your\s+work\s+to:\s*`[^`\n]+`
       |
       your\s+final\s+message\s+should\s+be\s+a\s+report\s+of\s+your\s+work\.?
+      |
+      as\s+your\s+final\s+action,\s+create\s+the\s+run\s+report\s+with\s+meridian\.?
     )
     [^\n]*\n+
+    (?:Run\s+`?meridian\s+report\s+create\s+--stdin`?[^\n]*\n+)?
     (?:(?:Keep\s+the\s+report\s+concise\.|Include:|Be\s+thorough:)[^\n]*\n+)?
-    Use\s+plain\s+markdown\.[^\n]*\n*
+    (?:Use\s+plain\s+markdown\.[^\n]*\n*)?
     """
 )
 _REPORT_LINE_RE = re.compile(
@@ -26,7 +29,11 @@ _REPORT_LINE_RE = re.compile(
       |
       \*\*IMPORTANT[^\n]*?your\s+final\s+message\s+should\s+be\s+a\s+report\s+of\s+your\s+work\.?[^\n]*
       |
+      \*\*IMPORTANT[^\n]*?as\s+your\s+final\s+action,\s+create\s+the\s+run\s+report\s+with\s+meridian\.?[^\n]*
+      |
       write\s+your\s+report\s+to:\s*`?[^`\n]+`?\s*
+      |
+      run\s+`?meridian\s+report\s+create\s+--stdin`?[^\n]*
       |
       use\s+plain\s+markdown\.[^\n]*
     )

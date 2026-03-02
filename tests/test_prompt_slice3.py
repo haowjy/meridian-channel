@@ -35,11 +35,11 @@ Fix the bug in parser.py.
 _STALE_FINAL_MESSAGE_INSTRUCTION = """
 # Report
 
-**IMPORTANT - Your final message should be a report of your work.**
+**IMPORTANT - As your final action, create the run report with Meridian.**
 
 Include: what was done.
 
-Use plain markdown. Meridian captures your final message as the run report.
+Run `meridian report create --stdin` with plain markdown content.
 
 Follow-up request for the same task.
 """
@@ -157,7 +157,7 @@ def test_reference_loader_space_at_sigil_requires_space_env(
         ),
         pytest.param(
             _STALE_FINAL_MESSAGE_INSTRUCTION,
-            "Your final message should be a report of your work.",
+            "create the run report with Meridian.",
             "Follow-up request for the same task.",
             id="final-message-instruction",
         ),
@@ -212,7 +212,7 @@ def test_compose_prompt_keeps_context_isolated_and_sanitized(tmp_path: Path) -> 
     )
 
     assert "INJECTION: should never leak" not in composed
-    assert composed.count("Your final message should be a report of your work.") == 1
+    assert composed.count("As your final action, create the run report with Meridian.") == 1
     assert "/tmp/stale.md" not in composed
     assert "Safe context context" in composed
     assert "Implement the change with context." in composed
