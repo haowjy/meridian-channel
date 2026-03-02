@@ -58,13 +58,6 @@ def _resolve_space_dir(repo_root: Path, space: str | None = None) -> tuple[str, 
     return str(space_id), resolve_space_dir(repo_root, space_id)
 
 
-def _merge_warnings(*warnings: str | None) -> str | None:
-    parts = [item.strip() for item in warnings if item and item.strip()]
-    if not parts:
-        return None
-    return "; ".join(parts)
-
-
 def _non_empty_space(space: str | None) -> str | None:
     if space is None:
         return None

@@ -36,6 +36,7 @@ from meridian.lib.safety.permissions import (
 )
 from meridian.lib.types import ModelId
 
+from ._utils import merge_warnings
 from ._spawn_models import SpawnCreateInput
 
 if TYPE_CHECKING:
@@ -185,12 +186,6 @@ def _load_model_guidance_text(repo_root: Path | None = None) -> str:
         return ""
 
 
-def _merge_warnings(primary: str | None, secondary: str | None) -> str | None:
-    if primary and secondary:
-        return f"{primary}; {secondary}"
-    return primary or secondary
-
-
 def _build_create_payload(
     payload: SpawnCreateInput,
     *,
@@ -313,9 +308,9 @@ def _build_create_payload(
         if resolved_skills.missing_skills
         else None
     )
-    warning = _merge_warnings(route_warning, missing_skills_warning)
-    warning = _merge_warnings(warning, continuation_warning)
-    warning = _merge_warnings(preflight_warning, warning)
+    warning = merge_warnings(route_warning, missing_skills_warning)
+    warning = merge_warnings(warning, continuation_warning)
+    warning = merge_warnings(preflight_warning, warning)
     from meridian.lib.harness.adapter import SpawnParams
 
     inferred_tier = resolve_permission_tier_from_profile(
@@ -338,7 +333,7 @@ def _build_create_payload(
         unsafe=False,
         default_tier=runtime_view.config.default_permission_tier,
     )
-    warning = _merge_warnings(
+    warning = merge_warnings(
         warning,
         validate_permission_config_for_harness(
             harness_id=harness.id,
