@@ -2,4 +2,6 @@
 
 This backlog has been consolidated into the top-level `backlog/` folder.
 
-- Current location: `backlog/migration-notes.md`
+- Index: `backlog/README.md`
+- Bugs: `backlog/bugs.md`
+- Migration reference: `backlog/_reference/migration-gotchas.md`
