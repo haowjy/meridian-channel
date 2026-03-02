@@ -279,6 +279,7 @@ async def spawn_and_stream(
     stderr_log_path: Path,
     timeout_seconds: float | None,
     env: dict[str, str] | None = None,
+    stdin_text: str | None = None,
     kill_grace_seconds: float = DEFAULT_KILL_GRACE_SECONDS,
     budget_tracker: LiveBudgetTracker | None = None,
     secrets: tuple[SecretSpec, ...] = (),
@@ -297,6 +298,7 @@ async def spawn_and_stream(
         cwd=str(cwd),
         env=env,
         start_new_session=True,
+        stdin=asyncio.subprocess.PIPE if stdin_text is not None else None,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -342,6 +344,26 @@ async def spawn_and_stream(
             stream_to_terminal=stream_stderr_to_terminal,
         )
     )
+    stdin_task: asyncio.Task[None] | None = None
+    if stdin_text is not None:
+        if process.stdin is None:
+            raise RuntimeError("Subprocess did not expose stdin pipe.")
+
+        async def _feed_stdin() -> None:
+            assert process.stdin is not None
+            try:
+                process.stdin.write(stdin_text.encode("utf-8"))
+                await process.stdin.drain()
+            except (BrokenPipeError, ConnectionResetError):
+                return
+            finally:
+                process.stdin.close()
+                try:
+                    await process.stdin.wait_closed()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
+        stdin_task = asyncio.create_task(_feed_stdin())
 
     received_signal: signal.Signals | None = None
     timed_out = False
@@ -362,6 +384,8 @@ async def spawn_and_stream(
         await _terminate_after_cancellation(process, kill_grace_seconds=kill_grace_seconds)
         raise
     finally:
+        if stdin_task is not None:
+            await stdin_task
         if budget_termination_task is not None:
             await budget_termination_task
 
@@ -487,6 +511,7 @@ async def execute_with_finalization(
         continue_harness_session_id=continue_harness_session_id,
         continue_fork=continue_fork,
     )
+    prompt_stdin = run.prompt if harness.capabilities.supports_stdin_prompt else None
 
     resolved_perms = permission_resolver or SafeDefaultPermissionResolver()
     resolved_permission_config = permission_config or PermissionConfig()
@@ -557,6 +582,7 @@ async def execute_with_finalization(
                 stderr_log_path=log_dir / STDERR_FILENAME,
                 timeout_seconds=timeout_seconds,
                 env=child_env,
+                stdin_text=prompt_stdin,
                 kill_grace_seconds=kill_grace_seconds,
                 budget_tracker=budget_tracker,
                 secrets=secrets,

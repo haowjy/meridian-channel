@@ -102,6 +102,7 @@ def load_reference_files(
     file_paths: Sequence[str | Path],
     *,
     base_dir: Path | None = None,
+    include_content: bool = True,
 ) -> tuple[ReferenceFile, ...]:
     """Load referenced files in input order."""
 
@@ -126,7 +127,8 @@ def load_reference_files(
             resolved = (expanded if expanded.is_absolute() else root / expanded).resolve()
         if not resolved.is_file():
             raise FileNotFoundError(f"Reference file not found: {resolved}")
-        loaded.append(ReferenceFile(path=resolved, content=resolved.read_text(encoding="utf-8")))
+        content = resolved.read_text(encoding="utf-8") if include_content else ""
+        loaded.append(ReferenceFile(path=resolved, content=content))
     return tuple(loaded)
 
 
@@ -140,3 +142,19 @@ def render_reference_blocks(references: Sequence[ReferenceFile]) -> tuple[str, .
             continue
         blocks.append(f"# Reference: {reference.path}\n\n{body}")
     return tuple(blocks)
+
+
+def render_reference_paths_section(references: Sequence[ReferenceFile]) -> tuple[str, ...]:
+    """Render reference paths without inlining file bodies."""
+
+    if not references:
+        return ()
+    lines = [
+        "# Reference Files",
+        "",
+        "Read these files from disk when gathering context:",
+        "",
+    ]
+    for reference in references:
+        lines.append(f"- {reference.path}")
+    return ("\n".join(lines),)

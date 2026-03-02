@@ -243,7 +243,13 @@ def _build_create_payload(
         search_paths=runtime_view.config.search_paths,
         readonly=payload.dry_run,
     )
-    loaded_references = load_reference_files(payload.files, base_dir=runtime_view.repo_root)
+    harness, route_warning = runtime_view.harness_registry.route(defaults.model)
+    use_reference_paths = str(harness.id) == "codex"
+    loaded_references = load_reference_files(
+        payload.files,
+        base_dir=runtime_view.repo_root,
+        include_content=not use_reference_paths,
+    )
     parsed_template_vars = parse_template_assignments(payload.template_vars)
 
     # Model guidance is coupled to the run-agent skill (it lives under
@@ -255,8 +261,6 @@ def _build_create_payload(
         if "run-agent" in loaded_skill_names
         else ""
     )
-
-    harness, route_warning = runtime_view.harness_registry.route(defaults.model)
     # --- Native agent passthrough for Claude ---
     # When the harness supports native agents, skip injecting agent body and
     # skill content into the composed prompt. Instead, pass agent name and
@@ -277,6 +281,7 @@ def _build_create_payload(
         agent_body="" if native_agents else defaults.agent_body,
         model_guidance=model_guidance,
         template_variables=parsed_template_vars,
+        reference_mode="paths" if use_reference_paths else "inline",
     )
     requested_harness_session_id = (payload.continue_harness_session_id or "").strip()
     requested_harness = (payload.continue_harness or "").strip()

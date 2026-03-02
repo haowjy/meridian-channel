@@ -118,10 +118,13 @@ def test_run_create_dry_run_outputs_composed_prompt_and_command(
     assert payload["model"] == "gpt-5.3-codex"
     assert payload["harness_id"] == "codex"
     assert payload["cli_command"][0] == "codex"
+    assert payload["cli_command"][-1] == "-"
     # Model guidance only injected when run-agent skill is loaded; reviewer
     # profile uses skills: [reviewing], so guidance is absent.
     assert "Prefer deterministic tests." not in payload["composed_prompt"]
-    assert "Context value: ok" in payload["composed_prompt"]
+    assert "# Reference Files" in payload["composed_prompt"]
+    assert str(reference_file) in payload["composed_prompt"]
+    assert "Context value: ok" not in payload["composed_prompt"]
     assert "Implement the task." in payload["composed_prompt"]
 
 

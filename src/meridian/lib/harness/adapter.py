@@ -23,6 +23,7 @@ class HarnessCapabilities:
     """Feature flags for one harness implementation."""
 
     supports_stream_events: bool = True
+    supports_stdin_prompt: bool = False
     supports_session_resume: bool = False
     supports_session_fork: bool = False
     supports_native_skills: bool = False

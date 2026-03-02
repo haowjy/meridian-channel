@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 from typing import ClassVar
 
@@ -60,6 +61,7 @@ class CodexAdapter:
     def capabilities(self) -> HarnessCapabilities:
         return HarnessCapabilities(
             supports_stream_events=True,
+            supports_stdin_prompt=True,
             supports_session_resume=True,
             supports_native_skills=True,
             supports_programmatic_tools=False,
@@ -73,10 +75,12 @@ class CodexAdapter:
             if harness_session_id
             else self.BASE_COMMAND
         )
+        # Codex supports prompt-from-stdin via "-" and this avoids argv length limits.
+        command_run = replace(run, prompt="-")
         return build_harness_command(
             base_command=base_command,
             prompt_mode=self.PROMPT_MODE,
-            run=run,
+            run=command_run,
             strategies=self.STRATEGIES,
             perms=perms,
             harness_id=self.id,

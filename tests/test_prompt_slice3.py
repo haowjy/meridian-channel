@@ -127,6 +127,16 @@ def test_reference_loader_supports_space_at_sigil(monkeypatch: pytest.MonkeyPatc
     assert loaded[0].content == "from-space"
 
 
+def test_reference_loader_can_skip_inline_content(tmp_path: Path) -> None:
+    reference_file = tmp_path / "context.md"
+    reference_file.write_text("heavy-content", encoding="utf-8")
+
+    loaded = load_reference_files([reference_file], include_content=False)
+    assert len(loaded) == 1
+    assert loaded[0].path == reference_file.resolve()
+    assert loaded[0].content == ""
+
+
 def test_reference_loader_space_at_sigil_requires_space_env(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -206,3 +216,21 @@ def test_compose_prompt_keeps_context_isolated_and_sanitized(tmp_path: Path) -> 
     assert "/tmp/stale.md" not in composed
     assert "Safe context context" in composed
     assert "Implement the change with context." in composed
+
+
+def test_compose_prompt_can_render_reference_paths_without_inlining_content(tmp_path: Path) -> None:
+    reference_file = tmp_path / "big.txt"
+    reference_file.write_text("Do not inline me.", encoding="utf-8")
+    loaded_refs = load_reference_files([reference_file], include_content=False)
+
+    composed = compose_run_prompt_text(
+        skills=[],
+        references=loaded_refs,
+        user_prompt="Use the references.",
+        report_path=str(tmp_path / "report.md"),
+        reference_mode="paths",
+    )
+
+    assert "# Reference Files" in composed
+    assert str(reference_file.resolve()) in composed
+    assert "Do not inline me." not in composed

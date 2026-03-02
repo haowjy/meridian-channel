@@ -110,6 +110,12 @@ class MockHarnessAdapter:
         return None
 
 
+class StdinMockHarnessAdapter(MockHarnessAdapter):
+    @property
+    def capabilities(self) -> HarnessCapabilities:
+        return HarnessCapabilities(supports_stdin_prompt=True)
+
+
 def _create_run(repo_root: Path, *, prompt: str) -> tuple[Spawn, Path]:
     space = create_space(repo_root, name="slice4")
     run = Spawn(
@@ -136,6 +142,40 @@ def _pid_exists(pid: int) -> bool:
     except PermissionError:
         return True
     return True
+
+
+@pytest.mark.asyncio
+async def test_execute_with_finalization_pipes_prompt_to_stdin_when_supported(
+    tmp_path: Path,
+) -> None:
+    run, space_dir = _create_run(tmp_path, prompt="stdin payload")
+    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
+
+    script = tmp_path / "read_stdin.py"
+    script.write_text(
+        "import json\nimport sys\nprint(json.dumps({'stdin': sys.stdin.read()}), flush=True)\n",
+        encoding="utf-8",
+    )
+
+    adapter = StdinMockHarnessAdapter(script=script)
+    registry = HarnessRegistry()
+    registry.register(adapter)
+
+    exit_code = await execute_with_finalization(
+        run,
+        repo_root=tmp_path,
+        space_dir=space_dir,
+        artifacts=artifacts,
+        registry=registry,
+        harness_id=adapter.id,
+        cwd=tmp_path,
+        timeout_seconds=5.0,
+    )
+
+    assert exit_code == 0
+    output_key = make_artifact_key(run.spawn_id, "output.jsonl")
+    assert artifacts.exists(output_key)
+    assert '"stdin": "stdin payload"' in artifacts.get(output_key).decode("utf-8")
 
 
 @pytest.mark.asyncio

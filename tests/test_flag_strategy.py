@@ -79,7 +79,7 @@ def test_claude_build_command_adhoc_agent_json() -> None:
     assert command[command.index("--agents") + 1] == adhoc
 
 
-def test_codex_build_command_drops_agent_and_uses_positional_prompt() -> None:
+def test_codex_build_command_drops_agent_and_uses_stdin_prompt_marker() -> None:
     command = CodexAdapter().build_command(
         _sample_run(model="gpt-5.3-codex"),
         StubPermissionResolver(),
@@ -93,7 +93,7 @@ def test_codex_build_command_drops_agent_and_uses_positional_prompt() -> None:
         "--perm",
         "codex",
         "--json",
-        "Implement feature X.",
+        "-",
     ]
     assert "--agent" not in command
     assert "--skills" not in command
@@ -129,6 +129,7 @@ def test_codex_build_command_uses_resume_subcommand_when_session_available() -> 
     assert command[:4] == ["codex", "exec", "resume", "session-456"]
     assert "--model" in command
     assert "--fork" not in command
+    assert command[-1] == "-"
 
 
 def test_opencode_build_command_strips_model_prefix_and_uses_positional_prompt() -> None:

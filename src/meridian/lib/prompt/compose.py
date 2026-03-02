@@ -11,6 +11,7 @@ from meridian.lib.domain import SkillContent
 from meridian.lib.prompt.reference import (
     ReferenceFile,
     render_reference_blocks,
+    render_reference_paths_section,
     resolve_template_variables,
     substitute_template_variables,
 )
@@ -75,6 +76,7 @@ def compose_run_prompt(
     model_guidance: str = "",
     template_variables: Mapping[str, str | Path] | None = None,
     prior_output: str | None = None,
+    reference_mode: Literal["inline", "paths"] = "inline",
 ) -> str:
     """Compose a run prompt with deterministic ordering and sanitization.
 
@@ -99,7 +101,10 @@ def compose_run_prompt(
     if model_guidance_text:
         non_skill_sections.append(f"# Model Guidance\n\n{model_guidance_text}")
 
-    non_skill_sections.extend(render_reference_blocks(references))
+    if reference_mode == "paths":
+        non_skill_sections.extend(render_reference_paths_section(references))
+    else:
+        non_skill_sections.extend(render_reference_blocks(references))
 
     if prior_output is not None and prior_output.strip():
         non_skill_sections.append(sanitize_prior_output(prior_output))
@@ -139,6 +144,7 @@ def compose_run_prompt_text(
     model_guidance: str = "",
     template_variables: Mapping[str, str | Path] | None = None,
     prior_output: str | None = None,
+    reference_mode: Literal["inline", "paths"] = "inline",
 ) -> str:
     """Compose and render prompt text."""
 
@@ -151,6 +157,7 @@ def compose_run_prompt_text(
         model_guidance=model_guidance,
         template_variables=template_variables,
         prior_output=prior_output,
+        reference_mode=reference_mode,
     ).strip()
 
 
