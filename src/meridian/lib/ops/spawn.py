@@ -20,6 +20,7 @@ from meridian.lib.safety.permissions import (
     build_permission_config,
     validate_permission_config_for_harness,
 )
+from meridian.lib.space import space_file
 from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_space_dir
 
@@ -81,10 +82,15 @@ def spawn_create_sync(payload: SpawnCreateInput) -> SpawnActionOutput:
 
     payload, preflight_warning = _validate_create_input(payload)
     payload = replace(payload, space=str(require_space_id(payload.space)))
+    resolved_root, config = resolve_runtime_root_and_config(payload.repo_root)
+    space = space_file.get_space(resolved_root, payload.space)
+    if space is not None and space.status == "closed":
+        raise ValueError(
+            f"Space '{payload.space}' is closed. Resume the space before creating spawns."
+        )
 
     runtime = None
     if not payload.dry_run:
-        resolved_root, config = resolve_runtime_root_and_config(payload.repo_root)
         current_depth, max_depth = _depth_limits(config.max_depth)
         if current_depth >= max_depth:
             return _depth_exceeded_output(current_depth, max_depth)
