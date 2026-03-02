@@ -10,6 +10,7 @@ from meridian.lib.config._paths import bundled_agents_root, resolve_search_paths
 from meridian.lib.config.agent import scan_agent_profiles
 from meridian.lib.config.settings import SearchPathConfig, load_config
 from meridian.lib.config.skill_registry import SkillRegistry
+from tests.helpers.fixtures import write_config as _write_config
 
 if TYPE_CHECKING:
     import pytest
@@ -18,10 +19,6 @@ if TYPE_CHECKING:
 def _write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
-
-
-def _write_config(repo_root: Path, content: str) -> None:
-    _write(repo_root / ".meridian" / "config.toml", content)
 
 
 def _write_agent(path: Path, *, name: str, model: str) -> None:

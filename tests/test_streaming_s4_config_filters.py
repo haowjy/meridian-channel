@@ -10,12 +10,7 @@ from meridian.lib.exec.terminal import (
     VERBOSE_VISIBLE_CATEGORIES,
     resolve_visible_categories,
 )
-
-
-def _write_config(repo_root: Path, content: str) -> None:
-    config_path = repo_root / ".meridian" / "config.toml"
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    config_path.write_text(content, encoding="utf-8")
+from tests.helpers.fixtures import write_config as _write_config
 
 
 def test_config_preset_overrides_default_filter(tmp_path: Path) -> None:

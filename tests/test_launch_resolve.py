@@ -13,40 +13,10 @@ from meridian.lib.launch_resolve import (
     resolve_permission_tier_from_profile,
     resolve_skills_from_profile,
 )
-
-
-def _write(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
-
-
-def _write_agent(repo_root: Path, *, name: str, model: str) -> None:
-    _write(
-        repo_root / ".agents" / "agents" / f"{name}.md",
-        (
-            "---\n"
-            f"name: {name}\n"
-            f"model: {model}\n"
-            "skills: []\n"
-            "---\n\n"
-            f"# {name}\n"
-        ),
-    )
-
-
-def _write_skill(repo_root: Path, *, name: str, body: str = "Skill body.") -> Path:
-    skill_file = repo_root / ".agents" / "skills" / name / "SKILL.md"
-    _write(
-        skill_file,
-        (
-            "---\n"
-            f"name: {name}\n"
-            f"description: {name} skill\n"
-            "---\n\n"
-            f"{body}\n"
-        ),
-    )
-    return skill_file
+from tests.helpers.fixtures import (
+    write_agent as _write_agent,
+    write_skill as _write_skill,
+)
 
 
 def test_load_profile_explicit_agent_loads_directly(tmp_path: Path) -> None:

@@ -18,55 +18,11 @@ from meridian.lib.space.launch import (
     _build_interactive_command,
     _resolve_primary_session_metadata,
 )
-
-
-def _write(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
-
-
-def _write_config(repo_root: Path, content: str) -> None:
-    _write(repo_root / ".meridian" / "config.toml", content)
-
-
-def _write_skill(repo_root: Path, name: str, body: str) -> None:
-    _write(
-        repo_root / ".agents" / "skills" / name / "SKILL.md",
-        (
-            "---\n"
-            f"name: {name}\n"
-            f"description: {name} skill\n"
-            "---\n\n"
-            f"{body}\n"
-        ),
-    )
-
-
-def _write_agent(
-    repo_root: Path,
-    *,
-    name: str,
-    model: str,
-    skills: list[str],
-    sandbox: str | None = None,
-    mcp_tools: list[str] | None = None,
-    allowed_tools: list[str] | None = None,
-) -> None:
-    lines = [
-        "---",
-        f"name: {name}",
-        f"model: {model}",
-        f"skills: [{', '.join(skills)}]",
-    ]
-    if sandbox is not None:
-        lines.append(f"sandbox: {sandbox}")
-    if mcp_tools is not None:
-        lines.append(f"mcp-tools: [{', '.join(mcp_tools)}]")
-    if allowed_tools is not None:
-        lines.append(f"allowed-tools: [{', '.join(allowed_tools)}]")
-    lines.append("---")
-    lines.extend(["", f"# {name}", "", "Agent body."])
-    _write(repo_root / ".agents" / "agents" / f"{name}.md", "\n".join(lines) + "\n")
+from tests.helpers.fixtures import (
+    write_agent as _write_agent,
+    write_config as _write_config,
+    write_skill as _write_skill,
+)
 
 
 def _allowed_tools_from_command(command: tuple[str, ...]) -> tuple[str, ...]:

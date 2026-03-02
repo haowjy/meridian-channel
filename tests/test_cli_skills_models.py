@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import json
-import os
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
+from tests.helpers.cli import spawn_cli
 
 
 @pytest.fixture
@@ -23,36 +21,34 @@ def repo_with_skill(tmp_path: Path) -> Path:
     (tmp_path / ".meridian").mkdir(parents=True, exist_ok=True)
     return tmp_path
 
-
-def _spawn_cli(cwd: Path, args: list[str], timeout: float = 15.0) -> subprocess.CompletedProcess[str]:
-    env = os.environ.copy()
-    src = str(Path(__file__).resolve().parents[1] / "src")
-    existing = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = src if not existing else f"{src}:{existing}"
-    return subprocess.run(
-        [sys.executable, "-m", "meridian", *args],
-        cwd=cwd,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=timeout,
-    )
-
-
 def test_skills_cli_commands_work(repo_with_skill: Path) -> None:
-    listed = _spawn_cli(repo_with_skill, ["--json", "skills", "list"])
+    listed = spawn_cli(
+        package_root=Path(__file__).resolve().parents[1],
+        cwd=repo_with_skill,
+        args=["--json", "skills", "list"],
+        timeout=15.0,
+    )
     assert listed.returncode == 0
     listed_payload = json.loads(listed.stdout)
     assert listed_payload["skills"]
     assert any(item["name"] == "test-skill" for item in listed_payload["skills"])
 
-    searched = _spawn_cli(repo_with_skill, ["--json", "skills", "search", "test"])
+    searched = spawn_cli(
+        package_root=Path(__file__).resolve().parents[1],
+        cwd=repo_with_skill,
+        args=["--json", "skills", "search", "test"],
+        timeout=15.0,
+    )
     assert searched.returncode == 0
     searched_payload = json.loads(searched.stdout)
     assert any(item["name"] == "test-skill" for item in searched_payload["skills"])
 
-    shown = _spawn_cli(repo_with_skill, ["--json", "skills", "show", "test-skill"])
+    shown = spawn_cli(
+        package_root=Path(__file__).resolve().parents[1],
+        cwd=repo_with_skill,
+        args=["--json", "skills", "show", "test-skill"],
+        timeout=15.0,
+    )
     assert shown.returncode == 0
     shown_payload = json.loads(shown.stdout)
     assert shown_payload["name"] == "test-skill"

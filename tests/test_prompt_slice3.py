@@ -18,6 +18,7 @@ from meridian.lib.prompt.reference import (
     substitute_template_variables,
 )
 from meridian.lib.prompt.sanitize import sanitize_prior_output, strip_stale_report_paths
+from tests.helpers.fixtures import write_skill as _write_skill
 
 _STALE_FILE_PATH_INSTRUCTION = """
 # Report
@@ -43,22 +44,6 @@ Run `meridian report create --stdin` with plain markdown content.
 
 Follow-up request for the same task.
 """
-
-
-def _write_skill(repo_root: Path, name: str, body: str) -> None:
-    skill_file = repo_root / ".agents" / "skills" / name / "SKILL.md"
-    skill_file.parent.mkdir(parents=True, exist_ok=True)
-    skill_file.write_text(
-        (
-            "---\n"
-            f"name: {name}\n"
-            f"description: {name} skill\n"
-            "---\n\n"
-            f"{body}\n"
-        ),
-        encoding="utf-8",
-    )
-
 
 def test_skill_loading_order_and_dedup(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"

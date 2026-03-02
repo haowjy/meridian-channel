@@ -4,57 +4,19 @@ from __future__ import annotations
 
 import importlib
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
 from meridian.lib import logging as cli_logging
+from tests.helpers.cli import spawn_cli
+from tests.helpers.fixtures import write_skill
 
 cli_main = importlib.import_module("meridian.cli.main")
 
-
-def _write_skill(repo_root: Path, name: str, body: str) -> None:
-    skill_file = repo_root / ".agents" / "skills" / name / "SKILL.md"
-    skill_file.parent.mkdir(parents=True, exist_ok=True)
-    skill_file.write_text(
-        (
-            "---\n"
-            f"name: {name}\n"
-            f"description: {name} skill\n"
-            "---\n\n"
-            f"{body}\n"
-        ),
-        encoding="utf-8",
-    )
-
-
-def _spawn_cli(
-    *,
-    package_root: Path,
-    cli_env: dict[str, str],
-    repo_root: Path,
-    args: list[str],
-) -> subprocess.CompletedProcess[str]:
-    env = dict(cli_env)
-    env["MERIDIAN_REPO_ROOT"] = repo_root.as_posix()
-    if "spawn" in args and "--space" not in args and "--space-id" not in args:
-        env["MERIDIAN_SPACE_ID"] = "s1"
-    return subprocess.run(
-        [sys.executable, "-m", "meridian", *args],
-        cwd=package_root,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=20,
-    )
-
-
 def _seed_base_skills(repo_root: Path) -> None:
-    _write_skill(repo_root, "run-agent", "Base run-agent skill.")
-    _write_skill(repo_root, "agent", "Base agent skill.")
+    write_skill(repo_root, "run-agent", "Base run-agent skill.")
+    write_skill(repo_root, "agent", "Base agent skill.")
 
 
 def test_bug5_prompt_text_uses_rendered_template_not_repr(
@@ -63,7 +25,7 @@ def test_bug5_prompt_text_uses_rendered_template_not_repr(
     repo_root = tmp_path / "repo"
     _seed_base_skills(repo_root)
 
-    result = _spawn_cli(
+    result = spawn_cli(
         package_root=package_root,
         cli_env=cli_env,
         repo_root=repo_root,
@@ -83,7 +45,7 @@ def test_bug6_gemini_alias_routes_to_opencode(
     repo_root = tmp_path / "repo"
     _seed_base_skills(repo_root)
 
-    result = _spawn_cli(
+    result = spawn_cli(
         package_root=package_root,
         cli_env=cli_env,
         repo_root=repo_root,
@@ -102,7 +64,7 @@ def test_bug8_unknown_model_fails_fast_with_clean_error(
     repo_root = tmp_path / "repo"
     _seed_base_skills(repo_root)
 
-    result = _spawn_cli(
+    result = spawn_cli(
         package_root=package_root,
         cli_env=cli_env,
         repo_root=repo_root,
@@ -126,7 +88,7 @@ def test_ol10_unknown_model_error_includes_available_models_and_suggestion(
     repo_root = tmp_path / "repo"
     _seed_base_skills(repo_root)
 
-    result = _spawn_cli(
+    result = spawn_cli(
         package_root=package_root,
         cli_env=cli_env,
         repo_root=repo_root,
@@ -168,7 +130,7 @@ def test_bug16_show_unknown_resource_emits_clean_error(
     if args[:2] == ["spawn", "show"]:
         cli_env["MERIDIAN_SPACE_ID"] = "s1"
 
-    result = _spawn_cli(
+    result = spawn_cli(
         package_root=package_root,
         cli_env=cli_env,
         repo_root=repo_root,
@@ -186,7 +148,7 @@ def test_bug17_run_create_requires_nonempty_prompt(
     repo_root = tmp_path / "repo"
     _seed_base_skills(repo_root)
 
-    result = _spawn_cli(
+    result = spawn_cli(
         package_root=package_root,
         cli_env=cli_env,
         repo_root=repo_root,
@@ -208,7 +170,7 @@ def test_bug3_no_prefixed_global_flags_are_accepted(
     repo_root = tmp_path / "repo"
     _seed_base_skills(repo_root)
 
-    result = _spawn_cli(
+    result = spawn_cli(
         package_root=package_root,
         cli_env=cli_env,
         repo_root=repo_root,
@@ -226,7 +188,7 @@ def test_dx2_unknown_top_level_command_has_clean_error(
     cli_env: dict[str, str],
     tmp_path: Path,
 ) -> None:
-    result = _spawn_cli(
+    result = spawn_cli(
         package_root=package_root,
         cli_env=cli_env,
         repo_root=tmp_path / "repo",
@@ -244,7 +206,7 @@ def test_dx2_init_alias_routes_to_config_init(
     tmp_path: Path,
 ) -> None:
     repo_root = tmp_path / "repo"
-    result = _spawn_cli(
+    result = spawn_cli(
         package_root=package_root,
         cli_env=cli_env,
         repo_root=repo_root,
@@ -262,7 +224,7 @@ def test_dx3_help_uses_descriptions_and_hides_empty_flags(
 ) -> None:
     repo_root = tmp_path / "repo"
     _seed_base_skills(repo_root)
-    result = _spawn_cli(
+    result = spawn_cli(
         package_root=package_root,
         cli_env=cli_env,
         repo_root=repo_root,

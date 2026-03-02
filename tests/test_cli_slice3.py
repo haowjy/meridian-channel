@@ -8,43 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-
-def _write_skill(repo_root: Path, name: str, body: str) -> None:
-    skill_file = repo_root / ".agents" / "skills" / name / "SKILL.md"
-    skill_file.parent.mkdir(parents=True, exist_ok=True)
-    skill_file.write_text(
-        (
-            "---\n"
-            f"name: {name}\n"
-            f"description: {name} skill\n"
-            "---\n\n"
-            f"{body}\n"
-        ),
-        encoding="utf-8",
-    )
-
-
-def _write_config(repo_root: Path, content: str) -> None:
-    config_file = repo_root / ".meridian" / "config.toml"
-    config_file.parent.mkdir(parents=True, exist_ok=True)
-    config_file.write_text(content, encoding="utf-8")
-
-
-def _write_agent(repo_root: Path, *, name: str, model: str) -> None:
-    agent_file = repo_root / ".agents" / "agents" / f"{name}.md"
-    agent_file.parent.mkdir(parents=True, exist_ok=True)
-    agent_file.write_text(
-        (
-            "---\n"
-            f"name: {name}\n"
-            f"model: {model}\n"
-            "skills: []\n"
-            "---\n\n"
-            f"# {name}\n"
-        ),
-        encoding="utf-8",
-    )
-
+from tests.helpers.fixtures import write_agent, write_config, write_skill
 
 def test_run_create_dry_run_outputs_composed_prompt_and_command(
     package_root: Path, tmp_path: Path
@@ -52,9 +16,9 @@ def test_run_create_dry_run_outputs_composed_prompt_and_command(
     repo_root = tmp_path / "slice3-test-repo"
     (repo_root / ".agents" / "agents").mkdir(parents=True, exist_ok=True)
 
-    _write_skill(repo_root, "run-agent", "Base run-agent skill.")
-    _write_skill(repo_root, "agent", "Base agent skill.")
-    _write_skill(repo_root, "reviewing", "Reviewing skill body.")
+    write_skill(repo_root, "run-agent", "Base run-agent skill.")
+    write_skill(repo_root, "agent", "Base agent skill.")
+    write_skill(repo_root, "reviewing", "Reviewing skill body.")
     guidance_file = (
         repo_root
         / ".agents"
@@ -132,12 +96,12 @@ def test_start_dry_run_agent_flag_overrides_default_primary_agent(
     package_root: Path, tmp_path: Path
 ) -> None:
     repo_root = tmp_path / "start-agent-override"
-    _write_config(
+    write_config(
         repo_root,
         "[defaults]\ndefault_primary_agent = 'lead-primary'\n",
     )
-    _write_agent(repo_root, name="lead-primary", model="claude-opus-4-6")
-    _write_agent(repo_root, name="review-primary", model="claude-sonnet-4-6")
+    write_agent(repo_root, name="lead-primary", model="claude-opus-4-6")
+    write_agent(repo_root, name="review-primary", model="claude-sonnet-4-6")
 
     env = os.environ.copy()
     env["MERIDIAN_REPO_ROOT"] = str(repo_root)

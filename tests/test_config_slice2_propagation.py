@@ -9,12 +9,7 @@ import pytest
 from meridian.lib.ops.spawn import SpawnCreateInput
 from meridian.lib.safety.permissions import PermissionConfig, PermissionTier
 from meridian.lib.space.space_file import create_space
-
-
-def _write_config(repo_root: Path, content: str) -> None:
-    config_path = repo_root / ".meridian" / "config.toml"
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    config_path.write_text(content, encoding="utf-8")
+from tests.helpers.fixtures import write_config as _write_config
 
 
 def _clear_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
