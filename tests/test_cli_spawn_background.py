@@ -38,7 +38,7 @@ def test_run_create_background_prints_run_id_in_text_mode(
     )
     assert created.returncode == 0, created.stderr
     spawn_id = created.stdout.strip()
-    assert re.fullmatch(r"r[0-9]+", spawn_id), created.stdout
+    assert re.fullmatch(r"p[0-9]+", spawn_id), created.stdout
 
     waited = run_meridian(
         [
@@ -83,7 +83,7 @@ def test_run_create_background_writes_metadata_to_stderr(
     )
     assert created.returncode == 0, created.stderr
     spawn_id = created.stdout.strip()
-    assert re.fullmatch(r"r[0-9]+", spawn_id), created.stdout
+    assert re.fullmatch(r"p[0-9]+", spawn_id), created.stdout
     assert f"spawn_id={spawn_id}" in created.stderr
     assert "status=running" in created.stderr
 

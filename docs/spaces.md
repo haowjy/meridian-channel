@@ -39,10 +39,10 @@ meridian start [--new] [--space sN]
   .spaces/
     <space-id>/
       space.json            # space metadata (id/name/status/timestamps)
-      spawns.jsonl            # append-only run start/finalize events
+      spawns.jsonl          # append-only spawn start/finalize events
       sessions.jsonl        # append-only harness launch/stop/update events
       spawns/
-        <run-id>/
+        <spawn-id>/
           output.jsonl
           stderr.log
           report.md
@@ -64,13 +64,10 @@ meridian start [--new] [--space sN]
 
 ```bash
 export MERIDIAN_SPACE_ID=s12
-meridian spawn spawn -p "Implement the parser"
+meridian spawn -p "Implement the parser"
 meridian spawn list
 ```
-
-Current behavior: if `MERIDIAN_SPACE_ID` is unset, `meridian spawn spawn` auto-creates a new space and returns a warning with the new `sN` ID.
-
-Target behavior: spawn creation requires explicit space context (`MERIDIAN_SPACE_ID` or `--space`), with no auto-create fallback.
+Spawn creation requires explicit space context (`MERIDIAN_SPACE_ID` or `--space`).
 
 ## Locking
 

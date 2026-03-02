@@ -10,14 +10,14 @@ Meridian safety layers:
 
 Developer note:
 - Canonical domain term is `spawn` (see [Developer Terminology](developer-terminology.md)).
-- Command examples below use current CLI paths (`meridian spawn ...`) until migration completes.
+- Command examples below use the current CLI paths.
 
 ## Permission Tiers
 
 ```bash
-meridian spawn spawn -p "Read code" --permission read-only
-meridian spawn spawn -p "Edit files" --permission workspace-write
-meridian spawn spawn -p "Spawn broadly" --permission full-access
+meridian spawn -p "Read code" --permission read-only
+meridian spawn -p "Edit files" --permission workspace-write
+meridian spawn -p "Spawn broadly" --permission full-access
 ```
 
 | Tier | Intent | Claude | Codex |
@@ -28,7 +28,7 @@ meridian spawn spawn -p "Spawn broadly" --permission full-access
 
 Notes:
 
-- `run spawn` does not expose an `--unsafe` override; requesting `--permission danger` is rejected.
+- `spawn` does not expose an `--unsafe` override; requesting `--permission danger` is rejected.
 - OpenCode has no danger-bypass flag; danger is validated and falls back to full-access behavior there in paths that still support it.
 
 ### Agent profile mapping
@@ -43,10 +43,10 @@ Notes:
 CLI `--permission` overrides profile defaults.
 
 ## Cost Budgets
-`run spawn` no longer exposes budget flags. Budget enforcement is available only in execution-layer integrations that explicitly wire it.
+`spawn` no longer exposes budget flags. Budget enforcement is available only in execution-layer integrations that explicitly wire it.
 
 ## Guardrails
-`run spawn` no longer exposes guardrail flags.
+`spawn` no longer exposes guardrail flags.
 
 Guardrail env vars:
 
@@ -57,7 +57,7 @@ Guardrail env vars:
 Non-zero exit marks guardrail failure and feeds normal retry/error handling.
 
 ## Secret Redaction
-`run spawn` no longer exposes secret injection flags.
+`spawn` no longer exposes secret injection flags.
 
 Secret values are injected as `MERIDIAN_SECRET_<KEY>` and redacted in persisted outputs.
 
@@ -72,12 +72,10 @@ Guardrail scripts do not receive `MERIDIAN_SECRET_*` values.
 ## Depth Limiting
 
 ```text
-MERIDIAN_DEPTH=0 -> meridian spawn spawn (child depth 1)
-  -> MERIDIAN_DEPTH=1 -> meridian spawn spawn (child depth 2)
-  -> MERIDIAN_DEPTH=2 -> meridian spawn spawn (child depth 3)
+MERIDIAN_DEPTH=0 -> meridian spawn (child depth 1)
+  -> MERIDIAN_DEPTH=1 -> meridian spawn (child depth 2)
+  -> MERIDIAN_DEPTH=2 -> meridian spawn (child depth 3)
   -> MERIDIAN_DEPTH=3 -> refused (max depth reached)
 ```
-
-Target naming after migration: `meridian spawn` replaces `meridian spawn spawn`.
 
 `MERIDIAN_MAX_DEPTH` controls the ceiling (default `3`).

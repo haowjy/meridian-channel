@@ -60,7 +60,7 @@ Otherwise Meridian composes the prompt and passes it via `--system-prompt`.
 
 ## Session Continuation Fields
 
-For spawn continuation (currently `run continue`), Meridian resolves and passes harness session context as:
+For spawn continuation (`spawn continue`), Meridian resolves and passes harness session context as:
 
 - `continue_harness_session_id`
 - `continue_fork`
@@ -75,4 +75,4 @@ On `experimental.session.compacting`, it reads `.meridian/.spaces/<space-id>/ses
 
 ## Direct Adapter
 
-A `DirectAdapter` (Anthropic Messages API tool-calling) exists in the harness registry for programmatic use, but standard spawn routing (currently `meridian spawn spawn`) uses CLI harnesses (`claude`, `codex`, `opencode`).
+A `DirectAdapter` (Anthropic Messages API tool-calling) exists in the harness registry for programmatic use, but standard spawn routing (`meridian spawn`) uses CLI harnesses (`claude`, `codex`, `opencode`).

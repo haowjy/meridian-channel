@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from meridian.lib.ops._runtime import require_space_id, resolve_runtime_root_and_config
-from meridian.lib.ops._spawn_query import _read_spawn_row, resolve_spawn_reference
+from meridian.lib.ops._spawn_query import resolve_spawn_reference
 from meridian.lib.ops.registry import OperationSpec, operation
 from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_space_dir
@@ -35,7 +35,7 @@ def _resolve_space_and_spawn(
 ) -> tuple[str, str]:
     resolved_space = str(require_space_id(space))
     resolved_spawn = _resolve_target_spawn_id(repo_root, spawn_id, resolved_space)
-    if _read_spawn_row(repo_root, resolved_spawn, resolved_space) is None:
+    if spawn_store.get_spawn(resolve_space_dir(repo_root, resolved_space), resolved_spawn) is None:
         raise ValueError(f"Spawn '{resolved_spawn}' not found")
     return resolved_space, resolved_spawn
 
