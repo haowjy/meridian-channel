@@ -265,7 +265,7 @@ def _record_from_events(events: list[JSONRow]) -> dict[str, SpawnRecord]:
 
 
 def _spawn_sort_key(spawn: SpawnRecord) -> tuple[int, str]:
-    if spawn.id.startswith("r") and spawn.id[1:].isdigit():
+    if len(spawn.id) >= 2 and spawn.id[0] in {"p", "r"} and spawn.id[1:].isdigit():
         return (int(spawn.id[1:]), spawn.id)
     return (10**9, spawn.id)
 

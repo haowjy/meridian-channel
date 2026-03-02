@@ -31,7 +31,7 @@ def test_next_run_id_counts_start_events_and_skips_truncated_trailing_line(tmp_p
         handle.write(json.dumps({"v": 1, "event": "start", "id": "r2"}) + "\n")
         handle.write('{"v":1,"event":"start","id":"r3"')
 
-    assert next_spawn_id(space_dir) == "r3"
+    assert next_spawn_id(space_dir) == "p3"
 
 
 def test_next_chat_id_counts_start_events(tmp_path):

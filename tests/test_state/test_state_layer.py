@@ -79,7 +79,7 @@ def test_space_and_run_crud_with_file_backed_stores(tmp_path: Path) -> None:
     assert loaded.output_tokens == 20
 
     summaries = list_spawns(space_dir, filters={"model": "gpt-5.3-codex"})
-    assert [summary.id for summary in summaries] == ["r2"]
+    assert [summary.id for summary in summaries] == ["p2"]
 
 
 def test_space_status_transitions_and_finish_timestamp(tmp_path: Path) -> None:
@@ -196,13 +196,13 @@ def test_locking_contention_writes_clean_jsonl(tmp_path: Path) -> None:
             json.loads(line)
 
 
-def test_id_generation_uses_s_r_c_prefixes(tmp_path: Path) -> None:
+def test_id_generation_uses_s_p_c_prefixes(tmp_path: Path) -> None:
     assert str(next_space_id(tmp_path)) == "s1"
 
     space = create_space(tmp_path, name="idgen")
     space_dir = resolve_space_dir(tmp_path, space.id)
 
-    assert str(next_spawn_id(space_dir)) == "r1"
+    assert str(next_spawn_id(space_dir)) == "p1"
     assert next_chat_id(space_dir) == "c1"
 
     start_spawn(
@@ -213,7 +213,7 @@ def test_id_generation_uses_s_r_c_prefixes(tmp_path: Path) -> None:
         harness="codex",
         prompt="first",
     )
-    assert str(next_spawn_id(space_dir)) == "r2"
+    assert str(next_spawn_id(space_dir)) == "p2"
 
 
 def test_artifact_store_local_and_memory(tmp_path: Path) -> None:

@@ -36,7 +36,7 @@ def test_start_and_finalize_run_round_trip(tmp_path):
 
     loaded = get_spawn(space_dir, spawn_id)
     assert loaded is not None
-    assert loaded.id == "r1"
+    assert loaded.id == "p1"
     assert loaded.status == "succeeded"
     assert loaded.model == "gpt-5.3-codex"
     assert loaded.chat_id == "c1"
@@ -62,7 +62,7 @@ def test_start_run_writes_schema_version(tmp_path):
     payload = json.loads(first)
     assert payload["v"] == 1
     assert payload["event"] == "start"
-    assert payload["id"] == "r1"
+    assert payload["id"] == "p1"
 
 
 def test_list_runs_filters_by_model_and_status(tmp_path):
@@ -89,8 +89,8 @@ def test_list_runs_filters_by_model_and_status(tmp_path):
     failed = list_spawns(space_dir, filters={"status": "failed"})
     claude = list_spawns(space_dir, filters={"model": "claude-sonnet-4-6"})
 
-    assert [run.id for run in failed] == ["r1"]
-    assert [run.id for run in claude] == ["r2"]
+    assert [run.id for run in failed] == ["p1"]
+    assert [run.id for run in claude] == ["p2"]
 
 
 def test_list_runs_skips_truncated_trailing_json(tmp_path):

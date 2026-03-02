@@ -53,10 +53,10 @@ def next_space_id(repo_root: Path) -> SpaceId:
 
 
 def next_spawn_id(space_dir: Path) -> SpawnId:
-    """Return the next run ID (`r1`, `r2`, ...) for a space."""
+    """Return the next spawn ID (`p1`, `p2`, ...) for a space."""
 
     starts = _count_start_events(space_dir / "spawns.jsonl")
-    return SpawnId(f"r{starts + 1}")
+    return SpawnId(f"p{starts + 1}")
 
 
 def next_chat_id(space_dir: Path) -> str:
