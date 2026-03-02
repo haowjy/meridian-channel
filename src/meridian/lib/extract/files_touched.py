@@ -32,6 +32,36 @@ _FILE_LIST_KEYS: frozenset[str] = frozenset(
 _PATH_PATTERN = re.compile(
     r"(?<![\w/.-])(?:[A-Za-z]:\\)?(?:\.{1,2}/)?(?:[\w.-]+[\\/])+[\w.-]+(?:\.[\w.-]+)?"
 )
+_KNOWN_DIR_PREFIXES: tuple[str, ...] = (
+    "src/",
+    "tests/",
+    "docs/",
+    "_docs/",
+    "plans/",
+    "backlog/",
+    "frontend/",
+    "backend/",
+    "scripts/",
+    ".agents/",
+    ".meridian/",
+    "config/",
+)
+
+
+def _strip_relative_prefixes(path: str) -> str:
+    normalized = path
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    while normalized.startswith("../"):
+        normalized = normalized[3:]
+    return normalized
+
+
+def _has_file_extension(path: str) -> bool:
+    filename = path.rsplit("/", 1)[-1]
+    if not filename:
+        return False
+    return "." in filename and not filename.endswith(".")
 
 
 def _normalize_path(value: str) -> str | None:
@@ -43,10 +73,13 @@ def _normalize_path(value: str) -> str | None:
     normalized = candidate.replace("\\", "/")
     if normalized.startswith("./"):
         normalized = normalized[2:]
-    if normalized.startswith("../"):
-        # Keep relative parent paths untouched; we only drop a single leading "./".
-        pass
     if "/" not in normalized:
+        return None
+    candidate = _strip_relative_prefixes(normalized)
+    if not (
+        _has_file_extension(candidate)
+        or any(candidate.startswith(prefix) for prefix in _KNOWN_DIR_PREFIXES)
+    ):
         return None
     return normalized
 

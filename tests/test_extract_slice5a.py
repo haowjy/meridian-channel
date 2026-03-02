@@ -100,6 +100,19 @@ def test_extract_files_touched_from_structured_output_and_text() -> None:
     )
 
 
+def test_extract_files_touched_ignores_pseudo_paths_without_extension_or_prefix() -> None:
+    artifacts = InMemoryStore()
+    spawn_id = SpawnId("r-files-filtered")
+    artifacts.put(
+        make_artifact_key(spawn_id, "output.jsonl"),
+        b'{"role":"assistant","content":"Placeholder foo/bar and alias alpha/beta"}\n'
+        b'{"role":"assistant","content":"Updated src/chapter and docs/guide/overview"}\n',
+    )
+
+    touched = extract_files_touched(artifacts, spawn_id)
+    assert touched == ("src/chapter", "docs/guide/overview")
+
+
 def test_enrich_finalize_materializes_report_from_assistant_message(tmp_path: Path) -> None:
     artifacts = InMemoryStore()
     spawn_id = SpawnId("r-finalize")
