@@ -27,7 +27,7 @@ from meridian.lib.ops.spawn import SpawnActionOutput
 from meridian.lib.ops.space import SpaceActionOutput
 from meridian.lib.space import space_file
 from meridian.lib.space.launch import SpaceLaunchRequest, cleanup_orphaned_locks, launch_primary
-from meridian.lib.space.session_store import SessionRecord, cleanup_stale_sessions, resolve_session_ref
+from meridian.lib.space.session_store import cleanup_stale_sessions, resolve_session_ref
 from meridian.lib.space.summary import generate_space_summary
 from meridian.lib.state.paths import resolve_all_spaces_dir, resolve_space_dir
 from meridian.lib.types import SpaceId
@@ -69,7 +69,8 @@ _GLOBAL_OPTIONS: ContextVar[GlobalOptions | None] = ContextVar("_GLOBAL_OPTIONS"
 @dataclass(frozen=True, slots=True)
 class _ResolvedContinueTarget:
     space: space_file.SpaceRecord
-    session: SessionRecord
+    harness_session_id: str | None
+    warning: str | None = None
 
 
 def get_global_options() -> GlobalOptions:
@@ -545,6 +546,7 @@ def _run_primary_launch(
 
     selected: space_file.SpaceRecord
     continue_harness_session_id: str | None = None
+    continue_warning: str | None = None
     fresh = True
     if resume_target is not None:
         if new:
@@ -561,7 +563,8 @@ def _run_primary_launch(
             explicit_space=explicit_space,
         )
         selected = resolved_continue.space
-        continue_harness_session_id = resolved_continue.session.harness_session_id.strip() or None
+        continue_harness_session_id = resolved_continue.harness_session_id
+        continue_warning = resolved_continue.warning
         fresh = False
     else:
         selected = _start_space_record(
@@ -620,6 +623,7 @@ def _run_primary_launch(
                 if launch_result.continue_ref is not None
                 else None
             ),
+            warning=continue_warning,
         )
     )
 
@@ -634,34 +638,89 @@ def _resolve_continue_target(
     if not normalized:
         raise ValueError("--continue requires a non-empty session reference.")
 
-    if explicit_space is not None:
-        selected = space_file.get_space(repo_root, explicit_space)
-        if selected is None:
-            raise ValueError(f"Space '{explicit_space}' not found")
-        session = resolve_session_ref(resolve_space_dir(repo_root, selected.id), normalized)
-        if session is None:
-            raise ValueError(
-                f"Session '{normalized}' not found in space '{selected.id}'."
-            )
-        return _ResolvedContinueTarget(space=selected, session=session)
-
-    matches: list[_ResolvedContinueTarget] = []
-    for record in space_file.list_spaces(repo_root):
+    all_spaces = space_file.list_spaces(repo_root)
+    matches: list[tuple[space_file.SpaceRecord, str | None]] = []
+    for record in all_spaces:
         space_dir = resolve_space_dir(repo_root, record.id)
         session = resolve_session_ref(space_dir, normalized)
         if session is None:
             continue
-        matches.append(_ResolvedContinueTarget(space=record, session=session))
+        harness_session_id = session.harness_session_id.strip() or None
+        matches.append((record, harness_session_id))
+
+    if explicit_space is not None:
+        selected = space_file.get_space(repo_root, explicit_space)
+        if selected is None:
+            raise ValueError(f"Space '{explicit_space}' not found")
+
+        explicit_match = next((item for item in matches if item[0].id == selected.id), None)
+        if explicit_match is not None:
+            return _ResolvedContinueTarget(
+                space=selected,
+                harness_session_id=explicit_match[1],
+            )
+
+        if matches:
+            if len(matches) > 1:
+                spaces = ", ".join(sorted(record.id for record, _ in matches))
+                raise ValueError(
+                    f"Session '{normalized}' is ambiguous across spaces ({spaces}). "
+                    "Use a more specific session id."
+                )
+            resolved_space, harness_session_id = matches[0]
+            return _ResolvedContinueTarget(
+                space=resolved_space,
+                harness_session_id=harness_session_id,
+                warning=(
+                    f"Session '{normalized}' belongs to space '{resolved_space.id}'; "
+                    f"ignoring --space '{selected.id}'."
+                ),
+            )
+
+        if _looks_like_chat_alias(normalized):
+            raise ValueError(
+                f"Session '{normalized}' not found in space '{selected.id}'."
+            )
+        return _ResolvedContinueTarget(
+            space=selected,
+            harness_session_id=normalized,
+            warning=(
+                f"Session '{normalized}' is not tracked yet; binding it to space "
+                f"'{selected.id}' for this run."
+            ),
+        )
 
     if not matches:
-        raise ValueError(f"Session '{normalized}' not found.")
+        if _looks_like_chat_alias(normalized):
+            raise ValueError(f"Session '{normalized}' not found.")
+        selected = _start_space_record(
+            repo_root=repo_root,
+            force_new=False,
+            explicit_space=None,
+        )
+        return _ResolvedContinueTarget(
+            space=selected,
+            harness_session_id=normalized,
+            warning=(
+                f"Session '{normalized}' is not tracked yet; binding it to space "
+                f"'{selected.id}' for this run."
+            ),
+        )
     if len(matches) > 1:
-        spaces = ", ".join(sorted(match.space.id for match in matches))
+        spaces = ", ".join(sorted(record.id for record, _ in matches))
         raise ValueError(
             f"Session '{normalized}' is ambiguous across spaces ({spaces}). "
             "Use --space to disambiguate."
         )
-    return matches[0]
+    resolved_space, harness_session_id = matches[0]
+    return _ResolvedContinueTarget(
+        space=resolved_space,
+        harness_session_id=harness_session_id,
+    )
+
+
+def _looks_like_chat_alias(value: str) -> bool:
+    return value.startswith("c") and value[1:].isdigit()
 
 
 @app.command(name="init")

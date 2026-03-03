@@ -75,6 +75,7 @@ class SpaceActionOutput:
     summary_path: str | None = None
     continue_ref: str | None = None
     resume_command: str | None = None
+    warning: str | None = None
 
     def format_text(self, ctx: FormatContext | None = None) -> str:
         """Single-line action summary for text output mode."""
@@ -82,10 +83,18 @@ class SpaceActionOutput:
         if self.command:
             # Show the full command for dry-run so it can be copy-pasted.
             import shlex
-            return f"{summary}\n{shlex.join(self.command)}"
+            details = f"{summary}\n{shlex.join(self.command)}"
+            if self.warning:
+                return f"warning: {self.warning}\n{details}"
+            return details
         if self.resume_command:
-            return f"{summary}\nResume this session with:\n{self.resume_command}"
+            details = f"{summary}\nResume this session with:\n{self.resume_command}"
+            if self.warning:
+                return f"warning: {self.warning}\n{details}"
+            return details
         # Show the full command for dry-run so it can be copy-pasted.
+        if self.warning:
+            return f"warning: {self.warning}\n{summary}"
         return summary
 
 

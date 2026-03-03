@@ -453,9 +453,10 @@ def test_root_continue_requires_disambiguation_without_space(
         main_module.app(["--continue", "shared-session", "--dry-run"])
 
 
-def test_root_continue_space_mismatch_errors(
+def test_root_continue_space_mismatch_warns_and_uses_recorded_space(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     main_module = importlib.import_module("meridian.cli.main")
     first = create_space(tmp_path, name="first")
@@ -472,8 +473,61 @@ def test_root_continue_space_mismatch_errors(
 
     monkeypatch.setattr(main_module, "resolve_repo_root", lambda: tmp_path)
 
-    with pytest.raises(ValueError, match=f"not found in space '{first.id}'"):
+    with pytest.raises(SystemExit) as exc:
         main_module.app(["--continue", "sess-second", "--space", first.id, "--dry-run"])
+    assert int(exc.value.code) == 0
+    captured = capsys.readouterr()
+    assert f"warning: Session 'sess-second' belongs to space '{second.id}'" in captured.out
+    assert f"Space {second.id} active (Space resume dry-run)" in captured.out
+    assert "--resume sess-second" in captured.out
+
+
+def test_root_continue_unknown_harness_session_binds_to_explicit_space(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    main_module = importlib.import_module("meridian.cli.main")
+    selected = create_space(tmp_path, name="selected")
+
+    monkeypatch.setattr(main_module, "resolve_repo_root", lambda: tmp_path)
+
+    with pytest.raises(SystemExit) as exc:
+        main_module.app(
+            [
+                "--continue",
+                "external-session-123",
+                "--space",
+                selected.id,
+                "--dry-run",
+            ]
+        )
+    assert int(exc.value.code) == 0
+    captured = capsys.readouterr()
+    assert "warning: Session 'external-session-123' is not tracked yet" in captured.out
+    assert f"Space {selected.id} active (Space resume dry-run)" in captured.out
+    assert "--resume external-session-123" in captured.out
+
+
+def test_root_continue_unknown_harness_session_binds_to_default_space(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    main_module = importlib.import_module("meridian.cli.main")
+    first = create_space(tmp_path, name="first")
+    latest = create_space(tmp_path, name="latest")
+    space_crud.transition_space(tmp_path, first.id, "closed")
+
+    monkeypatch.setattr(main_module, "resolve_repo_root", lambda: tmp_path)
+
+    with pytest.raises(SystemExit) as exc:
+        main_module.app(["--continue", "external-session-999", "--dry-run"])
+    assert int(exc.value.code) == 0
+    captured = capsys.readouterr()
+    assert "warning: Session 'external-session-999' is not tracked yet" in captured.out
+    assert f"Space {latest.id} active (Space resume dry-run)" in captured.out
+    assert "--resume external-session-999" in captured.out
 
 
 def test_root_harness_override_builds_codex_command(
