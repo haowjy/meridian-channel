@@ -1,7 +1,25 @@
 # Primary CLI Redesign Plan
 
-Status: draft
+Status: in progress
 Date: 2026-03-03
+
+## Execution Board
+
+1. Slice A: Delete unused primary flags (`timeout/budget/guardrail/secret`) - done
+- Commit: `ec5f806`
+- Verification: `uv run meridian start --help`, explicit unknown-flag failure smoke, targeted pytest, `uv run pytest-llm`
+2. Slice B: Root entry unification (`meridian` as primary entrypoint, remove `start`) - pending
+3. Slice C: Continue contract (`--continue <session-ref>` string, not bool) - pending
+4. Slice D: Primary harness refactor (remove hardcoded Claude path) - pending
+5. Slice E: Session identity + resume UX output - pending
+6. Slice F: Docs/help/smoke hardening - pending
+
+## Current Implementation Snapshot (2026-03-03)
+
+- `meridian start` is still the primary entrypoint.
+- Root `meridian` does not launch a primary session.
+- `--continue` on `start` is still stubbed.
+- This plan remains active and not yet implemented.
 
 ## Goal
 
