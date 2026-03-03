@@ -29,8 +29,44 @@ meridian space close sN
 Top-level shortcut:
 
 ```bash
-meridian start [--new] [--space sN]
+meridian [--new] [--space sN] [--continue SESSION_REF]
 ```
+
+`meridian` without subcommands launches primary work in a space.
+
+Default selection without `--space`:
+- latest `active` space if one exists
+- otherwise a newly created space
+
+## Continue Semantics
+
+`--continue <SESSION_REF>` accepts:
+- tracked chat alias (`cN`)
+- tracked harness session id
+- unknown non-alias ref (treated as external harness session id and bound on use)
+
+Behavior:
+- known ref + no `--space`: resolve owning space automatically
+- known ref + mismatched `--space`: warn and use the owning space
+- unknown non-alias ref + `--space`: bind to that space for the run
+- unknown non-alias ref + no `--space`: bind to default-selected space
+- unknown chat alias (`cN`): error
+
+When a continue ref is available, output includes:
+
+```text
+Resume this session with:
+meridian --continue <continue_ref>
+```
+
+## Claude `/clear` Caveat (Current)
+
+For primary sessions, Meridian does not automatically observe in-session `/clear` transitions yet.
+
+Practical impact:
+- after `/clear`, Claude may move to a new session id
+- Meridian will use the previous id until you continue once with the new id
+- running `meridian --continue <new-claude-session-id>` binds/registers the new id for future runs
 
 ## State Model (Files-as-Authority)
 

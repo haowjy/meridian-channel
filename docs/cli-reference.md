@@ -5,7 +5,7 @@ Current CLI surface from `meridian --help`.
 ## Top-Level Commands
 
 ```text
-completion  config  doctor  init  models  report  serve  skills  space  spawn  start
+completion  config  doctor  init  models  report  serve  skills  space  spawn
 ```
 
 ## Global Options
@@ -21,6 +21,58 @@ Use before subcommands:
 | `--yes` | Auto-confirm prompts where supported |
 | `--no-input` | Fail instead of prompting |
 | `--version` | Print version |
+
+## Primary Launch (`meridian`)
+
+`meridian` with no subcommand launches the primary harness session.
+
+```bash
+meridian [--new] [--space SPACE_ID] [--continue SESSION_REF] \
+  [--model MODEL] [--harness HARNESS] [--agent AGENT] \
+  [--permission TIER] [--unsafe] [--autocompact N] [--dry-run]
+```
+
+Examples:
+
+```bash
+# default: latest active space, else create one
+meridian
+
+# force new space + fresh session
+meridian --new
+
+# fresh session in explicit existing space
+meridian --space s12
+
+# continue by harness session ref
+meridian --continue sess_abc123
+```
+
+### `--continue` Resolution
+
+Resolution order and behavior:
+
+1. If `SESSION_REF` matches tracked history, Meridian uses that mapped space/session.
+2. If `--space` is supplied and conflicts with a tracked mapping, Meridian warns and uses the tracked space.
+3. If `SESSION_REF` is unknown and not a chat alias (`cN`), Meridian treats it as a harness session id and binds it to:
+   - `--space <id>` when provided, otherwise
+   - default-selected space (latest active, else new).
+4. Chat aliases (`cN`) must already exist; unknown aliases error.
+
+Warnings are emitted in both text and JSON output (`warning` field).
+
+### Primary Output Contract
+
+- Non-dry-run:
+  - no full command echo
+  - includes resume hint when available:
+    - `Resume this session with:`
+    - `meridian --continue <continue_ref>`
+- Dry-run:
+  - includes fully resolved command
+- JSON:
+  - includes `space_id`, `continue_ref`, `resume_command`, `warning`
+  - `command` is populated for dry-run only
 
 ## `meridian spawn`
 
@@ -137,16 +189,6 @@ meridian space resume --space s12 --fresh
 meridian space list --limit 20
 meridian space show s12
 meridian space close s12
-```
-
-## `meridian start`
-
-Resolve or create a space and launch the primary harness.
-
-```bash
-meridian start
-meridian start --new
-meridian start --space s12
 ```
 
 ## Other Commands
