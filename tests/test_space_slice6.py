@@ -28,6 +28,7 @@ from meridian.lib.ops.space import (
 )
 from meridian.lib.space import crud as space_crud
 from meridian.lib.space.space_file import create_space, get_space
+from meridian.lib.space.session_store import start_session, stop_session
 from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_space_dir
 
@@ -380,3 +381,102 @@ def test_root_command_launches_and_forwards_options(
     assert isinstance(argv, list)
     assert "--autocompact" not in argv
     assert "enabled" in argv
+
+
+def test_root_continue_dry_run_resolves_space_and_passes_resume_flag(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    main_module = importlib.import_module("meridian.cli.main")
+    first = create_space(tmp_path, name="first")
+    second = create_space(tmp_path, name="second")
+    first_dir = resolve_space_dir(tmp_path, first.id)
+    second_dir = resolve_space_dir(tmp_path, second.id)
+
+    first_chat = start_session(
+        first_dir,
+        harness="claude",
+        harness_session_id="sess-first",
+        model="claude-opus-4-6",
+    )
+    second_chat = start_session(
+        second_dir,
+        harness="claude",
+        harness_session_id="sess-second",
+        model="claude-opus-4-6",
+    )
+    stop_session(first_dir, first_chat)
+    stop_session(second_dir, second_chat)
+
+    monkeypatch.setattr(main_module, "resolve_repo_root", lambda: tmp_path)
+
+    with pytest.raises(SystemExit) as exc:
+        main_module.app(["--continue", "sess-second", "--dry-run"])
+    assert int(exc.value.code) == 0
+
+    captured = capsys.readouterr()
+    assert f"Space {second.id} active (Space resume dry-run)" in captured.out
+    assert "--resume sess-second" in captured.out
+
+
+def test_root_continue_requires_disambiguation_without_space(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    main_module = importlib.import_module("meridian.cli.main")
+    first = create_space(tmp_path, name="first")
+    second = create_space(tmp_path, name="second")
+    first_dir = resolve_space_dir(tmp_path, first.id)
+    second_dir = resolve_space_dir(tmp_path, second.id)
+
+    first_chat = start_session(
+        first_dir,
+        harness="claude",
+        harness_session_id="sess-first",
+        model="claude-opus-4-6",
+    )
+    second_chat = start_session(
+        second_dir,
+        harness="claude",
+        harness_session_id="sess-second",
+        model="claude-opus-4-6",
+    )
+    stop_session(first_dir, first_chat)
+    stop_session(second_dir, second_chat)
+
+    monkeypatch.setattr(main_module, "resolve_repo_root", lambda: tmp_path)
+
+    with pytest.raises(SystemExit) as exc:
+        main_module.main(["--continue", "c1", "--dry-run"])
+    assert int(exc.value.code) == 1
+    captured = capsys.readouterr()
+    assert "ambiguous across spaces" in captured.err
+
+
+def test_root_continue_space_mismatch_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    main_module = importlib.import_module("meridian.cli.main")
+    first = create_space(tmp_path, name="first")
+    second = create_space(tmp_path, name="second")
+    second_dir = resolve_space_dir(tmp_path, second.id)
+
+    second_chat = start_session(
+        second_dir,
+        harness="claude",
+        harness_session_id="sess-second",
+        model="claude-opus-4-6",
+    )
+    stop_session(second_dir, second_chat)
+
+    monkeypatch.setattr(main_module, "resolve_repo_root", lambda: tmp_path)
+
+    with pytest.raises(SystemExit) as exc:
+        main_module.main(["--continue", "sess-second", "--space", first.id, "--dry-run"])
+    assert int(exc.value.code) == 1
+    captured = capsys.readouterr()
+    assert f"not found in space '{first.id}'" in captured.err

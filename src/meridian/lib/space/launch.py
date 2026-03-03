@@ -61,6 +61,7 @@ class SpaceLaunchRequest:
     dry_run: bool = False
     permission_tier: str | None = None
     unsafe: bool = False
+    continue_harness_session_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -238,6 +239,13 @@ def _build_interactive_command(
     if skill_injection:
         appended_parts.append(skill_injection)
     command.extend(["--append-system-prompt", "\n\n".join(part for part in appended_parts if part)])
+    harness_session_id = (
+        request.continue_harness_session_id.strip()
+        if request.continue_harness_session_id is not None
+        else ""
+    )
+    if harness_session_id:
+        command.extend(["--resume", harness_session_id])
     command.extend(passthrough_args)
     return tuple(command)
 

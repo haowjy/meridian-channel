@@ -27,7 +27,7 @@ from meridian.lib.ops.spawn import SpawnActionOutput
 from meridian.lib.ops.space import SpaceActionOutput
 from meridian.lib.space import space_file
 from meridian.lib.space.launch import SpaceLaunchRequest, cleanup_orphaned_locks, launch_primary
-from meridian.lib.space.session_store import cleanup_stale_sessions
+from meridian.lib.space.session_store import SessionRecord, cleanup_stale_sessions, resolve_session_ref
 from meridian.lib.space.summary import generate_space_summary
 from meridian.lib.state.paths import resolve_all_spaces_dir, resolve_space_dir
 from meridian.lib.types import SpaceId
@@ -64,6 +64,12 @@ class GlobalOptions:
 
 
 _GLOBAL_OPTIONS: ContextVar[GlobalOptions | None] = ContextVar("_GLOBAL_OPTIONS", default=None)
+
+
+@dataclass(frozen=True, slots=True)
+class _ResolvedContinueTarget:
+    space: space_file.SpaceRecord
+    session: SessionRecord
 
 
 def get_global_options() -> GlobalOptions:
@@ -341,10 +347,10 @@ def root(
         str | None,
         Parameter(name="--space", help="Use an explicit existing space id."),
     ] = None,
-    continue_mode: Annotated[
-        bool,
-        Parameter(name="--continue", help="Continue mode (currently stubbed)."),
-    ] = False,
+    continue_ref: Annotated[
+        str | None,
+        Parameter(name="--continue", help="Continue a previous session reference."),
+    ] = None,
     model: Annotated[
         str,
         Parameter(name="--model", help="Model id or alias for primary harness."),
@@ -398,7 +404,7 @@ def root(
     _run_primary_launch(
         new=new,
         space=space,
-        continue_mode=continue_mode,
+        continue_ref=continue_ref,
         model=model,
         agent=agent,
         permission_tier=permission_tier,
@@ -515,7 +521,7 @@ def _run_primary_launch(
     *,
     new: bool,
     space: str | None,
-    continue_mode: bool,
+    continue_ref: str | None,
     model: str,
     agent: str | None,
     permission_tier: str | None,
@@ -526,19 +532,40 @@ def _run_primary_launch(
 ) -> None:
     """Shared primary launch flow for root command entry."""
 
-    if continue_mode:
-        raise ValueError(
-            "ERROR [NOT_IMPLEMENTED]: --continue is not wired yet. "
-            "Next: use `meridian` without --continue."
-        )
-
     repo_root = resolve_repo_root()
     explicit_space = space.strip() if space is not None and space.strip() else None
-    selected = _start_space_record(
-        repo_root=repo_root,
-        force_new=new,
-        explicit_space=explicit_space,
-    )
+    normalized_continue_ref = continue_ref.strip() if continue_ref is not None else ""
+    resume_target = normalized_continue_ref if normalized_continue_ref else None
+
+    selected: space_file.SpaceRecord
+    continue_harness_session_id: str | None = None
+    fresh = True
+    if resume_target is not None:
+        if new:
+            raise ValueError("Cannot combine --continue with --new.")
+        if model.strip():
+            raise ValueError("Cannot combine --continue with --model.")
+        if agent is not None and agent.strip():
+            raise ValueError("Cannot combine --continue with --agent.")
+        resolved_continue = _resolve_continue_target(
+            repo_root=repo_root,
+            continue_ref=resume_target,
+            explicit_space=explicit_space,
+        )
+        selected = resolved_continue.space
+        continue_harness_session_id = resolved_continue.session.harness_session_id.strip() or None
+        if continue_harness_session_id is None:
+            raise ValueError(
+                f"Session '{resume_target}' in space '{selected.id}' cannot be continued "
+                "because it has no harness session id."
+            )
+        fresh = False
+    else:
+        selected = _start_space_record(
+            repo_root=repo_root,
+            force_new=new,
+            explicit_space=explicit_space,
+        )
     summary_path = generate_space_summary(
         repo_root=repo_root,
         space_id=SpaceId(selected.id),
@@ -552,11 +579,12 @@ def _run_primary_launch(
             agent=agent,
             autocompact=autocompact,
             passthrough_args=harness_args,
-            fresh=True,
+            fresh=fresh,
             pinned_context="",
             dry_run=dry_run,
             permission_tier=permission_tier,
             unsafe=unsafe,
+            continue_harness_session_id=continue_harness_session_id,
         ),
     )
 
@@ -569,13 +597,61 @@ def _run_primary_launch(
         SpaceActionOutput(
             space_id=selected.id,
             state=transitioned.status,
-            message=("Space launch dry-run." if dry_run else "Space session finished."),
+            message=(
+                "Space resume dry-run."
+                if dry_run and resume_target is not None
+                else (
+                    "Space launch dry-run."
+                    if dry_run
+                    else ("Space resumed." if resume_target is not None else "Space session finished.")
+                )
+            ),
             exit_code=launch_result.exit_code,
             command=launch_result.command if dry_run else (),
             lock_path=launch_result.lock_path.as_posix(),
             summary_path=summary_path.as_posix(),
         )
     )
+
+
+def _resolve_continue_target(
+    *,
+    repo_root: Path,
+    continue_ref: str,
+    explicit_space: str | None,
+) -> _ResolvedContinueTarget:
+    normalized = continue_ref.strip()
+    if not normalized:
+        raise ValueError("--continue requires a non-empty session reference.")
+
+    if explicit_space is not None:
+        selected = space_file.get_space(repo_root, explicit_space)
+        if selected is None:
+            raise ValueError(f"Space '{explicit_space}' not found")
+        session = resolve_session_ref(resolve_space_dir(repo_root, selected.id), normalized)
+        if session is None:
+            raise ValueError(
+                f"Session '{normalized}' not found in space '{selected.id}'."
+            )
+        return _ResolvedContinueTarget(space=selected, session=session)
+
+    matches: list[_ResolvedContinueTarget] = []
+    for record in space_file.list_spaces(repo_root):
+        space_dir = resolve_space_dir(repo_root, record.id)
+        session = resolve_session_ref(space_dir, normalized)
+        if session is None:
+            continue
+        matches.append(_ResolvedContinueTarget(space=record, session=session))
+
+    if not matches:
+        raise ValueError(f"Session '{normalized}' not found.")
+    if len(matches) > 1:
+        spaces = ", ".join(sorted(match.space.id for match in matches))
+        raise ValueError(
+            f"Session '{normalized}' is ambiguous across spaces ({spaces}). "
+            "Use --space to disambiguate."
+        )
+    return matches[0]
 
 
 @app.command(name="init")
@@ -648,6 +724,7 @@ _TOP_LEVEL_VALUE_FLAGS = frozenset(
         "--format",
         "--config",
         "--space",
+        "--continue",
         "--model",
         "--agent",
         "-a",
@@ -672,8 +749,6 @@ _TOP_LEVEL_BOOL_FLAGS = frozenset(
         "--human",
         "--new",
         "--no-new",
-        "--continue",
-        "--no-continue",
         "--unsafe",
         "--no-unsafe",
         "--dry-run",
