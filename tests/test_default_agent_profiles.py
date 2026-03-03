@@ -112,11 +112,13 @@ def test_space_primary_profile_controls_model_skills_and_sandbox(tmp_path: Path)
     assert "--agent" in command
     assert command[command.index("--agent") + 1] == "_meridian-c1-lead-primary"
     assert "--append-system-prompt" in command
-    assert "Primary orchestration content" in command[command.index("--append-system-prompt") + 1]
+    appended_prompt = command[command.index("--append-system-prompt") + 1]
+    assert "space prompt" in appended_prompt
+    assert "Primary orchestration content" in appended_prompt
     assert "--system-prompt" not in command
 
 
-def test_space_primary_profile_without_skills_omits_skill_injection(tmp_path: Path) -> None:
+def test_space_primary_profile_without_skills_still_injects_space_context(tmp_path: Path) -> None:
     _write_config(
         tmp_path,
         "[defaults]\ndefault_primary_agent = 'lead-primary'\n",
@@ -137,7 +139,10 @@ def test_space_primary_profile_without_skills_omits_skill_injection(tmp_path: Pa
         chat_id="c1",
     )
 
-    assert "--append-system-prompt" not in command
+    assert "--append-system-prompt" in command
+    appended_prompt = command[command.index("--append-system-prompt") + 1]
+    assert appended_prompt == "space prompt"
+    assert "# Skill:" not in appended_prompt
 
 
 def test_space_primary_profile_missing_falls_back_to_bundled_primary(

@@ -234,10 +234,13 @@ def _build_interactive_command(
         cli_permission_override=permission_tier_override is not None,
     )
     command.extend(resolver.resolve_flags(harness))
-    # Workaround: Claude Code --agent does not preload skills (issue #29902).
-    appended = compose_skill_injections(resolved_skills.loaded_skills)
-    if appended:
-        command.extend(["--append-system-prompt", appended])
+    # Primary space context must always be present in Claude's system prompt.
+    # Skill content is appended as an additional section when available.
+    appended_parts = [prompt.strip()]
+    skill_injection = compose_skill_injections(resolved_skills.loaded_skills)
+    if skill_injection:
+        appended_parts.append(skill_injection)
+    command.extend(["--append-system-prompt", "\n\n".join(part for part in appended_parts if part)])
     command.extend(passthrough_args)
     return tuple(command)
 

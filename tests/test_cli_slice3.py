@@ -133,3 +133,6 @@ def test_start_dry_run_agent_flag_overrides_default_primary_agent(
     assert command[command.index("--agent") + 1] == "_meridian-dry-run-review-primary"
     assert "--model" in command
     assert command[command.index("--model") + 1] == "claude-sonnet-4-6"
+    assert "--append-system-prompt" in command
+    appended_prompt = command[command.index("--append-system-prompt") + 1]
+    assert "# Meridian Space Session" in appended_prompt
