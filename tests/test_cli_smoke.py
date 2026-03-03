@@ -96,6 +96,7 @@ def test_json_and_format_flags_output_stdout_only(run_meridian) -> None:
     assert result_format.returncode == 0
     payload_format = json.loads(result_format.stdout)
     assert payload_format["space_id"].startswith("s")
+    assert payload_format["command"] == []
     space_id = payload_format["space_id"]
 
     result = run_meridian(["--json", "spawn", "--dry-run", "--space", space_id, "-p", "hello"])

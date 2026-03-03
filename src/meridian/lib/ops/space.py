@@ -181,7 +181,7 @@ def space_start_sync(payload: SpaceStartInput) -> SpaceActionOutput:
         state=transitioned.status,
         message=("Space launch dry-run." if payload.dry_run else "Space session finished."),
         exit_code=launch_result.exit_code,
-        command=launch_result.command,
+        command=launch_result.command if payload.dry_run else (),
         lock_path=launch_result.lock_path.as_posix(),
         summary_path=summary_path.as_posix(),
     )
@@ -235,7 +235,7 @@ def space_resume_sync(payload: SpaceResumeInput) -> SpaceActionOutput:
         state=transitioned.status,
         message=("Space resumed (fresh)." if payload.fresh else "Space resumed."),
         exit_code=launch_result.exit_code,
-        command=launch_result.command,
+        command=(),
         lock_path=launch_result.lock_path.as_posix(),
         summary_path=summary_path.as_posix(),
     )

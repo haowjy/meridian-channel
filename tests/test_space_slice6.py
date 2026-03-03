@@ -68,6 +68,7 @@ def test_space_start_creates_lock_sets_env_and_forwards_passthrough(
     assert result.space_id == "s1"
     assert result.state == "active"
     assert result.exit_code == 0
+    assert result.command == ()
     assert result.lock_path is not None
     assert not Path(result.lock_path).exists()
 
@@ -114,6 +115,7 @@ def test_space_resume_fresh_omits_continuation_guidance(
         )
     )
     assert result.state == "active"
+    assert result.command == ()
 
     payload = _capture_payload(capture)
     env = payload["env"]
@@ -353,6 +355,7 @@ def test_start_command_launches_and_forwards_options(
     package_root: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     main_module = importlib.import_module("meridian.cli.main")
     capture = tmp_path / "start-top-level-capture.json"
@@ -362,6 +365,8 @@ def test_start_command_launches_and_forwards_options(
     with pytest.raises(SystemExit) as exc:
         main_module.app(["start", "--autocompact", "72", "--harness-arg", "enabled"])
     assert int(exc.value.code) == 0
+    captured = capsys.readouterr()
+    assert "mock_harness.py" not in captured.out
 
     payload = _capture_payload(capture)
     env = payload["env"]
