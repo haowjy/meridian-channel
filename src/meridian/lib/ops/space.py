@@ -73,7 +73,7 @@ class SpaceActionOutput:
     command: tuple[str, ...] = ()
     lock_path: str | None = None
     summary_path: str | None = None
-    session_id: str | None = None
+    continue_ref: str | None = None
     resume_command: str | None = None
 
     def format_text(self, ctx: FormatContext | None = None) -> str:
@@ -174,10 +174,10 @@ def space_start_sync(payload: SpaceStartInput) -> SpaceActionOutput:
         command=launch_result.command if payload.dry_run else (),
         lock_path=launch_result.lock_path.as_posix(),
         summary_path=summary_path.as_posix(),
-        session_id=launch_result.session_id,
+        continue_ref=launch_result.continue_ref,
         resume_command=(
-            f"meridian --continue {launch_result.session_id}"
-            if launch_result.session_id is not None
+            f"meridian --continue {launch_result.continue_ref}"
+            if launch_result.continue_ref is not None
             else None
         ),
     )
@@ -229,10 +229,10 @@ def space_resume_sync(payload: SpaceResumeInput) -> SpaceActionOutput:
         command=(),
         lock_path=launch_result.lock_path.as_posix(),
         summary_path=summary_path.as_posix(),
-        session_id=launch_result.session_id,
+        continue_ref=launch_result.continue_ref,
         resume_command=(
-            f"meridian --continue {launch_result.session_id}"
-            if launch_result.session_id is not None
+            f"meridian --continue {launch_result.continue_ref}"
+            if launch_result.continue_ref is not None
             else None
         ),
     )

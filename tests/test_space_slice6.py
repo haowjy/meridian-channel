@@ -435,13 +435,13 @@ def test_root_continue_requires_disambiguation_without_space(
     first_chat = start_session(
         first_dir,
         harness="claude",
-        harness_session_id="sess-first",
+        harness_session_id="shared-session",
         model="claude-opus-4-6",
     )
     second_chat = start_session(
         second_dir,
         harness="claude",
-        harness_session_id="sess-second",
+        harness_session_id="shared-session",
         model="claude-opus-4-6",
     )
     stop_session(first_dir, first_chat)
@@ -450,7 +450,7 @@ def test_root_continue_requires_disambiguation_without_space(
     monkeypatch.setattr(main_module, "resolve_repo_root", lambda: tmp_path)
 
     with pytest.raises(ValueError, match="ambiguous across spaces"):
-        main_module.app(["--continue", "c1", "--dry-run"])
+        main_module.app(["--continue", "shared-session", "--dry-run"])
 
 
 def test_root_continue_space_mismatch_errors(

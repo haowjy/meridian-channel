@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import BinaryIO
-from uuid import uuid4
 
 from meridian.lib.harness.materialize import cleanup_materialized
 from meridian.lib.state.id_gen import next_chat_id
@@ -27,7 +26,6 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True, slots=True)
 class SessionRecord:
     chat_id: str
-    session_id: str
     harness: str
     harness_session_id: str
     model: str
@@ -104,16 +102,11 @@ def _coerce_string_or_empty(value: JSONValue | None) -> str:
 
 def _record_from_start_event(event: JSONRow) -> SessionRecord | None:
     chat_id = event.get("chat_id")
-    session_id = event.get("session_id")
     harness = event.get("harness")
     harness_session_id = event.get("harness_session_id")
     model = event.get("model")
     started_at = event.get("started_at")
     if not isinstance(chat_id, str):
-        return None
-    if session_id is None:
-        session_id = chat_id
-    if not isinstance(session_id, str):
         return None
     if not isinstance(harness, str):
         return None
@@ -125,7 +118,6 @@ def _record_from_start_event(event: JSONRow) -> SessionRecord | None:
         return None
     return SessionRecord(
         chat_id=chat_id,
-        session_id=session_id,
         harness=harness,
         harness_session_id=harness_session_id,
         model=model,
@@ -160,7 +152,6 @@ def _records_by_session(space_dir: Path) -> dict[str, SessionRecord]:
             stopped_at = event.get("stopped_at")
             records[chat_id] = SessionRecord(
                 chat_id=existing.chat_id,
-                session_id=existing.session_id,
                 harness=existing.harness,
                 harness_session_id=existing.harness_session_id,
                 model=existing.model,
@@ -183,7 +174,6 @@ def _records_by_session(space_dir: Path) -> dict[str, SessionRecord]:
                 continue
             records[chat_id] = SessionRecord(
                 chat_id=existing.chat_id,
-                session_id=existing.session_id,
                 harness=existing.harness,
                 harness_session_id=harness_session_id,
                 model=existing.model,
@@ -241,12 +231,10 @@ def start_session(
 
     with _lock_file(paths.sessions_lock):
         chat_id = next_chat_id(space_dir)
-        session_id = str(uuid4())
         event: JSONRow = {
             "v": 1,
             "event": "start",
             "chat_id": chat_id,
-            "session_id": session_id,
             "harness": harness,
             "harness_session_id": harness_session_id,
             "model": model,
@@ -332,21 +320,13 @@ def get_last_session(space_dir: Path) -> SessionRecord | None:
 
 
 def resolve_session_ref(space_dir: Path, ref: str) -> SessionRecord | None:
-    """Resolve session reference by session/chat ID (`cN`) or harness session ID."""
+    """Resolve session reference by harness session ID."""
 
     normalized = ref.strip()
     if not normalized:
         return None
 
     records = _records_by_session(space_dir)
-    direct = records.get(normalized)
-    if direct is not None:
-        return direct
-
-    for record in records.values():
-        if record.session_id == normalized:
-            return record
-
     matches = [
         record for record in records.values() if record.harness_session_id == normalized
     ]

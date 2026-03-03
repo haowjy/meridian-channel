@@ -9,7 +9,7 @@ import shlex
 import signal
 import subprocess
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
@@ -33,7 +33,7 @@ from meridian.lib.safety.permissions import (
     build_permission_config,
     build_permission_resolver,
 )
-from meridian.lib.space.session_store import resolve_session_ref, start_session, stop_session
+from meridian.lib.space.session_store import start_session, stop_session
 from meridian.lib.space import space_file
 from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_space_dir, resolve_state_paths
@@ -73,7 +73,7 @@ class SpaceLaunchResult:
     exit_code: int
     final_state: SpaceState
     lock_path: Path
-    session_id: str | None = None
+    continue_ref: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -303,6 +303,13 @@ def _normalize_system_prompt_passthrough_args(
         index += 1
 
     return tuple(cleaned), tuple(prompt_fragments)
+
+
+def _has_passthrough_session_id(passthrough_args: tuple[str, ...]) -> bool:
+    for token in passthrough_args:
+        if token == "--session-id" or token.startswith("--session-id="):
+            return True
+    return False
 
 
 def _build_harness_command(
@@ -550,15 +557,41 @@ def launch_primary(
             exit_code=0,
             final_state="active",
             lock_path=lock_path,
-            session_id=None,
+            continue_ref=None,
         )
 
     command: tuple[str, ...] = ()
     chat_id: str | None = None
-    session_id: str | None = None
+    continue_ref: str | None = None
     primary_spawn_id: str | None = None
     primary_started = 0.0
     child_env: dict[str, str] | None = None
+    seed_harness_session_id = (
+        request.continue_harness_session_id.strip()
+        if request.continue_harness_session_id is not None
+        else ""
+    )
+    command_request = request
+    if (
+        not request.dry_run
+        and not seed_harness_session_id
+        and session_metadata.harness == "claude"
+    ):
+        seed_harness_session_id = str(uuid4())
+    if (
+        seed_harness_session_id
+        and session_metadata.harness == "claude"
+        and not (request.continue_harness_session_id or "").strip()
+        and not _has_passthrough_session_id(request.passthrough_args)
+    ):
+        command_request = replace(
+            request,
+            passthrough_args=(
+                *request.passthrough_args,
+                "--session-id",
+                seed_harness_session_id,
+            ),
+        )
 
     # Always use Popen (not execvp) so the finally block can clean up
     # materialized harness files after the child exits.
@@ -568,7 +601,7 @@ def launch_primary(
         chat_id = start_session(
             space_dir,
             harness=session_metadata.harness,
-            harness_session_id="",
+            harness_session_id=seed_harness_session_id,
             model=session_metadata.model,
             agent=session_metadata.agent,
             agent_path=session_metadata.agent_path,
@@ -596,7 +629,7 @@ def launch_primary(
         )
         command = _build_harness_command(
             repo_root=repo_root,
-            request=request,
+            request=command_request,
             prompt=prompt,
             chat_id=chat_id,
             config=config,
@@ -652,9 +685,7 @@ def launch_primary(
         if lock_path.exists():
             lock_path.unlink()
 
-    if chat_id is not None:
-        session = resolve_session_ref(space_dir, chat_id)
-        session_id = session.session_id if session is not None else chat_id
+    continue_ref = seed_harness_session_id.strip() or None
 
     final_state: SpaceState = "active"
     return SpaceLaunchResult(
@@ -662,5 +693,5 @@ def launch_primary(
         exit_code=exit_code,
         final_state=final_state,
         lock_path=lock_path,
-        session_id=session_id,
+        continue_ref=continue_ref,
     )

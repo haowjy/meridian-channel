@@ -614,10 +614,10 @@ def _run_primary_launch(
             command=launch_result.command if dry_run else (),
             lock_path=launch_result.lock_path.as_posix(),
             summary_path=summary_path.as_posix(),
-            session_id=launch_result.session_id,
+            continue_ref=launch_result.continue_ref,
             resume_command=(
-                f"meridian --continue {launch_result.session_id}"
-                if launch_result.session_id is not None
+                f"meridian --continue {launch_result.continue_ref}"
+                if launch_result.continue_ref is not None
                 else None
             ),
         )
