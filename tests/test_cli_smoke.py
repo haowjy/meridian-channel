@@ -74,6 +74,12 @@ def test_version_flag_prints_package_version(run_meridian) -> None:
     assert __version__ in result.stdout
 
 
+def test_start_command_removed(run_meridian) -> None:
+    result = run_meridian(["start", "--dry-run"])
+    assert result.returncode == 1
+    assert "Unknown command: start" in result.stderr
+
+
 def test_serve_exits_cleanly_on_eof(package_root, cli_env) -> None:
     proc = subprocess.Popen(
         [sys.executable, "-m", "meridian", "serve"],

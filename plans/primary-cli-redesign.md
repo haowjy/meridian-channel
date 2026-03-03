@@ -1,6 +1,6 @@
 # Primary CLI Redesign Plan
 
-Status: in progress
+Status: completed
 Date: 2026-03-03
 
 ## Execution Board
@@ -18,16 +18,19 @@ Date: 2026-03-03
 - Commit: `2950a8b`
 - Verification: `uv run meridian --help`, `uv run meridian --json --model <model> --harness <id> --dry-run`, incompatibility error smoke, targeted pytest, `uv run pytest-llm`
 5. Slice E: Session identity + resume UX output - done
-- Commit: TBD
+- Commit: `f533a23`
 - Verification: non-dry-run root output includes resume hint, JSON includes `session_id` and `resume_command`, continue resolution accepts session ids, targeted pytest, `uv run pytest-llm`
-6. Slice F: Docs/help/smoke hardening - pending
+6. Slice F: Docs/help/smoke hardening - done
+- Commit: TBD
+- Verification: explicit smoke for bare `meridian`, `meridian --dry-run`, and removed `start` command; targeted CLI smoke tests; `uv run pytest-llm`
 
 ## Current Implementation Snapshot (2026-03-03)
 
-- `meridian start` is still the primary entrypoint.
-- Root `meridian` does not launch a primary session.
-- `--continue` on `start` is still stubbed.
-- This plan remains active and not yet implemented.
+- `meridian` (no subcommand) launches the primary session flow.
+- `meridian start` has been removed.
+- `--continue <session-ref>` resolves sessions/spaces and supports ambiguity/mismatch errors.
+- `--harness` is available with model compatibility enforcement.
+- Primary sessions now record stable `session_id` values and emit resume hints on exit.
 
 ## Goal
 
