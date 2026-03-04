@@ -24,11 +24,16 @@ from meridian.cli.skills_cmd import register_skills_commands
 from meridian.cli.space import register_space_commands
 from meridian.lib.config._paths import resolve_repo_root
 from meridian.lib.harness.registry import get_default_harness_registry
+from meridian.lib.harness.session_detection import infer_harness_from_untracked_session_ref
 from meridian.lib.ops.spawn import SpawnActionOutput
 from meridian.lib.ops.space import SpaceActionOutput
 from meridian.lib.space import space_file
 from meridian.lib.space.launch import SpaceLaunchRequest, cleanup_orphaned_locks, launch_primary
-from meridian.lib.space.session_store import cleanup_stale_sessions, resolve_session_ref
+from meridian.lib.space.session_store import (
+    cleanup_stale_sessions,
+    get_last_session,
+    resolve_session_ref,
+)
 from meridian.lib.space.summary import generate_space_summary
 from meridian.lib.state.paths import resolve_all_spaces_dir, resolve_space_dir
 from meridian.lib.types import SpaceId
@@ -71,6 +76,7 @@ _GLOBAL_OPTIONS: ContextVar[GlobalOptions | None] = ContextVar("_GLOBAL_OPTIONS"
 class _ResolvedContinueTarget:
     space: space_file.SpaceRecord
     harness_session_id: str | None
+    harness: str | None
     warning: str | None = None
 
 
@@ -552,6 +558,7 @@ def _run_primary_launch(
 
     selected: space_file.SpaceRecord
     continue_harness_session_id: str | None = None
+    continue_harness: str | None = None
     continue_warning: str | None = None
     fresh = True
     if resume_target is not None:
@@ -570,6 +577,7 @@ def _run_primary_launch(
         )
         selected = resolved_continue.space
         continue_harness_session_id = resolved_continue.harness_session_id
+        continue_harness = resolved_continue.harness
         continue_warning = resolved_continue.warning
         fresh = False
     else:
@@ -588,7 +596,7 @@ def _run_primary_launch(
         request=SpaceLaunchRequest(
             space_id=SpaceId(selected.id),
             model=model,
-            harness=harness,
+            harness=continue_harness if resume_target is not None else harness,
             agent=agent,
             autocompact=autocompact,
             passthrough_args=harness_args,
@@ -638,16 +646,25 @@ def _resolve_continue_target(
     normalized = continue_ref.strip()
     if not normalized:
         raise ValueError("--continue requires a non-empty session reference.")
+    inferred_harness = infer_harness_from_untracked_session_ref(repo_root, normalized)
 
     all_spaces = space_file.list_spaces(repo_root)
-    matches: list[tuple[space_file.SpaceRecord, str | None]] = []
+    matches: list[tuple[space_file.SpaceRecord, str | None, str | None]] = []
     for record in all_spaces:
         space_dir = resolve_space_dir(repo_root, record.id)
         session = resolve_session_ref(space_dir, normalized)
         if session is None:
             continue
         harness_session_id = session.harness_session_id.strip() or None
-        matches.append((record, harness_session_id))
+        harness = inferred_harness or (session.harness.strip() or None)
+        matches.append((record, harness_session_id, harness))
+
+    def _last_space_harness(space_id: str) -> str | None:
+        record = get_last_session(resolve_space_dir(repo_root, space_id))
+        if record is None:
+            return None
+        normalized_harness = record.harness.strip()
+        return normalized_harness or None
 
     if explicit_space is not None:
         selected = space_file.get_space(repo_root, explicit_space)
@@ -659,19 +676,21 @@ def _resolve_continue_target(
             return _ResolvedContinueTarget(
                 space=selected,
                 harness_session_id=explicit_match[1],
+                harness=explicit_match[2],
             )
 
         if matches:
             if len(matches) > 1:
-                spaces = ", ".join(sorted(record.id for record, _ in matches))
+                spaces = ", ".join(sorted(record.id for record, _, _ in matches))
                 raise ValueError(
                     f"Session '{normalized}' is ambiguous across spaces ({spaces}). "
                     "Use a more specific session id."
                 )
-            resolved_space, harness_session_id = matches[0]
+            resolved_space, harness_session_id, harness_id = matches[0]
             return _ResolvedContinueTarget(
                 space=resolved_space,
                 harness_session_id=harness_session_id,
+                harness=harness_id,
                 warning=(
                     f"Session '{normalized}' belongs to space '{resolved_space.id}'; "
                     f"ignoring --space '{selected.id}'."
@@ -685,6 +704,10 @@ def _resolve_continue_target(
         return _ResolvedContinueTarget(
             space=selected,
             harness_session_id=normalized,
+            harness=(
+                inferred_harness
+                or _last_space_harness(selected.id)
+            ),
             warning=(
                 f"Session '{normalized}' is not tracked yet; binding it to space "
                 f"'{selected.id}' for this run."
@@ -702,21 +725,26 @@ def _resolve_continue_target(
         return _ResolvedContinueTarget(
             space=selected,
             harness_session_id=normalized,
+            harness=(
+                inferred_harness
+                or _last_space_harness(selected.id)
+            ),
             warning=(
                 f"Session '{normalized}' is not tracked yet; binding it to space "
                 f"'{selected.id}' for this run."
             ),
         )
     if len(matches) > 1:
-        spaces = ", ".join(sorted(record.id for record, _ in matches))
+        spaces = ", ".join(sorted(record.id for record, _, _ in matches))
         raise ValueError(
             f"Session '{normalized}' is ambiguous across spaces ({spaces}). "
             "Use --space to disambiguate."
         )
-    resolved_space, harness_session_id = matches[0]
+    resolved_space, harness_session_id, harness_id = matches[0]
     return _ResolvedContinueTarget(
         space=resolved_space,
         harness_session_id=harness_session_id,
+        harness=harness_id,
     )
 
 

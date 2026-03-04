@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import time
 
 import pytest
 
 from meridian.lib.harness.registry import get_default_harness_registry
 from meridian.lib.ops.space import SpaceStartInput, space_start_sync
 from meridian.lib.types import SpaceId
+from meridian.lib.harness.session_detection import detect_primary_harness_session_id
 from meridian.lib.space.launch import (
     SpaceLaunchRequest,
     _build_space_env,
@@ -401,3 +404,198 @@ def test_build_interactive_command_uses_catalog_harness_for_custom_model(
     assert command[0] == "opencode"
     assert "--model" in command
     assert command[command.index("--model") + 1] == "custom-model-v1"
+
+
+def testdetect_primary_harness_session_id_from_codex_rollout_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    home_dir = tmp_path / "home"
+    monkeypatch.setenv("HOME", home_dir.as_posix())
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    other_repo = tmp_path / "other-repo"
+    other_repo.mkdir(parents=True, exist_ok=True)
+
+    session_id = "019cb8d4-8d62-79d3-a925-d329f8310c5d"
+    other_session_id = "019cb8d4-8d62-79d3-a925-d329f8310c5e"
+    sessions_dir = home_dir / ".codex" / "sessions" / "2026" / "03" / "04"
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+
+    other_rollout = sessions_dir / f"rollout-2026-03-04T06-31-04-{other_session_id}.jsonl"
+    other_rollout.write_text(
+        json.dumps(
+            {
+                "type": "session_meta",
+                "payload": {"id": other_session_id, "cwd": other_repo.as_posix()},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    rollout = sessions_dir / f"rollout-2026-03-04T06-31-03-{session_id}.jsonl"
+    rollout.write_text(
+        "\n".join(
+            (
+                json.dumps(
+                    {
+                        "type": "session_meta",
+                        "payload": {"id": session_id, "cwd": repo_root.as_posix()},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": "working"}],
+                        },
+                    }
+                ),
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    started_at = time.time()
+    os.utime(other_rollout, (started_at + 2, started_at + 2))
+    os.utime(rollout, (started_at + 3, started_at + 3))
+
+    resolved = detect_primary_harness_session_id(
+        harness_id="codex",
+        repo_root=repo_root,
+        started_at_epoch=started_at,
+        started_at_local_iso="2026-03-04T06:31:00",
+    )
+
+    assert resolved == session_id
+
+
+def testdetect_primary_harness_session_id_skips_codex_aborted_bootstrap(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    home_dir = tmp_path / "home"
+    monkeypatch.setenv("HOME", home_dir.as_posix())
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True, exist_ok=True)
+
+    valid_session_id = "019cb8d4-8d62-79d3-a925-d329f8310c5d"
+    aborted_session_id = "019cb8ef-c55a-7782-a75e-0c9dc798cd35"
+    sessions_dir = home_dir / ".codex" / "sessions" / "2026" / "03" / "04"
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+
+    valid_rollout = sessions_dir / f"rollout-2026-03-04T06-31-03-{valid_session_id}.jsonl"
+    valid_rollout.write_text(
+        "\n".join(
+            (
+                json.dumps(
+                    {
+                        "type": "session_meta",
+                        "payload": {"id": valid_session_id, "cwd": repo_root.as_posix()},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": "hello"}],
+                        },
+                    }
+                ),
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    aborted_rollout = sessions_dir / f"rollout-2026-03-04T06-31-04-{aborted_session_id}.jsonl"
+    aborted_rollout.write_text(
+        "\n".join(
+            (
+                json.dumps(
+                    {
+                        "type": "session_meta",
+                        "payload": {"id": aborted_session_id, "cwd": repo_root.as_posix()},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "event_msg",
+                        "payload": {"type": "turn_aborted"},
+                    }
+                ),
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    started_at = time.time()
+    os.utime(valid_rollout, (started_at + 2, started_at + 2))
+    os.utime(aborted_rollout, (started_at + 3, started_at + 3))
+
+    resolved = detect_primary_harness_session_id(
+        harness_id="codex",
+        repo_root=repo_root,
+        started_at_epoch=started_at,
+        started_at_local_iso="2026-03-04T06:31:00",
+    )
+
+    assert resolved == valid_session_id
+
+
+def testdetect_primary_harness_session_id_from_opencode_log(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    home_dir = tmp_path / "home"
+    monkeypatch.setenv("HOME", home_dir.as_posix())
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    other_repo = tmp_path / "other-repo"
+    other_repo.mkdir(parents=True, exist_ok=True)
+
+    logs_dir = home_dir / ".local" / "share" / "opencode" / "log"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    log_file = logs_dir / "2026-03-04T120000.log"
+    log_file.write_text(
+        "\n".join(
+            (
+                (
+                    "INFO  2026-03-04T12:50:00 +2ms service=session "
+                    f"id=ses_old123 directory={repo_root.as_posix()} created"
+                ),
+                (
+                    "INFO  2026-03-04T12:50:05 +2ms service=session "
+                    f"id=ses_other directory={other_repo.as_posix()} created"
+                ),
+                (
+                    "INFO  2026-03-04T12:50:10 +2ms service=session "
+                    f"id=ses_new456 directory={repo_root.as_posix()} created"
+                ),
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    started_at = time.time()
+    os.utime(log_file, (started_at + 2, started_at + 2))
+
+    resolved = detect_primary_harness_session_id(
+        harness_id="opencode",
+        repo_root=repo_root,
+        started_at_epoch=started_at,
+        started_at_local_iso="2026-03-04T12:50:01",
+    )
+
+    assert resolved == "ses_new456"

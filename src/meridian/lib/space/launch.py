@@ -26,6 +26,7 @@ from meridian.lib.exec.env import (
 from meridian.lib.harness.adapter import HarnessAdapter, SpawnParams
 from meridian.lib.harness.registry import HarnessRegistry
 from meridian.lib.harness.materialize import cleanup_materialized, materialize_for_harness
+from meridian.lib.harness.session_detection import detect_primary_harness_session_id
 from meridian.lib.launch_resolve import (
     load_agent_profile_with_fallback,
     resolve_permission_tier_from_profile,
@@ -39,7 +40,7 @@ from meridian.lib.safety.permissions import (
     build_permission_resolver,
     warn_profile_tier_escalation,
 )
-from meridian.lib.space.session_store import start_session, stop_session
+from meridian.lib.space.session_store import start_session, stop_session, update_session_harness_id
 from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_space_dir, resolve_state_paths
 from meridian.lib.types import HarnessId, ModelId, SpaceId
@@ -623,12 +624,15 @@ def launch_primary(
     continue_ref: str | None = None
     primary_spawn_id: str | None = None
     primary_started = 0.0
+    primary_started_epoch = 0.0
+    primary_started_local_iso: str | None = None
     child_env: dict[str, str] | None = None
     seed_harness_session_id = (
         request.continue_harness_session_id.strip()
         if request.continue_harness_session_id is not None
         else ""
     )
+    resolved_harness_session_id = seed_harness_session_id
     command_request = request
     if (
         not request.dry_run
@@ -636,6 +640,7 @@ def launch_primary(
         and session_metadata.harness == "claude"
     ):
         seed_harness_session_id = str(uuid4())
+    resolved_harness_session_id = seed_harness_session_id
     if (
         seed_harness_session_id
         and session_metadata.harness == "claude"
@@ -678,6 +683,8 @@ def launch_primary(
             )
         )
         primary_started = time.monotonic()
+        primary_started_epoch = time.time()
+        primary_started_local_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
         harness_context = _build_harness_context(
             repo_root=repo_root,
             request=command_request,
@@ -736,6 +743,21 @@ def launch_primary(
             )
         if chat_id is not None:
             try:
+                observed_harness_session_id = None
+                if primary_started_epoch > 0.0:
+                    observed_harness_session_id = detect_primary_harness_session_id(
+                        harness_id=session_metadata.harness,
+                        repo_root=repo_root,
+                        started_at_epoch=primary_started_epoch,
+                        started_at_local_iso=primary_started_local_iso,
+                    )
+                if (
+                    observed_harness_session_id is not None
+                    and observed_harness_session_id.strip()
+                    and observed_harness_session_id.strip() != resolved_harness_session_id.strip()
+                ):
+                    resolved_harness_session_id = observed_harness_session_id.strip()
+                    update_session_harness_id(space_dir, chat_id, resolved_harness_session_id)
                 stop_session(space_dir, chat_id)
             finally:
                 _cleanup_launch_materialized(
@@ -746,7 +768,7 @@ def launch_primary(
         if lock_path.exists():
             lock_path.unlink()
 
-    continue_ref = seed_harness_session_id.strip() or None
+    continue_ref = resolved_harness_session_id.strip() or None
 
     return SpaceLaunchResult(
         command=command,
