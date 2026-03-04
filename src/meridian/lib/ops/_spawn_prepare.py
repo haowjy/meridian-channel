@@ -155,15 +155,17 @@ def _validate_requested_model(
             message
         )
 
-    routed = route_model(normalized)
-    if routed.warning is None:
-        return normalized, f"Model '{normalized}' is not in catalog. Routing to '{routed.harness_id}'."
+    try:
+        routed = route_model(normalized)
+    except ValueError:
+        message = (
+            f"Unknown model '{normalized}'. Spawn `meridian models list` to inspect supported models."
+        )
+        if validation_context:
+            message = f"{message}\n{validation_context}"
+        raise ValueError(message) from None
 
-    message = f"Unknown model '{normalized}'. Spawn `meridian models list` to inspect supported models."
-    if validation_context:
-        message = f"{message}\n{validation_context}"
-
-    raise ValueError(message)
+    return normalized, f"Model '{normalized}' is not in catalog. Routing to '{routed.harness_id}'."
 
 
 def _validate_create_input(payload: SpawnCreateInput) -> tuple[SpawnCreateInput, str | None]:
@@ -230,6 +232,7 @@ def _build_create_payload(
     defaults = resolve_run_defaults(
         payload.model,
         profile=profile,
+        default_model=runtime_view.config.default_model,
     )
 
     resolved_skills = resolve_skills_from_profile(
@@ -238,7 +241,10 @@ def _build_create_payload(
         search_paths=runtime_view.config.search_paths,
         readonly=payload.dry_run,
     )
-    harness, route_warning = runtime_view.harness_registry.route(defaults.model)
+    harness, route_warning = runtime_view.harness_registry.route(
+        defaults.model,
+        repo_root=runtime_view.repo_root,
+    )
     reference_mode = harness.capabilities.reference_input_mode
     use_reference_paths = reference_mode == "paths"
     loaded_references = load_reference_files(

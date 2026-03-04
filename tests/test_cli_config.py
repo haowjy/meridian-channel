@@ -33,6 +33,8 @@ def test_config_init_creates_file(tmp_path: Path, run_meridian, cli_env: dict[st
     content = config_path.read_text(encoding="utf-8")
     assert "[defaults]" in content
     assert "# max_depth = 3" in content
+    assert "[harness]" in content
+    assert '# codex = "gpt-5.3-codex"' in content
     assert "[output]" in content
 
 
@@ -48,6 +50,42 @@ def test_config_set_get_roundtrip(tmp_path: Path, run_meridian, cli_env: dict[st
     payload = json.loads(get_result.stdout)
     assert payload["key"] == "defaults.max_depth"
     assert payload["value"] == 9
+    assert payload["source"] == "file"
+
+
+def test_config_harness_default_model_roundtrip_full_model_id(
+    tmp_path: Path,
+    run_meridian,
+    cli_env: dict[str, str],
+) -> None:
+    cli_env["MERIDIAN_REPO_ROOT"] = tmp_path.as_posix()
+
+    set_result = run_meridian(["config", "set", "harness.codex", "gpt-5.3-codex"])
+    assert set_result.returncode == 0
+
+    get_result = run_meridian(["--json", "config", "get", "harness.codex"])
+    assert get_result.returncode == 0
+    payload = json.loads(get_result.stdout)
+    assert payload["key"] == "harness.codex"
+    assert payload["value"] == "gpt-5.3-codex"
+    assert payload["source"] == "file"
+
+
+def test_config_default_model_roundtrip_full_model_id(
+    tmp_path: Path,
+    run_meridian,
+    cli_env: dict[str, str],
+) -> None:
+    cli_env["MERIDIAN_REPO_ROOT"] = tmp_path.as_posix()
+
+    set_result = run_meridian(["config", "set", "defaults.model", "gpt-5.2-high"])
+    assert set_result.returncode == 0
+
+    get_result = run_meridian(["--json", "config", "get", "defaults.model"])
+    assert get_result.returncode == 0
+    payload = json.loads(get_result.stdout)
+    assert payload["key"] == "defaults.model"
+    assert payload["value"] == "gpt-5.2-high"
     assert payload["source"] == "file"
 
 

@@ -473,7 +473,7 @@ async def execute_with_finalization(
     report_path = log_dir / REPORT_FILENAME
 
     if harness_id is None:
-        harness, _warning = registry.route(str(run.model))
+        harness, _warning = registry.route(str(run.model), repo_root=repo_root)
     else:
         harness = registry.get(harness_id)
 

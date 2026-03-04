@@ -13,6 +13,7 @@ from meridian.lib.config.model_guidance import load_model_guidance, selected_gui
 from meridian.lib.config.routing import route_model
 from meridian.lib.config.skill import parse_skill_file
 from meridian.lib.config.skill_registry import SkillRegistry
+from meridian.lib.harness.registry import HarnessRegistry
 
 
 def _write(path: Path, content: str) -> None:
@@ -195,7 +196,7 @@ def test_agent_profile_mcp_tools_normalizes_and_warns_unknown(monkeypatch, tmp_p
     )
 
 
-def test_route_model_matches_bash_rules() -> None:
+def test_route_model_matches_routing_rules() -> None:
     assert route_model("claude-opus-4-6").harness_id == "claude"
     assert route_model("sonnet-foo").harness_id == "claude"
     assert route_model("gpt-5.3-codex").harness_id == "codex"
@@ -204,9 +205,8 @@ def test_route_model_matches_bash_rules() -> None:
     assert route_model("google/gemini-2.5-pro").harness_id == "opencode"
     assert route_model("any-model", mode="direct").harness_id == "direct"
 
-    fallback = route_model("totally-unknown-family")
-    assert fallback.harness_id == "codex"
-    assert fallback.warning is not None
+    with pytest.raises(ValueError, match="Unknown model family"):
+        route_model("totally-unknown-family")
 
 
 def test_model_catalog_override_and_resolution(tmp_path: Path) -> None:
@@ -230,3 +230,21 @@ def test_model_catalog_override_and_resolution(tmp_path: Path) -> None:
     resolved = resolve_model("custom", repo_root=repo_root)
     assert str(resolved.model_id) == "my-custom-model"
     assert resolved.harness == "opencode"
+
+
+def test_registry_route_prefers_catalog_harness_for_custom_models(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    _write(
+        repo_root / ".meridian" / "models.toml",
+        (
+            "[[models]]\n"
+            "model_id = 'my-custom-model'\n"
+            "aliases = ['custom']\n"
+            "harness = 'opencode'\n"
+        ),
+    )
+
+    registry = HarnessRegistry.with_defaults()
+    adapter, warning = registry.route("my-custom-model", repo_root=repo_root)
+    assert adapter.id == "opencode"
+    assert warning is None

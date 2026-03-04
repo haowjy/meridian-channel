@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+import pytest
+
 from meridian.lib.config.catalog import load_model_catalog, resolve_model
 
 
@@ -69,11 +71,5 @@ def test_alias_collision_warns_and_uses_first_match(tmp_path: Path, caplog) -> N
     )
 
     with caplog.at_level(logging.WARNING, logger="meridian.lib.config.catalog"):
-        resolved = resolve_model("shared", repo_root=repo_root)
-
-    assert str(resolved.model_id) == "aaa-first"
-    assert any(
-        "Model alias 'shared' is declared by 'aaa-first' and 'zzz-second'. Using 'aaa-first'."
-        in message
-        for message in caplog.messages
-    )
+        with pytest.raises(ValueError, match="Model alias collision"):
+            resolve_model("shared", repo_root=repo_root)

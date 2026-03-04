@@ -51,6 +51,15 @@ class PrimaryConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class HarnessConfig:
+    """Default model configuration for each harness adapter."""
+
+    claude: str = "claude-opus-4-6"
+    codex: str = "gpt-5.3-codex"
+    opencode: str = "gemini-3.1-pro"
+
+
+@dataclass(frozen=True, slots=True)
 class MeridianConfig:
     """Resolved operational configuration for meridian."""
 
@@ -63,6 +72,8 @@ class MeridianConfig:
     default_permission_tier: str = "read-only"
     default_primary_agent: str = "primary"
     default_agent: str = "agent"
+    default_model: str = "gpt-5.3-codex"
+    harness: HarnessConfig = HarnessConfig()
     primary: PrimaryConfig = PrimaryConfig()
     output: OutputConfig = OutputConfig()
     search_paths: SearchPathConfig = SearchPathConfig()
@@ -71,6 +82,18 @@ class MeridianConfig:
     def primary_agent(self) -> str:
         """Backward-compatible alias for legacy config field name."""
         return self.default_primary_agent
+
+    def default_model_for_harness(self, harness_id: str) -> str | None:
+        """Return configured default model for one harness ID."""
+
+        normalized = harness_id.strip().lower()
+        if normalized == "claude":
+            return self.harness.claude
+        if normalized == "codex":
+            return self.harness.codex
+        if normalized == "opencode":
+            return self.harness.opencode
+        return None
 
 
 _SECTION_KEY_MAP: dict[str, dict[str, str]] = {
@@ -82,6 +105,8 @@ _SECTION_KEY_MAP: dict[str, dict[str, str]] = {
         "primary_agent": "default_primary_agent",
         "agent": "default_agent",
         "default_agent": "default_agent",
+        "model": "default_model",
+        "default_model": "default_model",
     },
     "timeouts": {
         "kill_grace_seconds": "kill_grace_seconds",
@@ -107,6 +132,7 @@ _TOP_LEVEL_KEY_MAP: dict[str, str] = {
     "default_primary_agent": "default_primary_agent",
     "primary_agent": "default_primary_agent",
     "default_agent": "default_agent",
+    "default_model": "default_model",
 }
 
 _ENV_OVERRIDE_MAP: dict[str, str] = {
@@ -120,11 +146,16 @@ _ENV_OVERRIDE_MAP: dict[str, str] = {
     "MERIDIAN_PRIMARY_AGENT": "default_primary_agent",
     "MERIDIAN_DEFAULT_PRIMARY_AGENT": "default_primary_agent",
     "MERIDIAN_DEFAULT_AGENT": "default_agent",
+    "MERIDIAN_DEFAULT_MODEL": "default_model",
+    "MERIDIAN_HARNESS_MODEL_CLAUDE": "harness.claude",
+    "MERIDIAN_HARNESS_MODEL_CODEX": "harness.codex",
+    "MERIDIAN_HARNESS_MODEL_OPENCODE": "harness.opencode",
 }
 
 _OUTPUT_VERBOSITY_PRESETS = frozenset({"quiet", "normal", "verbose", "debug"})
 _SEARCH_PATH_KEYS = frozenset({"agents", "skills", "global_agents", "global_skills"})
 _PRIMARY_KEYS = frozenset({"autocompact_pct", "permission_tier"})
+_HARNESS_KEYS = frozenset({"claude", "codex", "opencode"})
 _PRIMARY_AUTOCOMPACT_PCT_MIN = 1
 _PRIMARY_AUTOCOMPACT_PCT_MAX = 100
 _USER_CONFIG_ENV_VAR = "MERIDIAN_CONFIG"
@@ -344,6 +375,59 @@ def _coerce_primary_config(
     )
 
 
+def _normalize_model_identifier(model: str, *, repo_root: Path) -> str:
+    normalized = model.strip()
+    if not normalized:
+        return normalized
+    try:
+        from meridian.lib.config.catalog import resolve_model
+
+        return str(resolve_model(normalized, repo_root=repo_root).model_id)
+    except KeyError:
+        # Unknown model IDs are allowed here and validated during launch.
+        return normalized
+
+
+def _coerce_harness_config(
+    *,
+    raw_value: object,
+    source: str,
+    repo_root: Path,
+    base: HarnessConfig | None = None,
+) -> HarnessConfig:
+    if not isinstance(raw_value, dict):
+        raise ValueError(f"Invalid value for '{source}': expected table.")
+
+    defaults = base if base is not None else HarnessConfig()
+    values = {
+        "claude": defaults.claude,
+        "codex": defaults.codex,
+        "opencode": defaults.opencode,
+    }
+    for key, value in cast("dict[str, object]", raw_value).items():
+        if key not in _HARNESS_KEYS:
+            logger.warning("Ignoring unknown Meridian config key '%s.%s'.", source, key)
+            continue
+        if not isinstance(value, str):
+            raise ValueError(
+                f"Invalid value for '{source}.{key}': expected str, got "
+                f"{type(value).__name__} ({value!r})."
+            )
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError(
+                f"Invalid value for '{source}.{key}': expected non-empty string."
+            )
+        normalized = _normalize_model_identifier(normalized, repo_root=repo_root)
+        values[key] = normalized
+
+    return HarnessConfig(
+        claude=values["claude"],
+        codex=values["codex"],
+        opencode=values["opencode"],
+    )
+
+
 def _coerce_env_value(*, field_name: str, raw_value: str, env_name: str) -> object:
     expected = _expected_type_name(field_name)
     if expected == "int":
@@ -380,6 +464,7 @@ def _apply_toml_payload(
     values: dict[str, object],
     payload: dict[str, object],
     path: Path,
+    repo_root: Path,
 ) -> None:
     for key, raw_value in payload.items():
         if key == "output":
@@ -403,6 +488,14 @@ def _apply_toml_payload(
                 base=cast("PrimaryConfig", values["primary"]),
             )
             continue
+        if key == "harness":
+            values["harness"] = _coerce_harness_config(
+                raw_value=raw_value,
+                source="harness",
+                repo_root=repo_root,
+                base=cast("HarnessConfig", values["harness"]),
+            )
+            continue
 
         section_map = _SECTION_KEY_MAP.get(key)
         if section_map is not None:
@@ -422,6 +515,11 @@ def _apply_toml_payload(
                     raw_value=section_value,
                     source=f"{key}.{section_key}",
                 )
+                if field_name == "default_model":
+                    values[field_name] = _normalize_model_identifier(
+                        cast("str", values[field_name]),
+                        repo_root=repo_root,
+                    )
             continue
 
         field_name = _TOP_LEVEL_KEY_MAP.get(key)
@@ -433,18 +531,44 @@ def _apply_toml_payload(
             raw_value=raw_value,
             source=key,
         )
+        if field_name == "default_model":
+            values[field_name] = _normalize_model_identifier(
+                cast("str", values[field_name]),
+                repo_root=repo_root,
+            )
 
 
-def _apply_env_overrides(values: dict[str, object]) -> None:
+def _apply_env_overrides(values: dict[str, object], *, repo_root: Path) -> None:
     for env_name, field_name in _ENV_OVERRIDE_MAP.items():
         raw_value = os.getenv(env_name)
         if raw_value is None:
+            continue
+        if field_name.startswith("harness."):
+            harness_key = field_name.split(".", 1)[1]
+            current_harness = cast("HarnessConfig", values["harness"])
+            raw_harness = {
+                "claude": current_harness.claude,
+                "codex": current_harness.codex,
+                "opencode": current_harness.opencode,
+                harness_key: raw_value,
+            }
+            values["harness"] = _coerce_harness_config(
+                raw_value=raw_harness,
+                source="harness",
+                repo_root=repo_root,
+                base=current_harness,
+            )
             continue
         values[field_name] = _coerce_env_value(
             field_name=field_name,
             raw_value=raw_value,
             env_name=env_name,
         )
+        if field_name == "default_model":
+            values[field_name] = _normalize_model_identifier(
+                cast("str", values[field_name]),
+                repo_root=repo_root,
+            )
 
 
 def _build_config(values: dict[str, object]) -> MeridianConfig:
@@ -458,6 +582,8 @@ def _build_config(values: dict[str, object]) -> MeridianConfig:
         default_permission_tier=cast("str", values["default_permission_tier"]),
         default_primary_agent=cast("str", values["default_primary_agent"]),
         default_agent=cast("str", values["default_agent"]),
+        default_model=cast("str", values["default_model"]),
+        harness=cast("HarnessConfig", values["harness"]),
         primary=cast("PrimaryConfig", values["primary"]),
         output=cast("OutputConfig", values["output"]),
         search_paths=cast("SearchPathConfig", values["search_paths"]),
@@ -491,13 +617,23 @@ def load_config(repo_root: Path, *, user_config: Path | None = None) -> Meridian
     if project_path.is_file():
         payload_obj = tomllib.loads(project_path.read_text(encoding="utf-8"))
         payload = cast("dict[str, object]", payload_obj)
-        _apply_toml_payload(values=values, payload=payload, path=project_path)
+        _apply_toml_payload(
+            values=values,
+            payload=payload,
+            path=project_path,
+            repo_root=repo_root,
+        )
 
     resolved_user_config = _resolve_user_config_path(user_config)
     if resolved_user_config is not None:
         payload_obj = tomllib.loads(resolved_user_config.read_text(encoding="utf-8"))
         payload = cast("dict[str, object]", payload_obj)
-        _apply_toml_payload(values=values, payload=payload, path=resolved_user_config)
+        _apply_toml_payload(
+            values=values,
+            payload=payload,
+            path=resolved_user_config,
+            repo_root=repo_root,
+        )
 
-    _apply_env_overrides(values)
+    _apply_env_overrides(values, repo_root=repo_root)
     return _build_config(values)

@@ -72,7 +72,7 @@ class SpaceActionOutput:
 
     def format_text(self, ctx: FormatContext | None = None) -> str:
         """Single-line action summary for text output mode."""
-        summary = f"{self.message.rstrip('.')} (space {self.space_id})"
+        summary = f"\n{self.message.rstrip('.')} (space {self.space_id})"
         if self.command:
             # Show the full command for dry-run so it can be copy-pasted.
             import shlex
@@ -81,7 +81,7 @@ class SpaceActionOutput:
                 return f"warning: {self.warning}\n{details}"
             return details
         if self.resume_command:
-            details = f"{summary}\nContinue via meridian:\n  {self.resume_command}"
+            details = f"{summary}\nContinue via meridian:\n{self.resume_command}"
             if self.warning:
                 return f"warning: {self.warning}\n{details}"
             return details

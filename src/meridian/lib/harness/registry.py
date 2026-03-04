@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal
 
 from meridian.lib.config.routing import route_model
@@ -48,7 +49,19 @@ class HarnessRegistry:
         self,
         model: str,
         mode: Literal["harness", "direct"] = "harness",
+        *,
+        repo_root: Path | None = None,
     ) -> tuple[HarnessAdapter, str | None]:
+        if mode == "harness":
+            from meridian.lib.config.catalog import resolve_model
+
+            try:
+                resolved = resolve_model(model, repo_root=repo_root)
+            except KeyError:
+                pass
+            else:
+                return self.get(resolved.harness), None
+
         decision = route_model(model=model, mode=mode)
         return self.get(decision.harness_id), decision.warning
 

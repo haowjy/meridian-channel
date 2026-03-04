@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from meridian.lib.formatting import FormatContext
 
 
-_SECTION_ORDER: tuple[str, ...] = ("defaults", "timeouts", "permissions", "output")
+_SECTION_ORDER: tuple[str, ...] = ("defaults", "timeouts", "permissions", "harness", "output")
 _OUTPUT_VERBOSITY_PRESETS = frozenset({"quiet", "normal", "verbose", "debug"})
 
 
@@ -89,6 +89,15 @@ _CONFIG_KEY_SPECS: tuple[_ConfigKeySpec, ...] = (
         aliases=("defaults.default_agent", "default_agent", "agent"),
     ),
     _ConfigKeySpec(
+        canonical_key="defaults.model",
+        section="defaults",
+        file_key="model",
+        field_path=("default_model",),
+        value_kind="str",
+        env_var="MERIDIAN_DEFAULT_MODEL",
+        aliases=("defaults.default_model", "default_model"),
+    ),
+    _ConfigKeySpec(
         canonical_key="timeouts.kill_grace_seconds",
         section="timeouts",
         file_key="kill_grace_seconds",
@@ -127,6 +136,30 @@ _CONFIG_KEY_SPECS: tuple[_ConfigKeySpec, ...] = (
             "default_tier",
             "default_permission_tier",
         ),
+    ),
+    _ConfigKeySpec(
+        canonical_key="harness.claude",
+        section="harness",
+        file_key="claude",
+        field_path=("harness", "claude"),
+        value_kind="str",
+        env_var="MERIDIAN_HARNESS_MODEL_CLAUDE",
+    ),
+    _ConfigKeySpec(
+        canonical_key="harness.codex",
+        section="harness",
+        file_key="codex",
+        field_path=("harness", "codex"),
+        value_kind="str",
+        env_var="MERIDIAN_HARNESS_MODEL_CODEX",
+    ),
+    _ConfigKeySpec(
+        canonical_key="harness.opencode",
+        section="harness",
+        file_key="opencode",
+        field_path=("harness", "opencode"),
+        value_kind="str",
+        env_var="MERIDIAN_HARNESS_MODEL_OPENCODE",
     ),
     _ConfigKeySpec(
         canonical_key="output.show",
@@ -589,6 +622,9 @@ def _scaffold_template() -> str:
         ),
         "# Profile name for the default non-primary agent (str).",
         f"# agent = {_toml_literal(cast('str', defaults['defaults.agent']))}",
+        "# Default model for spawns when --model and profile model are both unset",
+        "# (str model id).",
+        f"# model = {_toml_literal(cast('str', defaults['defaults.model']))}",
         "",
         "# -- Timeout behavior -------------------------------------------------------",
         "[timeouts]",
@@ -604,6 +640,15 @@ def _scaffold_template() -> str:
         "# Default permission tier for non-primary sessions (str; valid: read-only,",
         "# workspace-write, full-access; 'danger' is not allowed in config).",
         f"# default_tier = {_toml_literal(cast('str', defaults['permissions.default_tier']))}",
+        "",
+        "# -- Harness default models ------------------------------------------------",
+        "[harness]",
+        "# Default model for Claude harness (str model id).",
+        f"# claude = {_toml_literal(cast('str', defaults['harness.claude']))}",
+        "# Default model for Codex harness (str model id).",
+        f"# codex = {_toml_literal(cast('str', defaults['harness.codex']))}",
+        "# Default model for OpenCode harness (str model id).",
+        f"# opencode = {_toml_literal(cast('str', defaults['harness.opencode']))}",
         "",
         "# -- Primary agent defaults -------------------------------------------------",
         "[primary]",

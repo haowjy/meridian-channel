@@ -21,7 +21,7 @@ class RoutingDecision:
 def route_model(model: str, mode: SpawnMode = "harness") -> RoutingDecision:
     """Route a model ID to the corresponding harness family.
 
-    Matches current bash behavior with Codex fallback for unknown families.
+    Unknown model families are rejected to avoid silently choosing the wrong harness.
     """
 
     normalized = model.strip()
@@ -35,5 +35,6 @@ def route_model(model: str, mode: SpawnMode = "harness") -> RoutingDecision:
     if normalized.startswith(("opencode-", "gemini-", "gemini")) or "/" in normalized:
         return RoutingDecision(harness_id=HarnessId("opencode"))
 
-    warning = f"Unknown model family '{model}'. Using harness 'codex'."
-    return RoutingDecision(harness_id=HarnessId("codex"), warning=warning)
+    raise ValueError(
+        f"Unknown model family '{model}'. Configure an explicit harness in models.toml."
+    )

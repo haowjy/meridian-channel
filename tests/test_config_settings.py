@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from meridian.lib.config.settings import MeridianConfig, PrimaryConfig, load_config
+from meridian.lib.config.settings import HarnessConfig, MeridianConfig, PrimaryConfig, load_config
 
 
 def _install_config(repo_root: Path, content: str) -> None:
@@ -36,6 +36,12 @@ def test_load_config_from_fixture_toml(package_root: Path, tmp_path: Path) -> No
         default_permission_tier="workspace-write",
         default_primary_agent="lead-primary",
         default_agent="worker-agent",
+        default_model="gpt-5.2-high",
+        harness=HarnessConfig(
+            claude="claude-sonnet-4-6",
+            codex="gpt-5.3-codex",
+            opencode="gemini-3.1-pro",
+        ),
         primary=PrimaryConfig(
             autocompact_pct=61,
             permission_tier="workspace-write",
@@ -67,12 +73,16 @@ def test_load_config_env_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     )
     monkeypatch.setenv("MERIDIAN_MAX_DEPTH", "9")
     monkeypatch.setenv("MERIDIAN_DEFAULT_AGENT", "env-agent")
+    monkeypatch.setenv("MERIDIAN_DEFAULT_MODEL", "gpt-5.2-high")
+    monkeypatch.setenv("MERIDIAN_HARNESS_MODEL_CLAUDE", "claude-opus-4-6")
 
     loaded = load_config(repo_root)
 
     assert loaded.max_depth == 9
     assert loaded.default_agent == "env-agent"
+    assert loaded.default_model == "gpt-5.2-high"
     assert loaded.max_retries == 3
+    assert loaded.harness.claude == "claude-opus-4-6"
 
 
 def test_load_config_accepts_legacy_primary_agent_key(tmp_path: Path) -> None:

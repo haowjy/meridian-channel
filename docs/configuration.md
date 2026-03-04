@@ -49,10 +49,14 @@ Canonical keys accepted by `meridian config set/get/reset`:
 | `defaults.retry_backoff_seconds` | float | Retry backoff multiplier |
 | `defaults.primary_agent` | str | Primary profile name |
 | `defaults.agent` | str | Default non-primary profile |
+| `defaults.model` | str | Default model for spawn when unset |
 | `timeouts.kill_grace_seconds` | float | Grace before force-kill |
 | `timeouts.guardrail_seconds` | float | Guardrail timeout |
 | `timeouts.wait_seconds` | float | Default `run wait` timeout |
 | `permissions.default_tier` | str | Default non-primary permission tier |
+| `harness.claude` | str | Default model for Claude harness |
+| `harness.codex` | str | Default model for Codex harness |
+| `harness.opencode` | str | Default model for OpenCode harness |
 | `output.show` | array[str] | Stream categories shown |
 | `output.verbosity` | str\|null | `quiet\|normal\|verbose\|debug` |
 
@@ -67,9 +71,15 @@ Scaffolded but not exposed via `config set` shorthand keys:
 [defaults]
 max_depth = 4
 agent = "coder"
+model = "gpt-5.3-codex"
 
 [permissions]
 default_tier = "workspace-write"
+
+[harness]
+claude = "claude-opus-4-6"
+codex = "gpt-5.3-codex"
+opencode = "gemini-3.1-pro"
 
 [output]
 show = ["lifecycle", "error"]
@@ -123,6 +133,10 @@ cost_tier = "$$"
 - `MERIDIAN_DEFAULT_PERMISSION_TIER`
 - `MERIDIAN_PRIMARY_AGENT`
 - `MERIDIAN_DEFAULT_AGENT`
+- `MERIDIAN_DEFAULT_MODEL`
+- `MERIDIAN_HARNESS_MODEL_CLAUDE`
+- `MERIDIAN_HARNESS_MODEL_CODEX`
+- `MERIDIAN_HARNESS_MODEL_OPENCODE`
 
 ### Guardrails and Secrets
 

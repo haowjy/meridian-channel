@@ -232,11 +232,11 @@ def test_opencode_build_command_resume_and_fork() -> None:
     assert "--fork" in command
 
 
-def test_resolve_run_defaults_resolves_model_alias(monkeypatch, tmp_path: Path) -> None:
+def test_resolve_run_defaults_keeps_full_model_id(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("MERIDIAN_REPO_ROOT", str(tmp_path))
 
     defaults = resolve_run_defaults(
-        requested_model="codex",
+        requested_model="gpt-5.3-codex",
         profile=None,
     )
 

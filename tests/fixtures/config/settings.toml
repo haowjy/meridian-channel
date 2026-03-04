@@ -4,6 +4,7 @@ max_retries = 4
 retry_backoff_seconds = 0.5
 default_primary_agent = "lead-primary"
 agent = "worker-agent"
+model = "gpt-5.2-high"
 
 [timeouts]
 kill_grace_seconds = 1.5
@@ -12,6 +13,11 @@ wait_seconds = 900.0
 
 [permissions]
 default_tier = "workspace-write"
+
+[harness]
+claude = "claude-sonnet-4-6"
+codex = "gpt-5.3-codex"
+opencode = "gemini-3.1-pro"
 
 [primary]
 autocompact_pct = 61

@@ -214,12 +214,10 @@ def resolve_model(name_or_alias: str, repo_root: Path | None = None) -> CatalogM
                 continue
             if str(existing.model_id) == str(entry.model_id):
                 continue
-            logger.warning(
-                "Model alias '%s' is declared by '%s' and '%s'. Using '%s'.",
-                alias,
-                existing.model_id,
-                entry.model_id,
-                existing.model_id,
+            raise ValueError(
+                "Model alias collision: "
+                f"'{alias}' is declared by '{existing.model_id}' and "
+                f"'{entry.model_id}'. Resolve the collision in models.toml."
             )
 
     resolved = alias_to_model.get(normalized)

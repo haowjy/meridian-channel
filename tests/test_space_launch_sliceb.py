@@ -272,6 +272,76 @@ def test_build_interactive_command_supports_codex_harness_override(
     assert "# Meridian Space Session" in command[-1]
 
 
+def test_build_interactive_command_harness_override_uses_harness_default_over_profile_model(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("MERIDIAN_HARNESS_COMMAND", raising=False)
+
+    request = SpaceLaunchRequest(
+        space_id=SpaceId("s99b"),
+        harness="codex",
+        fresh=True,
+    )
+    prompt = build_primary_prompt(request)
+
+    command = _build_harness_command(
+        repo_root=tmp_path,
+        request=request,
+        prompt=prompt,
+        harness_registry=get_default_harness_registry(),
+        chat_id="c99b",
+    )
+
+    assert command[0] == "codex"
+    assert "--model" in command
+    # Even though bundled primary profile has a Claude model, harness override
+    # should drive default model selection when --model is omitted.
+    assert command[command.index("--model") + 1] == "gpt-5.3-codex"
+
+
+def test_build_interactive_command_uses_harness_default_model_when_profile_has_none(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("MERIDIAN_HARNESS_COMMAND", raising=False)
+    _install_config(
+        tmp_path,
+        "[harness]\n"
+        "codex = 'gpt-5.2-high'\n",
+    )
+    profile_path = tmp_path / ".agents" / "agents" / "primary.md"
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    profile_path.write_text(
+        "---\n"
+        "name: primary\n"
+        "description: primary without model\n"
+        "---\n"
+        "\n"
+        "Primary body.\n",
+        encoding="utf-8",
+    )
+
+    request = SpaceLaunchRequest(
+        space_id=SpaceId("s101"),
+        harness="codex",
+        fresh=True,
+    )
+    prompt = build_primary_prompt(request)
+
+    command = _build_harness_command(
+        repo_root=tmp_path,
+        request=request,
+        prompt=prompt,
+        harness_registry=get_default_harness_registry(),
+        chat_id="c101",
+    )
+
+    assert command[0] == "codex"
+    assert "--model" in command
+    assert command[command.index("--model") + 1] == "gpt-5.2-high"
+
+
 def test_build_interactive_command_rejects_incompatible_harness_override(
     monkeypatch,
     tmp_path: Path,
@@ -294,3 +364,40 @@ def test_build_interactive_command_rejects_incompatible_harness_override(
             harness_registry=get_default_harness_registry(),
             chat_id="c100",
         )
+
+
+def test_build_interactive_command_uses_catalog_harness_for_custom_model(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("MERIDIAN_HARNESS_COMMAND", raising=False)
+    models_path = tmp_path / ".meridian" / "models.toml"
+    models_path.parent.mkdir(parents=True, exist_ok=True)
+    models_path.write_text(
+        (
+            "[[models]]\n"
+            "model_id = 'custom-model-v1'\n"
+            "aliases = ['customv1']\n"
+            "harness = 'opencode'\n"
+        ),
+        encoding="utf-8",
+    )
+
+    request = SpaceLaunchRequest(
+        space_id=SpaceId("s-catalog"),
+        model="custom-model-v1",
+        fresh=True,
+    )
+    prompt = build_primary_prompt(request)
+
+    command = _build_harness_command(
+        repo_root=tmp_path,
+        request=request,
+        prompt=prompt,
+        harness_registry=get_default_harness_registry(),
+        chat_id="c-catalog",
+    )
+
+    assert command[0] == "opencode"
+    assert "--model" in command
+    assert command[command.index("--model") + 1] == "custom-model-v1"

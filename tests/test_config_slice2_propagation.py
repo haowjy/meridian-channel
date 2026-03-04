@@ -145,3 +145,51 @@ def test_run_spawn_rejects_danger_permission_tier_without_unsafe_override(
                 space="s1",
             )
         )
+
+
+def test_spawn_fallback_model_uses_defaults_model_not_harness_codex(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _clear_config_env(monkeypatch)
+    _write_config(
+        tmp_path,
+        (
+            "[defaults]\n"
+            "model = 'gpt-5.2-high'\n"
+            "\n"
+            "[harness]\n"
+            "codex = 'gpt-5.3-codex'\n"
+        ),
+    )
+    agent_path = tmp_path / ".agents" / "agents" / "no-model.md"
+    agent_path.parent.mkdir(parents=True, exist_ok=True)
+    agent_path.write_text(
+        "---\n"
+        "name: no-model\n"
+        "description: no model fallback test\n"
+        "---\n"
+        "\n"
+        "No model here.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MERIDIAN_SPACE_ID", create_space(tmp_path, name="cfg-prop").id)
+
+    captured: dict[str, str] = {}
+
+    async def fake_execute_with_finalization(*args: object, **kwargs: object) -> int:
+        spawn = args[0]
+        captured["model"] = str(getattr(spawn, "model"))
+        return 0
+
+    monkeypatch.setattr(run_ops, "execute_with_finalization", fake_execute_with_finalization)
+
+    run_ops.spawn_create_sync(
+        SpawnCreateInput(
+            prompt="spawn fallback default model",
+            agent="no-model",
+            repo_root=tmp_path.as_posix(),
+        )
+    )
+
+    assert captured["model"] == "gpt-5.2-high"

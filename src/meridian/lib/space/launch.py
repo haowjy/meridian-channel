@@ -178,15 +178,26 @@ def _build_harness_context(
         fallback_name="primary",
     )
 
+    default_model = resolved_config.harness.claude
+    requested_model = request.model
+    if request.harness is not None and request.harness.strip():
+        override_default = resolved_config.default_model_for_harness(request.harness)
+        if override_default:
+            default_model = override_default
+            if not requested_model.strip():
+                requested_model = override_default
+
     defaults = resolve_run_defaults(
-        request.model,
+        requested_model,
         profile=profile,
+        default_model=default_model,
     )
     model = ModelId(defaults.model)
     harness = _resolve_harness(
         model=model,
         harness_override=request.harness,
         harness_registry=harness_registry,
+        repo_root=resolved_root,
     )
     adapter = harness_registry.get(harness)
     resolved_skills = resolve_skills_from_profile(
@@ -355,15 +366,26 @@ def _resolve_primary_session_metadata(
         fallback_name="primary",
     )
 
+    default_model = config.harness.claude
+    requested_model = request.model
+    if request.harness is not None and request.harness.strip():
+        override_default = config.default_model_for_harness(request.harness)
+        if override_default:
+            default_model = override_default
+            if not requested_model.strip():
+                requested_model = override_default
+
     defaults = resolve_run_defaults(
-        request.model,
+        requested_model,
         profile=profile,
+        default_model=default_model,
     )
     model = ModelId(defaults.model)
     harness = _resolve_harness(
         model=model,
         harness_override=request.harness,
         harness_registry=harness_registry,
+        repo_root=repo_root,
     )
 
     resolved_skills = resolve_skills_from_profile(
@@ -402,9 +424,18 @@ def _resolve_harness(
     model: ModelId,
     harness_override: str | None,
     harness_registry: HarnessRegistry,
+    repo_root: Path,
 ) -> HarnessId:
-    decision = route_model(str(model), mode="harness")
-    routed_harness_id = decision.harness_id
+    warning: str | None = None
+    from meridian.lib.config.catalog import resolve_model
+
+    try:
+        resolved = resolve_model(str(model), repo_root=repo_root)
+        routed_harness_id = resolved.harness
+    except KeyError:
+        decision = route_model(str(model), mode="harness")
+        routed_harness_id = decision.harness_id
+        warning = decision.warning
     supported_primary_harnesses = tuple(
         harness_id
         for harness_id in harness_registry.ids()
@@ -428,8 +459,8 @@ def _resolve_harness(
             f"Harness '{override_harness}' is incompatible with model '{model}' "
             f"(routes to '{routed_harness_id}')."
         )
-        if decision.warning:
-            message = f"{message} {decision.warning}"
+        if warning:
+            message = f"{message} {warning}"
         raise ValueError(message)
     return override_harness
 
