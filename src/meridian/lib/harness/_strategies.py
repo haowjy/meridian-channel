@@ -68,6 +68,14 @@ def build_harness_command(
 ) -> list[str]:
     """Build one harness command using field strategies."""
 
+    all_fields = {f.name for f in fields(SpawnParams)}
+    unmapped = all_fields - set(strategies.keys()) - _SKIP_FIELDS
+    if unmapped:
+        raise ValueError(
+            f"SpawnParams fields missing strategy mappings: {', '.join(sorted(unmapped))}. "
+            f"Add a FlagStrategy (use DROP to ignore) for each."
+        )
+
     strategy_args: list[str] = []
     for run_field in fields(SpawnParams):
         field_name = run_field.name
