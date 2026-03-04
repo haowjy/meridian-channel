@@ -368,7 +368,7 @@ def test_root_command_launches_and_forwards_options(
     assert int(exc.value.code) == 0
     captured = capsys.readouterr()
     assert "mock_harness.py" not in captured.out
-    assert "Resume this session with:" in captured.out
+    assert "Continue via meridian:" in captured.out
     assert "meridian --continue " in captured.out
 
     payload = _capture_payload(capture)
@@ -418,7 +418,7 @@ def test_root_continue_dry_run_resolves_space_and_passes_resume_flag(
     assert int(exc.value.code) == 0
 
     captured = capsys.readouterr()
-    assert f"Space {second.id} active (Space resume dry-run)" in captured.out
+    assert f"Resume dry-run (space {second.id})" in captured.out
     assert "--resume sess-second" in captured.out
 
 
@@ -478,7 +478,7 @@ def test_root_continue_space_mismatch_warns_and_uses_recorded_space(
     assert int(exc.value.code) == 0
     captured = capsys.readouterr()
     assert f"warning: Session 'sess-second' belongs to space '{second.id}'" in captured.out
-    assert f"Space {second.id} active (Space resume dry-run)" in captured.out
+    assert f"Resume dry-run (space {second.id})" in captured.out
     assert "--resume sess-second" in captured.out
 
 
@@ -505,7 +505,7 @@ def test_root_continue_unknown_harness_session_binds_to_explicit_space(
     assert int(exc.value.code) == 0
     captured = capsys.readouterr()
     assert "warning: Session 'external-session-123' is not tracked yet" in captured.out
-    assert f"Space {selected.id} active (Space resume dry-run)" in captured.out
+    assert f"Resume dry-run (space {selected.id})" in captured.out
     assert "--resume external-session-123" in captured.out
 
 
@@ -526,7 +526,7 @@ def test_root_continue_unknown_harness_session_binds_to_default_space(
     assert int(exc.value.code) == 0
     captured = capsys.readouterr()
     assert "warning: Session 'external-session-999' is not tracked yet" in captured.out
-    assert f"Space {latest.id} active (Space resume dry-run)" in captured.out
+    assert f"Resume dry-run (space {latest.id})" in captured.out
     assert "--resume external-session-999" in captured.out
 
 

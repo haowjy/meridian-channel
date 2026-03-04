@@ -605,12 +605,12 @@ def _run_primary_launch(
             space_id=selected.id,
             state=transitioned.status,
             message=(
-                "Space resume dry-run."
+                "Resume dry-run."
                 if dry_run and resume_target is not None
                 else (
-                    "Space launch dry-run."
+                    "Launch dry-run."
                     if dry_run
-                    else ("Space resumed." if resume_target is not None else "Space session finished.")
+                    else ("Session resumed." if resume_target is not None else "Session finished.")
                 )
             ),
             exit_code=launch_result.exit_code,

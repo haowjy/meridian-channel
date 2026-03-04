@@ -55,8 +55,8 @@ Behavior:
 When a continue ref is available, output includes:
 
 ```text
-Resume this session with:
-meridian --continue <continue_ref>
+Continue via meridian:
+  meridian --continue <continue_ref>
 ```
 
 ## Claude `/clear` Caveat (Current)

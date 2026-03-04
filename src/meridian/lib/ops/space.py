@@ -79,7 +79,7 @@ class SpaceActionOutput:
 
     def format_text(self, ctx: FormatContext | None = None) -> str:
         """Single-line action summary for text output mode."""
-        summary = f"Space {self.space_id} {self.state} ({self.message.rstrip('.')})"
+        summary = f"{self.message.rstrip('.')} (space {self.space_id})"
         if self.command:
             # Show the full command for dry-run so it can be copy-pasted.
             import shlex
@@ -88,7 +88,7 @@ class SpaceActionOutput:
                 return f"warning: {self.warning}\n{details}"
             return details
         if self.resume_command:
-            details = f"{summary}\nResume this session with:\n{self.resume_command}"
+            details = f"{summary}\nContinue via meridian:\n  {self.resume_command}"
             if self.warning:
                 return f"warning: {self.warning}\n{details}"
             return details
@@ -178,7 +178,7 @@ def space_start_sync(payload: SpaceStartInput) -> SpaceActionOutput:
     return SpaceActionOutput(
         space_id=space.id,
         state=transitioned.status,
-        message=("Space launch dry-run." if payload.dry_run else "Space session finished."),
+        message=("Launch dry-run." if payload.dry_run else "Session finished."),
         exit_code=launch_result.exit_code,
         command=launch_result.command if payload.dry_run else (),
         lock_path=launch_result.lock_path.as_posix(),
@@ -233,7 +233,7 @@ def space_resume_sync(payload: SpaceResumeInput) -> SpaceActionOutput:
     return SpaceActionOutput(
         space_id=str(space.space_id),
         state=transitioned.status,
-        message=("Space resumed (fresh)." if payload.fresh else "Space resumed."),
+        message=("Session resumed (fresh)." if payload.fresh else "Session resumed."),
         exit_code=launch_result.exit_code,
         command=(),
         lock_path=launch_result.lock_path.as_posix(),
