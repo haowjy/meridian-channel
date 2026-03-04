@@ -223,16 +223,16 @@ def _coerce_optional_float(value: object) -> float | None:
     return None
 
 
-def _iter_dicts(value: object) -> list[dict[str, object]]:
+def iter_nested_dicts(value: object) -> list[dict[str, object]]:
     found: list[dict[str, object]] = []
     if isinstance(value, dict):
         payload = cast("dict[str, object]", value)
         found.append(payload)
         for nested in payload.values():
-            found.extend(_iter_dicts(nested))
+            found.extend(iter_nested_dicts(nested))
     elif isinstance(value, list):
         for item in cast("list[object]", value):
-            found.extend(_iter_dicts(item))
+            found.extend(iter_nested_dicts(item))
     return found
 
 
@@ -299,11 +299,11 @@ def extract_usage_from_artifacts(artifacts: ArtifactStore, spawn_id: SpawnId) ->
         payload = _read_json_artifact(artifacts, spawn_id, filename)
         if payload is None:
             continue
-        for nested in _iter_dicts(payload):
+        for nested in iter_nested_dicts(payload):
             candidates.append(_candidate_from_payload(nested))
 
     for payload in _iter_json_lines_artifact(artifacts, spawn_id, "output.jsonl"):
-        for nested in _iter_dicts(payload):
+        for nested in iter_nested_dicts(payload):
             candidates.append(_candidate_from_payload(nested))
 
     if not candidates:
@@ -363,7 +363,7 @@ def extract_session_id_from_artifacts_with_patterns(
         if not isinstance(payload_obj, dict):
             continue
         payload = cast("dict[str, object]", payload_obj)
-        for nested in _iter_dicts(payload):
+        for nested in iter_nested_dicts(payload):
             for key_name in json_keys:
                 value = nested.get(key_name)
                 if not isinstance(value, str):

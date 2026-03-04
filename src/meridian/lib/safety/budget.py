@@ -104,14 +104,14 @@ def extract_cost_usd_from_json_line(raw_line: bytes) -> float | None:
 
     # Import lazily to avoid package init cycles:
     # safety -> budget -> harness._common -> harness.adapter -> safety.permissions.
-    from meridian.lib.harness._common import _coerce_optional_float, _iter_dicts
+    from meridian.lib.harness._common import _coerce_optional_float, iter_nested_dicts
 
     try:
         payload_obj = json.loads(raw_line.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
         return None
 
-    for payload in _iter_dicts(payload_obj):
+    for payload in iter_nested_dicts(payload_obj):
         for key in COST_KEYS:
             value = _coerce_optional_float(payload.get(key))
             if value is not None:

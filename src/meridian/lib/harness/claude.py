@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import ClassVar, cast
 
 from meridian.lib.harness._common import (
+    iter_nested_dicts,
     categorize_stream_event,
     extract_session_id_from_artifacts,
     extract_usage_from_artifacts,
@@ -33,18 +34,6 @@ from meridian.lib.harness.adapter import (
 from meridian.lib.safety.permissions import PermissionConfig
 from meridian.lib.types import HarnessId, SpawnId
 
-
-def _iter_dicts(value: object) -> list[dict[str, object]]:
-    nested: list[dict[str, object]] = []
-    if isinstance(value, dict):
-        payload = cast("dict[str, object]", value)
-        nested.append(payload)
-        for child in payload.values():
-            nested.extend(_iter_dicts(child))
-    elif isinstance(value, list):
-        for child in cast("list[object]", value):
-            nested.extend(_iter_dicts(child))
-    return nested
 
 
 def _split_csv(value: str) -> list[str]:
@@ -137,7 +126,7 @@ def _normalize_task(item: object) -> dict[str, str] | None:
 def _extract_todowrite_tasks(metadata: dict[str, object]) -> list[dict[str, str]]:
     tasks: list[dict[str, str]] = []
     todo_tool_names = {"todowrite", "todo_write", "todo.write"}
-    for payload in _iter_dicts(metadata):
+    for payload in iter_nested_dicts(metadata):
         name = str(
             payload.get("name")
             or payload.get("tool_name")
