@@ -127,7 +127,7 @@ def test_start_dry_run_agent_flag_overrides_default_primary_agent(
     assert completed.returncode == 0, completed.stderr
     payload = json.loads(completed.stdout)
     command = payload["command"]
-    assert payload["message"] == "Space launch dry-run."
+    assert payload["message"] == "Launch dry-run."
     assert "--agent" in command
     assert command[command.index("--agent") + 1] == "_meridian-dry-run-review-primary"
     assert "--model" in command

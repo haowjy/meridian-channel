@@ -23,6 +23,7 @@ from meridian.cli.report_cmd import register_report_commands
 from meridian.cli.skills_cmd import register_skills_commands
 from meridian.cli.space import register_space_commands
 from meridian.lib.config._paths import resolve_repo_root
+from meridian.lib.harness.registry import get_default_harness_registry
 from meridian.lib.ops.spawn import SpawnActionOutput
 from meridian.lib.ops.space import SpaceActionOutput
 from meridian.lib.space import space_file
@@ -593,6 +594,7 @@ def _run_primary_launch(
             unsafe=unsafe,
             continue_harness_session_id=continue_harness_session_id,
         ),
+        harness_registry=get_default_harness_registry(),
     )
 
     transitioned = space_file.update_space_status(

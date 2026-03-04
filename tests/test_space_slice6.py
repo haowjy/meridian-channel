@@ -551,7 +551,7 @@ def test_root_harness_override_builds_codex_command(
         )
     assert int(exc.value.code) == 0
     captured = capsys.readouterr()
-    assert "codex exec" in captured.out
+    assert "codex --model gpt-5.3-codex" in captured.out
 
 
 def test_root_harness_override_rejects_incompatible_model(

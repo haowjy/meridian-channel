@@ -173,6 +173,7 @@ class ClaudeAdapter:
     }
     PROMPT_MODE: ClassVar[PromptMode] = PromptMode.FLAG
     BASE_COMMAND: ClassVar[tuple[str, ...]] = ("claude", "-p")
+    PRIMARY_BASE_COMMAND: ClassVar[tuple[str, ...]] = ("claude",)
     EVENT_CATEGORY_MAP: ClassVar[dict[str, str]] = {
         "result": "lifecycle",
         "tool_use": "tool-use",
@@ -208,9 +209,14 @@ class ClaudeAdapter:
                 mcp_config.claude_allowed_tools,
             )
         merged_perms = _StaticPermissionResolver(permission_flags)
-        command_run = replace(run, prompt="-")
+        if run.interactive:
+            base_command = self.PRIMARY_BASE_COMMAND
+            command_run = replace(run, prompt="")
+        else:
+            base_command = self.BASE_COMMAND
+            command_run = replace(run, prompt="-")
         command = build_harness_command(
-            base_command=self.BASE_COMMAND,
+            base_command=base_command,
             prompt_mode=self.PROMPT_MODE,
             run=command_run,
             strategies=self.STRATEGIES,

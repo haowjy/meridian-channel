@@ -42,7 +42,7 @@ type StrategyMap = dict[str, FlagStrategy]
 
 
 _SKIP_FIELDS = frozenset(
-    {"prompt", "extra_args", "repo_root", "mcp_tools", "adhoc_agent_json"}
+    {"prompt", "extra_args", "repo_root", "mcp_tools", "adhoc_agent_json", "interactive"}
 )
 
 
@@ -95,7 +95,7 @@ def build_harness_command(
             continue
 
     command = list(base_command)
-    if prompt_mode is PromptMode.FLAG:
+    if prompt_mode is PromptMode.FLAG and run.prompt:
         command.append(run.prompt)
     command.extend(strategy_args)
     permission_flags = perms.resolve_flags(harness_id)
@@ -104,7 +104,8 @@ def build_harness_command(
         command.extend(mcp_config.command_args)
     if prompt_mode is PromptMode.POSITIONAL:
         command.extend(run.extra_args)
-        command.append(run.prompt)
+        if run.prompt:
+            command.append(run.prompt)
         return command
     command.extend(run.extra_args)
     return command

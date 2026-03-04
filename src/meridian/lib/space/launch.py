@@ -19,8 +19,13 @@ from meridian.lib.config._paths import resolve_repo_root
 from meridian.lib.config.routing import route_model
 from meridian.lib.config.settings import MeridianConfig, load_config
 from meridian.lib.domain import SpaceState
-from meridian.lib.exec.spawn import HARNESS_ENV_PASS_THROUGH, sanitize_child_env
-from meridian.lib.harness.registry import HarnessRegistry, get_default_harness_registry
+from meridian.lib.exec.env import (
+    HARNESS_ENV_PASS_THROUGH,
+    build_harness_child_env,
+    sanitize_child_env,
+)
+from meridian.lib.harness.adapter import HarnessAdapter, SpawnParams
+from meridian.lib.harness.registry import HarnessRegistry
 from meridian.lib.harness.materialize import cleanup_materialized, materialize_for_harness
 from meridian.lib.launch_resolve import (
     load_agent_profile_with_fallback,
@@ -30,6 +35,7 @@ from meridian.lib.launch_resolve import (
 from meridian.lib.prompt.assembly import resolve_run_defaults
 from meridian.lib.prompt.compose import compose_skill_injections
 from meridian.lib.safety.permissions import (
+    PermissionConfig,
     warn_profile_tier_escalation,
     build_permission_config,
     build_permission_resolver,
@@ -87,6 +93,14 @@ class _PrimarySessionMetadata:
     skill_paths: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class _PrimaryHarnessContext:
+    command: tuple[str, ...]
+    adapter: HarnessAdapter | None = None
+    run_params: SpawnParams | None = None
+    permission_config: PermissionConfig | None = None
+
+
 def space_lock_path(repo_root: Path, space_id: SpaceId) -> Path:
     """Return active space lock path for one space ID."""
 
@@ -137,23 +151,25 @@ def _write_lock(
     path.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
 
 
-def _build_interactive_command(
+def _build_harness_context(
     *,
     repo_root: Path | None = None,
     request: SpaceLaunchRequest,
     prompt: str,
-    passthrough_args: tuple[str, ...],
+    harness_registry: HarnessRegistry,
     chat_id: str = "",
     config: MeridianConfig | None = None,
-) -> tuple[str, ...]:
-    """Build interactive CLI command for space sessions."""
+) -> _PrimaryHarnessContext:
+    """Build primary harness command and launch context for one space session."""
+
+    passthrough_args = request.passthrough_args
 
     override = os.getenv("MERIDIAN_HARNESS_COMMAND", "").strip()
     if override:
         command = [*shlex.split(override), *passthrough_args]
         if not command:
             raise ValueError("MERIDIAN_HARNESS_COMMAND resolved to an empty command.")
-        return tuple(command)
+        return _PrimaryHarnessContext(command=tuple(command))
 
     resolved_root = resolve_repo_root(repo_root)
     resolved_config = config if config is not None else load_config(resolved_root)
@@ -170,7 +186,12 @@ def _build_interactive_command(
         profile=profile,
     )
     model = ModelId(defaults.model)
-    harness = _resolve_harness(model=model, harness_override=request.harness)
+    harness = _resolve_harness(
+        model=model,
+        harness_override=request.harness,
+        harness_registry=harness_registry,
+    )
+    adapter = harness_registry.get(harness)
     resolved_skills = resolve_skills_from_profile(
         profile_skills=defaults.skills,
         repo_root=resolved_root,
@@ -197,27 +218,11 @@ def _build_interactive_command(
     passthrough_args, passthrough_prompt_fragments = _normalize_system_prompt_passthrough_args(
         passthrough_args
     )
-    command: list[str]
     harness_session_id = (
         request.continue_harness_session_id.strip()
         if request.continue_harness_session_id is not None
         else ""
     )
-    if harness == HarnessId("codex") and harness_session_id:
-        command = ["codex", "exec", "resume", harness_session_id]
-    elif harness == HarnessId("codex"):
-        command = ["codex", "exec"]
-    elif harness == HarnessId("opencode"):
-        command = ["opencode", "run"]
-    else:
-        command = [str(harness)]
-
-    if harness == HarnessId("claude") and materialized.agent_name:
-        command.extend(["--agent", materialized.agent_name])
-    model_value = str(model)
-    if harness == HarnessId("opencode") and model_value.startswith("opencode-"):
-        model_value = model_value[len("opencode-") :]
-    command.extend(["--model", model_value])
     primary_default_tier = resolved_config.primary.permission_tier
     inferred_tier = resolve_permission_tier_from_profile(
         profile=profile,
@@ -249,27 +254,32 @@ def _build_interactive_command(
         permission_config=permission_config,
         cli_permission_override=permission_tier_override is not None,
     )
-    command.extend(resolver.resolve_flags(harness))
-    # Primary space context must always be present for any harness.
-    # Claude gets this through --append-system-prompt; other harnesses receive
-    # an initial prompt argument.
+
     appended_parts = [prompt.strip()]
     appended_parts.extend(fragment.strip() for fragment in passthrough_prompt_fragments if fragment.strip())
     skill_injection = compose_skill_injections(resolved_skills.loaded_skills)
     if skill_injection:
         appended_parts.append(skill_injection)
     appended_prompt = "\n\n".join(part for part in appended_parts if part)
-    if harness == HarnessId("claude"):
-        command.extend(["--append-system-prompt", appended_prompt])
-    elif appended_prompt:
-        command.append(appended_prompt)
-
-    if harness == HarnessId("claude") and harness_session_id:
-        command.extend(["--resume", harness_session_id])
-    elif harness == HarnessId("opencode") and harness_session_id:
-        command.extend(["--session", harness_session_id])
-    command.extend(passthrough_args)
-    return tuple(command)
+    run_params = SpawnParams(
+        prompt=appended_prompt,
+        model=model,
+        skills=resolved_skills.skill_names,
+        agent=materialized.agent_name or None,
+        extra_args=passthrough_args,
+        repo_root=resolved_root.as_posix(),
+        mcp_tools=profile.mcp_tools if profile is not None else (),
+        interactive=True,
+        continue_harness_session_id=harness_session_id or None,
+        appended_system_prompt=appended_prompt if appended_prompt else None,
+    )
+    command = tuple(adapter.build_command(run_params, resolver))
+    return _PrimaryHarnessContext(
+        command=command,
+        adapter=adapter,
+        run_params=run_params,
+        permission_config=permission_config,
+    )
 
 
 def _normalize_system_prompt_passthrough_args(
@@ -318,18 +328,19 @@ def _build_harness_command(
     repo_root: Path,
     request: SpaceLaunchRequest,
     prompt: str,
+    harness_registry: HarnessRegistry,
     chat_id: str = "",
     config: MeridianConfig | None = None,
 ) -> tuple[str, ...]:
     resolved_config = config if config is not None else load_config(repo_root)
-    return _build_interactive_command(
+    return _build_harness_context(
         repo_root=repo_root,
         request=request,
         prompt=prompt,
-        passthrough_args=request.passthrough_args,
+        harness_registry=harness_registry,
         chat_id=chat_id,
         config=resolved_config,
-    )
+    ).command
 
 
 def _resolve_primary_session_metadata(
@@ -337,6 +348,7 @@ def _resolve_primary_session_metadata(
     repo_root: Path,
     request: SpaceLaunchRequest,
     config: MeridianConfig,
+    harness_registry: HarnessRegistry,
 ) -> _PrimarySessionMetadata:
     profile = load_agent_profile_with_fallback(
         repo_root=repo_root,
@@ -351,7 +363,11 @@ def _resolve_primary_session_metadata(
         profile=profile,
     )
     model = ModelId(defaults.model)
-    harness = _resolve_harness(model=model, harness_override=request.harness)
+    harness = _resolve_harness(
+        model=model,
+        harness_override=request.harness,
+        harness_registry=harness_registry,
+    )
 
     resolved_skills = resolve_skills_from_profile(
         profile_skills=defaults.skills,
@@ -384,15 +400,7 @@ def _resolve_primary_session_metadata(
     )
 
 
-def _resolve_harness(*, model: ModelId, harness_override: str | None = None) -> HarnessId:
-    return _resolve_harness_with_registry(
-        model=model,
-        harness_override=harness_override,
-        harness_registry=get_default_harness_registry(),
-    )
-
-
-def _resolve_harness_with_registry(
+def _resolve_harness(
     *,
     model: ModelId,
     harness_override: str | None,
@@ -509,10 +517,12 @@ def _build_space_env(
     *,
     default_autocompact_pct: int | None = None,
     spawn_id: str | None = None,
+    harness_context: _PrimaryHarnessContext | None = None,
 ) -> dict[str, str]:
     env_overrides = {
         "MERIDIAN_SPACE_ID": str(request.space_id),
         "MERIDIAN_DEPTH": os.environ.get("MERIDIAN_DEPTH", "0"),
+        "MERIDIAN_REPO_ROOT": repo_root.as_posix(),
         "MERIDIAN_SPACE_PROMPT": prompt,
         "MERIDIAN_STATE_ROOT": resolve_state_paths(repo_root).root_dir.resolve().as_posix(),
     }
@@ -525,6 +535,21 @@ def _build_space_env(
     )
     if autocompact_pct is not None:
         env_overrides["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"] = str(autocompact_pct)
+
+    if (
+        harness_context is not None
+        and harness_context.adapter is not None
+        and harness_context.run_params is not None
+        and harness_context.permission_config is not None
+    ):
+        return build_harness_child_env(
+            base_env=os.environ,
+            adapter=harness_context.adapter,
+            run_params=harness_context.run_params,
+            permission_config=harness_context.permission_config,
+            runtime_env_overrides=env_overrides,
+            pass_through=HARNESS_ENV_PASS_THROUGH,
+        )
 
     return sanitize_child_env(
         base_env=os.environ,
@@ -552,6 +577,7 @@ def launch_primary(
     *,
     repo_root: Path,
     request: SpaceLaunchRequest,
+    harness_registry: HarnessRegistry,
 ) -> SpaceLaunchResult:
     """Launch primary agent process and wait for exit."""
 
@@ -561,6 +587,7 @@ def launch_primary(
         repo_root=repo_root,
         request=request,
         config=config,
+        harness_registry=harness_registry,
     )
     space_dir = resolve_space_dir(repo_root, request.space_id)
     lock_path = space_lock_path(repo_root, request.space_id)
@@ -570,6 +597,7 @@ def launch_primary(
             repo_root=repo_root,
             request=request,
             prompt=prompt,
+            harness_registry=harness_registry,
             chat_id="dry-run",
             config=config,
         )
@@ -641,19 +669,22 @@ def launch_primary(
             )
         )
         primary_started = time.monotonic()
+        harness_context = _build_harness_context(
+            repo_root=repo_root,
+            request=command_request,
+            prompt=prompt,
+            harness_registry=harness_registry,
+            chat_id=chat_id,
+            config=config,
+        )
+        command = harness_context.command
         child_env = _build_space_env(
             repo_root,
             request,
             prompt,
             default_autocompact_pct=config.primary.autocompact_pct,
             spawn_id=primary_spawn_id,
-        )
-        command = _build_harness_command(
-            repo_root=repo_root,
-            request=command_request,
-            prompt=prompt,
-            chat_id=chat_id,
-            config=config,
+            harness_context=harness_context,
         )
         _write_lock(
             path=lock_path,

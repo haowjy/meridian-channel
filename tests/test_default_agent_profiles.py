@@ -11,11 +11,12 @@ import meridian.lib.safety.permissions as permission_safety
 import meridian.lib.space.launch as space_launch
 from meridian.lib.config._paths import bundled_agents_root
 from meridian.lib.config.agent import _BUILTIN_PATH, load_agent_profile
+from meridian.lib.harness.registry import get_default_harness_registry
 from meridian.lib.ops.spawn import SpawnCreateInput
 from meridian.lib.types import SpaceId
 from meridian.lib.space.launch import (
     SpaceLaunchRequest,
-    _build_interactive_command,
+    _build_harness_command,
     _resolve_primary_session_metadata,
 )
 from tests.helpers.fixtures import (
@@ -99,11 +100,11 @@ def test_space_primary_profile_controls_model_skills_and_sandbox(tmp_path: Path)
     _write_skill(tmp_path, "orchestrate", "Primary orchestration content")
 
     request = SpaceLaunchRequest(space_id=SpaceId("w1"))
-    command = _build_interactive_command(
+    command = _build_harness_command(
         repo_root=tmp_path,
         request=request,
         prompt="space prompt",
-        passthrough_args=(),
+        harness_registry=get_default_harness_registry(),
         chat_id="c1",
     )
 
@@ -131,11 +132,11 @@ def test_space_primary_profile_without_skills_still_injects_space_context(tmp_pa
         sandbox="unrestricted",
     )
 
-    command = _build_interactive_command(
+    command = _build_harness_command(
         repo_root=tmp_path,
         request=SpaceLaunchRequest(space_id=SpaceId("w1")),
         prompt="space prompt",
-        passthrough_args=(),
+        harness_registry=get_default_harness_registry(),
         chat_id="c1",
     )
 
@@ -157,6 +158,7 @@ def test_space_primary_profile_missing_falls_back_to_bundled_primary(
         repo_root=tmp_path,
         request=SpaceLaunchRequest(space_id=SpaceId("w1")),
         config=space_launch.load_config(tmp_path),
+        harness_registry=get_default_harness_registry(),
     )
 
     assert metadata.agent == "primary"
@@ -187,11 +189,11 @@ def test_space_primary_profile_missing_sandbox_uses_default_permission_tier(
     )
     _write_skill(tmp_path, "orchestrate", "Primary orchestration content")
 
-    command = _build_interactive_command(
+    command = _build_harness_command(
         repo_root=tmp_path,
         request=SpaceLaunchRequest(space_id=SpaceId("w1")),
         prompt="space prompt",
-        passthrough_args=(),
+        harness_registry=get_default_harness_registry(),
         chat_id="c1",
     )
 
@@ -237,11 +239,11 @@ def test_space_primary_profile_unknown_sandbox_uses_default_permission_tier_with
     stub_logger = _Logger()
     monkeypatch.setattr(space_launch, "logger", stub_logger)
 
-    command = _build_interactive_command(
+    command = _build_harness_command(
         repo_root=tmp_path,
         request=SpaceLaunchRequest(space_id=SpaceId("w1")),
         prompt="space prompt",
-        passthrough_args=(),
+        harness_registry=get_default_harness_registry(),
         chat_id="c1",
     )
 
@@ -272,14 +274,15 @@ def test_space_primary_profile_non_claude_model_routes_to_matching_harness(tmp_p
         sandbox="workspace-write",
     )
 
-    command = _build_interactive_command(
+    command = _build_harness_command(
         repo_root=tmp_path,
         request=SpaceLaunchRequest(space_id=SpaceId("w1")),
         prompt="space prompt",
-        passthrough_args=(),
+        harness_registry=get_default_harness_registry(),
         chat_id="c1",
     )
-    assert command[:2] == ("codex", "exec")
+    assert command[0] == "codex"
+    assert "exec" not in command[:2]
     assert "--model" in command
     assert command[command.index("--model") + 1] == "gpt-5.3-codex"
 

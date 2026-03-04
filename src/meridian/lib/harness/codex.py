@@ -44,6 +44,7 @@ class CodexAdapter:
     }
     PROMPT_MODE: ClassVar[PromptMode] = PromptMode.POSITIONAL
     BASE_COMMAND: ClassVar[tuple[str, ...]] = ("codex", "exec")
+    PRIMARY_BASE_COMMAND: ClassVar[tuple[str, ...]] = ("codex",)
     EVENT_CATEGORY_MAP: ClassVar[dict[str, str]] = {
         "response.completed": "lifecycle",
         "response.output_text.delta": "assistant",
@@ -72,13 +73,21 @@ class CodexAdapter:
     def build_command(self, run: SpawnParams, perms: PermissionResolver) -> list[str]:
         mcp_config = self.mcp_config(run)
         harness_session_id = (run.continue_harness_session_id or "").strip()
-        base_command = (
-            ("codex", "exec", "resume", harness_session_id)
-            if harness_session_id
-            else self.BASE_COMMAND
-        )
-        # Codex supports prompt-from-stdin via "-" and this avoids argv length limits.
-        command_run = replace(run, prompt="-")
+        if run.interactive:
+            base_command = (
+                ("codex", "resume", harness_session_id)
+                if harness_session_id
+                else self.PRIMARY_BASE_COMMAND
+            )
+            command_run = run
+        else:
+            base_command = (
+                ("codex", "exec", "resume", harness_session_id)
+                if harness_session_id
+                else self.BASE_COMMAND
+            )
+            # Codex supports prompt-from-stdin via "-" and this avoids argv length limits.
+            command_run = replace(run, prompt="-")
         return build_harness_command(
             base_command=base_command,
             prompt_mode=self.PROMPT_MODE,

@@ -58,6 +58,7 @@ class OpenCodeAdapter:
     }
     PROMPT_MODE: ClassVar[PromptMode] = PromptMode.POSITIONAL
     BASE_COMMAND: ClassVar[tuple[str, ...]] = ("opencode", "run")
+    PRIMARY_BASE_COMMAND: ClassVar[tuple[str, ...]] = ("opencode",)
     EVENT_CATEGORY_MAP: ClassVar[dict[str, str]] = {
         "spawn.start": "sub-run",
         "spawn.done": "sub-run",
@@ -85,9 +86,10 @@ class OpenCodeAdapter:
 
     def build_command(self, run: SpawnParams, perms: PermissionResolver) -> list[str]:
         mcp_config = self.mcp_config(run)
-        command_run = replace(run, prompt="-")
+        base_command = self.PRIMARY_BASE_COMMAND if run.interactive else self.BASE_COMMAND
+        command_run = run if run.interactive else replace(run, prompt="-")
         command = build_harness_command(
-            base_command=self.BASE_COMMAND,
+            base_command=base_command,
             prompt_mode=self.PROMPT_MODE,
             run=command_run,
             strategies=self.STRATEGIES,

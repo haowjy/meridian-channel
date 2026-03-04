@@ -7,13 +7,13 @@ from pathlib import Path
 
 import pytest
 
+from meridian.lib.harness.registry import get_default_harness_registry
 from meridian.lib.ops.space import SpaceStartInput, space_start_sync
 from meridian.lib.types import SpaceId
 from meridian.lib.space.launch import (
     SpaceLaunchRequest,
     _build_space_env,
     _build_harness_command,
-    _build_interactive_command,
     build_primary_prompt,
     cleanup_orphaned_locks,
 )
@@ -36,14 +36,15 @@ def test_build_interactive_command_uses_system_prompt_model_and_passthrough(
         space_id=SpaceId("s42"),
         model="claude-opus-4-6",
         fresh=True,
+        passthrough_args=("--permission-mode", "acceptEdits"),
     )
     prompt = build_primary_prompt(request)
 
-    command = _build_interactive_command(
+    command = _build_harness_command(
         repo_root=tmp_path,
         request=request,
         prompt=prompt,
-        passthrough_args=("--permission-mode", "acceptEdits"),
+        harness_registry=get_default_harness_registry(),
         chat_id="c1",
     )
 
@@ -112,6 +113,7 @@ def test_primary_settings_apply_to_harness_command_and_env(tmp_path: Path) -> No
         repo_root=tmp_path,
         request=request,
         prompt="space prompt",
+        harness_registry=get_default_harness_registry(),
     )
 
     assert "--autocompact" not in command
@@ -193,13 +195,6 @@ def test_build_interactive_command_merges_passthrough_system_prompt_flags(
         space_id=SpaceId("s77"),
         model="claude-opus-4-6",
         fresh=True,
-    )
-    prompt = build_primary_prompt(request)
-
-    command = _build_interactive_command(
-        repo_root=tmp_path,
-        request=request,
-        prompt=prompt,
         passthrough_args=(
             "--append-system-prompt",
             "first passthrough",
@@ -207,6 +202,14 @@ def test_build_interactive_command_merges_passthrough_system_prompt_flags(
             "--permission-mode",
             "acceptEdits",
         ),
+    )
+    prompt = build_primary_prompt(request)
+
+    command = _build_harness_command(
+        repo_root=tmp_path,
+        request=request,
+        prompt=prompt,
+        harness_registry=get_default_harness_registry(),
         chat_id="c77",
     )
 
@@ -228,15 +231,16 @@ def test_build_interactive_command_rejects_missing_system_prompt_passthrough_val
     monkeypatch.delenv("MERIDIAN_HARNESS_COMMAND", raising=False)
 
     with pytest.raises(ValueError, match="--append-system-prompt requires a value"):
-        _build_interactive_command(
+        _build_harness_command(
             repo_root=tmp_path,
             request=SpaceLaunchRequest(
                 space_id=SpaceId("s88"),
                 model="claude-opus-4-6",
                 fresh=True,
+                passthrough_args=("--append-system-prompt",),
             ),
             prompt="space prompt",
-            passthrough_args=("--append-system-prompt",),
+            harness_registry=get_default_harness_registry(),
             chat_id="c88",
         )
 
@@ -255,15 +259,16 @@ def test_build_interactive_command_supports_codex_harness_override(
     )
     prompt = build_primary_prompt(request)
 
-    command = _build_interactive_command(
+    command = _build_harness_command(
         repo_root=tmp_path,
         request=request,
         prompt=prompt,
-        passthrough_args=(),
+        harness_registry=get_default_harness_registry(),
         chat_id="c99",
     )
 
-    assert command[:2] == ("codex", "exec")
+    assert command[0] == "codex"
+    assert "exec" not in command[:2]
     assert "--model" in command
     assert command[command.index("--model") + 1] == "gpt-5.3-codex"
     assert "# Meridian Space Session" in command[-1]
@@ -284,10 +289,10 @@ def test_build_interactive_command_rejects_incompatible_harness_override(
     prompt = build_primary_prompt(request)
 
     with pytest.raises(ValueError, match="incompatible with model"):
-        _build_interactive_command(
+        _build_harness_command(
             repo_root=tmp_path,
             request=request,
             prompt=prompt,
-            passthrough_args=(),
+            harness_registry=get_default_harness_registry(),
             chat_id="c100",
         )

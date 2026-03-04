@@ -142,7 +142,7 @@ def test_space_start_supports_dry_run(run_meridian) -> None:
     result = run_meridian(["--json", "space", "start", "--dry-run"])
     assert result.returncode == 0
     payload = json.loads(result.stdout)
-    assert payload["message"] == "Space launch dry-run."
+    assert payload["message"] == "Launch dry-run."
     assert payload["exit_code"] == 0
     assert "mock_harness.py" in payload["command"][1]
 

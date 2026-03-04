@@ -29,7 +29,7 @@ def _sample_run(*, model: str) -> SpawnParams:
 
 
 def test_every_run_params_field_is_mapped_for_each_adapter() -> None:
-    skip = {"prompt", "extra_args", "repo_root", "mcp_tools", "adhoc_agent_json"}
+    skip = {"prompt", "extra_args", "repo_root", "mcp_tools", "adhoc_agent_json", "interactive"}
     required = {field.name for field in dataclasses.fields(SpawnParams)} - skip
     adapter_classes = (ClaudeAdapter, CodexAdapter, OpenCodeAdapter)
 
@@ -115,6 +115,23 @@ def test_claude_build_command_resume_and_fork() -> None:
     assert "--fork-session" in command
 
 
+def test_claude_build_command_interactive_omits_dash_p_and_uses_append_prompt() -> None:
+    command = ClaudeAdapter().build_command(
+        SpawnParams(
+            prompt="space prompt",
+            model=ModelId("claude-opus-4-6"),
+            interactive=True,
+            appended_system_prompt="space prompt",
+        ),
+        StubPermissionResolver(),
+    )
+
+    assert command[0] == "claude"
+    assert "-p" not in command
+    assert "--append-system-prompt" in command
+    assert command[command.index("--append-system-prompt") + 1] == "space prompt"
+
+
 def test_codex_build_command_uses_resume_subcommand_when_session_available() -> None:
     command = CodexAdapter().build_command(
         SpawnParams(
@@ -130,6 +147,37 @@ def test_codex_build_command_uses_resume_subcommand_when_session_available() -> 
     assert "--model" in command
     assert "--fork" not in command
     assert command[-1] == "-"
+
+
+def test_codex_build_command_interactive_uses_primary_base_command() -> None:
+    command = CodexAdapter().build_command(
+        SpawnParams(
+            prompt="space prompt",
+            model=ModelId("gpt-5.3-codex"),
+            interactive=True,
+        ),
+        StubPermissionResolver(),
+    )
+
+    assert command[0] == "codex"
+    assert "exec" not in command[:2]
+    assert "--model" in command
+    assert command[-1] == "space prompt"
+
+
+def test_codex_build_command_interactive_resume_uses_resume_subcommand() -> None:
+    command = CodexAdapter().build_command(
+        SpawnParams(
+            prompt="space prompt",
+            model=ModelId("gpt-5.3-codex"),
+            interactive=True,
+            continue_harness_session_id="session-456",
+        ),
+        StubPermissionResolver(),
+    )
+
+    assert command[:3] == ["codex", "resume", "session-456"]
+    assert "--model" in command
 
 
 def test_opencode_build_command_strips_model_prefix_and_uses_positional_prompt() -> None:
@@ -150,6 +198,22 @@ def test_opencode_build_command_strips_model_prefix_and_uses_positional_prompt()
     ]
     assert "--agent" not in command
     assert "--skills" not in command
+
+
+def test_opencode_build_command_interactive_uses_primary_base_command() -> None:
+    command = OpenCodeAdapter().build_command(
+        SpawnParams(
+            prompt="space prompt",
+            model=ModelId("opencode-gpt-5.3-codex"),
+            interactive=True,
+        ),
+        StubPermissionResolver(),
+    )
+
+    assert command[0] == "opencode"
+    assert "run" not in command[:2]
+    assert "--model" in command
+    assert command[-1] == "space prompt"
 
 
 def test_opencode_build_command_resume_and_fork() -> None:

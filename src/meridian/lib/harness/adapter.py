@@ -46,6 +46,7 @@ class SpawnParams:
     extra_args: tuple[str, ...] = ()
     repo_root: str | None = None
     mcp_tools: tuple[str, ...] = ()
+    interactive: bool = False
     continue_harness_session_id: str | None = None
     continue_fork: bool = False
     appended_system_prompt: str | None = None

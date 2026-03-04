@@ -8,7 +8,7 @@ import os
 import signal
 import sys
 import time
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -17,6 +17,11 @@ import structlog
 
 from meridian.lib.config.settings import MeridianConfig
 from meridian.lib.domain import Spawn
+from meridian.lib.exec.env import (
+    HARNESS_ENV_PASS_THROUGH,
+    build_harness_child_env,
+    sanitize_child_env as _sanitize_child_env,
+)
 from meridian.lib.exec.errors import ErrorCategory, classify_error, should_retry
 from meridian.lib.exec.process_groups import signal_process_group
 from meridian.lib.exec.signals import SignalForwarder, map_process_exit_code, signal_coordinator
@@ -35,7 +40,6 @@ from meridian.lib.harness.adapter import (
     PermissionResolver,
     SpawnParams,
     StreamEvent,
-    resolve_mcp_config,
 )
 from meridian.lib.harness.registry import HarnessRegistry
 from meridian.lib.safety.budget import Budget, BudgetBreach, LiveBudgetTracker
@@ -58,78 +62,8 @@ DEFAULT_RETRY_BACKOFF_SECONDS = _DEFAULT_CONFIG.retry_backoff_seconds
 DEFAULT_GUARDRAIL_TIMEOUT_SECONDS = _DEFAULT_CONFIG.guardrail_timeout_seconds
 logger = structlog.get_logger(__name__)
 
-_CHILD_ENV_ALLOWLIST = frozenset(
-    {
-        "PATH",
-        "HOME",
-        "USER",
-        "SHELL",
-        "LANG",
-        "TERM",
-        "TMPDIR",
-        "PYTHONPATH",
-        "VIRTUAL_ENV",
-    }
-)
-_CHILD_ENV_ALLOWLIST_PREFIXES = ("LC_", "XDG_", "UV_")
-_CHILD_ENV_SECRET_SUFFIXES = ("_TOKEN", "_KEY", "_SECRET")
-# Harness CLIs need these credentials to authenticate. Keep this explicit so
-# secret-like env vars still default to redacted unless intentionally allowed.
-HARNESS_ENV_PASS_THROUGH = frozenset(
-    {
-        "ANTHROPIC_API_KEY",
-        "ANTHROPIC_BASE_URL",
-        "OPENAI_API_KEY",
-        "OPENAI_ORG_ID",
-        "OPENAI_PROJECT_ID",
-        "OPENAI_BASE_URL",
-        "OPENROUTER_API_KEY",
-        "GEMINI_API_KEY",
-        "GOOGLE_API_KEY",
-        "GROQ_API_KEY",
-        "XAI_API_KEY",
-        "MISTRAL_API_KEY",
-        "COHERE_API_KEY",
-        "DEEPSEEK_API_KEY",
-        "TOGETHER_API_KEY",
-        "PERPLEXITY_API_KEY",
-    }
-)
-
-
-def _is_allowlisted_child_env_var(key: str) -> bool:
-    normalized = key.upper()
-    if normalized in _CHILD_ENV_ALLOWLIST:
-        return True
-    return any(normalized.startswith(prefix) for prefix in _CHILD_ENV_ALLOWLIST_PREFIXES)
-
-
-def _looks_like_secret_env_var(key: str) -> bool:
-    normalized = key.upper()
-    return any(normalized.endswith(suffix) for suffix in _CHILD_ENV_SECRET_SUFFIXES)
-
-
-def sanitize_child_env(
-    base_env: Mapping[str, str],
-    env_overrides: Mapping[str, str] | None,
-    pass_through: Collection[str],
-) -> dict[str, str]:
-    """Return a sanitized child environment with explicit pass-through controls."""
-
-    pass_through_keys = {name.upper() for name in pass_through}
-    sanitized: dict[str, str] = {}
-
-    for key, value in base_env.items():
-        normalized = key.upper()
-        if _looks_like_secret_env_var(normalized) and normalized not in pass_through_keys:
-            continue
-        if normalized in pass_through_keys or _is_allowlisted_child_env_var(normalized):
-            sanitized[key] = value
-
-    if env_overrides is not None:
-        sanitized.update(env_overrides)
-
-    return sanitized
+# Backward-compatible re-export for existing callers/tests.
+sanitize_child_env = _sanitize_child_env
 
 
 class SafeDefaultPermissionResolver(PermissionResolver):
@@ -558,20 +492,18 @@ async def execute_with_finalization(
 
     resolved_perms = permission_resolver or SafeDefaultPermissionResolver()
     resolved_permission_config = permission_config or PermissionConfig()
-    adapter_env_overrides = harness.env_overrides(resolved_permission_config)
-    mcp_config = resolve_mcp_config(harness, run_params)
-    if mcp_config is not None:
-        adapter_env_overrides.update(mcp_config.env_overrides)
     runtime_env_overrides = {
         "MERIDIAN_REPO_ROOT": execution_cwd.as_posix(),
         "MERIDIAN_STATE_ROOT": resolve_state_paths(repo_root).root_dir.resolve().as_posix(),
     }
     merged_env_overrides = dict(env_overrides or {})
     merged_env_overrides.update(runtime_env_overrides)
-    merged_env_overrides.update(adapter_env_overrides)
-    child_env = sanitize_child_env(
+    child_env = build_harness_child_env(
         base_env=os.environ,
-        env_overrides=merged_env_overrides,
+        adapter=harness,
+        run_params=run_params,
+        permission_config=resolved_permission_config,
+        runtime_env_overrides=merged_env_overrides,
         pass_through=HARNESS_ENV_PASS_THROUGH,
     )
     if spawn_store.get_spawn(space_dir, run.spawn_id) is None:

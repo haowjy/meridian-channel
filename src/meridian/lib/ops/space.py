@@ -168,6 +168,7 @@ def space_start_sync(payload: SpaceStartInput) -> SpaceActionOutput:
             permission_tier=payload.permission_tier,
             unsafe=payload.unsafe,
         ),
+        harness_registry=runtime.harness_registry,
     )
     transitioned = space_file.update_space_status(
         runtime.repo_root,
@@ -222,6 +223,7 @@ def space_resume_sync(payload: SpaceResumeInput) -> SpaceActionOutput:
             permission_tier=payload.permission_tier,
             unsafe=payload.unsafe,
         ),
+        harness_registry=runtime.harness_registry,
     )
 
     transitioned = space_file.update_space_status(
