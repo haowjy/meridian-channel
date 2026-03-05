@@ -72,10 +72,13 @@ If reviewers disagree, run a tiebreak with a different model. If 3 rework cycles
 
 Independent steps can run in parallel using background spawns:
 
-```
-R1=$(meridian spawn --background -m MODEL -p "Step A")
-R2=$(meridian spawn --background -m MODEL -p "Step B")
-meridian spawn wait $R1 $R2
+```bash
+# Launch background spawns (output is JSON with spawn_id field)
+meridian spawn --background -m MODEL -p "Step A"
+meridian spawn --background -m MODEL -p "Step B"
+
+# Wait for them by ID
+meridian spawn wait SPAWN_ID_A SPAWN_ID_B
 ```
 
 ## When to Stop

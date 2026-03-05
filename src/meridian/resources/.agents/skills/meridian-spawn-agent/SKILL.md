@@ -8,6 +8,20 @@ description: Multi-agent coordination via the meridian CLI. Teaches how to spawn
 You have the `meridian` CLI for multi-agent coordination. Use it to spawn subagents, track progress, and inspect results.
 In agent mode, all CLI output is JSON.
 
+## Setup
+
+Before spawning, ensure you have a space:
+
+```bash
+# First spawn auto-creates a space, but you must export the ID for subsequent commands
+export MERIDIAN_SPACE_ID=my-task
+
+# Or let the first spawn auto-create, then export the hint it prints
+meridian spawn -m MODEL -p "first task" --background
+# hint: export MERIDIAN_SPACE_ID=s1
+export MERIDIAN_SPACE_ID=s1
+```
+
 ## Spawn Composition
 
 Compose each spawn from `model + prompt + context`:
@@ -18,7 +32,7 @@ Compose each spawn from `model + prompt + context`:
 Start minimal, then add context only when needed.
 
 ```bash
-# Basic
+# Basic (meridian spawn is shorthand for meridian spawn create)
 meridian spawn -m MODEL -p "PROMPT"
 
 # With reference files (repeat -f)
@@ -45,23 +59,48 @@ meridian spawn --dry-run -m MODEL -p "Plan the migration"
 | --- | --- | --- |
 | `--model`, `-m` | Select model id or alias | Optional if agent/defaults provide one |
 | `--prompt`, `-p` | Prompt text | Primary spawn instructions |
-| `--file`, `-f` | Add reference files | Repeatable |
+| `--file`, `-f` | Add reference files | Repeatable; content included in prompt context |
 | `--agent`, `-a` | Use an agent profile | Applies profile model/skills/sandbox defaults |
-| `--prompt-var` | Template vars (`KEY=VALUE`) | Repeatable; replaces `{{KEY}}` |
+| `--prompt-var` | Template vars (`KEY=VALUE`) | Repeatable; replaces `{{KEY}}` in prompt |
 | `--background` | Return immediately with spawn id | Use with `meridian spawn wait` |
 | `--dry-run` | Preview composed spawn | No harness execution |
-| `--timeout-secs` | Runtime timeout | Float seconds |
+| `--timeout` | Runtime timeout in minutes | Integer minutes |
 | `--permission` | Override permission tier | Example: `read-only`, `workspace-write` |
 | `--report-path` | Relative report output path | Default `report.md` |
+| `--verbose` | Enable verbose spawn logging | |
+| `--quiet` | Reduce non-essential output | |
+| `--space-id` | Spawn within a specific space | Also `--space` |
 
 ## Parallel Execution
 
 Launch independent spawns in the background, then wait for all:
 ```bash
-R1=$(meridian spawn --background -m MODEL -p "Step A")
-R2=$(meridian spawn --background -m MODEL -p "Step B")
-meridian spawn wait $R1 $R2
+# Each --background spawn returns JSON with a spawn_id field
+meridian spawn --background -m MODEL -p "Step A"
+meridian spawn --background -m MODEL -p "Step B"
+
+# Wait for specific spawns by ID
+meridian spawn wait SPAWN_ID_A SPAWN_ID_B
+
+# Or extract spawn_id from JSON output programmatically
+SID=$(meridian spawn --background -m MODEL -p "Task" | jq -r .spawn_id)
+meridian spawn wait "$SID" --report
 ```
+
+## Shared Filesystem
+
+Each space has a shared filesystem at `.meridian/.spaces/<space-id>/fs/`. Use it to pass data between spawns:
+
+```bash
+# Write output for other spawns to consume
+mkdir -p ".meridian/.spaces/$MERIDIAN_SPACE_ID/fs"
+echo "result data" > ".meridian/.spaces/$MERIDIAN_SPACE_ID/fs/step-a-output.txt"
+
+# Read another spawn's output
+cat ".meridian/.spaces/$MERIDIAN_SPACE_ID/fs/step-a-output.txt"
+```
+
+Agents organize this directory however they want — meridian provides the container only.
 
 ## Spawn Inspection
 
@@ -84,6 +123,9 @@ meridian spawn wait SPAWN_ID --report
 # Continue an existing spawn
 meridian spawn continue SPAWN_ID -p "Follow up instruction"
 meridian spawn continue SPAWN_ID -p "Try alternate approach" --fork
+
+# Cancel a running spawn
+meridian spawn cancel SPAWN_ID
 
 # Aggregate stats
 meridian spawn stats

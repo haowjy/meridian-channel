@@ -1,15 +1,20 @@
 # Tech Debt
 
-Code and test cleanup. Last verified: 2026-03-04.
+Code and test cleanup. Last verified: 2026-03-05.
 
 ## Open
 
 | ID | Summary | Priority | Status | Tracking |
 |----|---------|----------|--------|----------|
 | TD-9 | Finish space-plumbing follow-up cleanup (report-path semantics, artifact scoping) | Medium | In-progress (Steps 0+2 done, Steps 1+3 remain) | `plans/space-plumbing-fix.md` |
-| TD-17 | Extract per-harness prompt/resume policy from shared launch assembly (prevent prompt payload leaks on resume) | High | Open | `TBD (new scope)` |
 
 Note: Steps 0 (thread space_id explicitly) and 2 (thread space into reference loading) are complete. Remaining work is Step 1 (report_path semantics) and Step 3 (space-aware artifact keys). File paths are now `_spawn_*.py` (not `_run_*.py`).
+
+## Archived (2026-03-05 harness cleanup batch)
+
+| ID | Summary | Status | Resolution Commit(s) |
+|----|---------|--------|----------------------|
+| TD-17 | Extract per-harness prompt/resume policy from shared launch assembly | Closed | Harness cleanup Step 1: adapter launch hooks (seed_session, filter_launch_content, detect_primary_session_id) |
 
 ## Archived (2026-03-04 cleanup batch)
 
