@@ -1,10 +1,10 @@
 # Backlog
 
-Central backlog for cross-cutting work not tied to a single implementation plan. Last verified: 2026-03-04.
+Central backlog for cross-cutting work not tied to a single implementation plan. Last verified: 2026-03-05.
 
 ## Current Status
 
-- Open items: `1` (TD-9: space-plumbing Steps 1+3)
+- Open items: `2` (TD-9: space-plumbing Steps 1+3; TD-17: prompt/resume policy extraction)
 - Archived from 2026-03-04 cleanup batch: `8` (TD-7, TD-10–TD-16)
 - Archived from backlog-execution batch: `17`
 - Previously closed (pre-batch): `2` (`BUG-2`, `BUG-7`)

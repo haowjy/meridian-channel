@@ -68,6 +68,8 @@ def test_space_start_creates_lock_sets_env_and_forwards_passthrough(
     assert result.space_id == "s1"
     assert result.exit_code == 0
     assert result.command == ()
+    assert result.continue_ref is not None
+    assert result.resume_command == f"meridian --continue {result.continue_ref}"
     assert result.lock_path is not None
     assert not Path(result.lock_path).exists()
 
@@ -334,8 +336,7 @@ def test_root_command_launches_and_forwards_options(
     assert int(exc.value.code) == 0
     captured = capsys.readouterr()
     assert "mock_harness.py" not in captured.out
-    assert "Continue via meridian:" in captured.out
-    assert "meridian --continue " in captured.out
+    assert "Session finished (space s1)" in captured.out
 
     payload = _capture_payload(capture)
     env = payload["env"]
@@ -386,6 +387,117 @@ def test_root_continue_dry_run_resolves_space_and_passes_resume_flag(
     captured = capsys.readouterr()
     assert f"Resume dry-run (space {second.id})" in captured.out
     assert "--resume sess-second" in captured.out
+
+
+def test_root_continue_dry_run_reuses_recorded_harness(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    main_module = importlib.import_module("meridian.cli.main")
+    selected = create_space(tmp_path, name="codex-space")
+    selected_dir = resolve_space_dir(tmp_path, selected.id)
+
+    chat_id = start_session(
+        selected_dir,
+        harness="codex",
+        harness_session_id="sess-codex",
+        model="gpt-5.3-codex",
+    )
+    stop_session(selected_dir, chat_id)
+
+    monkeypatch.setattr(main_module, "resolve_repo_root", lambda: tmp_path)
+
+    with pytest.raises(SystemExit) as exc:
+        main_module.app(["--continue", "sess-codex", "--dry-run"])
+    assert int(exc.value.code) == 0
+
+    captured = capsys.readouterr()
+    assert f"Resume dry-run (space {selected.id})" in captured.out
+    assert "codex resume sess-codex" in captured.out
+
+
+def test_root_continue_codex_dry_run_skips_duplicate_continuation_injection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    main_module = importlib.import_module("meridian.cli.main")
+    selected = create_space(tmp_path, name="codex-space")
+    selected_dir = resolve_space_dir(tmp_path, selected.id)
+
+    chat_id = start_session(
+        selected_dir,
+        harness="codex",
+        harness_session_id="sess-codex",
+        model="gpt-5.3-codex",
+    )
+    _ = spawn_store.start_spawn(
+        selected_dir,
+        chat_id=chat_id,
+        model="gpt-5.3-codex",
+        agent="primary",
+        harness="codex",
+        kind="primary",
+        prompt=(
+            "# Meridian Space Session\n"
+            "Space: s1\n\n"
+            "# Continuation Guidance\n\n"
+            "Existing continuation guidance."
+        ),
+    )
+    stop_session(selected_dir, chat_id)
+
+    monkeypatch.setattr(main_module, "resolve_repo_root", lambda: tmp_path)
+
+    with pytest.raises(SystemExit) as exc:
+        main_module.app(["--continue", "sess-codex", "--dry-run"])
+    assert int(exc.value.code) == 0
+
+    captured = capsys.readouterr()
+    assert f"Resume dry-run (space {selected.id})" in captured.out
+    assert "codex resume sess-codex" in captured.out
+    assert "Continuation Guidance" not in captured.out
+    assert "# Skill:" not in captured.out
+
+
+def test_root_continue_codex_dry_run_never_injects_prompt_even_when_last_continue_prompt_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    main_module = importlib.import_module("meridian.cli.main")
+    selected = create_space(tmp_path, name="codex-space")
+    selected_dir = resolve_space_dir(tmp_path, selected.id)
+
+    chat_id = start_session(
+        selected_dir,
+        harness="codex",
+        harness_session_id="sess-codex",
+        model="gpt-5.3-codex",
+    )
+    _ = spawn_store.start_spawn(
+        selected_dir,
+        chat_id=chat_id,
+        model="gpt-5.3-codex",
+        agent="primary",
+        harness="codex",
+        kind="primary",
+        prompt="Previous resume prompt without meridian continuation header.",
+    )
+    stop_session(selected_dir, chat_id)
+
+    monkeypatch.setattr(main_module, "resolve_repo_root", lambda: tmp_path)
+
+    with pytest.raises(SystemExit) as exc:
+        main_module.app(["--continue", "sess-codex", "--dry-run"])
+    assert int(exc.value.code) == 0
+
+    captured = capsys.readouterr()
+    assert f"Resume dry-run (space {selected.id})" in captured.out
+    assert "codex resume sess-codex" in captured.out
+    assert "Continuation Guidance" not in captured.out
+    assert "# Skill:" not in captured.out
 
 
 def test_root_continue_requires_disambiguation_without_space(
@@ -473,6 +585,89 @@ def test_root_continue_unknown_harness_session_binds_to_explicit_space(
     assert "warning: Session 'external-session-123' is not tracked yet" in captured.out
     assert f"Resume dry-run (space {selected.id})" in captured.out
     assert "--resume external-session-123" in captured.out
+
+
+def test_root_continue_unknown_harness_session_uses_last_space_harness(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    main_module = importlib.import_module("meridian.cli.main")
+    selected = create_space(tmp_path, name="selected")
+    selected_dir = resolve_space_dir(tmp_path, selected.id)
+
+    chat_id = start_session(
+        selected_dir,
+        harness="codex",
+        harness_session_id="known-session",
+        model="gpt-5.3-codex",
+    )
+    stop_session(selected_dir, chat_id)
+
+    monkeypatch.setattr(main_module, "resolve_repo_root", lambda: tmp_path)
+
+    with pytest.raises(SystemExit) as exc:
+        main_module.app(
+            [
+                "--continue",
+                "external-codex-session",
+                "--space",
+                selected.id,
+                "--dry-run",
+            ]
+        )
+    assert int(exc.value.code) == 0
+    captured = capsys.readouterr()
+    assert "warning: Session 'external-codex-session' is not tracked yet" in captured.out
+    assert f"Resume dry-run (space {selected.id})" in captured.out
+    assert "codex resume external-codex-session" in captured.out
+    assert "Continuation Guidance" not in captured.out
+    assert "# Skill:" not in captured.out
+
+
+def test_root_continue_unknown_harness_session_infers_codex_from_rollout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    main_module = importlib.import_module("meridian.cli.main")
+    selected = create_space(tmp_path, name="selected")
+    session_id = "019cb8ef-c55a-7782-a75e-0c9dc798cd35"
+
+    home_dir = tmp_path / "home"
+    monkeypatch.setenv("HOME", home_dir.as_posix())
+    sessions_dir = home_dir / ".codex" / "sessions" / "2026" / "03" / "04"
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    rollout = sessions_dir / f"rollout-2026-03-04T07-00-47-{session_id}.jsonl"
+    rollout.write_text(
+        json.dumps(
+            {
+                "type": "session_meta",
+                "payload": {"id": session_id, "cwd": tmp_path.as_posix()},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(main_module, "resolve_repo_root", lambda: tmp_path)
+
+    with pytest.raises(SystemExit) as exc:
+        main_module.app(
+            [
+                "--continue",
+                session_id,
+                "--space",
+                selected.id,
+                "--dry-run",
+            ]
+        )
+    assert int(exc.value.code) == 0
+    captured = capsys.readouterr()
+    assert f"Resume dry-run (space {selected.id})" in captured.out
+    assert f"codex resume {session_id}" in captured.out
+    assert "Continuation Guidance" not in captured.out
+    assert "# Skill:" not in captured.out
 
 
 def test_root_continue_unknown_harness_session_binds_to_default_space(

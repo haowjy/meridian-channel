@@ -94,8 +94,9 @@ class CodexAdapter(BaseHarnessAdapter):
                 if harness_session_id
                 else self.PRIMARY_BASE_COMMAND
             )
-            # Codex has no system prompt — guard against immediate execution
-            # on fresh interactive launches.
+            # Prompt injection here is a compatibility workaround: Codex does
+            # not expose a true system prompt channel, so Meridian appends a
+            # user-visible guard for fresh sessions only.
             guarded_prompt = run.prompt
             if guarded_prompt and not harness_session_id:
                 guarded_prompt = f"{guarded_prompt}\n\nDO NOT DO ANYTHING. WAIT FOR USER INPUT."
@@ -169,4 +170,3 @@ class CodexAdapter(BaseHarnessAdapter):
             json_keys=self.SESSION_ID_KEYS,
             text_patterns=self.SESSION_ID_TEXT_PATTERNS,
         )
-

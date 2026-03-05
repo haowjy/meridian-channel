@@ -123,12 +123,35 @@ def build_primary_prompt(request: SpaceLaunchRequest) -> str:
             ]
         )
     else:
+        # Prompt injection is a harness-compatibility workaround for flows that
+        # cannot provide a true system prompt channel.
         sections.extend(["", "# Continuation Guidance", "", _CONTINUATION_GUIDANCE])
 
     if request.pinned_context.strip():
         sections.extend(["", "# Re-Injected Pinned Context", "", request.pinned_context.strip()])
 
     return "\n".join(sections).strip()
+
+
+def _resolve_primary_prompt(
+    *,
+    request: SpaceLaunchRequest,
+    space_dir: Path,
+    harness_id: str,
+    continue_harness_session_id: str,
+) -> str:
+    """Resolve the effective primary prompt payload for one launch."""
+
+    _ = space_dir
+    prompt = build_primary_prompt(request)
+    if request.fresh or harness_id != "codex":
+        return prompt
+    if not continue_harness_session_id:
+        return prompt
+    # Codex-specific prompt injection is a compatibility workaround for missing
+    # system prompt support. For true `codex resume` semantics, resume launches
+    # must reattach without appending a new user prompt payload.
+    return ""
 
 
 def _write_lock(
@@ -264,12 +287,24 @@ def _build_harness_context(
         cli_permission_override=permission_tier_override is not None,
     )
 
-    appended_parts = [prompt.strip()]
-    appended_parts.extend(fragment.strip() for fragment in passthrough_prompt_fragments if fragment.strip())
-    skill_injection = compose_skill_injections(resolved_skills.loaded_skills)
-    if skill_injection:
-        appended_parts.append(skill_injection)
-    appended_prompt = "\n\n".join(part for part in appended_parts if part)
+    # Prompt injection is intentionally assembled here because several harnesses
+    # (notably Codex) lack a first-class system prompt channel.
+    #
+    # Codex resume is special: when a harness session ID is present we must
+    # reattach without sending any prompt payload (including skill injection
+    # text), otherwise resume behaves like a fresh new turn.
+    codex_resume_attach_only = str(harness) == "codex" and bool(harness_session_id)
+    if codex_resume_attach_only:
+        appended_prompt = ""
+    else:
+        appended_parts = [prompt.strip()]
+        appended_parts.extend(
+            fragment.strip() for fragment in passthrough_prompt_fragments if fragment.strip()
+        )
+        skill_injection = compose_skill_injections(resolved_skills.loaded_skills)
+        if skill_injection:
+            appended_parts.append(skill_injection)
+        appended_prompt = "\n\n".join(part for part in appended_parts if part)
     run_params = SpawnParams(
         prompt=appended_prompt,
         model=model,
@@ -619,7 +654,6 @@ def _prepare_launch_context(
     """Config loading, prompt building, session-ID seeding, command-request patching."""
 
     config = load_config(repo_root)
-    prompt = build_primary_prompt(request)
     session_metadata = _resolve_primary_session_metadata(
         repo_root=repo_root,
         request=request,
@@ -633,6 +667,12 @@ def _prepare_launch_context(
         request.continue_harness_session_id.strip()
         if request.continue_harness_session_id is not None
         else ""
+    )
+    prompt = _resolve_primary_prompt(
+        request=request,
+        space_dir=space_dir,
+        harness_id=session_metadata.harness,
+        continue_harness_session_id=explicit_session_id,
     )
     is_claude = session_metadata.harness == "claude"
     seed_harness_session_id = explicit_session_id or (str(uuid4()) if is_claude else "")
