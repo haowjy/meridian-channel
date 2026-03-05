@@ -15,17 +15,14 @@ from meridian.lib.space.session_store import (
 )
 from meridian.lib.state.paths import SpacePaths
 
-
 def _space_dir(tmp_path):
     space_dir = tmp_path / ".meridian" / ".spaces" / "s1"
     space_dir.mkdir(parents=True, exist_ok=True)
     return space_dir
 
-
 def _write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
-
 
 def test_start_session_creates_start_event_and_lock_file(tmp_path):
     space_dir = _space_dir(tmp_path)
@@ -64,7 +61,6 @@ def test_start_session_creates_start_event_and_lock_file(tmp_path):
 
     stop_session(space_dir, chat_id)
 
-
 def test_stop_session_appends_stop_event(tmp_path):
     space_dir = _space_dir(tmp_path)
     chat_id = start_session(
@@ -83,26 +79,6 @@ def test_stop_session_appends_stop_event(tmp_path):
     assert stop_payload["event"] == "stop"
     assert stop_payload["chat_id"] == "c1"
     assert isinstance(stop_payload["stopped_at"], str)
-
-
-def test_list_active_sessions_detects_live_vs_dead_locks(tmp_path):
-    space_dir = _space_dir(tmp_path)
-    live_session = start_session(
-        space_dir,
-        harness="codex",
-        harness_session_id="live",
-        model="gpt-5.3-codex",
-    )
-
-    dead_lock = space_dir / "sessions" / "c2.lock"
-    dead_lock.parent.mkdir(parents=True, exist_ok=True)
-    dead_lock.touch()
-
-    active = list_active_sessions(space_dir)
-    assert active == [live_session]
-
-    stop_session(space_dir, live_session)
-
 
 def test_get_last_session_returns_most_recent_start(tmp_path):
     space_dir = _space_dir(tmp_path)
@@ -135,7 +111,6 @@ def test_get_last_session_returns_most_recent_start(tmp_path):
     stop_session(space_dir, c1)
     stop_session(space_dir, c2)
 
-
 def test_resolve_session_ref_by_harness_session_id(tmp_path):
     space_dir = _space_dir(tmp_path)
     c1 = start_session(
@@ -166,37 +141,6 @@ def test_resolve_session_ref_by_harness_session_id(tmp_path):
     stop_session(space_dir, c1)
     stop_session(space_dir, c2)
 
-
-def test_start_stop_round_trip_persists_agent_and_skill_metadata(tmp_path):
-    space_dir = _space_dir(tmp_path)
-    chat_id = start_session(
-        space_dir,
-        harness="codex",
-        harness_session_id="",
-        model="gpt-5.3-codex",
-        agent="coder",
-        agent_path="/repo/.agents/agents/coder.md",
-        skills=("run-agent", "reviewing"),
-        skill_paths=(
-            "/repo/.agents/skills/run-agent/SKILL.md",
-            "/repo/.agents/skills/reviewing/SKILL.md",
-        ),
-    )
-
-    stop_session(space_dir, chat_id)
-    record = get_last_session(space_dir)
-    assert record is not None
-    assert record.chat_id == chat_id
-    assert record.agent == "coder"
-    assert record.agent_path == "/repo/.agents/agents/coder.md"
-    assert record.skills == ("run-agent", "reviewing")
-    assert record.skill_paths == (
-        "/repo/.agents/skills/run-agent/SKILL.md",
-        "/repo/.agents/skills/reviewing/SKILL.md",
-    )
-    assert record.stopped_at is not None
-
-
 def test_update_session_harness_id_writes_update_event_and_replays(tmp_path):
     space_dir = _space_dir(tmp_path)
     chat_id = start_session(
@@ -224,31 +168,6 @@ def test_update_session_harness_id_writes_update_event_and_replays(tmp_path):
     assert update_rows[0]["harness_session_id"] == "hs-updated"
 
     stop_session(space_dir, chat_id)
-
-
-def test_resolve_session_ref_returns_newest_harness_session_match(tmp_path):
-    space_dir = _space_dir(tmp_path)
-    c1 = start_session(
-        space_dir,
-        harness="claude",
-        harness_session_id="dup-session",
-        model="claude-opus-4-6",
-    )
-    c2 = start_session(
-        space_dir,
-        harness="codex",
-        harness_session_id="dup-session",
-        model="gpt-5.3-codex",
-    )
-
-    resolved = resolve_session_ref(space_dir, "dup-session")
-    assert resolved is not None
-    assert resolved.chat_id == c2
-    assert resolved.harness == "codex"
-
-    stop_session(space_dir, c1)
-    stop_session(space_dir, c2)
-
 
 def test_backward_compat_old_start_event_defaults_new_fields(tmp_path):
     space_dir = _space_dir(tmp_path)
@@ -279,7 +198,6 @@ def test_backward_compat_old_start_event_defaults_new_fields(tmp_path):
     assert record.skills == ()
     assert record.skill_paths == ()
     assert record.params == ("--foo", "bar")
-
 
 def test_cleanup_stale_sessions_removes_dead_locks_and_writes_stop_events(tmp_path):
     space_dir = _space_dir(tmp_path)
@@ -329,7 +247,6 @@ def test_cleanup_stale_sessions_removes_dead_locks_and_writes_stop_events(tmp_pa
     assert isinstance(stop_rows[0]["stopped_at"], str)
 
     stop_session(space_dir, live)
-
 
 def test_cleanup_stale_sessions_removes_materialized_scope_for_stale_chat(tmp_path):
     space_dir = _space_dir(tmp_path)

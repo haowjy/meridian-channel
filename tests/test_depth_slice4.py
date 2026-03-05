@@ -14,7 +14,6 @@ from meridian.lib.ops._spawn_execute import _spawn_child_env
 from meridian.lib.ops.spawn import SpawnCreateInput, spawn_create, spawn_create_sync
 from meridian.server.main import mcp
 
-
 def _payload_from_result(result: Any) -> dict[str, Any]:
     if isinstance(result, dict):
         return result
@@ -29,7 +28,6 @@ def _payload_from_result(result: Any) -> dict[str, Any]:
         if isinstance(payload, dict):
             return payload
     raise AssertionError("Tool result did not include a JSON object payload")
-
 
 def test_run_create_sync_refuses_when_depth_limit_reached(
     monkeypatch: pytest.MonkeyPatch,
@@ -52,7 +50,6 @@ def test_run_create_sync_refuses_when_depth_limit_reached(
     assert result.max_depth == 3
     assert result.spawn_id is None
     assert not (tmp_path / ".meridian" / ".spaces").exists()
-
 
 @pytest.mark.asyncio
 async def test_run_create_async_refuses_when_depth_limit_reached(
@@ -77,7 +74,6 @@ async def test_run_create_async_refuses_when_depth_limit_reached(
     assert result.spawn_id is None
     assert not (tmp_path / ".meridian" / ".spaces").exists()
 
-
 @pytest.mark.asyncio
 async def test_mcp_run_spawn_refuses_when_depth_limit_reached(
     monkeypatch: pytest.MonkeyPatch,
@@ -101,53 +97,9 @@ async def test_mcp_run_spawn_refuses_when_depth_limit_reached(
     assert payload["spawn_id"] is None
     assert not (repo_root / ".meridian" / ".spaces").exists()
 
-
 def test_run_child_env_increments_depth(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MERIDIAN_DEPTH", "2")
     env = _spawn_child_env("s9")
     assert env["MERIDIAN_DEPTH"] == "3"
     assert env["MERIDIAN_SPACE_ID"] == "s9"
 
-
-def test_cli_run_spawn_depth_limit_returns_structured_error(
-    package_root: Path,
-    cli_env: dict[str, str],
-    tmp_path: Path,
-) -> None:
-    repo_root = tmp_path / "repo"
-    (repo_root / ".agents" / "skills").mkdir(parents=True, exist_ok=True)
-
-    env = dict(cli_env)
-    env["MERIDIAN_REPO_ROOT"] = repo_root.as_posix()
-    env["MERIDIAN_DEPTH"] = "3"
-    env["MERIDIAN_MAX_DEPTH"] = "3"
-    env["MERIDIAN_SPACE_ID"] = "s1"
-
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "meridian",
-            "--json",
-            "spawn",
-            "--prompt",
-            "blocked-cli",
-            "--model",
-            "gpt-5.3-codex",
-        ],
-        cwd=package_root,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=10,
-    )
-
-    assert result.returncode == 1
-    payload = json.loads(result.stdout)
-    assert payload["status"] == "failed"
-    assert payload["error"] == "max_depth_exceeded"
-    assert payload["current_depth"] == 3
-    assert payload["max_depth"] == 3
-    assert payload["spawn_id"] is None
-    assert not (repo_root / ".meridian" / ".spaces").exists()

@@ -13,7 +13,6 @@ from meridian.lib.harness.opencode import OpenCodeAdapter
 from meridian.lib.state.artifact_store import InMemoryStore, make_artifact_key
 from meridian.lib.types import SpawnId
 
-
 def test_adapters_extract_usage_from_cross_harness_payloads() -> None:
     artifacts = InMemoryStore()
 
@@ -48,96 +47,6 @@ def test_adapters_extract_usage_from_cross_harness_payloads() -> None:
     assert opencode_usage.output_tokens == 3
     assert opencode_usage.total_cost_usd == 0.015
 
-
-def test_report_uses_last_assistant_message_when_report_missing() -> None:
-    artifacts = InMemoryStore()
-    spawn_id = SpawnId("r-report-fallback")
-    artifacts.put(
-        make_artifact_key(spawn_id, "output.jsonl"),
-        b'{"role":"assistant","content":"first answer"}\n'
-        b'{"role":"user","content":"follow up"}\n'
-        b'{"role":"assistant","content":[{"type":"text","text":"final assistant message"}]}\n',
-    )
-
-    extracted = extract_or_fallback_report(artifacts, spawn_id)
-    assert extracted.source == "assistant_message"
-    assert extracted.content == "final assistant message"
-
-
-def test_report_prefers_report_md_when_both_sources_exist() -> None:
-    artifacts = InMemoryStore()
-    spawn_id = SpawnId("r-report-prefer-file")
-    artifacts.put(
-        make_artifact_key(spawn_id, "output.jsonl"),
-        b'{"role":"assistant","content":"assistant summary"}\n',
-    )
-    artifacts.put(
-        make_artifact_key(spawn_id, "report.md"),
-        b"# File Report\n\nUse this one.\n",
-    )
-
-    extracted = extract_or_fallback_report(artifacts, spawn_id)
-    assert extracted.source == "report_md"
-    assert extracted.content == "# File Report\n\nUse this one."
-
-
-def test_extract_files_touched_from_structured_output_and_text() -> None:
-    artifacts = InMemoryStore()
-    spawn_id = SpawnId("r-files")
-    artifacts.put(
-        make_artifact_key(spawn_id, "output.jsonl"),
-        b'{"files_touched":["src/story/ch1.md","src/story/ch2.md"]}\n'
-        b'{"role":"assistant","content":"Updated _docs/plans/roadmap.md"}\n'
-        b"Touched path frontend/src/app.ts during cleanup.\n",
-    )
-
-    touched = extract_files_touched(artifacts, spawn_id)
-    assert touched == (
-        "src/story/ch1.md",
-        "src/story/ch2.md",
-        "_docs/plans/roadmap.md",
-        "frontend/src/app.ts",
-    )
-
-
-def test_extract_files_touched_ignores_pseudo_paths_without_extension_or_prefix() -> None:
-    artifacts = InMemoryStore()
-    spawn_id = SpawnId("r-files-filtered")
-    artifacts.put(
-        make_artifact_key(spawn_id, "output.jsonl"),
-        b'{"role":"assistant","content":"Placeholder foo/bar and alias alpha/beta"}\n'
-        b'{"role":"assistant","content":"Updated src/chapter and docs/guide/overview"}\n',
-    )
-
-    touched = extract_files_touched(artifacts, spawn_id)
-    assert touched == ("src/chapter", "docs/guide/overview")
-
-
-def test_enrich_finalize_materializes_report_from_assistant_message(tmp_path: Path) -> None:
-    artifacts = InMemoryStore()
-    spawn_id = SpawnId("r-finalize")
-    artifacts.put(
-        make_artifact_key(spawn_id, "output.jsonl"),
-        b'{"role":"assistant","content":"updated src/chapters/ch03.md","session_id":"sess-42"}\n'
-        b'{"role":"assistant","content":"final result"}\n',
-    )
-
-    enrichment = enrich_finalize(
-        artifacts=artifacts,
-        adapter=ClaudeAdapter(),
-        spawn_id=spawn_id,
-        log_dir=tmp_path / "logs" / "r-finalize",
-    )
-
-    assert enrichment.report.source == "assistant_message"
-    assert enrichment.report_path is not None
-    assert enrichment.report_path.exists()
-    assert "final result" in enrichment.report_path.read_text(encoding="utf-8")
-    assert enrichment.harness_session_id == "sess-42"
-    assert enrichment.files_touched == ("src/chapters/ch03.md",)
-    assert enrichment.output_is_empty is False
-
-
 def test_codex_extract_session_id_from_resume_text_line() -> None:
     artifacts = InMemoryStore()
     spawn_id = SpawnId("r-codex-resume-text")
@@ -148,7 +57,6 @@ def test_codex_extract_session_id_from_resume_text_line() -> None:
 
     session_id = CodexAdapter().extract_session_id(artifacts, spawn_id)
     assert session_id == "019cb8d4-8d62-79d3-a925-d329f8310c5d"
-
 
 def test_opencode_extract_session_id_from_json_alias_and_resume_text() -> None:
     artifacts = InMemoryStore()

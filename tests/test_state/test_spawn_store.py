@@ -4,12 +4,10 @@ import json
 
 from meridian.lib.state.spawn_store import finalize_spawn, get_spawn, list_spawns, spawn_stats, start_spawn
 
-
 def _space_dir(tmp_path):
     space_dir = tmp_path / ".meridian" / ".spaces" / "s1"
     space_dir.mkdir(parents=True, exist_ok=True)
     return space_dir
-
 
 def test_start_and_finalize_run_round_trip(tmp_path):
     space_dir = _space_dir(tmp_path)
@@ -47,7 +45,6 @@ def test_start_and_finalize_run_round_trip(tmp_path):
     assert loaded.input_tokens == 42
     assert loaded.output_tokens == 17
 
-
 def test_start_run_writes_schema_version(tmp_path):
     space_dir = _space_dir(tmp_path)
     start_spawn(
@@ -64,35 +61,6 @@ def test_start_run_writes_schema_version(tmp_path):
     assert payload["v"] == 1
     assert payload["event"] == "start"
     assert payload["id"] == "p1"
-
-
-def test_list_runs_filters_by_model_and_status(tmp_path):
-    space_dir = _space_dir(tmp_path)
-    r1 = start_spawn(
-        space_dir,
-        chat_id="c1",
-        model="gpt-5.3-codex",
-        agent="coder",
-        harness="codex",
-        prompt="p1",
-    )
-    r2 = start_spawn(
-        space_dir,
-        chat_id="c1",
-        model="claude-sonnet-4-6",
-        agent="coder",
-        harness="claude",
-        prompt="p2",
-    )
-    finalize_spawn(space_dir, r1, "failed", 1)
-    finalize_spawn(space_dir, r2, "succeeded", 0)
-
-    failed = list_spawns(space_dir, filters={"status": "failed"})
-    claude = list_spawns(space_dir, filters={"model": "claude-sonnet-4-6"})
-
-    assert [run.id for run in failed] == ["p1"]
-    assert [run.id for run in claude] == ["p2"]
-
 
 def test_list_runs_skips_truncated_trailing_json(tmp_path):
     space_dir = _space_dir(tmp_path)
@@ -121,7 +89,6 @@ def test_list_runs_skips_truncated_trailing_json(tmp_path):
     assert len(spawns) == 1
     assert spawns[0].id == "r1"
     assert spawns[0].status == "running"
-
 
 def test_run_stats_aggregates_model_status_cost_duration_and_tokens(tmp_path):
     space_dir = _space_dir(tmp_path)

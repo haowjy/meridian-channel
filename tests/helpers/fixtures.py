@@ -11,12 +11,6 @@ def _write(path: Path, content: str) -> Path:
     return path
 
 
-def write_config(repo_root: Path, content: str) -> Path:
-    """Write `.meridian/config.toml` under one repo root."""
-
-    return _write(repo_root / ".meridian" / "config.toml", content)
-
-
 def write_skill(
     repo_root: Path,
     name: str,

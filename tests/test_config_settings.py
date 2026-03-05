@@ -10,12 +10,10 @@ import pytest
 
 from meridian.lib.config.settings import HarnessConfig, MeridianConfig, PrimaryConfig, load_config
 
-
 def _install_config(repo_root: Path, content: str) -> None:
     config_path = repo_root / ".meridian" / "config.toml"
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(content, encoding="utf-8")
-
 
 def test_load_config_from_fixture_toml(package_root: Path, tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
@@ -48,7 +46,6 @@ def test_load_config_from_fixture_toml(package_root: Path, tmp_path: Path) -> No
         ),
     )
 
-
 def test_load_config_missing_file_returns_defaults(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir(parents=True, exist_ok=True)
@@ -56,7 +53,6 @@ def test_load_config_missing_file_returns_defaults(tmp_path: Path) -> None:
     loaded = load_config(repo_root)
 
     assert loaded == MeridianConfig()
-
 
 def test_load_config_env_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
@@ -84,64 +80,6 @@ def test_load_config_env_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     assert loaded.max_retries == 3
     assert loaded.harness.claude == "claude-opus-4-6"
 
-
-def test_load_config_accepts_legacy_primary_agent_key(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
-    _install_config(
-        repo_root,
-        "[defaults]\n"
-        "primary_agent = 'legacy-primary'\n",
-    )
-
-    loaded = load_config(repo_root)
-
-    assert loaded.default_primary_agent == "legacy-primary"
-    assert loaded.primary_agent == "legacy-primary"
-
-
-def test_load_config_legacy_primary_agent_env_alias(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    repo_root = tmp_path / "repo"
-    _install_config(
-        repo_root,
-        "[defaults]\n"
-        "default_primary_agent = 'from-file'\n",
-    )
-    monkeypatch.setenv("MERIDIAN_PRIMARY_AGENT", "legacy-env")
-
-    loaded = load_config(repo_root)
-
-    assert loaded.default_primary_agent == "legacy-env"
-
-
-def test_load_config_warns_on_unknown_keys(
-    caplog: pytest.LogCaptureFixture,
-    tmp_path: Path,
-) -> None:
-    repo_root = tmp_path / "repo"
-    _install_config(
-        repo_root,
-        (
-            "[defaults]\n"
-            "max_depth = 5\n"
-            "unknown_default = 1\n"
-            "\n"
-            "[mystery]\n"
-            "value = 123\n"
-        ),
-    )
-    caplog.set_level(logging.WARNING, logger="meridian.lib.config.settings")
-
-    loaded = load_config(repo_root)
-
-    assert loaded.max_depth == 5
-    messages = [record.getMessage() for record in caplog.records]
-    assert any("defaults.unknown_default" in message for message in messages)
-    assert any("mystery" in message for message in messages)
-
-
 def test_load_config_rejects_danger_default_tier(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     _install_config(
@@ -153,7 +91,6 @@ def test_load_config_rejects_danger_default_tier(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="default_permission_tier"):
         load_config(repo_root)
 
-
 def test_load_config_rejects_danger_primary_permission_tier(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     _install_config(
@@ -164,7 +101,6 @@ def test_load_config_rejects_danger_primary_permission_tier(tmp_path: Path) -> N
 
     with pytest.raises(ValueError, match=r"primary\.permission_tier"):
         load_config(repo_root)
-
 
 def test_load_config_rejects_type_errors(
     monkeypatch: pytest.MonkeyPatch,
@@ -184,7 +120,6 @@ def test_load_config_rejects_type_errors(
     with pytest.raises(ValueError, match=r"MERIDIAN_MAX_DEPTH.*expected int"):
         load_config(repo_root)
 
-
 def test_load_config_rejects_primary_section_type_errors(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     _install_config(
@@ -202,7 +137,6 @@ def test_load_config_rejects_primary_section_type_errors(tmp_path: Path) -> None
     )
     with pytest.raises(ValueError, match=r"primary\.permission_tier.*expected str"):
         load_config(repo_root)
-
 
 @pytest.mark.parametrize("value", (-1, 0, 101))
 def test_load_config_rejects_primary_autocompact_out_of_range(

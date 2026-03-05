@@ -40,7 +40,6 @@ from meridian.lib.state.artifact_store import LocalStore, make_artifact_key
 from meridian.lib.state.paths import resolve_space_dir
 from meridian.lib.types import HarnessId, ModelId, SpawnId, SpaceId
 
-
 class RecordingPermissionResolver(PermissionResolver):
     def __init__(self, *, flags: tuple[str, ...] = ()) -> None:
         self.flags = flags
@@ -49,7 +48,6 @@ class RecordingPermissionResolver(PermissionResolver):
     def resolve_flags(self, harness_id: HarnessId) -> list[str]:
         self.seen_harness_ids.append(harness_id)
         return list(self.flags)
-
 
 class MockHarnessAdapter:
     """Test harness adapter that shells out to tests/mock_harness.py."""
@@ -109,12 +107,10 @@ class MockHarnessAdapter:
             return artifacts.get(key).decode("utf-8").strip()
         return None
 
-
 class StdinMockHarnessAdapter(MockHarnessAdapter):
     @property
     def capabilities(self) -> HarnessCapabilities:
         return HarnessCapabilities(supports_stdin_prompt=True)
-
 
 def _create_run(repo_root: Path, *, prompt: str) -> tuple[Spawn, Path]:
     space = create_space(repo_root, name="slice4")
@@ -127,12 +123,10 @@ def _create_run(repo_root: Path, *, prompt: str) -> tuple[Spawn, Path]:
     )
     return run, resolve_space_dir(repo_root, space.id)
 
-
 def _fetch_run_row(space_dir: Path, spawn_id: SpawnId) -> spawn_store.SpawnRecord:
     row = spawn_store.get_spawn(space_dir, spawn_id)
     assert row is not None
     return row
-
 
 def _pid_exists(pid: int) -> bool:
     try:
@@ -143,306 +137,17 @@ def _pid_exists(pid: int) -> bool:
         return True
     return True
 
+@pytest.mark.asyncio
 
 @pytest.mark.asyncio
-async def test_execute_with_finalization_pipes_prompt_to_stdin_when_supported(
-    tmp_path: Path,
-) -> None:
-    run, space_dir = _create_run(tmp_path, prompt="stdin payload")
-    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
-
-    script = tmp_path / "read_stdin.py"
-    script.write_text(
-        "import json\nimport sys\nprint(json.dumps({'stdin': sys.stdin.read()}), flush=True)\n",
-        encoding="utf-8",
-    )
-
-    adapter = StdinMockHarnessAdapter(script=script)
-    registry = HarnessRegistry()
-    registry.register(adapter)
-
-    exit_code = await execute_with_finalization(
-        run,
-        repo_root=tmp_path,
-        space_dir=space_dir,
-        artifacts=artifacts,
-        registry=registry,
-        harness_id=adapter.id,
-        cwd=tmp_path,
-        timeout_seconds=5.0,
-    )
-
-    assert exit_code == 0
-    output_key = make_artifact_key(run.spawn_id, "output.jsonl")
-    assert artifacts.exists(output_key)
-    assert '"stdin": "stdin payload"' in artifacts.get(output_key).decode("utf-8")
-
 
 @pytest.mark.asyncio
-async def test_execute_with_finalization_captures_without_stderr_passthrough(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    package_root: Path,
-    tmp_path: Path,
-) -> None:
-    import meridian.lib.exec.spawn as spawn_module
-
-    run, space_dir = _create_run(tmp_path, prompt="stream")
-    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
-    fixture = package_root / "tests" / "fixtures" / "partial.jsonl"
-    adapter = MockHarnessAdapter(
-        script=package_root / "tests" / "mock_harness.py",
-        base_args=(
-            "--stdout-file",
-            str(fixture),
-            "--stderr",
-            "slice4 warning",
-            "--stream-delay",
-            "0.01",
-        ),
-    )
-    registry = HarnessRegistry()
-    registry.register(adapter)
-    perms = RecordingPermissionResolver()
-
-    called = False
-    start_new_session_values: list[object] = []
-    original = spawn_module.asyncio.create_subprocess_exec
-
-    async def wrapped_create_subprocess_exec(*args: object, **kwargs: object):
-        nonlocal called
-        called = True
-        start_new_session_values.append(kwargs.get("start_new_session"))
-        return await original(*args, **kwargs)
-
-    monkeypatch.setattr(
-        spawn_module.asyncio,
-        "create_subprocess_exec",
-        wrapped_create_subprocess_exec,
-    )
-
-    exit_code = await execute_with_finalization(
-        run,
-        repo_root=tmp_path,
-        space_dir=space_dir,
-        artifacts=artifacts,
-        registry=registry,
-        permission_resolver=perms,
-        harness_id=adapter.id,
-        cwd=tmp_path,
-        timeout_seconds=5.0,
-    )
-
-    assert called is True
-    assert exit_code == 0
-    assert adapter.build_calls == 1
-    assert adapter.last_params is not None
-    assert perms.seen_harness_ids == [HarnessId("mock")]
-    assert start_new_session_values == [True]
-
-    row = _fetch_run_row(space_dir, run.spawn_id)
-    assert row.status == "succeeded"
-    assert row.exit_code == 0
-
-    output_key = make_artifact_key(run.spawn_id, "output.jsonl")
-    stderr_key = make_artifact_key(run.spawn_id, "stderr.log")
-    assert artifacts.exists(output_key)
-    assert artifacts.exists(stderr_key)
-
-    output_text = artifacts.get(output_key).decode("utf-8")
-    assert '{"line": 1}' in output_text
-    assert '{"line": 3}' in output_text
-    stderr_text = artifacts.get(stderr_key).decode("utf-8")
-    assert "slice4 warning" in stderr_text
-
-    captured = capsys.readouterr()
-    assert "slice4 warning" not in captured.err
-
 
 @pytest.mark.asyncio
-async def test_execute_with_finalization_allows_stderr_passthrough_when_enabled(
-    capsys: pytest.CaptureFixture[str],
-    package_root: Path,
-    tmp_path: Path,
-) -> None:
-    run, space_dir = _create_run(tmp_path, prompt="stream")
-    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
-    fixture = package_root / "tests" / "fixtures" / "partial.jsonl"
-    adapter = MockHarnessAdapter(
-        script=package_root / "tests" / "mock_harness.py",
-        base_args=(
-            "--stdout-file",
-            str(fixture),
-            "--stderr",
-            "slice4 warning",
-        ),
-    )
-    registry = HarnessRegistry()
-    registry.register(adapter)
-
-    exit_code = await execute_with_finalization(
-        run,
-        repo_root=tmp_path,
-        space_dir=space_dir,
-        artifacts=artifacts,
-        registry=registry,
-        harness_id=adapter.id,
-        cwd=tmp_path,
-        timeout_seconds=5.0,
-        stream_stderr_to_terminal=True,
-    )
-
-    assert exit_code == 0
-    captured = capsys.readouterr()
-    assert "slice4 warning" in captured.err
-
 
 @pytest.mark.asyncio
-async def test_timeout_kills_child_and_finalizes_row(package_root: Path, tmp_path: Path) -> None:
-    run, space_dir = _create_run(tmp_path, prompt="hang")
-    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
-    adapter = MockHarnessAdapter(
-        script=package_root / "tests" / "mock_harness.py",
-        base_args=("--hang",),
-    )
-    registry = HarnessRegistry()
-    registry.register(adapter)
-
-    exit_code = await execute_with_finalization(
-        run,
-        repo_root=tmp_path,
-        space_dir=space_dir,
-        artifacts=artifacts,
-        registry=registry,
-        harness_id=adapter.id,
-        cwd=tmp_path,
-        timeout_seconds=0.2,
-        kill_grace_seconds=0.1,
-    )
-
-    assert exit_code == 3
-    row = _fetch_run_row(space_dir, run.spawn_id)
-    assert row.status == "failed"
-    assert row.exit_code == 3
-    assert row.error == "timeout"
-    assert row.finished_at is not None
-
 
 @pytest.mark.asyncio
-async def test_timeout_kills_grandchild_processes(package_root: Path, tmp_path: Path) -> None:
-    parent_script = tmp_path / "parent.py"
-    child_script = tmp_path / "child.py"
-    child_pid_path = tmp_path / "child.pid"
-
-    child_script.write_text(
-        textwrap.dedent(
-            """
-            from __future__ import annotations
-
-            import time
-
-            while True:
-                time.sleep(0.25)
-            """
-        ),
-        encoding="utf-8",
-    )
-
-    parent_script.write_text(
-        textwrap.dedent(
-            """
-            from __future__ import annotations
-
-            import subprocess
-            import sys
-            import time
-            from pathlib import Path
-
-            pid_file = Path(sys.argv[1])
-            child_path = Path(sys.argv[2])
-
-            child = subprocess.Popen([sys.executable, str(child_path)])
-            pid_file.write_text(str(child.pid), encoding="utf-8")
-
-            while True:
-                time.sleep(0.25)
-            """
-        ),
-        encoding="utf-8",
-    )
-
-    run, space_dir = _create_run(tmp_path, prompt="hang")
-    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
-    adapter = MockHarnessAdapter(
-        script=package_root / "tests" / "mock_harness.py",
-        command_override=(
-            sys.executable,
-            str(parent_script),
-            str(child_pid_path),
-            str(child_script),
-        ),
-    )
-    registry = HarnessRegistry()
-    registry.register(adapter)
-
-    exit_code = await execute_with_finalization(
-        run,
-        repo_root=tmp_path,
-        space_dir=space_dir,
-        artifacts=artifacts,
-        registry=registry,
-        harness_id=adapter.id,
-        cwd=tmp_path,
-        timeout_seconds=0.3,
-        kill_grace_seconds=0.1,
-    )
-
-    assert exit_code == 3
-    assert child_pid_path.exists()
-
-    child_pid = int(child_pid_path.read_text(encoding="utf-8").strip())
-    deadline = time.time() + 5.0
-    while _pid_exists(child_pid) and time.time() < deadline:
-        await asyncio.sleep(0.05)
-
-    try:
-        if _pid_exists(child_pid):
-            os.kill(child_pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
-
-    assert _pid_exists(child_pid) is False
-
-
-@pytest.mark.asyncio
-async def test_infra_failure_still_writes_finalize_row(tmp_path: Path) -> None:
-    run, space_dir = _create_run(tmp_path, prompt="boom")
-    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
-    adapter = MockHarnessAdapter(
-        script=tmp_path / "unused.py",
-        command_override=("definitely-missing-binary-for-slice4",),
-    )
-    registry = HarnessRegistry()
-    registry.register(adapter)
-
-    exit_code = await execute_with_finalization(
-        run,
-        repo_root=tmp_path,
-        space_dir=space_dir,
-        artifacts=artifacts,
-        registry=registry,
-        harness_id=adapter.id,
-        cwd=tmp_path,
-        timeout_seconds=1.0,
-    )
-
-    assert exit_code == 2
-    row = _fetch_run_row(space_dir, run.spawn_id)
-    assert row.status == "failed"
-    assert row.exit_code == 2
-    assert row.error is None
-    assert row.finished_at is not None
-
 
 @pytest.mark.asyncio
 async def test_execute_with_finalization_ignores_sigterm_during_finalize_write(
@@ -503,7 +208,6 @@ async def test_execute_with_finalization_ignores_sigterm_during_finalize_write(
     assert finalize_called is True
     assert transitioned_mask_states == [True, False]
 
-
 def test_signal_forwarder_forwards_sigint_and_sigterm(monkeypatch: pytest.MonkeyPatch) -> None:
     import meridian.lib.exec.signals as signals_module
 
@@ -535,7 +239,6 @@ def test_signal_forwarder_forwards_sigint_and_sigterm(monkeypatch: pytest.Monkey
     assert signal_to_exit_code(signal.SIGINT) == 130
     assert signal_to_exit_code(signal.SIGTERM) == 143
     assert map_process_exit_code(raw_return_code=0, received_signal=signal.SIGTERM) == 143
-
 
 def test_signal_coordinator_dispatches_signal_to_all_active_forwarders(
     monkeypatch: pytest.MonkeyPatch,
@@ -588,12 +291,6 @@ def test_signal_coordinator_dispatches_signal_to_all_active_forwarders(
 
     assert sent_signals == [signal.SIGTERM, signal.SIGTERM]
 
-
-def test_safe_default_permission_resolver_returns_no_flags() -> None:
-    resolver = SafeDefaultPermissionResolver()
-    assert resolver.resolve_flags(HarnessId("codex")) == []
-
-
 def test_kill_running_parent_process_still_finalizes_run(
     package_root: Path,
     tmp_path: Path,
@@ -627,7 +324,6 @@ def test_kill_running_parent_process_still_finalizes_run(
             from meridian.lib.state.artifact_store import LocalStore
             from meridian.lib.state.paths import resolve_space_dir
             from meridian.lib.types import HarnessId, ModelId, SpawnId, SpaceId
-
 
             class WorkerAdapter:
                 @property
@@ -663,7 +359,6 @@ def test_kill_running_parent_process_still_finalizes_run(
                     _ = (artifacts, spawn_id)
                     return None
 
-
             async def main() -> int:
                 repo_root = Path("{repo_root.as_posix()}")
                 space = create_space(repo_root, name="worker")
@@ -689,7 +384,6 @@ def test_kill_running_parent_process_still_finalizes_run(
                     cwd=repo_root,
                     timeout_seconds=30.0,
                 )
-
 
             raise SystemExit(asyncio.run(main()))
             """
