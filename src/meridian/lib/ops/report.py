@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from meridian.lib.context import RuntimeContext
 from meridian.lib.ops._runtime import require_space_id, resolve_runtime_root_and_config
 from meridian.lib.ops._spawn_query import resolve_spawn_reference
 from meridian.lib.ops.registry import OperationSpec, operation
@@ -17,13 +17,25 @@ if TYPE_CHECKING:
     from meridian.lib.formatting import FormatContext
 
 
-def _resolve_target_spawn_id(repo_root: Path, spawn_id: str | None, space: str) -> str:
+def _runtime_context(ctx: RuntimeContext | None) -> RuntimeContext:
+    if ctx is not None:
+        return ctx
+    return RuntimeContext.from_environment()
+
+
+def _resolve_target_spawn_id(
+    repo_root: Path,
+    spawn_id: str | None,
+    space: str,
+    *,
+    current_spawn_id: str | None = None,
+) -> str:
     candidate = (spawn_id or "").strip()
     if candidate:
         return resolve_spawn_reference(repo_root, candidate, space)
-    current_spawn_id = os.getenv("MERIDIAN_SPAWN_ID", "").strip()
-    if current_spawn_id:
-        return resolve_spawn_reference(repo_root, current_spawn_id, space)
+    normalized_current_spawn = (current_spawn_id or "").strip()
+    if normalized_current_spawn:
+        return resolve_spawn_reference(repo_root, normalized_current_spawn, space)
     raise ValueError("Spawn ID is required. Pass --spawn or set MERIDIAN_SPAWN_ID.")
 
 
@@ -32,9 +44,16 @@ def _resolve_space_and_spawn(
     repo_root: Path,
     space: str | None,
     spawn_id: str | None,
+    ctx: RuntimeContext | None = None,
 ) -> tuple[str, str]:
-    resolved_space = str(require_space_id(space))
-    resolved_spawn = _resolve_target_spawn_id(repo_root, spawn_id, resolved_space)
+    runtime_context = _runtime_context(ctx)
+    resolved_space = str(require_space_id(space, space_id=runtime_context.space_id))
+    resolved_spawn = _resolve_target_spawn_id(
+        repo_root,
+        spawn_id,
+        resolved_space,
+        current_spawn_id=str(runtime_context.spawn_id or ""),
+    )
     if spawn_store.get_spawn(resolve_space_dir(repo_root, resolved_space), resolved_spawn) is None:
         raise ValueError(f"Spawn '{resolved_spawn}' not found")
     return resolved_space, resolved_spawn
@@ -131,12 +150,16 @@ class ReportSearchOutput:
         return tabular([[item.spawn_id, item.report_path, item.snippet] for item in self.results])
 
 
-def report_create_sync(payload: ReportCreateInput) -> ReportCreateOutput:
+def report_create_sync(
+    payload: ReportCreateInput,
+    ctx: RuntimeContext | None = None,
+) -> ReportCreateOutput:
     repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
     space_id, spawn_id = _resolve_space_and_spawn(
         repo_root=repo_root,
         space=payload.space,
         spawn_id=payload.spawn_id,
+        ctx=ctx,
     )
     content = payload.content.strip()
     if not content:
@@ -154,12 +177,16 @@ def report_create_sync(payload: ReportCreateInput) -> ReportCreateOutput:
     )
 
 
-def report_show_sync(payload: ReportShowInput) -> ReportShowOutput:
+def report_show_sync(
+    payload: ReportShowInput,
+    ctx: RuntimeContext | None = None,
+) -> ReportShowOutput:
     repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
     space_id, spawn_id = _resolve_space_and_spawn(
         repo_root=repo_root,
         space=payload.space,
         spawn_id=payload.spawn_id,
+        ctx=ctx,
     )
     report_path = _report_path(repo_root, space=space_id, spawn_id=spawn_id)
     if not report_path.is_file():
@@ -172,9 +199,13 @@ def report_show_sync(payload: ReportShowInput) -> ReportShowOutput:
     )
 
 
-def report_search_sync(payload: ReportSearchInput) -> ReportSearchOutput:
+def report_search_sync(
+    payload: ReportSearchInput,
+    ctx: RuntimeContext | None = None,
+) -> ReportSearchOutput:
+    runtime_context = _runtime_context(ctx)
     repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
-    resolved_space = str(require_space_id(payload.space))
+    resolved_space = str(require_space_id(payload.space, space_id=runtime_context.space_id))
     limit = payload.limit if payload.limit > 0 else 20
     query = payload.query.strip()
 
@@ -207,16 +238,25 @@ def report_search_sync(payload: ReportSearchInput) -> ReportSearchOutput:
     return ReportSearchOutput(results=tuple(matches))
 
 
-async def report_create(payload: ReportCreateInput) -> ReportCreateOutput:
-    return report_create_sync(payload)
+async def report_create(
+    payload: ReportCreateInput,
+    ctx: RuntimeContext | None = None,
+) -> ReportCreateOutput:
+    return report_create_sync(payload, ctx=ctx)
 
 
-async def report_show(payload: ReportShowInput) -> ReportShowOutput:
-    return report_show_sync(payload)
+async def report_show(
+    payload: ReportShowInput,
+    ctx: RuntimeContext | None = None,
+) -> ReportShowOutput:
+    return report_show_sync(payload, ctx=ctx)
 
 
-async def report_search(payload: ReportSearchInput) -> ReportSearchOutput:
-    return report_search_sync(payload)
+async def report_search(
+    payload: ReportSearchInput,
+    ctx: RuntimeContext | None = None,
+) -> ReportSearchOutput:
+    return report_search_sync(payload, ctx=ctx)
 
 
 operation(

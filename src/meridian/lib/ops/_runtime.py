@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -60,21 +59,35 @@ def build_runtime(repo_root: str | None = None) -> OperationRuntime:
     return build_runtime_from_root_and_config(resolved_root, config)
 
 
-def require_space_id(space: str | None) -> SpaceId:
+def _normalize_space_id(space_id: str | SpaceId | None) -> str:
+    if space_id is None:
+        return ""
+    return str(space_id).strip()
+
+
+def require_space_id(
+    space: str | None,
+    *,
+    space_id: str | SpaceId | None = None,
+) -> SpaceId:
     """Resolve space ID and raise when none is configured."""
 
     resolved = space.strip() if space is not None else ""
     if not resolved:
-        resolved = os.getenv("MERIDIAN_SPACE_ID", "").strip()
+        resolved = _normalize_space_id(space_id)
     if not resolved:
         raise ValueError(SPACE_REQUIRED_ERROR)
     return SpaceId(resolved)
 
 
-def resolve_space_id_or_none(space: str | None) -> str | None:
-    """Resolve space ID from explicit value or env var, returning None if absent."""
+def resolve_space_id_or_none(
+    space: str | None,
+    *,
+    space_id: str | SpaceId | None = None,
+) -> str | None:
+    """Resolve space ID from explicit value or fallback, returning None if absent."""
 
     resolved = space.strip() if space is not None else ""
     if not resolved:
-        resolved = os.getenv("MERIDIAN_SPACE_ID", "").strip()
+        resolved = _normalize_space_id(space_id)
     return resolved or None

@@ -304,8 +304,14 @@ def _resolve_chat_id(*, ctx: RuntimeContext | None = None) -> str:
     return "c0"
 
 
-def _resolve_space(repo_root: Path, payload_space: str | None) -> tuple[SpaceId, Path]:
-    resolved = require_space_id(payload_space)
+def _resolve_space(
+    repo_root: Path,
+    payload_space: str | None,
+    *,
+    ctx: RuntimeContext | None = None,
+) -> tuple[SpaceId, Path]:
+    runtime_context = _runtime_context(ctx)
+    resolved = require_space_id(payload_space, space_id=runtime_context.space_id)
     return resolved, resolve_space_dir(repo_root, resolved)
 
 
@@ -317,7 +323,7 @@ def _init_spawn(
     ctx: RuntimeContext | None = None,
 ) -> _SpawnContext:
     runtime_context = _runtime_context(ctx)
-    space_id, space_dir = _resolve_space(runtime.repo_root, payload.space)
+    space_id, space_dir = _resolve_space(runtime.repo_root, payload.space, ctx=runtime_context)
     spawn_id = spawn_store.start_spawn(
         space_dir,
         chat_id=_resolve_chat_id(ctx=runtime_context),

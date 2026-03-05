@@ -18,6 +18,7 @@ from uuid import uuid4
 from meridian.lib.config._paths import resolve_repo_root
 from meridian.lib.config.routing import route_model
 from meridian.lib.config.settings import MeridianConfig, load_config
+from meridian.lib.context import RuntimeContext
 from meridian.lib.exec.env import (
     HARNESS_ENV_PASS_THROUGH,
     build_harness_child_env,
@@ -542,13 +543,15 @@ def _build_space_env(
     spawn_id: str | None = None,
     harness_context: _PrimaryHarnessContext | None = None,
 ) -> dict[str, str]:
-    env_overrides = {
-        "MERIDIAN_SPACE_ID": str(request.space_id),
-        "MERIDIAN_DEPTH": os.environ.get("MERIDIAN_DEPTH", "0"),
-        "MERIDIAN_REPO_ROOT": repo_root.as_posix(),
-        "MERIDIAN_SPACE_PROMPT": prompt,
-        "MERIDIAN_STATE_ROOT": resolve_state_paths(repo_root).root_dir.resolve().as_posix(),
-    }
+    current_context = RuntimeContext.from_environment()
+    runtime_context = RuntimeContext(
+        space_id=request.space_id,
+        depth=current_context.depth,
+        repo_root=repo_root.resolve(),
+        state_root=resolve_state_paths(repo_root).root_dir.resolve(),
+    )
+    env_overrides = runtime_context.to_env_overrides()
+    env_overrides["MERIDIAN_SPACE_PROMPT"] = prompt
     if spawn_id is not None and spawn_id.strip():
         env_overrides["MERIDIAN_SPAWN_ID"] = spawn_id.strip()
     autocompact_pct = (

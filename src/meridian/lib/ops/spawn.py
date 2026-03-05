@@ -9,6 +9,7 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
+from meridian.lib.context import RuntimeContext
 from meridian.lib.exec.spawn import execute_with_finalization
 from meridian.lib.ops._runtime import (
     build_runtime_from_root_and_config,
@@ -66,33 +67,58 @@ def _minutes_to_seconds(timeout_minutes: float | None) -> float | None:
     return timeout_minutes * 60.0
 
 
-def _resolve_space_dir(repo_root: Path, space: str | None = None) -> tuple[str, Path]:
-    space_id = require_space_id(space)
+def _runtime_context(ctx: RuntimeContext | None) -> RuntimeContext:
+    if ctx is not None:
+        return ctx
+    return RuntimeContext.from_environment()
+
+
+def _context_space_id(space_id: str | None) -> str | None:
+    normalized = (space_id or "").strip()
+    return normalized or None
+
+
+def _resolve_space_dir(
+    repo_root: Path,
+    space: str | None = None,
+    *,
+    space_id: str | None = None,
+) -> tuple[str, Path]:
+    space_id = require_space_id(space, space_id=space_id)
     return str(space_id), resolve_space_dir(repo_root, space_id)
 
 
-def _resolve_or_create_space(explicit: str | None, repo_root: Path) -> tuple[str, bool]:
+def _resolve_or_create_space(
+    explicit: str | None,
+    repo_root: Path,
+    *,
+    space_id: str | None = None,
+) -> tuple[str, bool]:
     """Resolve space from explicit value / env, or auto-create one.
 
     Returns (space_id, auto_created).
     """
-    resolved = resolve_space_id_or_none(explicit)
+    resolved = resolve_space_id_or_none(explicit, space_id=space_id)
     if resolved is not None:
         return resolved, False
     record = space_file.create_space(repo_root)
     return record.id, True
 
 
-def _non_empty_space(space: str | None) -> str | None:
-    if space is None:
-        return None
-    normalized = space.strip()
+def _non_empty_space(space: str | None, *, space_id: str | None = None) -> str | None:
+    normalized = (space or "").strip()
+    if not normalized:
+        normalized = _context_space_id(space_id) or ""
     if not normalized:
         return None
     return normalized
 
 
-def spawn_create_sync(payload: SpawnCreateInput) -> SpawnActionOutput:
+def spawn_create_sync(
+    payload: SpawnCreateInput,
+    ctx: RuntimeContext | None = None,
+) -> SpawnActionOutput:
+    runtime_context = _runtime_context(ctx)
     _spawn_prepare_module.build_permission_config = build_permission_config
     _spawn_prepare_module.validate_permission_config_for_harness = (
         validate_permission_config_for_harness
@@ -103,7 +129,11 @@ def spawn_create_sync(payload: SpawnCreateInput) -> SpawnActionOutput:
 
     payload, preflight_warning = _validate_create_input(payload)
     resolved_root, config = resolve_runtime_root_and_config(payload.repo_root)
-    space_id_str, auto_created = _resolve_or_create_space(payload.space, resolved_root)
+    space_id_str, auto_created = _resolve_or_create_space(
+        payload.space,
+        resolved_root,
+        space_id=_context_space_id(str(runtime_context.space_id or "")),
+    )
     payload = replace(payload, space=space_id_str)
     if auto_created:
         auto_warning = f"Auto-created space {space_id_str}. Pass --space {space_id_str} to add more spawns to this space."
@@ -111,7 +141,7 @@ def spawn_create_sync(payload: SpawnCreateInput) -> SpawnActionOutput:
 
     runtime = None
     if not payload.dry_run:
-        current_depth, max_depth = _depth_limits(config.max_depth)
+        current_depth, max_depth = _depth_limits(config.max_depth, ctx=runtime_context)
         if current_depth >= max_depth:
             return _depth_exceeded_output(current_depth, max_depth)
         runtime = build_runtime_from_root_and_config(resolved_root, config)
@@ -136,20 +166,41 @@ def spawn_create_sync(payload: SpawnCreateInput) -> SpawnActionOutput:
     if runtime is None:
         raise RuntimeError("Spawn runtime was not initialized.")
     if payload.background:
-        return _execute_spawn_background(payload=payload, prepared=prepared, runtime=runtime)
-    return _execute_spawn_blocking(payload=payload, prepared=prepared, runtime=runtime)
+        return _execute_spawn_background(
+            payload=payload,
+            prepared=prepared,
+            runtime=runtime,
+            ctx=runtime_context,
+        )
+    return _execute_spawn_blocking(
+        payload=payload,
+        prepared=prepared,
+        runtime=runtime,
+        ctx=runtime_context,
+    )
 
 
-async def spawn_create(payload: SpawnCreateInput) -> SpawnActionOutput:
-    return await asyncio.to_thread(spawn_create_sync, payload)
+async def spawn_create(
+    payload: SpawnCreateInput,
+    ctx: RuntimeContext | None = None,
+) -> SpawnActionOutput:
+    return await asyncio.to_thread(spawn_create_sync, payload, ctx=ctx)
 
 
-def spawn_list_sync(payload: SpawnListInput) -> SpawnListOutput:
+def spawn_list_sync(
+    payload: SpawnListInput,
+    ctx: RuntimeContext | None = None,
+) -> SpawnListOutput:
+    runtime_context = _runtime_context(ctx)
     if payload.no_space:
         return SpawnListOutput(spawns=())
 
     repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
-    current_space_id, space_dir = _resolve_space_dir(repo_root, payload.space)
+    current_space_id, space_dir = _resolve_space_dir(
+        repo_root,
+        payload.space,
+        space_id=_context_space_id(str(runtime_context.space_id or "")),
+    )
 
     spawns = list(reversed(spawn_store.list_spawns(space_dir)))
     if payload.status is not None:
@@ -176,13 +227,24 @@ def spawn_list_sync(payload: SpawnListInput) -> SpawnListOutput:
     )
 
 
-async def spawn_list(payload: SpawnListInput) -> SpawnListOutput:
-    return await asyncio.to_thread(spawn_list_sync, payload)
+async def spawn_list(
+    payload: SpawnListInput,
+    ctx: RuntimeContext | None = None,
+) -> SpawnListOutput:
+    return await asyncio.to_thread(spawn_list_sync, payload, ctx=ctx)
 
 
-def spawn_stats_sync(payload: SpawnStatsInput) -> SpawnStatsOutput:
+def spawn_stats_sync(
+    payload: SpawnStatsInput,
+    ctx: RuntimeContext | None = None,
+) -> SpawnStatsOutput:
+    runtime_context = _runtime_context(ctx)
     repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
-    current_space_id, space_dir = _resolve_space_dir(repo_root, payload.space)
+    current_space_id, space_dir = _resolve_space_dir(
+        repo_root,
+        payload.space,
+        space_id=_context_space_id(str(runtime_context.space_id or "")),
+    )
 
     spawns = spawn_store.list_spawns(space_dir)
     if payload.session is not None and payload.session.strip():
@@ -226,13 +288,23 @@ def spawn_stats_sync(payload: SpawnStatsInput) -> SpawnStatsOutput:
     )
 
 
-async def spawn_stats(payload: SpawnStatsInput) -> SpawnStatsOutput:
-    return await asyncio.to_thread(spawn_stats_sync, payload)
+async def spawn_stats(
+    payload: SpawnStatsInput,
+    ctx: RuntimeContext | None = None,
+) -> SpawnStatsOutput:
+    return await asyncio.to_thread(spawn_stats_sync, payload, ctx=ctx)
 
 
-def spawn_show_sync(payload: SpawnShowInput) -> SpawnDetailOutput:
+def spawn_show_sync(
+    payload: SpawnShowInput,
+    ctx: RuntimeContext | None = None,
+) -> SpawnDetailOutput:
+    runtime_context = _runtime_context(ctx)
     repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
-    resolved_space = _non_empty_space(payload.space)
+    resolved_space = _non_empty_space(
+        payload.space,
+        space_id=_context_space_id(str(runtime_context.space_id or "")),
+    )
     spawn_id = resolve_spawn_reference(repo_root, payload.spawn_id, resolved_space)
     row = _read_spawn_row(repo_root, spawn_id, resolved_space)
     if row is None:
@@ -246,8 +318,11 @@ def spawn_show_sync(payload: SpawnShowInput) -> SpawnDetailOutput:
     )
 
 
-async def spawn_show(payload: SpawnShowInput) -> SpawnDetailOutput:
-    return await asyncio.to_thread(spawn_show_sync, payload)
+async def spawn_show(
+    payload: SpawnShowInput,
+    ctx: RuntimeContext | None = None,
+) -> SpawnDetailOutput:
+    return await asyncio.to_thread(spawn_show_sync, payload, ctx=ctx)
 
 
 def _read_background_pid(space_dir: Path, spawn_id: str) -> int:
@@ -263,11 +338,22 @@ def _read_background_pid(space_dir: Path, spawn_id: str) -> int:
     return pid
 
 
-def spawn_cancel_sync(payload: SpawnCancelInput) -> SpawnActionOutput:
+def spawn_cancel_sync(
+    payload: SpawnCancelInput,
+    ctx: RuntimeContext | None = None,
+) -> SpawnActionOutput:
+    runtime_context = _runtime_context(ctx)
     repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
-    resolved_space = _non_empty_space(payload.space)
+    resolved_space = _non_empty_space(
+        payload.space,
+        space_id=_context_space_id(str(runtime_context.space_id or "")),
+    )
     spawn_id = resolve_spawn_reference(repo_root, payload.spawn_id, resolved_space)
-    current_space_id, space_dir = _resolve_space_dir(repo_root, resolved_space)
+    current_space_id, space_dir = _resolve_space_dir(
+        repo_root,
+        resolved_space,
+        space_id=_context_space_id(str(runtime_context.space_id or "")),
+    )
     row = _read_spawn_row(repo_root, spawn_id, current_space_id)
     if row is None:
         raise ValueError(f"Spawn '{spawn_id}' not found")
@@ -305,8 +391,11 @@ def spawn_cancel_sync(payload: SpawnCancelInput) -> SpawnActionOutput:
     )
 
 
-async def spawn_cancel(payload: SpawnCancelInput) -> SpawnActionOutput:
-    return await asyncio.to_thread(spawn_cancel_sync, payload)
+async def spawn_cancel(
+    payload: SpawnCancelInput,
+    ctx: RuntimeContext | None = None,
+) -> SpawnActionOutput:
+    return await asyncio.to_thread(spawn_cancel_sync, payload, ctx=ctx)
 
 
 def _spawn_is_terminal(status: str) -> bool:
@@ -387,9 +476,16 @@ def _emit_wait_heartbeat(message: str) -> None:
     get_active_sink(fallback=TextSink(format="text")).heartbeat(message)
 
 
-def spawn_wait_sync(payload: SpawnWaitInput) -> SpawnWaitMultiOutput:
+def spawn_wait_sync(
+    payload: SpawnWaitInput,
+    ctx: RuntimeContext | None = None,
+) -> SpawnWaitMultiOutput:
+    runtime_context = _runtime_context(ctx)
     repo_root, config = resolve_runtime_root_and_config(payload.repo_root)
-    resolved_space = _non_empty_space(payload.space)
+    resolved_space = _non_empty_space(
+        payload.space,
+        space_id=_context_space_id(str(runtime_context.space_id or "")),
+    )
     spawn_ids = resolve_spawn_references(repo_root, _normalize_wait_spawn_ids(payload), resolved_space)
     timeout_minutes = (
         payload.timeout if payload.timeout is not None else config.wait_timeout_minutes
@@ -454,16 +550,21 @@ def spawn_wait_sync(payload: SpawnWaitInput) -> SpawnWaitMultiOutput:
         time.sleep(poll)
 
 
-async def spawn_wait(payload: SpawnWaitInput) -> SpawnWaitMultiOutput:
-    return await asyncio.to_thread(spawn_wait_sync, payload)
+async def spawn_wait(
+    payload: SpawnWaitInput,
+    ctx: RuntimeContext | None = None,
+) -> SpawnWaitMultiOutput:
+    return await asyncio.to_thread(spawn_wait_sync, payload, ctx=ctx)
 
 
 def _source_spawn_for_follow_up(
     payload_spawn_id: str,
     repo_root: Path,
     space: str | None = None,
+    *,
+    context_space_id: str | None = None,
 ) -> tuple[str, spawn_store.SpawnRecord]:
-    resolved_space = _non_empty_space(space)
+    resolved_space = _non_empty_space(space, space_id=context_space_id)
     resolved_spawn_id = resolve_spawn_reference(repo_root, payload_spawn_id, resolved_space)
     row = _read_spawn_row(repo_root, resolved_spawn_id, resolved_space)
     if row is None:
@@ -493,12 +594,21 @@ def _with_command(result: SpawnActionOutput, command: str) -> SpawnActionOutput:
     return replace(result, command=command)
 
 
-def spawn_continue_sync(payload: SpawnContinueInput) -> SpawnActionOutput:
+def spawn_continue_sync(
+    payload: SpawnContinueInput,
+    ctx: RuntimeContext | None = None,
+) -> SpawnActionOutput:
+    runtime_context = _runtime_context(ctx)
     repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
+    resolved_space = _non_empty_space(
+        payload.space,
+        space_id=_context_space_id(str(runtime_context.space_id or "")),
+    )
     resolved_spawn_id, source_spawn = _source_spawn_for_follow_up(
         payload.spawn_id,
         repo_root,
-        payload.space,
+        resolved_space,
+        context_space_id=_context_space_id(str(runtime_context.space_id or "")),
     )
     derived_prompt = _prompt_for_follow_up(source_spawn, resolved_spawn_id, payload.prompt)
     source_harness = (source_spawn.harness or "").strip() or None
@@ -508,17 +618,20 @@ def spawn_continue_sync(payload: SpawnContinueInput) -> SpawnActionOutput:
         model=_model_for_follow_up(source_spawn, payload.model),
         repo_root=payload.repo_root,
         timeout=payload.timeout,
-        space=payload.space,
+        space=resolved_space,
         continue_harness_session_id=source_session_id,
         continue_harness=source_harness,
         continue_fork=payload.fork,
     )
-    result = spawn_create_sync(create_input)
+    result = spawn_create_sync(create_input, ctx=runtime_context)
     return _with_command(result, "spawn.continue")
 
 
-async def spawn_continue(payload: SpawnContinueInput) -> SpawnActionOutput:
-    return await asyncio.to_thread(spawn_continue_sync, payload)
+async def spawn_continue(
+    payload: SpawnContinueInput,
+    ctx: RuntimeContext | None = None,
+) -> SpawnActionOutput:
+    return await asyncio.to_thread(spawn_continue_sync, payload, ctx=ctx)
 
 
 operation(
