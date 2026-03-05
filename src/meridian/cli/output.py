@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import json
 import sys
-from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, TextIO, cast
 
 from meridian.lib.formatting import FormatContext, TextFormattable
+from meridian.lib.sink import NullSink, OutputSink
 from meridian.lib.serialization import to_jsonable
 
 OutputFormat = Literal["text", "json", "porcelain"]
@@ -21,20 +21,6 @@ _DEFAULT_FORMAT_CTX = FormatContext()
 @dataclass(frozen=True, slots=True)
 class OutputConfig:
     format: OutputFormat
-
-
-class OutputSink(Protocol):
-    def result(self, payload: Any) -> None: ...
-
-    def status(self, message: str) -> None: ...
-
-    def warning(self, message: str) -> None: ...
-
-    def error(self, message: str, exit_code: int = 1) -> None: ...
-
-    def heartbeat(self, message: str) -> None: ...
-
-    def event(self, payload: dict[str, Any]) -> None: ...
 
 
 class _FlushableSink(Protocol):
@@ -219,31 +205,7 @@ class AgentSink:
         self._stdout.flush()
 
 
-class NullSink:
-    def result(self, payload: Any) -> None:
-        _ = payload
-
-    def status(self, message: str) -> None:
-        _ = message
-
-    def warning(self, message: str) -> None:
-        _ = message
-
-    def error(self, message: str, exit_code: int = 1) -> None:
-        _ = (message, exit_code)
-
-    def heartbeat(self, message: str) -> None:
-        _ = message
-
-    def event(self, payload: dict[str, Any]) -> None:
-        _ = payload
-
-    def flush(self) -> None:
-        return
-
-
 _NULL_SINK = NullSink()
-_ACTIVE_SINK: ContextVar[OutputSink | None] = ContextVar("_ACTIVE_SINK", default=None)
 
 
 def create_sink(config: OutputConfig, *, agent_mode: bool = False) -> OutputSink:
@@ -256,18 +218,6 @@ def create_sink(config: OutputConfig, *, agent_mode: bool = False) -> OutputSink
     return _NULL_SINK
 
 
-def set_active_sink(sink: OutputSink) -> Token[OutputSink | None]:
-    return _ACTIVE_SINK.set(sink)
-
-
-def reset_active_sink(token: Token[OutputSink | None]) -> None:
-    _ACTIVE_SINK.reset(token)
-
-
-def get_active_sink(*, fallback: OutputSink | None = None) -> OutputSink:
-    return _ACTIVE_SINK.get() or fallback or _NULL_SINK
-
-
 def flush_sink(sink: OutputSink) -> None:
     flush = getattr(sink, "flush", None)
     if callable(flush):
@@ -278,21 +228,7 @@ def flush_sink(sink: OutputSink) -> None:
             return
 
 
-def flush_active_sink() -> None:
-    sink = _ACTIVE_SINK.get()
-    if sink is None:
-        return
-    flush_sink(sink)
+def emit(value: Any, *, sink: OutputSink) -> None:
+    """Emit one payload via an explicit output sink."""
 
-
-def emit(value: Any, config: OutputConfig) -> None:
-    """Emit one payload according to the configured output mode."""
-
-    sink = _ACTIVE_SINK.get()
-    if sink is not None:
-        sink.result(value)
-        return
-
-    ephemeral_sink = create_sink(config)
-    ephemeral_sink.result(value)
-    flush_sink(ephemeral_sink)
+    sink.result(value)

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from meridian.lib.config._paths import resolve_repo_root
 from meridian.lib.config.settings import MeridianConfig, load_config
 from meridian.lib.harness.registry import HarnessRegistry, get_default_harness_registry
+from meridian.lib.sink import NullSink, OutputSink
 from meridian.lib.state.artifact_store import LocalStore
 from meridian.lib.state.paths import resolve_state_paths
 from meridian.lib.types import SpaceId
@@ -26,13 +27,17 @@ class OperationRuntime:
     config: MeridianConfig
     harness_registry: HarnessRegistry
     artifacts: LocalStore
+    sink: OutputSink = field(default_factory=NullSink)
 
 
 def resolve_runtime_root_and_config(
     repo_root: str | None = None,
+    *,
+    sink: OutputSink | None = None,
 ) -> tuple[Path, MeridianConfig]:
     """Resolve repository root and load operational config."""
 
+    _ = sink
     explicit_root = Path(repo_root).expanduser().resolve() if repo_root else None
     resolved_root = resolve_repo_root(explicit_root)
     return resolved_root, load_config(resolved_root)
@@ -41,6 +46,8 @@ def resolve_runtime_root_and_config(
 def build_runtime_from_root_and_config(
     repo_root: Path,
     config: MeridianConfig,
+    *,
+    sink: OutputSink | None = None,
 ) -> OperationRuntime:
     """Build a runtime bundle from one pre-resolved root and config."""
 
@@ -49,14 +56,19 @@ def build_runtime_from_root_and_config(
         config=config,
         harness_registry=get_default_harness_registry(),
         artifacts=LocalStore(resolve_state_paths(repo_root).artifacts_dir),
+        sink=sink or NullSink(),
     )
 
 
-def build_runtime(repo_root: str | None = None) -> OperationRuntime:
+def build_runtime(
+    repo_root: str | None = None,
+    *,
+    sink: OutputSink | None = None,
+) -> OperationRuntime:
     """Build a runtime bundle rooted at one repository path."""
 
-    resolved_root, config = resolve_runtime_root_and_config(repo_root)
-    return build_runtime_from_root_and_config(resolved_root, config)
+    resolved_root, config = resolve_runtime_root_and_config(repo_root, sink=sink)
+    return build_runtime_from_root_and_config(resolved_root, config, sink=sink)
 
 
 def _normalize_space_id(space_id: str | SpaceId | None) -> str:

@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, Protocol, cast
 
 import structlog
-
 from meridian.lib.config.agent import (
     AgentProfile,
     load_agent_profile,
@@ -41,6 +40,7 @@ from meridian.lib.safety.permissions import (
     build_permission_resolver,
     parse_permission_tier,
 )
+from meridian.lib.sink import OutputSink
 from meridian.lib.space.session_store import (
     start_session,
     stop_session,
@@ -135,7 +135,12 @@ def _depth_limits(max_depth: int, *, ctx: RuntimeContext | None = None) -> tuple
     return current_depth, max_depth
 
 
-def _emit_subrun_event(payload: dict[str, Any], *, ctx: RuntimeContext | None = None) -> None:
+def _emit_subrun_event(
+    payload: dict[str, Any],
+    *,
+    sink: OutputSink,
+    ctx: RuntimeContext | None = None,
+) -> None:
     runtime_context = _runtime_context(ctx)
     if runtime_context.depth <= 0:
         return
@@ -144,9 +149,7 @@ def _emit_subrun_event(payload: dict[str, Any], *, ctx: RuntimeContext | None = 
     parent_spawn_id = str(runtime_context.spawn_id or "")
     event_payload["parent"] = parent_spawn_id or None
     event_payload["ts"] = time.time()
-    from meridian.cli.output import TextSink, get_active_sink
-
-    get_active_sink(fallback=TextSink(format="text")).event(event_payload)
+    sink.event(event_payload)
 
 
 def _depth_exceeded_output(current_depth: int, max_depth: int) -> SpawnActionOutput:
@@ -350,7 +353,7 @@ def _init_spawn(
     }
     if prepared.agent_name is not None:
         run_start_event["agent"] = prepared.agent_name
-    _emit_subrun_event(run_start_event, ctx=runtime_context)
+    _emit_subrun_event(run_start_event, sink=runtime.sink, ctx=runtime_context)
     return _SpawnContext(
         spawn=spawn,
         space_id=space_id,
@@ -441,10 +444,11 @@ async def _execute_existing_spawn(
     session_agent: str = "",
     session_agent_path: str = "",
     session_skill_paths: tuple[str, ...] = (),
+    sink: OutputSink | None = None,
     ctx: RuntimeContext | None = None,
 ) -> int:
     runtime_context = _runtime_context(ctx)
-    runtime = build_runtime(str(repo_root))
+    runtime = build_runtime(str(repo_root), sink=sink)
     space_id_text = (space_id_hint or str(runtime_context.space_id or "")).strip()
     if not space_id_text:
         logger.error("Missing space ID for spawn execution.", spawn_id=str(spawn_id))
@@ -756,9 +760,7 @@ def _execute_spawn_blocking(
                 quiet=payload.quiet,
             )
             if rendered_stderr is not None:
-                from meridian.cli.output import TextSink, get_active_sink
-
-                get_active_sink(fallback=TextSink(format="text")).status(rendered_stderr)
+                runtime.sink.status(rendered_stderr)
     done_secs = duration
     tokens_total: int | None = None
     if row is not None:
@@ -778,6 +780,7 @@ def _execute_spawn_blocking(
             "tok": tokens_total,
             "d": context.current_depth,
         },
+        sink=runtime.sink,
         ctx=runtime_context,
     )
 
@@ -814,6 +817,7 @@ async def _execute_spawn_non_blocking(
     session_agent: str = "",
     session_agent_path: str = "",
     session_skill_paths: tuple[str, ...] = (),
+    sink: OutputSink | None = None,
     ctx: RuntimeContext | None = None,
 ) -> None:
     _ = await _execute_existing_spawn(
@@ -831,6 +835,7 @@ async def _execute_spawn_non_blocking(
         session_agent=session_agent,
         session_agent_path=session_agent_path,
         session_skill_paths=session_skill_paths,
+        sink=sink,
         ctx=ctx,
     )
 

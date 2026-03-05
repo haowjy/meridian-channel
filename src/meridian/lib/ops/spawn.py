@@ -22,6 +22,7 @@ from meridian.lib.safety.permissions import (
     build_permission_config,
     validate_permission_config_for_harness,
 )
+from meridian.lib.sink import NullSink, OutputSink
 from meridian.lib.space import space_file
 from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_space_dir
@@ -117,6 +118,8 @@ def _non_empty_space(space: str | None, *, space_id: str | None = None) -> str |
 def spawn_create_sync(
     payload: SpawnCreateInput,
     ctx: RuntimeContext | None = None,
+    *,
+    sink: OutputSink | None = None,
 ) -> SpawnActionOutput:
     runtime_context = _runtime_context(ctx)
     _spawn_prepare_module.build_permission_config = build_permission_config
@@ -144,7 +147,7 @@ def spawn_create_sync(
         current_depth, max_depth = _depth_limits(config.max_depth, ctx=runtime_context)
         if current_depth >= max_depth:
             return _depth_exceeded_output(current_depth, max_depth)
-        runtime = build_runtime_from_root_and_config(resolved_root, config)
+        runtime = build_runtime_from_root_and_config(resolved_root, config, sink=sink)
 
     prepared = _build_create_payload(payload, runtime=runtime, preflight_warning=preflight_warning)
     if payload.dry_run:
@@ -183,14 +186,19 @@ def spawn_create_sync(
 async def spawn_create(
     payload: SpawnCreateInput,
     ctx: RuntimeContext | None = None,
+    *,
+    sink: OutputSink | None = None,
 ) -> SpawnActionOutput:
-    return await asyncio.to_thread(spawn_create_sync, payload, ctx=ctx)
+    return await asyncio.to_thread(spawn_create_sync, payload, ctx=ctx, sink=sink)
 
 
 def spawn_list_sync(
     payload: SpawnListInput,
     ctx: RuntimeContext | None = None,
+    *,
+    sink: OutputSink | None = None,
 ) -> SpawnListOutput:
+    _ = sink
     runtime_context = _runtime_context(ctx)
     if payload.no_space:
         return SpawnListOutput(spawns=())
@@ -230,14 +238,19 @@ def spawn_list_sync(
 async def spawn_list(
     payload: SpawnListInput,
     ctx: RuntimeContext | None = None,
+    *,
+    sink: OutputSink | None = None,
 ) -> SpawnListOutput:
-    return await asyncio.to_thread(spawn_list_sync, payload, ctx=ctx)
+    return await asyncio.to_thread(spawn_list_sync, payload, ctx=ctx, sink=sink)
 
 
 def spawn_stats_sync(
     payload: SpawnStatsInput,
     ctx: RuntimeContext | None = None,
+    *,
+    sink: OutputSink | None = None,
 ) -> SpawnStatsOutput:
+    _ = sink
     runtime_context = _runtime_context(ctx)
     repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
     current_space_id, space_dir = _resolve_space_dir(
@@ -291,14 +304,19 @@ def spawn_stats_sync(
 async def spawn_stats(
     payload: SpawnStatsInput,
     ctx: RuntimeContext | None = None,
+    *,
+    sink: OutputSink | None = None,
 ) -> SpawnStatsOutput:
-    return await asyncio.to_thread(spawn_stats_sync, payload, ctx=ctx)
+    return await asyncio.to_thread(spawn_stats_sync, payload, ctx=ctx, sink=sink)
 
 
 def spawn_show_sync(
     payload: SpawnShowInput,
     ctx: RuntimeContext | None = None,
+    *,
+    sink: OutputSink | None = None,
 ) -> SpawnDetailOutput:
+    _ = sink
     runtime_context = _runtime_context(ctx)
     repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
     resolved_space = _non_empty_space(
@@ -321,8 +339,10 @@ def spawn_show_sync(
 async def spawn_show(
     payload: SpawnShowInput,
     ctx: RuntimeContext | None = None,
+    *,
+    sink: OutputSink | None = None,
 ) -> SpawnDetailOutput:
-    return await asyncio.to_thread(spawn_show_sync, payload, ctx=ctx)
+    return await asyncio.to_thread(spawn_show_sync, payload, ctx=ctx, sink=sink)
 
 
 def _read_background_pid(space_dir: Path, spawn_id: str) -> int:
@@ -341,7 +361,10 @@ def _read_background_pid(space_dir: Path, spawn_id: str) -> int:
 def spawn_cancel_sync(
     payload: SpawnCancelInput,
     ctx: RuntimeContext | None = None,
+    *,
+    sink: OutputSink | None = None,
 ) -> SpawnActionOutput:
+    _ = sink
     runtime_context = _runtime_context(ctx)
     repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
     resolved_space = _non_empty_space(
@@ -394,8 +417,10 @@ def spawn_cancel_sync(
 async def spawn_cancel(
     payload: SpawnCancelInput,
     ctx: RuntimeContext | None = None,
+    *,
+    sink: OutputSink | None = None,
 ) -> SpawnActionOutput:
-    return await asyncio.to_thread(spawn_cancel_sync, payload, ctx=ctx)
+    return await asyncio.to_thread(spawn_cancel_sync, payload, ctx=ctx, sink=sink)
 
 
 def _spawn_is_terminal(status: str) -> bool:
@@ -454,7 +479,7 @@ def _resolve_wait_heartbeat_mode(*, verbose: bool, quiet: bool, config_verbosity
     preset = (config_verbosity or "").strip().lower()
     if preset in {"quiet", "verbose", "debug"}:
         return preset
-    return "normal"
+    return "quiet"
 
 
 def _render_wait_heartbeat(pending: set[str], *, elapsed_secs: float, mode: str) -> str | None:
@@ -470,16 +495,17 @@ def _render_wait_heartbeat(pending: set[str], *, elapsed_secs: float, mode: str)
     return f"waiting for {pending_count} spawn(s) to finish..."
 
 
-def _emit_wait_heartbeat(message: str) -> None:
-    from meridian.cli.output import TextSink, get_active_sink
-
-    get_active_sink(fallback=TextSink(format="text")).heartbeat(message)
+def _emit_wait_heartbeat(message: str, *, sink: OutputSink) -> None:
+    sink.heartbeat(message)
 
 
 def spawn_wait_sync(
     payload: SpawnWaitInput,
     ctx: RuntimeContext | None = None,
+    *,
+    sink: OutputSink | None = None,
 ) -> SpawnWaitMultiOutput:
+    active_sink = sink or NullSink()
     runtime_context = _runtime_context(ctx)
     repo_root, config = resolve_runtime_root_and_config(payload.repo_root)
     resolved_space = _non_empty_space(
@@ -545,7 +571,7 @@ def spawn_wait_sync(
                 mode=heartbeat_mode,
             )
             if heartbeat is not None:
-                _emit_wait_heartbeat(heartbeat)
+                _emit_wait_heartbeat(heartbeat, sink=active_sink)
             next_heartbeat = now + heartbeat_interval
         time.sleep(poll)
 
@@ -553,8 +579,10 @@ def spawn_wait_sync(
 async def spawn_wait(
     payload: SpawnWaitInput,
     ctx: RuntimeContext | None = None,
+    *,
+    sink: OutputSink | None = None,
 ) -> SpawnWaitMultiOutput:
-    return await asyncio.to_thread(spawn_wait_sync, payload, ctx=ctx)
+    return await asyncio.to_thread(spawn_wait_sync, payload, ctx=ctx, sink=sink)
 
 
 def _source_spawn_for_follow_up(
@@ -597,6 +625,8 @@ def _with_command(result: SpawnActionOutput, command: str) -> SpawnActionOutput:
 def spawn_continue_sync(
     payload: SpawnContinueInput,
     ctx: RuntimeContext | None = None,
+    *,
+    sink: OutputSink | None = None,
 ) -> SpawnActionOutput:
     runtime_context = _runtime_context(ctx)
     repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
@@ -623,15 +653,17 @@ def spawn_continue_sync(
         continue_harness=source_harness,
         continue_fork=payload.fork,
     )
-    result = spawn_create_sync(create_input, ctx=runtime_context)
+    result = spawn_create_sync(create_input, ctx=runtime_context, sink=sink)
     return _with_command(result, "spawn.continue")
 
 
 async def spawn_continue(
     payload: SpawnContinueInput,
     ctx: RuntimeContext | None = None,
+    *,
+    sink: OutputSink | None = None,
 ) -> SpawnActionOutput:
-    return await asyncio.to_thread(spawn_continue_sync, payload, ctx=ctx)
+    return await asyncio.to_thread(spawn_continue_sync, payload, ctx=ctx, sink=sink)
 
 
 operation(

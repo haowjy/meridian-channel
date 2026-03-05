@@ -18,13 +18,9 @@ from meridian.cli.doctor_cmd import register_doctor_command
 from meridian.cli.models_cmd import register_models_commands
 from meridian.cli.output import (
     OutputConfig,
-    TextSink,
     create_sink,
-    flush_active_sink,
-    get_active_sink,
+    flush_sink,
     normalize_output_format,
-    reset_active_sink,
-    set_active_sink,
 )
 from meridian.cli.output import emit as emit_output
 from meridian.cli.report_cmd import register_report_commands
@@ -34,6 +30,7 @@ from meridian.lib.config._paths import resolve_repo_root
 from meridian.lib.harness.registry import get_default_harness_registry
 from meridian.lib.harness.session_detection import infer_harness_from_untracked_session_ref
 from meridian.lib.ops.spawn import SpawnActionOutput
+from meridian.lib.sink import OutputSink
 from meridian.lib.ops.space import SpaceActionOutput
 from meridian.lib.space import space_file
 from meridian.lib.space.launch import SpaceLaunchRequest, cleanup_orphaned_locks, launch_primary
@@ -75,6 +72,7 @@ class GlobalOptions:
     yes: bool = False
     no_input: bool = False
     output_explicit: bool = False
+    sink: OutputSink | None = None
 
 
 _GLOBAL_OPTIONS: ContextVar[GlobalOptions | None] = ContextVar("_GLOBAL_OPTIONS", default=None)
@@ -99,6 +97,22 @@ def get_global_options() -> GlobalOptions:
 
     default = GlobalOptions(output=OutputConfig(format="text"))
     return _GLOBAL_OPTIONS.get() or default
+
+
+def _resolve_sink(opts: GlobalOptions | None) -> tuple[OutputSink, bool]:
+    if opts is not None and opts.sink is not None:
+        return opts.sink, False
+    if opts is None:
+        return create_sink(OutputConfig(format="text")), True
+    return create_sink(
+        opts.output,
+        agent_mode=_agent_sink_enabled(output_explicit=opts.output_explicit),
+    ), True
+
+
+def current_output_sink() -> OutputSink:
+    sink, _ = _resolve_sink(_GLOBAL_OPTIONS.get())
+    return sink
 
 
 def _spawn_spawn_metadata_line(payload: SpawnActionOutput) -> str:
@@ -166,8 +180,7 @@ def _truncate_spawn_failure_fields(payload: SpawnActionOutput) -> SpawnActionOut
     return replace(payload, message=message, error=error)
 
 
-def _emit_spawn_text(payload: SpawnActionOutput) -> None:
-    sink = get_active_sink(fallback=TextSink(format="text"))
+def _emit_spawn_text(payload: SpawnActionOutput, *, sink: OutputSink) -> None:
     sink.status(_spawn_spawn_metadata_line(payload))
     if payload.warning:
         sink.warning(payload.warning)
@@ -178,7 +191,7 @@ def _emit_spawn_text(payload: SpawnActionOutput) -> None:
 
     if payload.spawn_id is None:
         # No stable spawn ID to resolve report from (e.g. preflight failure); defer to default emit.
-        emit_output(payload, OutputConfig(format="text"))
+        emit_output(payload, sink=sink)
         return
 
     report_text = _read_spawn_report_text(payload.spawn_id)
@@ -201,6 +214,7 @@ def _emit_spawn_text(payload: SpawnActionOutput) -> None:
 def emit(payload: object) -> None:
     """Write command output using current output format settings."""
     options = get_global_options()
+    sink, flush_after = _resolve_sink(options)
     if (
         options.output.format == "text"
         and isinstance(payload, SpawnActionOutput)
@@ -208,11 +222,15 @@ def emit(payload: object) -> None:
         and payload.status != "dry-run"
     ):
         if payload.spawn_id is not None:
-            _emit_spawn_text(payload)
+            _emit_spawn_text(payload, sink=sink)
         else:
-            emit_output(_truncate_spawn_failure_fields(payload), OutputConfig(format="text"))
+            emit_output(_truncate_spawn_failure_fields(payload), sink=sink)
+        if flush_after:
+            flush_sink(sink)
         return
-    emit_output(payload, options.output)
+    emit_output(payload, sink=sink)
+    if flush_after:
+        flush_sink(sink)
 
 
 def _extract_global_options(argv: Sequence[str]) -> tuple[list[str], GlobalOptions]:
@@ -827,18 +845,10 @@ def _operation_error_message(exc: Exception) -> str:
 
 def _emit_error(message: str, *, exit_code: int = 1) -> None:
     """Emit an error via the active sink and exit."""
-    opts = _GLOBAL_OPTIONS.get()
-    sink = (
-        get_active_sink(fallback=TextSink(format="text"))
-        if opts is None
-        else get_active_sink(
-            fallback=create_sink(
-                opts.output,
-                agent_mode=_agent_sink_enabled(output_explicit=opts.output_explicit),
-            )
-        )
-    )
+    sink, flush_after = _resolve_sink(_GLOBAL_OPTIONS.get())
     sink.error(message, exit_code=exit_code)
+    if flush_after:
+        flush_sink(sink)
     raise SystemExit(exit_code)
 
 _TOP_LEVEL_VALUE_FLAGS = frozenset(
@@ -988,7 +998,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         options.output,
         agent_mode=_agent_sink_enabled(output_explicit=options.output_explicit),
     )
-    sink_token = set_active_sink(active_sink)
+    options = replace(options, sink=active_sink)
     token = _GLOBAL_OPTIONS.set(options)
     prior_user_config = os.environ.get("MERIDIAN_CONFIG")
     if options.config_file is not None:
@@ -1002,9 +1012,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         except (KeyError, ValueError, FileNotFoundError, OSError) as exc:
             _emit_error(_operation_error_message(exc))
     finally:
-        flush_active_sink()
+        flush_sink(active_sink)
         _GLOBAL_OPTIONS.reset(token)
-        reset_active_sink(sink_token)
         if options.config_file is not None:
             if prior_user_config is None:
                 os.environ.pop("MERIDIAN_CONFIG", None)

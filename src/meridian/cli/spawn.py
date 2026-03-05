@@ -8,7 +8,7 @@ from typing import Annotated, Any, cast
 
 from cyclopts import App, Parameter
 
-from meridian.cli.main import _agent_mode_enabled
+from meridian.cli.main import _agent_mode_enabled, current_output_sink
 from meridian.lib.domain import SpawnStatus
 from meridian.lib.ops.registry import get_all_operations
 from meridian.lib.ops.spawn import (
@@ -139,7 +139,8 @@ def _spawn_create(
             space=space,
             timeout=timeout,
             permission_tier=permission_tier,
-        )
+        ),
+        sink=current_output_sink(),
     )
     emit(result)
     exit_code = _spawn_create_exit_code(result)
@@ -189,7 +190,8 @@ def _spawn_list(
             limit=limit,
             no_space=no_space,
             failed=failed,
-        )
+        ),
+        sink=current_output_sink(),
     )
     emit(result)
 
@@ -217,7 +219,8 @@ def _spawn_show(
                 report=report,
                 include_files=include_files,
                 space=space,
-            )
+            ),
+            sink=current_output_sink(),
         )
     )
 
@@ -238,7 +241,8 @@ def _spawn_stats(
             SpawnStatsInput(
                 session=session,
                 space=space,
-            )
+            ),
+            sink=current_output_sink(),
         )
     )
 
@@ -279,7 +283,8 @@ def _spawn_continue(
                 fork=fork,
                 timeout=timeout,
                 space=space,
-            )
+            ),
+            sink=current_output_sink(),
         )
     )
 
@@ -296,7 +301,8 @@ def _spawn_cancel(
         SpawnCancelInput(
             spawn_id=spawn_id,
             space=space,
-        )
+        ),
+        sink=current_output_sink(),
     )
     emit(result)
     if result.status == "failed":
@@ -346,7 +352,8 @@ def _spawn_wait(
             report=report,
             include_files=include_files,
             space=space,
-        )
+        ),
+        sink=current_output_sink(),
     )
     emit(result)
     if result.any_failed:
