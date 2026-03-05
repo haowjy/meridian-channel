@@ -169,8 +169,8 @@ def _validate_requested_model(
 
 
 def _validate_create_input(payload: SpawnCreateInput) -> tuple[SpawnCreateInput, str | None]:
-    if not payload.prompt.strip():
-        raise ValueError("prompt required: use --prompt/-p with non-empty text.")
+    if not payload.prompt.strip() and not payload.files:
+        raise ValueError("prompt required: use --prompt/-p or attach at least one --file/-f.")
 
     resolved_model, model_warning = _validate_requested_model(
         payload.model,

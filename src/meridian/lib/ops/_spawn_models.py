@@ -209,6 +209,8 @@ class SpawnDetailOutput:
     report_summary: str | None
     report: str | None
     files_touched: tuple[str, ...] | None
+    last_message: str | None = None
+    log_path: str | None = None
 
     def format_text(self, ctx: FormatContext | None = None) -> str:
         """Key-value detail view for text output mode. Omits None/empty fields."""
@@ -243,6 +245,9 @@ class SpawnDetailOutput:
             ("Failure", self.failure_reason),
             ("Cost", cost_value),
             ("Report", self.report_path),
+            ("Last message", self.last_message),
+            ("Log", self.log_path),
+            ("Hint", f"tail -f {self.log_path}" if self.log_path else None),
         ]
         return kv_block(pairs)
 

@@ -139,7 +139,10 @@ def spawn_create_sync(
     )
     payload = replace(payload, space=space_id_str)
     if auto_created:
-        auto_warning = f"Auto-created space {space_id_str}. Pass --space {space_id_str} to add more spawns to this space."
+        auto_warning = (
+            f"Auto-created space {space_id_str}. Pass --space {space_id_str} to add more spawns to this space.\n"
+            f"hint: export MERIDIAN_SPACE_ID={space_id_str}"
+        )
         preflight_warning = f"{preflight_warning}\n{auto_warning}" if preflight_warning else auto_warning
 
     runtime = None

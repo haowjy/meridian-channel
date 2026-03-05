@@ -211,6 +211,14 @@ def _emit_spawn_text(payload: SpawnActionOutput, *, sink: OutputSink) -> None:
     sink.result(report_text)
 
 
+def _emit_spawn_dry_run_text(payload: SpawnActionOutput, *, sink: OutputSink) -> None:
+    rendered = payload
+    if payload.warning:
+        sink.warning(payload.warning)
+        rendered = replace(payload, warning=None)
+    emit_output(rendered, sink=sink)
+
+
 def emit(payload: object) -> None:
     """Write command output using current output format settings."""
     options = get_global_options()
@@ -219,9 +227,10 @@ def emit(payload: object) -> None:
         options.output.format == "text"
         and isinstance(payload, SpawnActionOutput)
         and payload.command == "spawn.create"
-        and payload.status != "dry-run"
     ):
-        if payload.spawn_id is not None:
+        if payload.status == "dry-run":
+            _emit_spawn_dry_run_text(payload, sink=sink)
+        elif payload.spawn_id is not None:
             _emit_spawn_text(payload, sink=sink)
         else:
             emit_output(_truncate_spawn_failure_fields(payload), sink=sink)

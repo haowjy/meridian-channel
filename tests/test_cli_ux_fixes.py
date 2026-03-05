@@ -160,6 +160,28 @@ def test_bug17_run_create_requires_nonempty_prompt(
     assert "Traceback" not in result.stderr
 
 
+def test_spawn_create_accepts_file_without_prompt(
+    package_root: Path, cli_env: dict[str, str], tmp_path: Path
+) -> None:
+    repo_root = tmp_path / "repo"
+    _seed_base_skills(repo_root)
+    prompt_file = repo_root / "task.md"
+    prompt_file.parent.mkdir(parents=True, exist_ok=True)
+    prompt_file.write_text("Read this task context.", encoding="utf-8")
+
+    result = spawn_cli(
+        package_root=package_root,
+        cli_env=cli_env,
+        repo_root=repo_root,
+        args=["--json", "spawn", "--dry-run", "-f", "task.md"],
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "dry-run"
+    assert str(prompt_file.resolve()) in payload["composed_prompt"]
+
+
 @pytest.mark.parametrize(
     "flag",
     ["--no-json", "--no-porcelain", "--no-yes", "--no-no-input"],

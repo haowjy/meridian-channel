@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
+from typing import cast
 
 from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_space_dir, resolve_state_paths
@@ -15,6 +18,9 @@ _SPAWN_REFERENCE_STATUS_FILTERS: dict[str, tuple[str, ...] | None] = {
     "@last-failed": ("failed",),
     "@last-completed": ("succeeded",),
 }
+_RUNNING_LOG_MESSAGE_LIMIT = 120
+_ASSISTANT_ROLE_MARKER_RE = re.compile(r"^(assistant|codex)$", re.IGNORECASE)
+_LOG_ROLE_MARKER_RE = re.compile(r"^(user|assistant|codex|exec)$", re.IGNORECASE)
 
 
 def _space_dir(
@@ -109,6 +115,110 @@ def _read_report_text(
     return report_path.as_posix(), text
 
 
+def _truncate_log_message(value: str, *, max_chars: int = _RUNNING_LOG_MESSAGE_LIMIT) -> str:
+    compact = " ".join(value.split()).strip()
+    if len(compact) <= max_chars:
+        return compact
+    return f"{compact[: max_chars - 3].rstrip()}..."
+
+
+def _log_text_from_value(value: object) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        parts = [_log_text_from_value(item) for item in cast("list[object]", value)]
+        return " ".join(part for part in parts if part).strip()
+    if isinstance(value, dict):
+        payload = cast("dict[str, object]", value)
+        parts: list[str] = []
+        for key in ("text", "message", "output", "content"):
+            if key in payload:
+                text = _log_text_from_value(payload[key])
+                if text:
+                    parts.append(text)
+        return " ".join(parts).strip()
+    return ""
+
+
+def _assistant_texts(payload: object) -> list[str]:
+    found: list[str] = []
+    if isinstance(payload, dict):
+        obj = cast("dict[str, object]", payload)
+        role = str(obj.get("role", "")).lower()
+        event_type = str(obj.get("type", obj.get("event", ""))).lower()
+        category = str(obj.get("category", "")).lower()
+        if role == "assistant" or "assistant" in event_type or category == "assistant":
+            text = _log_text_from_value(obj)
+            if text:
+                found.append(text)
+        for nested in obj.values():
+            found.extend(_assistant_texts(nested))
+        return found
+    if isinstance(payload, list):
+        for item in cast("list[object]", payload):
+            found.extend(_assistant_texts(item))
+    return found
+
+
+def _extract_last_assistant_message(stderr_text: str) -> str | None:
+    last_message: str | None = None
+    pending_assistant_lines: list[str] | None = None
+
+    def _flush_pending_assistant() -> None:
+        nonlocal last_message, pending_assistant_lines
+        if pending_assistant_lines is None:
+            return
+        candidate = " ".join(line for line in pending_assistant_lines if line).strip()
+        if candidate:
+            last_message = candidate
+        pending_assistant_lines = None
+
+    for line in stderr_text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        if _ASSISTANT_ROLE_MARKER_RE.fullmatch(stripped):
+            _flush_pending_assistant()
+            pending_assistant_lines = []
+            continue
+
+        if pending_assistant_lines is not None:
+            if _LOG_ROLE_MARKER_RE.fullmatch(stripped):
+                _flush_pending_assistant()
+                if _ASSISTANT_ROLE_MARKER_RE.fullmatch(stripped):
+                    pending_assistant_lines = []
+                continue
+            pending_assistant_lines.append(stripped)
+            continue
+
+        try:
+            payload = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        assistant_texts = _assistant_texts(payload)
+        if assistant_texts:
+            last_message = assistant_texts[-1]
+    _flush_pending_assistant()
+    if last_message is None:
+        return None
+    return _truncate_log_message(last_message)
+
+
+def _read_running_log_details(
+    repo_root: Path,
+    spawn_id: str,
+    space: str | None = None,
+    *,
+    space_id: str | None = None,
+) -> tuple[str, str | None]:
+    stderr_path = _space_dir(repo_root, space, space_id=space_id) / "spawns" / spawn_id / "stderr.log"
+    if not stderr_path.is_file():
+        return stderr_path.as_posix(), None
+    stderr_text = stderr_path.read_text(encoding="utf-8", errors="ignore")
+    return stderr_path.as_posix(), _extract_last_assistant_message(stderr_text)
+
+
 def _read_files_touched(
     repo_root: Path,
     spawn_id: str,
@@ -152,6 +262,16 @@ def _detail_from_row(
             space_id=context_space_id,
         )
 
+    last_message: str | None = None
+    log_path: str | None = None
+    if row.status == "running":
+        log_path, last_message = _read_running_log_details(
+            repo_root,
+            row.id,
+            resolved_space_id,
+            space_id=context_space_id,
+        )
+
     return SpawnDetailOutput(
         spawn_id=row.id,
         status=row.status,
@@ -170,4 +290,6 @@ def _detail_from_row(
         report_summary=report_summary,
         report=report_text if report else None,
         files_touched=files_touched,
+        last_message=last_message,
+        log_path=log_path,
     )

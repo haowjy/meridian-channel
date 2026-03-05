@@ -50,6 +50,13 @@ def _join_sections(sections: Sequence[str]) -> str:
     return "\n\n".join(non_empty)
 
 
+def _render_templated_section(
+    section_text: str,
+    variables: Mapping[str, str],
+) -> str:
+    return substitute_template_variables(section_text, variables)
+
+
 def compose_skill_injections(skills: Sequence[SkillContent]) -> str | None:
     """Format skill content for --append-system-prompt injection.
 
@@ -94,14 +101,22 @@ def compose_run_prompt(
 
     skill_sections = _render_skill_blocks(skills)
     non_skill_sections: list[str] = []
+    resolved_variables = resolve_template_variables(template_variables or {})
 
     agent_body_text = agent_body.strip()
     if agent_body_text:
-        non_skill_sections.append(f"# Agent Profile\n\n{agent_body_text}")
+        non_skill_sections.append(
+            _render_templated_section(f"# Agent Profile\n\n{agent_body_text}", resolved_variables)
+        )
 
     model_guidance_text = model_guidance.strip()
     if model_guidance_text:
-        non_skill_sections.append(f"# Model Guidance\n\n{model_guidance_text}")
+        non_skill_sections.append(
+            _render_templated_section(
+                f"# Model Guidance\n\n{model_guidance_text}",
+                resolved_variables,
+            )
+        )
 
     if reference_mode == "paths":
         non_skill_sections.extend(render_reference_paths_section(references))
@@ -111,11 +126,7 @@ def compose_run_prompt(
     if prior_output is not None and prior_output.strip():
         non_skill_sections.append(sanitize_prior_output(prior_output))
 
-    resolved_variables = resolve_template_variables(template_variables or {})
-    rendered_non_skill_text = substitute_template_variables(
-        _join_sections(non_skill_sections),
-        resolved_variables,
-    )
+    rendered_non_skill_text = _join_sections(non_skill_sections)
     sections_text = _join_sections((*skill_sections, rendered_non_skill_text))
     cleaned_user_prompt = substitute_template_variables(
         strip_stale_report_paths(user_prompt),

@@ -29,6 +29,7 @@ def test_spawn_create_auto_creates_space_without_env(
     assert result.warning is not None
     assert "Auto-created space" in result.warning
     assert spaces[0].id in result.warning
+    assert f"hint: export MERIDIAN_SPACE_ID={spaces[0].id}" in result.warning
 
 
 def test_non_spawn_commands_require_space_context(

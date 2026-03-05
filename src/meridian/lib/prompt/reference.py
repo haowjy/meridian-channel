@@ -81,21 +81,34 @@ def resolve_template_variables(
     return resolved
 
 
-def substitute_template_variables(text: str, variables: Mapping[str, str]) -> str:
-    """Substitute `{{KEY}}` placeholders; fail fast on undefined variables."""
+def substitute_template_variables(
+    text: str,
+    variables: Mapping[str, str],
+    *,
+    strict: bool = True,
+) -> str:
+    """Substitute `{{KEY}}` placeholders.
 
-    missing = sorted(
-        {
-            match.group(1)
-            for match in _TEMPLATE_VAR_RE.finditer(text)
-            if match.group(1) not in variables
-        }
+    In strict mode, undefined variables raise `TemplateVariableError`.
+    In non-strict mode, undefined placeholders are preserved as-is.
+    """
+
+    if strict:
+        missing = sorted(
+            {
+                match.group(1)
+                for match in _TEMPLATE_VAR_RE.finditer(text)
+                if match.group(1) not in variables
+            }
+        )
+        if missing:
+            joined = ", ".join(missing)
+            raise TemplateVariableError(f"Undefined template variables: {joined}")
+
+    return _TEMPLATE_VAR_RE.sub(
+        lambda match: variables.get(match.group(1), match.group(0)),
+        text,
     )
-    if missing:
-        joined = ", ".join(missing)
-        raise TemplateVariableError(f"Undefined template variables: {joined}")
-
-    return _TEMPLATE_VAR_RE.sub(lambda match: variables[match.group(1)], text)
 
 
 def load_reference_files(

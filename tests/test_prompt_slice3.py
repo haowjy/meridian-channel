@@ -199,8 +199,25 @@ def test_compose_prompt_keeps_context_isolated_and_sanitized(tmp_path: Path) -> 
     assert "INJECTION: should never leak" not in composed
     assert composed.count("As your final action, create the run report with Meridian.") == 1
     assert "/tmp/stale.md" not in composed
-    assert "Safe context context" in composed
+    assert "Safe context {{CTX}}" in composed
     assert "Implement the change with context." in composed
+
+
+def test_compose_prompt_does_not_fail_on_unknown_reference_placeholders(tmp_path: Path) -> None:
+    reference_file = tmp_path / "source.ts"
+    reference_file.write_text("const template = '{{NOT_A_PROMPT_VAR}}';", encoding="utf-8")
+    loaded_refs = load_reference_files([reference_file])
+
+    composed = compose_run_prompt_text(
+        skills=[],
+        references=loaded_refs,
+        user_prompt="Inspect {{CTX}}.",
+        report_path=str(tmp_path / "report.md"),
+        template_variables={"CTX": "context"},
+    )
+
+    assert "{{NOT_A_PROMPT_VAR}}" in composed
+    assert "Inspect context." in composed
 
 
 def test_compose_prompt_can_render_reference_paths_without_inlining_content(tmp_path: Path) -> None:
