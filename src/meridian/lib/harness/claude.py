@@ -8,6 +8,7 @@ import tempfile
 from dataclasses import replace
 from pathlib import Path
 from typing import ClassVar, cast
+from uuid import uuid4
 
 from meridian.lib.harness._common import (
     iter_nested_dicts,
@@ -32,6 +33,7 @@ from meridian.lib.harness.adapter import (
     SpawnParams,
     StreamEvent,
 )
+from meridian.lib.harness.launch_types import PromptPolicy, SessionSeed
 from meridian.lib.safety.permissions import PermissionConfig
 from meridian.lib.types import HarnessId, SpawnId
 
@@ -82,6 +84,16 @@ def _merge_claude_allowed_tools(
         return preserved
     preserved.extend(["--allowedTools", ",".join(merged_allowed_tools)])
     return preserved
+
+
+def _extract_passthrough_session_id(args: tuple[str, ...]) -> str:
+    """Extract --session-id value from passthrough args, or return empty string."""
+    for i, token in enumerate(args):
+        if token == "--session-id" and i + 1 < len(args):
+            return args[i + 1].strip()
+        if token.startswith("--session-id="):
+            return token.partition("=")[2].strip()
+    return ""
 
 
 class _StaticPermissionResolver:
@@ -282,6 +294,39 @@ class ClaudeAdapter(BaseHarnessAdapter):
 
     def extract_session_id(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> str | None:
         return extract_session_id_from_artifacts(artifacts, spawn_id)
+
+    def seed_session(
+        self,
+        *,
+        is_resume: bool,
+        harness_session_id: str,
+        passthrough_args: tuple[str, ...],
+    ) -> SessionSeed:
+        # If user provided --session-id via passthrough, use that value
+        passthrough_session_id = _extract_passthrough_session_id(passthrough_args)
+        if passthrough_session_id:
+            return SessionSeed(session_id=passthrough_session_id)
+        session_id = harness_session_id or str(uuid4())
+        # Only inject --session-id for fresh sessions
+        if harness_session_id:
+            return SessionSeed(session_id=session_id)
+        return SessionSeed(
+            session_id=session_id,
+            session_args=("--session-id", session_id),
+        )
+
+    def filter_launch_content(
+        self,
+        *,
+        prompt: str,
+        skill_injection: str | None,
+        is_resume: bool,
+        harness_session_id: str,
+    ) -> PromptPolicy:
+        _ = harness_session_id
+        if is_resume:
+            return PromptPolicy()
+        return PromptPolicy(prompt=prompt, skill_injection=skill_injection)
 
     def extract_tasks(self, event: StreamEvent) -> list[dict[str, str]] | None:
         tasks = _extract_todowrite_tasks(event.metadata)

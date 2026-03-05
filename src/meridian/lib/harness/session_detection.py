@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import datetime
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -160,29 +159,6 @@ def resolve_opencode_primary_session_id(
         return None
     matches.sort(key=lambda item: item[0], reverse=True)
     return matches[0][1]
-
-
-def detect_primary_harness_session_id(
-    *,
-    harness_id: str,
-    repo_root: Path,
-    started_at_epoch: float,
-    started_at_local_iso: str | None = None,
-) -> str | None:
-    """Detect the harness-native session ID for a completed primary launch."""
-
-    normalized_harness = harness_id.strip().lower()
-    if normalized_harness == "codex":
-        return resolve_codex_primary_session_id(repo_root, started_at_epoch)
-    if normalized_harness != "opencode":
-        return None
-
-    local_iso = (
-        started_at_local_iso
-        if started_at_local_iso is not None
-        else datetime.fromtimestamp(started_at_epoch).strftime("%Y-%m-%dT%H:%M:%S")
-    )
-    return resolve_opencode_primary_session_id(repo_root, started_at_epoch, local_iso)
 
 
 def infer_harness_from_untracked_session_ref(repo_root: Path, session_ref: str) -> str | None:

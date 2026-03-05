@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from dataclasses import replace
+from pathlib import Path
 from typing import ClassVar
 
 from meridian.lib.harness._common import (
@@ -29,6 +31,8 @@ from meridian.lib.harness.adapter import (
     SpawnParams,
     StreamEvent,
 )
+from meridian.lib.harness.launch_types import PromptPolicy
+from meridian.lib.harness.session_detection import resolve_opencode_primary_session_id
 from meridian.lib.safety.permissions import PermissionConfig, opencode_permission_json
 from meridian.lib.types import HarnessId, SpawnId
 
@@ -150,6 +154,33 @@ class OpenCodeAdapter(BaseHarnessAdapter):
 
     def extract_usage(self, artifacts: ArtifactStore, spawn_id: SpawnId):
         return extract_usage_from_artifacts(artifacts, spawn_id)
+
+    def filter_launch_content(
+        self,
+        *,
+        prompt: str,
+        skill_injection: str | None,
+        is_resume: bool,
+        harness_session_id: str,
+    ) -> PromptPolicy:
+        _ = harness_session_id
+        if is_resume:
+            return PromptPolicy()
+        return PromptPolicy(prompt=prompt, skill_injection=skill_injection)
+
+    def detect_primary_session_id(
+        self,
+        *,
+        repo_root: Path,
+        started_at_epoch: float,
+        started_at_local_iso: str | None,
+    ) -> str | None:
+        local_iso = (
+            started_at_local_iso
+            if started_at_local_iso is not None
+            else datetime.fromtimestamp(started_at_epoch).strftime("%Y-%m-%dT%H:%M:%S")
+        )
+        return resolve_opencode_primary_session_id(repo_root, started_at_epoch, local_iso)
 
     def extract_session_id(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> str | None:
         return extract_session_id_from_artifacts_with_patterns(

@@ -12,7 +12,7 @@ import time
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from uuid import uuid4
 
 from meridian.lib.config._paths import resolve_repo_root
@@ -26,7 +26,6 @@ from meridian.lib.exec.env import (
 from meridian.lib.harness.adapter import HarnessAdapter, SpawnParams
 from meridian.lib.harness.registry import HarnessRegistry
 from meridian.lib.harness.materialize import cleanup_materialized, materialize_for_harness
-from meridian.lib.harness.session_detection import detect_primary_harness_session_id
 from meridian.lib.launch_resolve import (
     load_agent_profile_with_fallback,
     resolve_permission_tier_from_profile,
@@ -131,27 +130,6 @@ def build_primary_prompt(request: SpaceLaunchRequest) -> str:
         sections.extend(["", "# Re-Injected Pinned Context", "", request.pinned_context.strip()])
 
     return "\n".join(sections).strip()
-
-
-def _resolve_primary_prompt(
-    *,
-    request: SpaceLaunchRequest,
-    space_dir: Path,
-    harness_id: str,
-    continue_harness_session_id: str,
-) -> str:
-    """Resolve the effective primary prompt payload for one launch."""
-
-    _ = space_dir
-    prompt = build_primary_prompt(request)
-    if request.fresh or harness_id != "codex":
-        return prompt
-    if not continue_harness_session_id:
-        return prompt
-    # Codex-specific prompt injection is a compatibility workaround for missing
-    # system prompt support. For true `codex resume` semantics, resume launches
-    # must reattach without appending a new user prompt payload.
-    return ""
 
 
 def _write_lock(
@@ -259,7 +237,7 @@ def _build_harness_context(
     inferred_tier = resolve_permission_tier_from_profile(
         profile=profile,
         default_tier=primary_default_tier,
-        warning_logger=logger,
+        warning_logger=cast(Any, logger),
     )
     permission_tier_override = (
         request.permission_tier.strip()
@@ -271,7 +249,7 @@ def _build_harness_context(
             profile=profile,
             inferred_tier=inferred_tier,
             default_tier=primary_default_tier,
-            warning_logger=logger,
+            warning_logger=cast(Any, logger),
         )
     resolved_tier = permission_tier_override or inferred_tier
     # Primary settings only apply to this primary agent launch path.
@@ -287,24 +265,30 @@ def _build_harness_context(
         cli_permission_override=permission_tier_override is not None,
     )
 
-    # Prompt injection is intentionally assembled here because several harnesses
-    # (notably Codex) lack a first-class system prompt channel.
-    #
-    # Codex resume is special: when a harness session ID is present we must
-    # reattach without sending any prompt payload (including skill injection
-    # text), otherwise resume behaves like a fresh new turn.
-    codex_resume_attach_only = str(harness) == "codex" and bool(harness_session_id)
-    if codex_resume_attach_only:
-        appended_prompt = ""
-    else:
-        appended_parts = [prompt.strip()]
+    # Let the adapter decide what prompt/skill content to include.
+    # Resume launches typically suppress prompt and skill injection.
+    is_resume = bool(harness_session_id)
+    skill_injection = compose_skill_injections(resolved_skills.loaded_skills) or ""
+    policy = adapter.filter_launch_content(
+        prompt=prompt,
+        skill_injection=skill_injection,
+        is_resume=is_resume,
+        harness_session_id=harness_session_id,
+    )
+
+    if policy.skill_injection is not None:
+        appended_parts = [policy.prompt.strip()]
         appended_parts.extend(
             fragment.strip() for fragment in passthrough_prompt_fragments if fragment.strip()
         )
-        skill_injection = compose_skill_injections(resolved_skills.loaded_skills)
-        if skill_injection:
-            appended_parts.append(skill_injection)
+        if policy.skill_injection:
+            appended_parts.append(policy.skill_injection)
         appended_prompt = "\n\n".join(part for part in appended_parts if part)
+        appended_system_prompt = appended_prompt if appended_prompt else None
+    else:
+        appended_prompt = policy.prompt
+        appended_system_prompt = None
+
     run_params = SpawnParams(
         prompt=appended_prompt,
         model=model,
@@ -315,7 +299,7 @@ def _build_harness_context(
         mcp_tools=profile.mcp_tools if profile is not None else (),
         interactive=True,
         continue_harness_session_id=harness_session_id or None,
-        appended_system_prompt=appended_prompt if appended_prompt else None,
+        appended_system_prompt=appended_system_prompt,
     )
     command = tuple(adapter.build_command(run_params, resolver))
     return _PrimaryHarnessContext(
@@ -358,13 +342,6 @@ def _normalize_system_prompt_passthrough_args(
         index += 1
 
     return tuple(cleaned), tuple(prompt_fragments)
-
-
-def _has_passthrough_session_id(passthrough_args: tuple[str, ...]) -> bool:
-    for token in passthrough_args:
-        if token == "--session-id" or token.startswith("--session-id="):
-            return True
-    return False
 
 
 def _build_harness_command(
@@ -668,28 +645,20 @@ def _prepare_launch_context(
         if request.continue_harness_session_id is not None
         else ""
     )
-    prompt = _resolve_primary_prompt(
-        request=request,
-        space_dir=space_dir,
-        harness_id=session_metadata.harness,
-        continue_harness_session_id=explicit_session_id,
+    prompt = build_primary_prompt(request)
+
+    adapter = harness_registry.get(HarnessId(session_metadata.harness))
+    seed = adapter.seed_session(
+        is_resume=bool(explicit_session_id),
+        harness_session_id=explicit_session_id,
+        passthrough_args=request.passthrough_args,
     )
-    is_claude = session_metadata.harness == "claude"
-    seed_harness_session_id = explicit_session_id or (str(uuid4()) if is_claude else "")
+    seed_harness_session_id = seed.session_id
     command_request = request
-    if (
-        is_claude
-        and seed_harness_session_id
-        and not explicit_session_id
-        and not _has_passthrough_session_id(request.passthrough_args)
-    ):
+    if seed.session_args:
         command_request = replace(
             request,
-            passthrough_args=(
-                *request.passthrough_args,
-                "--session-id",
-                seed_harness_session_id,
-            ),
+            passthrough_args=(*request.passthrough_args, *seed.session_args),
         )
 
     return _LaunchContext(
@@ -808,8 +777,8 @@ def _run_harness_process(
             try:
                 observed_harness_session_id = None
                 if primary_started_epoch > 0.0:
-                    observed_harness_session_id = detect_primary_harness_session_id(
-                        harness_id=ctx.session_metadata.harness,
+                    adapter = harness_registry.get(HarnessId(ctx.session_metadata.harness))
+                    observed_harness_session_id = adapter.detect_primary_session_id(
                         repo_root=repo_root,
                         started_at_epoch=primary_started_epoch,
                         started_at_local_iso=primary_started_local_iso,
@@ -859,7 +828,7 @@ def launch_primary(
     if request.dry_run:
         command = _build_harness_command(
             repo_root=repo_root,
-            request=request,
+            request=ctx.command_request,
             prompt=ctx.prompt,
             harness_registry=harness_registry,
             chat_id="dry-run",

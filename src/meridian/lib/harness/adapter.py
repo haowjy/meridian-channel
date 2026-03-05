@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal, Protocol
 
 from meridian.lib.domain import TokenUsage
+from meridian.lib.harness.launch_types import PromptPolicy, SessionSeed
 from meridian.lib.safety.permissions import PermissionConfig
 from meridian.lib.types import ArtifactKey, HarnessId, ModelId, SpawnId
 
@@ -118,6 +120,31 @@ class HarnessAdapter(Protocol):
 
     def extract_session_id(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> str | None: ...
 
+    def seed_session(
+        self,
+        *,
+        is_resume: bool,
+        harness_session_id: str,
+        passthrough_args: tuple[str, ...],
+    ) -> SessionSeed: ...
+
+    def filter_launch_content(
+        self,
+        *,
+        prompt: str,
+        skill_injection: str | None,
+        is_resume: bool,
+        harness_session_id: str,
+    ) -> PromptPolicy: ...
+
+    def detect_primary_session_id(
+        self,
+        *,
+        repo_root: Path,
+        started_at_epoch: float,
+        started_at_local_iso: str | None,
+    ) -> str | None: ...
+
     def extract_tasks(self, event: StreamEvent) -> list[dict[str, str]] | None:
         """Extract structured task updates from one stream event."""
 
@@ -139,6 +166,37 @@ class HarnessAdapter(Protocol):
 
 class BaseHarnessAdapter:
     """Base with default no-op implementations for optional adapter methods."""
+
+    def seed_session(
+        self,
+        *,
+        is_resume: bool,
+        harness_session_id: str,
+        passthrough_args: tuple[str, ...],
+    ) -> SessionSeed:
+        _ = is_resume, harness_session_id, passthrough_args
+        return SessionSeed()
+
+    def filter_launch_content(
+        self,
+        *,
+        prompt: str,
+        skill_injection: str | None,
+        is_resume: bool,
+        harness_session_id: str,
+    ) -> PromptPolicy:
+        _ = is_resume, harness_session_id
+        return PromptPolicy(prompt=prompt, skill_injection=skill_injection)
+
+    def detect_primary_session_id(
+        self,
+        *,
+        repo_root: Path,
+        started_at_epoch: float,
+        started_at_local_iso: str | None,
+    ) -> str | None:
+        _ = repo_root, started_at_epoch, started_at_local_iso
+        return None
 
     def extract_tasks(self, event: StreamEvent) -> list[dict[str, str]] | None:
         _ = event

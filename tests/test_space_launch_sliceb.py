@@ -12,7 +12,8 @@ import pytest
 from meridian.lib.harness.registry import get_default_harness_registry
 from meridian.lib.ops.space import SpaceStartInput, space_start_sync
 from meridian.lib.types import SpaceId
-from meridian.lib.harness.session_detection import detect_primary_harness_session_id
+from meridian.lib.harness.codex import CodexAdapter
+from meridian.lib.harness.opencode import OpenCodeAdapter
 from meridian.lib.space.launch import (
     SpaceLaunchRequest,
     _build_space_env,
@@ -465,8 +466,8 @@ def testdetect_primary_harness_session_id_from_codex_rollout_metadata(
     os.utime(other_rollout, (started_at + 2, started_at + 2))
     os.utime(rollout, (started_at + 3, started_at + 3))
 
-    resolved = detect_primary_harness_session_id(
-        harness_id="codex",
+    adapter = CodexAdapter()
+    resolved = adapter.detect_primary_session_id(
         repo_root=repo_root,
         started_at_epoch=started_at,
         started_at_local_iso="2026-03-04T06:31:00",
@@ -542,8 +543,8 @@ def testdetect_primary_harness_session_id_skips_codex_aborted_bootstrap(
     os.utime(valid_rollout, (started_at + 2, started_at + 2))
     os.utime(aborted_rollout, (started_at + 3, started_at + 3))
 
-    resolved = detect_primary_harness_session_id(
-        harness_id="codex",
+    adapter = CodexAdapter()
+    resolved = adapter.detect_primary_session_id(
         repo_root=repo_root,
         started_at_epoch=started_at,
         started_at_local_iso="2026-03-04T06:31:00",
@@ -591,8 +592,8 @@ def testdetect_primary_harness_session_id_from_opencode_log(
     started_at = time.time()
     os.utime(log_file, (started_at + 2, started_at + 2))
 
-    resolved = detect_primary_harness_session_id(
-        harness_id="opencode",
+    adapter = OpenCodeAdapter()
+    resolved = adapter.detect_primary_session_id(
         repo_root=repo_root,
         started_at_epoch=started_at,
         started_at_local_iso="2026-03-04T12:50:01",
