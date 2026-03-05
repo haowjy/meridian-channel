@@ -10,7 +10,8 @@ def test_spawn_cancel_passes_spawn_id_and_space(monkeypatch) -> None:
     captured: dict[str, SpawnCancelInput] = {}
     emitted: list[SpawnActionOutput] = []
 
-    def fake_spawn_cancel_sync(payload: SpawnCancelInput) -> SpawnActionOutput:
+    def fake_spawn_cancel_sync(payload: SpawnCancelInput, *, sink=None) -> SpawnActionOutput:
+        _ = sink
         captured["payload"] = payload
         return SpawnActionOutput(command="spawn.cancel", status="cancelled", spawn_id="p1")
 
@@ -24,7 +25,8 @@ def test_spawn_cancel_passes_spawn_id_and_space(monkeypatch) -> None:
 
 
 def test_spawn_cancel_exits_for_failed_result(monkeypatch) -> None:
-    def fake_spawn_cancel_sync(payload: SpawnCancelInput) -> SpawnActionOutput:
+    def fake_spawn_cancel_sync(payload: SpawnCancelInput, *, sink=None) -> SpawnActionOutput:
+        _ = sink
         _ = payload
         return SpawnActionOutput(command="spawn.cancel", status="failed", spawn_id="p1")
 

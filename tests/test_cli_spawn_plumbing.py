@@ -95,7 +95,12 @@ def test_spawn_create_passes_flags(monkeypatch: pytest.MonkeyPatch, kwargs: dict
     captured: dict[str, SpawnCreateInput] = {}
     emitted: list[SpawnActionOutput] = []
 
-    def fake_spawn_create_sync(payload: SpawnCreateInput) -> SpawnActionOutput:
+    def fake_spawn_create_sync(
+        payload: SpawnCreateInput,
+        *,
+        sink=None,
+    ) -> SpawnActionOutput:
+        _ = sink
         captured["payload"] = payload
         status = "running" if payload.background else "dry-run"
         return SpawnActionOutput(command="spawn.create", status=status, spawn_id="r1")
@@ -121,7 +126,7 @@ def test_spawn_create_failed_results_raise_nonzero_exit(
     result: SpawnActionOutput,
     expected_exit: int,
 ) -> None:
-    monkeypatch.setattr(run_cli, "spawn_create_sync", lambda payload: result)
+    monkeypatch.setattr(run_cli, "spawn_create_sync", lambda payload, *, sink=None: result)
 
     with pytest.raises(SystemExit) as exc_info:
         run_cli._spawn_create(lambda _: None, prompt="test")
@@ -133,7 +138,8 @@ def test_spawn_show_passes_report_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, SpawnShowInput] = {}
     emitted: list[SpawnDetailOutput] = []
 
-    def fake_spawn_show_sync(payload: SpawnShowInput) -> SpawnDetailOutput:
+    def fake_spawn_show_sync(payload: SpawnShowInput, *, sink=None) -> SpawnDetailOutput:
+        _ = sink
         captured["payload"] = payload
         return _detail()
 
@@ -148,7 +154,8 @@ def test_spawn_stats_passes_session_and_space_filters(monkeypatch: pytest.Monkey
     captured: dict[str, SpawnStatsInput] = {}
     emitted: list[SpawnStatsOutput] = []
 
-    def fake_spawn_stats_sync(payload: SpawnStatsInput) -> SpawnStatsOutput:
+    def fake_spawn_stats_sync(payload: SpawnStatsInput, *, sink=None) -> SpawnStatsOutput:
+        _ = sink
         captured["payload"] = payload
         return SpawnStatsOutput(
             total_runs=1,
@@ -189,7 +196,8 @@ def test_spawn_wait_passes_multiple_ids(monkeypatch: pytest.MonkeyPatch) -> None
     captured: dict[str, SpawnWaitInput] = {}
     emitted: list[SpawnWaitMultiOutput] = []
 
-    def fake_spawn_wait_sync(payload: SpawnWaitInput) -> SpawnWaitMultiOutput:
+    def fake_spawn_wait_sync(payload: SpawnWaitInput, *, sink=None) -> SpawnWaitMultiOutput:
+        _ = sink
         captured["payload"] = payload
         return _wait_output(_detail("r1"), _detail("r2"))
 
@@ -205,7 +213,10 @@ def test_spawn_wait_exits_nonzero_when_any_failed(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(
         run_cli,
         "spawn_wait_sync",
-        lambda payload: _wait_output(_detail("r1"), _detail("r2", status="failed", exit_code=1)),
+        lambda payload, *, sink=None: _wait_output(
+            _detail("r1"),
+            _detail("r2", status="failed", exit_code=1),
+        ),
     )
 
     with pytest.raises(SystemExit) as exc_info:
@@ -218,7 +229,8 @@ def test_spawn_wait_passes_report_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, SpawnWaitInput] = {}
     emitted: list[SpawnWaitMultiOutput] = []
 
-    def fake_spawn_wait_sync(payload: SpawnWaitInput) -> SpawnWaitMultiOutput:
+    def fake_spawn_wait_sync(payload: SpawnWaitInput, *, sink=None) -> SpawnWaitMultiOutput:
+        _ = sink
         captured["payload"] = payload
         return _wait_output(_detail("r1"))
 
@@ -232,7 +244,8 @@ def test_spawn_wait_passes_report_flag(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_spawn_wait_passes_verbosity_flags(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, SpawnWaitInput] = {}
 
-    def fake_spawn_wait_sync(payload: SpawnWaitInput) -> SpawnWaitMultiOutput:
+    def fake_spawn_wait_sync(payload: SpawnWaitInput, *, sink=None) -> SpawnWaitMultiOutput:
+        _ = sink
         captured["payload"] = payload
         return _wait_output(_detail("r1"))
 
