@@ -384,11 +384,11 @@ def spawn_wait_sync(payload: SpawnWaitInput) -> SpawnWaitMultiOutput:
     repo_root, config = resolve_runtime_root_and_config(payload.repo_root)
     resolved_space = _non_empty_space(payload.space)
     spawn_ids = resolve_spawn_references(repo_root, _normalize_wait_spawn_ids(payload), resolved_space)
-    timeout_secs = (
-        payload.timeout_secs if payload.timeout_secs is not None else config.wait_timeout_seconds
+    timeout = (
+        payload.timeout if payload.timeout is not None else config.wait_timeout_seconds
     )
     started = time.monotonic()
-    deadline = started + max(timeout_secs, 0.0)
+    deadline = started + max(timeout, 0.0)
     poll = (
         payload.poll_interval_secs
         if payload.poll_interval_secs is not None
@@ -499,7 +499,7 @@ def spawn_continue_sync(payload: SpawnContinueInput) -> SpawnActionOutput:
         prompt=derived_prompt,
         model=_model_for_follow_up(source_spawn, payload.model),
         repo_root=payload.repo_root,
-        timeout_secs=payload.timeout_secs,
+        timeout=payload.timeout,
         space=payload.space,
         continue_harness_session_id=source_session_id,
         continue_harness=source_harness,

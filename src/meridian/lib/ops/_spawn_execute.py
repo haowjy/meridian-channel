@@ -392,7 +392,7 @@ async def _execute_existing_spawn(
     *,
     spawn_id: SpawnId,
     repo_root: Path,
-    timeout_secs: float | None,
+    timeout: float | None,
     skills: tuple[str, ...],
     agent_name: str | None,
     mcp_tools: tuple[str, ...],
@@ -452,7 +452,7 @@ async def _execute_existing_spawn(
             permission_resolver=resolver,
             permission_config=permission_config,
             cwd=runtime.repo_root,
-            timeout_seconds=timeout_secs,
+            timeout_seconds=timeout,
             kill_grace_seconds=runtime.config.kill_grace_seconds,
             skills=skills,
             agent=session_context.resolved_agent_name,
@@ -474,7 +474,7 @@ def _build_background_worker_command(
     spawn_id: str,
     repo_root: Path,
     space_id: str | None,
-    timeout_secs: float | None,
+    timeout: float | None,
     skills: tuple[str, ...],
     agent_name: str | None,
     mcp_tools: tuple[str, ...],
@@ -500,8 +500,8 @@ def _build_background_worker_command(
     ]
     if space_id is not None:
         command.extend(["--space-id", space_id])
-    if timeout_secs is not None:
-        command.extend(["--timeout-secs", str(timeout_secs)])
+    if timeout is not None:
+        command.extend(["--timeout", str(timeout)])
     if agent_name is not None:
         command.extend(["--agent", agent_name])
     for skill in skills:
@@ -541,7 +541,7 @@ def _execute_spawn_background(
         spawn_id=spawn_id_text,
         repo_root=runtime.repo_root,
         space_id=space_id_str,
-        timeout_secs=payload.timeout_secs,
+        timeout=payload.timeout,
         skills=prepared.skills,
         agent_name=prepared.agent_name,
         mcp_tools=prepared.mcp_tools,
@@ -673,7 +673,7 @@ def _execute_spawn_blocking(
                 permission_resolver=prepared.permission_resolver,
                 permission_config=prepared.permission_config,
                 cwd=runtime.repo_root,
-                timeout_seconds=payload.timeout_secs,
+                timeout_seconds=payload.timeout,
                 kill_grace_seconds=runtime.config.kill_grace_seconds,
                 skills=prepared.skills,
                 agent=session_context.resolved_agent_name,
@@ -751,7 +751,7 @@ async def _execute_spawn_non_blocking(
     *,
     spawn_id: SpawnId,
     repo_root: Path,
-    timeout_secs: float | None,
+    timeout: float | None,
     skills: tuple[str, ...],
     agent_name: str | None,
     mcp_tools: tuple[str, ...],
@@ -767,7 +767,7 @@ async def _execute_spawn_non_blocking(
     _ = await _execute_existing_spawn(
         spawn_id=spawn_id,
         repo_root=repo_root,
-        timeout_secs=timeout_secs,
+        timeout=timeout,
         skills=skills,
         agent_name=agent_name,
         mcp_tools=mcp_tools,
@@ -803,7 +803,7 @@ def _build_background_worker_parser() -> argparse.ArgumentParser:
     parser.add_argument("--spawn-id", required=True)
     parser.add_argument("--repo-root", required=True)
     parser.add_argument("--space-id", default=None)
-    parser.add_argument("--timeout-secs", type=float, default=None)
+    parser.add_argument("--timeout", type=float, default=None)
     parser.add_argument("--skill", action="append", default=[])
     parser.add_argument("--agent", default=None)
     parser.add_argument("--mcp-tool", action="append", default=[])
@@ -832,7 +832,7 @@ def _background_worker_main(argv: Sequence[str] | None = None) -> int:
             spawn_id=SpawnId(parsed.spawn_id),
             repo_root=Path(parsed.repo_root).expanduser().resolve(),
             space_id_hint=parsed.space_id,
-            timeout_secs=parsed.timeout_secs,
+            timeout=parsed.timeout,
             skills=tuple(str(item) for item in parsed.skill),
             agent_name=cast("str | None", parsed.agent),
             mcp_tools=tuple(str(item) for item in parsed.mcp_tool),

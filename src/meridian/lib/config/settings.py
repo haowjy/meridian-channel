@@ -68,7 +68,7 @@ class MeridianConfig:
     retry_backoff_seconds: float = 0.25
     kill_grace_seconds: float = 2.0
     guardrail_timeout_seconds: float = 30.0
-    wait_timeout_seconds: float = 600.0
+    wait_timeout_seconds: float = 1800.0
     default_permission_tier: str = "read-only"
     default_primary_agent: str = "primary"
     default_agent: str = "agent"

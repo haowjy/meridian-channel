@@ -194,7 +194,7 @@ def test_spawn_wait_passes_multiple_ids(monkeypatch: pytest.MonkeyPatch) -> None
         return _wait_output(_detail("r1"), _detail("r2"))
 
     monkeypatch.setattr(run_cli, "spawn_wait_sync", fake_spawn_wait_sync)
-    run_cli._spawn_wait(emitted.append, spawn_ids=("r1", "r2"), timeout_secs=30.0)
+    run_cli._spawn_wait(emitted.append, spawn_ids=("r1", "r2"), timeout=30.0)
 
     assert captured["payload"].spawn_ids == ("r1", "r2")
     assert emitted[0].total_runs == 2

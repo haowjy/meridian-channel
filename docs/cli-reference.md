@@ -99,7 +99,7 @@ Common flags:
 | `--dry-run` | Compose only, do not execute harness |
 | `--background` | Return immediately with spawn ID (`p*`) |
 | `--space-id`, `--space` | Explicit space scope |
-| `--timeout-secs` | Runtime limit |
+| `--timeout` | Runtime limit in minutes |
 | `--permission` | Permission tier |
 
 ### `spawn list`

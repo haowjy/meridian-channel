@@ -81,7 +81,7 @@ def test_run_wait_sync_waits_for_all_runs_and_returns_ordered_summary(
     result = run_ops.spawn_wait_sync(
         SpawnWaitInput(
             spawn_ids=("r1", "r2"),
-            timeout_secs=5.0,
+            timeout=5.0,
             poll_interval_secs=0.0,
         )
     )
@@ -128,7 +128,7 @@ def test_run_wait_sync_timeout_is_global_across_all_runs(
         run_ops.spawn_wait_sync(
             SpawnWaitInput(
                 spawn_ids=("r1", "r2"),
-                timeout_secs=1.0,
+                timeout=1.0,
                 poll_interval_secs=0.1,
             )
         )
@@ -220,7 +220,7 @@ def test_run_wait_sync_emits_heartbeat_with_default_verbosity(
     result = run_ops.spawn_wait_sync(
         SpawnWaitInput(
             spawn_ids=("r1",),
-            timeout_secs=5.0,
+            timeout=5.0,
             poll_interval_secs=0.1,
         )
     )
@@ -282,7 +282,7 @@ def test_run_wait_sync_suppresses_heartbeat_when_quiet(
     result = run_ops.spawn_wait_sync(
         SpawnWaitInput(
             spawn_ids=("r1",),
-            timeout_secs=5.0,
+            timeout=5.0,
             poll_interval_secs=0.1,
             quiet=True,
         )

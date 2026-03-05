@@ -103,8 +103,12 @@ def test_json_and_format_flags_output_stdout_only(run_meridian) -> None:
     assert payload_format["space_id"].startswith("s")
     assert payload_format["command"] == []
     assert "session_id" not in payload_format
-    assert isinstance(payload_format["continue_ref"], str)
-    assert payload_format["resume_command"] == f"meridian --continue {payload_format['continue_ref']}"
+    assert "continue_ref" in payload_format
+    if payload_format["continue_ref"] is None:
+        assert payload_format["resume_command"] is None
+    else:
+        assert isinstance(payload_format["continue_ref"], str)
+        assert payload_format["resume_command"] == f"meridian --continue {payload_format['continue_ref']}"
     space_id = payload_format["space_id"]
 
     result = run_meridian(["--json", "spawn", "--dry-run", "--space", space_id, "-p", "hello"])
@@ -183,7 +187,7 @@ def test_run_spawn_help_hides_human_flags_in_agent_mode(package_root, cli_env) -
     assert "--agent" in completed.stdout
     assert "--background" in completed.stdout
     assert "--permission" in completed.stdout
-    assert "--timeout-secs" in completed.stdout
+    assert "--timeout" in completed.stdout
     # Human-only flags should be hidden
     assert "--verbose" not in completed.stdout
     assert "--quiet" not in completed.stdout

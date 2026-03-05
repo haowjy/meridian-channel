@@ -83,7 +83,7 @@ async def test_mcp_tools_registered_and_callable(package_root, cli_env, tmp_path
             {
                 "prompt": "MCP non-blocking spawn_create verification",
                 "model": "gpt-5.3-codex",
-                "timeout_secs": 5,
+                "timeout": 5,
                 "dry_run": True,
             },
         )

@@ -68,7 +68,7 @@ Not MCP-exposed (CLI-only): `space_*`, `config_*`, `skills_search`.
 ```json
 {
   "spawn_ids": ["p7", "p8"],
-  "timeout_secs": 300,
+  "timeout": 30,
   "report": true,
   "include_files": false
 }

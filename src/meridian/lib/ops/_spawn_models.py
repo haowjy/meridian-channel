@@ -30,7 +30,7 @@ class SpawnCreateInput:
     background: bool = False
     space: str | None = None
     repo_root: str | None = None
-    timeout_secs: float | None = None
+    timeout: float | None = None
     permission_tier: str | None = None
     continue_harness_session_id: str | None = None
     continue_harness: str | None = None
@@ -253,7 +253,7 @@ class SpawnContinueInput:
     prompt: str
     model: str = ""
     fork: bool = False
-    timeout_secs: float | None = None
+    timeout: float | None = None
     space: str | None = None
     repo_root: str | None = None
 
@@ -263,7 +263,7 @@ class SpawnWaitInput:
     spawn_ids: tuple[str, ...] = ()
     # Compatibility alias for MCP clients that still send `spawn_id`.
     spawn_id: str | None = None
-    timeout_secs: float | None = None
+    timeout: float | None = None
     poll_interval_secs: float | None = None
     verbose: bool = False
     quiet: bool = False

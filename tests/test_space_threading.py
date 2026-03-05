@@ -147,7 +147,7 @@ def test_run_wait_sync_uses_explicit_space_without_env(
             spawn_ids=(spawn_id,),
             space=space.id,
             repo_root=tmp_path.as_posix(),
-            timeout_secs=0.1,
+            timeout=0.1,
             poll_interval_secs=0.01,
         )
     )

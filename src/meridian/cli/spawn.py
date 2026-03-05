@@ -44,6 +44,12 @@ def _spawn_create_exit_code(result: SpawnActionOutput) -> int:
     return 1
 
 
+def _normalize_timeout(timeout_minutes: float | None) -> float | None:
+    if timeout_minutes is None:
+        return None
+    return timeout_minutes * 60.0
+
+
 def _spawn_create(
     emit: Any,
     prompt: Annotated[
@@ -111,9 +117,12 @@ def _spawn_create(
         str | None,
         Parameter(name=["--space-id", "--space"], help="Space id to spawn within."),
     ] = None,
-    timeout_secs: Annotated[
+    timeout: Annotated[
         float | None,
-        Parameter(name="--timeout-secs", help="Maximum runtime before spawn timeout."),
+        Parameter(
+            name="--timeout",
+            help="Maximum runtime in minutes before spawn timeout.",
+        ),
     ] = None,
     permission_tier: Annotated[
         str | None,
@@ -134,7 +143,7 @@ def _spawn_create(
             stream=stream,
             background=background,
             space=space,
-            timeout_secs=timeout_secs,
+            timeout=_normalize_timeout(timeout),
             permission_tier=permission_tier,
         )
     )
@@ -255,9 +264,12 @@ def _spawn_continue(
         bool,
         Parameter(name="--fork", help="Fork a new branch from the source harness session."),
     ] = False,
-    timeout_secs: Annotated[
+    timeout: Annotated[
         float | None,
-        Parameter(name="--timeout-secs", help="Maximum runtime before timeout."),
+        Parameter(
+            name="--timeout",
+            help="Maximum runtime in minutes before timeout.",
+        ),
     ] = None,
     space: Annotated[
         str | None,
@@ -271,7 +283,7 @@ def _spawn_continue(
                 prompt=prompt,
                 model=model,
                 fork=fork,
-                timeout_secs=timeout_secs,
+                timeout=_normalize_timeout(timeout),
                 space=space,
             )
         )
@@ -303,9 +315,12 @@ def _spawn_wait(
         tuple[str, ...],
         Parameter(name="spawn_id", help="Spawn IDs to wait for."),
     ],
-    timeout_secs: Annotated[
+    timeout: Annotated[
         float | None,
-        Parameter(name="--timeout-secs", help="Maximum wait time before timing out."),
+        Parameter(
+            name="--timeout",
+            help="Maximum wait time in minutes before timing out.",
+        ),
     ] = None,
     verbose: Annotated[
         bool,
@@ -331,7 +346,7 @@ def _spawn_wait(
     result = spawn_wait_sync(
         SpawnWaitInput(
             spawn_ids=spawn_ids,
-            timeout_secs=timeout_secs,
+            timeout=_normalize_timeout(timeout),
             verbose=verbose,
             quiet=quiet,
             report=report,
