@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import sys
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
-from typing import Any, Literal, cast
+from typing import Any, Literal, Protocol, TextIO, cast
 
 from meridian.lib.formatting import FormatContext, TextFormattable
 from meridian.lib.serialization import to_jsonable
@@ -19,6 +21,24 @@ _DEFAULT_FORMAT_CTX = FormatContext()
 @dataclass(frozen=True, slots=True)
 class OutputConfig:
     format: OutputFormat
+
+
+class OutputSink(Protocol):
+    def result(self, payload: Any) -> None: ...
+
+    def status(self, message: str) -> None: ...
+
+    def warning(self, message: str) -> None: ...
+
+    def error(self, message: str, exit_code: int = 1) -> None: ...
+
+    def heartbeat(self, message: str) -> None: ...
+
+    def event(self, payload: dict[str, Any]) -> None: ...
+
+
+class _FlushableSink(Protocol):
+    def flush(self) -> None: ...
 
 
 def _to_json_value(value: Any) -> JSONValue:
@@ -57,33 +77,222 @@ def _porcelain_line(payload: dict[str, JSONValue]) -> str:
     return "\t".join(f"{key}={_porcelain_value(payload[key])}" for key in sorted(payload))
 
 
-def _emit_porcelain(value: Any) -> None:
+def _porcelain_lines(value: Any) -> tuple[str, ...]:
     payload = _to_json_value(value)
     if isinstance(payload, list):
+        lines: list[str] = []
         for item in cast("list[JSONValue]", payload):
             if isinstance(item, dict):
-                print(_porcelain_line(cast("dict[str, JSONValue]", item)))
+                lines.append(_porcelain_line(cast("dict[str, JSONValue]", item)))
             else:
-                print(item)
-        return
+                lines.append(str(item))
+        return tuple(lines)
     if isinstance(payload, dict):
-        print(_porcelain_line(cast("dict[str, JSONValue]", payload)))
+        return (_porcelain_line(cast("dict[str, JSONValue]", payload)),)
+    return (str(payload),)
+
+
+def _render_text(value: Any) -> str:
+    # "text" mode: prefer format_text() if available, fall back to indented JSON
+    # for types that have not yet implemented the protocol.
+    if isinstance(value, TextFormattable):
+        return value.format_text(_DEFAULT_FORMAT_CTX)
+    return json.dumps(_to_json_value(value), sort_keys=True, indent=2)
+
+
+class TextSink:
+    def __init__(
+        self,
+        *,
+        format: OutputFormat = "text",
+        stdout: TextIO | None = None,
+        stderr: TextIO | None = None,
+    ) -> None:
+        self._format = format
+        self._stdout = sys.stdout if stdout is None else stdout
+        self._stderr = sys.stderr if stderr is None else stderr
+
+    def result(self, payload: Any) -> None:
+        if self._format == "porcelain":
+            for line in _porcelain_lines(payload):
+                print(line, file=self._stdout)
+            return
+        if isinstance(payload, str):
+            print(payload, file=self._stdout)
+            return
+        print(_render_text(payload), file=self._stdout)
+
+    def status(self, message: str) -> None:
+        print(message, file=self._stderr)
+
+    def warning(self, message: str) -> None:
+        print(f"warning: {message}", file=self._stderr)
+
+    def error(self, message: str, exit_code: int = 1) -> None:
+        _ = exit_code
+        print(f"error: {message}", file=self._stderr)
+
+    def heartbeat(self, message: str) -> None:
+        print(message, file=self._stderr, flush=True)
+
+    def event(self, payload: dict[str, Any]) -> None:
+        print(json.dumps(_to_json_value(payload), separators=(",", ":")), file=self._stdout, flush=True)
+
+    def flush(self) -> None:
+        self._stdout.flush()
+        self._stderr.flush()
+
+
+class JsonSink:
+    def __init__(self, *, stdout: TextIO | None = None, stderr: TextIO | None = None) -> None:
+        self._stdout = sys.stdout if stdout is None else stdout
+        self._stderr = sys.stderr if stderr is None else stderr
+        self._result: JSONValue | None = None
+        self._has_result = False
+
+    def result(self, payload: Any) -> None:
+        self._result = _to_json_value(payload)
+        self._has_result = True
+
+    def status(self, message: str) -> None:
+        print(message, file=self._stderr)
+
+    def warning(self, message: str) -> None:
+        print(f"warning: {message}", file=self._stderr)
+
+    def error(self, message: str, exit_code: int = 1) -> None:
+        _ = exit_code
+        print(f"error: {message}", file=self._stderr)
+
+    def heartbeat(self, message: str) -> None:
+        print(message, file=self._stderr, flush=True)
+
+    def event(self, payload: dict[str, Any]) -> None:
+        print(json.dumps(_to_json_value(payload), separators=(",", ":")), file=self._stderr, flush=True)
+
+    def flush(self) -> None:
+        if self._has_result:
+            print(json.dumps(self._result, sort_keys=True), file=self._stdout)
+        self._stdout.flush()
+        self._stderr.flush()
+
+
+class AgentSink:
+    def __init__(self, *, stdout: TextIO | None = None) -> None:
+        self._stdout = sys.stdout if stdout is None else stdout
+        self._messages: list[dict[str, JSONValue]] = []
+
+    def _append_typed(self, message_type: str, payload: Any) -> None:
+        json_payload = _to_json_value(payload)
+        entry: dict[str, JSONValue] = {"type": message_type}
+        if isinstance(json_payload, dict):
+            for key, value in cast("dict[str, JSONValue]", json_payload).items():
+                if key == "type":
+                    entry["payload_type"] = value
+                else:
+                    entry[key] = value
+        else:
+            entry["payload"] = json_payload
+        self._messages.append(entry)
+
+    def result(self, payload: Any) -> None:
+        self._append_typed("result", payload)
+
+    def status(self, message: str) -> None:
+        _ = message
+
+    def warning(self, message: str) -> None:
+        _ = message
+
+    def error(self, message: str, exit_code: int = 1) -> None:
+        _ = (message, exit_code)
+
+    def heartbeat(self, message: str) -> None:
+        _ = message
+
+    def event(self, payload: dict[str, Any]) -> None:
+        self._append_typed("event", payload)
+
+    def flush(self) -> None:
+        for message in self._messages:
+            print(json.dumps(message, separators=(",", ":"), sort_keys=True), file=self._stdout)
+        self._stdout.flush()
+
+
+class NullSink:
+    def result(self, payload: Any) -> None:
+        _ = payload
+
+    def status(self, message: str) -> None:
+        _ = message
+
+    def warning(self, message: str) -> None:
+        _ = message
+
+    def error(self, message: str, exit_code: int = 1) -> None:
+        _ = (message, exit_code)
+
+    def heartbeat(self, message: str) -> None:
+        _ = message
+
+    def event(self, payload: dict[str, Any]) -> None:
+        _ = payload
+
+    def flush(self) -> None:
         return
-    print(payload)
+
+
+_NULL_SINK = NullSink()
+_ACTIVE_SINK: ContextVar[OutputSink | None] = ContextVar("_ACTIVE_SINK", default=None)
+
+
+def create_sink(config: OutputConfig, *, agent_mode: bool = False) -> OutputSink:
+    if config.format == "json":
+        if agent_mode:
+            return AgentSink()
+        return JsonSink()
+    if config.format in {"text", "porcelain"}:
+        return TextSink(format=config.format)
+    return _NULL_SINK
+
+
+def set_active_sink(sink: OutputSink) -> Token[OutputSink | None]:
+    return _ACTIVE_SINK.set(sink)
+
+
+def reset_active_sink(token: Token[OutputSink | None]) -> None:
+    _ACTIVE_SINK.reset(token)
+
+
+def get_active_sink(*, fallback: OutputSink | None = None) -> OutputSink:
+    return _ACTIVE_SINK.get() or fallback or _NULL_SINK
+
+
+def flush_sink(sink: OutputSink) -> None:
+    flush = getattr(sink, "flush", None)
+    if callable(flush):
+        try:
+            cast("_FlushableSink", sink).flush()
+        except Exception:
+            # Flush should never fail command execution (e.g. closed stdio on shutdown).
+            return
+
+
+def flush_active_sink() -> None:
+    sink = _ACTIVE_SINK.get()
+    if sink is None:
+        return
+    flush_sink(sink)
 
 
 def emit(value: Any, config: OutputConfig) -> None:
     """Emit one payload according to the configured output mode."""
 
-    if config.format == "json":
-        print(json.dumps(_to_json_value(value), sort_keys=True))
+    sink = _ACTIVE_SINK.get()
+    if sink is not None:
+        sink.result(value)
         return
-    if config.format == "porcelain":
-        _emit_porcelain(value)
-        return
-    # "text" mode: prefer format_text() if available, fall back to indented JSON
-    # for types that have not yet implemented the protocol.
-    if isinstance(value, TextFormattable):
-        print(value.format_text(_DEFAULT_FORMAT_CTX))
-    else:
-        print(json.dumps(_to_json_value(value), sort_keys=True, indent=2))
+
+    ephemeral_sink = create_sink(config)
+    ephemeral_sink.result(value)
+    flush_sink(ephemeral_sink)

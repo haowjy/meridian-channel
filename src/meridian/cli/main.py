@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import sys
@@ -17,7 +16,16 @@ from meridian import __version__
 from meridian.cli.config_cmd import register_config_commands
 from meridian.cli.doctor_cmd import register_doctor_command
 from meridian.cli.models_cmd import register_models_commands
-from meridian.cli.output import OutputConfig, normalize_output_format
+from meridian.cli.output import (
+    OutputConfig,
+    TextSink,
+    create_sink,
+    flush_active_sink,
+    get_active_sink,
+    normalize_output_format,
+    reset_active_sink,
+    set_active_sink,
+)
 from meridian.cli.output import emit as emit_output
 from meridian.cli.report_cmd import register_report_commands
 from meridian.cli.skills_cmd import register_skills_commands
@@ -159,12 +167,13 @@ def _truncate_spawn_failure_fields(payload: SpawnActionOutput) -> SpawnActionOut
 
 
 def _emit_spawn_text(payload: SpawnActionOutput) -> None:
-    print(_spawn_spawn_metadata_line(payload), file=sys.stderr)
+    sink = get_active_sink(fallback=TextSink(format="text"))
+    sink.status(_spawn_spawn_metadata_line(payload))
     if payload.warning:
-        print(f"warning: {payload.warning}", file=sys.stderr)
+        sink.warning(payload.warning)
 
     if payload.background and payload.status == "running" and payload.spawn_id is not None:
-        print(payload.spawn_id)
+        sink.result(payload.spawn_id)
         return
 
     if payload.spawn_id is None:
@@ -174,19 +183,19 @@ def _emit_spawn_text(payload: SpawnActionOutput) -> None:
 
     report_text = _read_spawn_report_text(payload.spawn_id)
     if report_text is None:
-        print(f"warning: no report extracted for spawn '{payload.spawn_id}'", file=sys.stderr)
+        sink.warning(f"no report extracted for spawn '{payload.spawn_id}'")
         if payload.status == "failed":
-            fallback_parts = []
+            fallback_parts: list[str] = []
             if payload.message is not None and payload.message.strip():
                 fallback_parts.append(payload.message.strip())
             if payload.error is not None and payload.error.strip():
                 fallback_parts.append(f"error={payload.error.strip()}")
             if fallback_parts:
-                print(_truncate_spawn_error_text("  ".join(fallback_parts)), file=sys.stderr)
+                sink.status(_truncate_spawn_error_text("  ".join(fallback_parts)))
         return
     if payload.status == "failed":
         report_text = _truncate_spawn_error_text(report_text)
-    print(report_text)
+    sink.result(report_text)
 
 
 def emit(payload: object) -> None:
@@ -308,6 +317,18 @@ def _extract_human_flag(argv: Sequence[str]) -> tuple[list[str], bool]:
 
 def _agent_mode_enabled() -> bool:
     return bool(os.getenv("MERIDIAN_SPACE_ID", "").strip())
+
+
+def _agent_sink_enabled(*, output_explicit: bool) -> bool:
+    if output_explicit or not _agent_mode_enabled():
+        return False
+    raw_depth = os.getenv("MERIDIAN_DEPTH", "").strip()
+    if not raw_depth:
+        return False
+    try:
+        return int(raw_depth) > 0
+    except ValueError:
+        return False
 
 
 app = App(
@@ -805,16 +826,19 @@ def _operation_error_message(exc: Exception) -> str:
 
 
 def _emit_error(message: str, *, exit_code: int = 1) -> None:
-    """Emit an error in the current output format and exit.
-
-    In JSON/porcelain mode, emits a structured error object to stdout so
-    callers (especially agent-mode subprocesses) can parse it reliably.
-    Always prints human-readable text to stderr for logs/humans.
-    """
-    print(f"error: {message}", file=sys.stderr)
+    """Emit an error via the active sink and exit."""
     opts = _GLOBAL_OPTIONS.get()
-    if opts is not None and opts.output.format == "json":
-        print(json.dumps({"error": message, "exit_code": exit_code}))
+    sink = (
+        get_active_sink(fallback=TextSink(format="text"))
+        if opts is None
+        else get_active_sink(
+            fallback=create_sink(
+                opts.output,
+                agent_mode=_agent_sink_enabled(output_explicit=opts.output_explicit),
+            )
+        )
+    )
+    sink.error(message, exit_code=exit_code)
     raise SystemExit(exit_code)
 
 _TOP_LEVEL_VALUE_FLAGS = frozenset(
@@ -960,6 +984,11 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     _validate_top_level_command(cleaned_args)
 
+    active_sink = create_sink(
+        options.output,
+        agent_mode=_agent_sink_enabled(output_explicit=options.output_explicit),
+    )
+    sink_token = set_active_sink(active_sink)
     token = _GLOBAL_OPTIONS.set(options)
     prior_user_config = os.environ.get("MERIDIAN_CONFIG")
     if options.config_file is not None:
@@ -973,12 +1002,14 @@ def main(argv: Sequence[str] | None = None) -> None:
         except (KeyError, ValueError, FileNotFoundError, OSError) as exc:
             _emit_error(_operation_error_message(exc))
     finally:
+        flush_active_sink()
+        _GLOBAL_OPTIONS.reset(token)
+        reset_active_sink(sink_token)
         if options.config_file is not None:
             if prior_user_config is None:
                 os.environ.pop("MERIDIAN_CONFIG", None)
             else:
                 os.environ["MERIDIAN_CONFIG"] = prior_user_config
-        _GLOBAL_OPTIONS.reset(token)
 
 
 _register_group_commands()

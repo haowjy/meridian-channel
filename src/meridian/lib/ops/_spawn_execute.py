@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import os
 import subprocess
 import sys
@@ -22,6 +21,7 @@ from meridian.lib.config.agent import (
     load_agent_profile,
     parse_agent_profile,
 )
+from meridian.lib.context import RuntimeContext
 from meridian.lib.domain import Spawn
 from meridian.lib.exec.spawn import execute_with_finalization
 from meridian.lib.exec.terminal import (
@@ -104,35 +104,49 @@ class _SessionExecutionContext:
     harness_session_id_observer: Callable[[str], None]
 
 
-def _read_non_negative_int_env(name: str, default: int) -> int:
-    raw = os.getenv(name, "").strip()
-    if not raw:
-        return default
-    try:
-        value = int(raw)
-    except ValueError as exc:
-        raise ValueError(f"{name} must be an integer.") from exc
-    if value < 0:
-        raise ValueError(f"{name} must be >= 0.")
-    return value
+def _runtime_context(ctx: RuntimeContext | None) -> RuntimeContext:
+    if ctx is not None:
+        return ctx
+    return RuntimeContext.from_environment()
 
 
-def _depth_limits(max_depth: int) -> tuple[int, int]:
-    current_depth = _read_non_negative_int_env("MERIDIAN_DEPTH", 0)
+def _optional_space_id(space_id: str | None) -> SpaceId | None:
+    if space_id is None:
+        return None
+    normalized = space_id.strip()
+    if not normalized:
+        return None
+    return SpaceId(normalized)
+
+
+def _optional_spawn_id(spawn_id: str | None) -> SpawnId | None:
+    if spawn_id is None:
+        return None
+    normalized = spawn_id.strip()
+    if not normalized:
+        return None
+    return SpawnId(normalized)
+
+
+def _depth_limits(max_depth: int, *, ctx: RuntimeContext | None = None) -> tuple[int, int]:
+    current_depth = _runtime_context(ctx).depth
     if max_depth < 0:
         raise ValueError("max_depth must be >= 0.")
     return current_depth, max_depth
 
 
-def _emit_subrun_event(payload: dict[str, Any]) -> None:
-    if _read_non_negative_int_env("MERIDIAN_DEPTH", 0) <= 0:
+def _emit_subrun_event(payload: dict[str, Any], *, ctx: RuntimeContext | None = None) -> None:
+    runtime_context = _runtime_context(ctx)
+    if runtime_context.depth <= 0:
         return
     event_payload = dict(payload)
     event_payload["v"] = 1
-    parent_spawn_id = os.getenv("MERIDIAN_SPAWN_ID", "").strip()
+    parent_spawn_id = str(runtime_context.spawn_id or "")
     event_payload["parent"] = parent_spawn_id or None
     event_payload["ts"] = time.time()
-    print(json.dumps(event_payload, separators=(",", ":")), file=sys.stdout, flush=True)
+    from meridian.cli.output import TextSink, get_active_sink
+
+    get_active_sink(fallback=TextSink(format="text")).event(event_payload)
 
 
 def _depth_exceeded_output(current_depth: int, max_depth: int) -> SpawnActionOutput:
@@ -149,27 +163,35 @@ def _depth_exceeded_output(current_depth: int, max_depth: int) -> SpawnActionOut
 def _spawn_child_env(
     space_id: str | None,
     spawn_id: str | None = None,
+    *,
+    ctx: RuntimeContext | None = None,
 ) -> dict[str, str]:
+    runtime_context = _runtime_context(ctx)
     # Preserve Meridian spawn context across nesting without forwarding unrelated
     # parent process environment variables.
     child_env = {key: value for key, value in os.environ.items() if key.startswith("MERIDIAN_")}
-    current_depth = _read_non_negative_int_env("MERIDIAN_DEPTH", 0)
-    child_env["MERIDIAN_DEPTH"] = str(current_depth + 1)
-    if space_id is not None:
-        child_env["MERIDIAN_SPACE_ID"] = space_id
-    parent_spawn_id = os.getenv("MERIDIAN_SPAWN_ID", "").strip()
-    if parent_spawn_id:
-        child_env["MERIDIAN_PARENT_SPAWN_ID"] = parent_spawn_id
+    resolved_space_id = _optional_space_id(space_id) or runtime_context.space_id
+    resolved_spawn_id = _optional_spawn_id(spawn_id)
+    if resolved_space_id is not None and resolved_spawn_id is not None:
+        child_context = runtime_context.child_context(
+            space_id=resolved_space_id,
+            spawn_id=resolved_spawn_id,
+        )
     else:
+        child_context = RuntimeContext(
+            space_id=resolved_space_id,
+            spawn_id=resolved_spawn_id,
+            parent_spawn_id=runtime_context.spawn_id if runtime_context.spawn_id is not None else None,
+            depth=runtime_context.depth + 1,
+            repo_root=runtime_context.repo_root,
+            state_root=runtime_context.state_root,
+            chat_id=runtime_context.chat_id,
+        )
+    child_env.update(child_context.to_env_overrides())
+    if runtime_context.spawn_id is None:
         child_env.pop("MERIDIAN_PARENT_SPAWN_ID", None)
-    if spawn_id is None:
+    if resolved_spawn_id is None:
         child_env.pop("MERIDIAN_SPAWN_ID", None)
-    else:
-        normalized_spawn = spawn_id.strip()
-        if normalized_spawn:
-            child_env["MERIDIAN_SPAWN_ID"] = normalized_spawn
-        else:
-            child_env.pop("MERIDIAN_SPAWN_ID", None)
     # Drop legacy name now that canonical spawn vars are used everywhere.
     child_env.pop("MERIDIAN_PARENT_RUN_ID", None)
     return child_env
@@ -275,8 +297,8 @@ def _cleanup_session_materialized(*, harness_id: str, repo_root: Path, chat_id: 
         )
 
 
-def _resolve_chat_id() -> str:
-    chat_id = os.getenv("MERIDIAN_CHAT_ID", "").strip()
+def _resolve_chat_id(*, ctx: RuntimeContext | None = None) -> str:
+    chat_id = _runtime_context(ctx).chat_id
     if chat_id:
         return chat_id
     return "c0"
@@ -292,11 +314,13 @@ def _init_spawn(
     payload: SpawnCreateInput,
     prepared: _PreparedCreateLike,
     runtime: OperationRuntime,
+    ctx: RuntimeContext | None = None,
 ) -> _SpawnContext:
+    runtime_context = _runtime_context(ctx)
     space_id, space_dir = _resolve_space(runtime.repo_root, payload.space)
     spawn_id = spawn_store.start_spawn(
         space_dir,
-        chat_id=_resolve_chat_id(),
+        chat_id=_resolve_chat_id(ctx=runtime_context),
         model=prepared.model,
         agent=prepared.agent_name or "",
         harness=prepared.harness_id,
@@ -311,7 +335,7 @@ def _init_spawn(
         status="running",
         space_id=space_id,
     )
-    current_depth = _read_non_negative_int_env("MERIDIAN_DEPTH", 0)
+    current_depth = runtime_context.depth
     run_start_event: dict[str, Any] = {
         "t": "meridian.spawn.start",
         "id": str(spawn.spawn_id),
@@ -320,7 +344,7 @@ def _init_spawn(
     }
     if prepared.agent_name is not None:
         run_start_event["agent"] = prepared.agent_name
-    _emit_subrun_event(run_start_event)
+    _emit_subrun_event(run_start_event, ctx=runtime_context)
     return _SpawnContext(
         spawn=spawn,
         space_id=space_id,
@@ -411,9 +435,11 @@ async def _execute_existing_spawn(
     session_agent: str = "",
     session_agent_path: str = "",
     session_skill_paths: tuple[str, ...] = (),
+    ctx: RuntimeContext | None = None,
 ) -> int:
+    runtime_context = _runtime_context(ctx)
     runtime = build_runtime(str(repo_root))
-    space_id_text = (space_id_hint or os.getenv("MERIDIAN_SPACE_ID", "")).strip()
+    space_id_text = (space_id_hint or str(runtime_context.space_id or "")).strip()
     if not space_id_text:
         logger.error("Missing space ID for spawn execution.", spawn_id=str(spawn_id))
         return 1
@@ -468,6 +494,7 @@ async def _execute_existing_spawn(
             env_overrides=_spawn_child_env(
                 space_id_text,
                 str(spawn.spawn_id),
+                ctx=runtime_context,
             ),
             max_retries=runtime.config.max_retries,
             retry_backoff_seconds=runtime.config.retry_backoff_seconds,
@@ -538,10 +565,12 @@ def _execute_spawn_background(
     payload: SpawnCreateInput,
     prepared: _PreparedCreateLike,
     runtime: OperationRuntime,
+    ctx: RuntimeContext | None = None,
 ) -> SpawnActionOutput:
+    runtime_context = _runtime_context(ctx)
     if payload.stream:
         logger.warning("--stream is ignored with --background; output goes to spawn log files.")
-    context = _init_spawn(payload=payload, prepared=prepared, runtime=runtime)
+    context = _init_spawn(payload=payload, prepared=prepared, runtime=runtime, ctx=runtime_context)
     spawn_id_text = str(context.spawn.spawn_id)
     space_id_str = str(context.space_id)
 
@@ -637,8 +666,10 @@ def _execute_spawn_blocking(
     payload: SpawnCreateInput,
     prepared: _PreparedCreateLike,
     runtime: OperationRuntime,
+    ctx: RuntimeContext | None = None,
 ) -> SpawnActionOutput:
-    context = _init_spawn(payload=payload, prepared=prepared, runtime=runtime)
+    runtime_context = _runtime_context(ctx)
+    context = _init_spawn(payload=payload, prepared=prepared, runtime=runtime, ctx=runtime_context)
     spawn = context.spawn
     started = time.monotonic()
     space_id_str = str(context.space_id)
@@ -655,7 +686,7 @@ def _execute_spawn_blocking(
                 config=runtime.config.output,
             ),
             output_stream=sys.stderr,
-            root_depth=_read_non_negative_int_env("MERIDIAN_DEPTH", 0),
+            root_depth=runtime_context.depth,
         )
         event_observer = event_filter.observe
 
@@ -691,6 +722,7 @@ def _execute_spawn_blocking(
                 env_overrides=_spawn_child_env(
                     space_id_str,
                     str(spawn.spawn_id),
+                    ctx=runtime_context,
                 ),
                 max_retries=runtime.config.max_retries,
                 retry_backoff_seconds=runtime.config.retry_backoff_seconds,
@@ -718,7 +750,9 @@ def _execute_spawn_blocking(
                 quiet=payload.quiet,
             )
             if rendered_stderr is not None:
-                print(rendered_stderr, file=sys.stderr, flush=True)
+                from meridian.cli.output import TextSink, get_active_sink
+
+                get_active_sink(fallback=TextSink(format="text")).status(rendered_stderr)
     done_secs = duration
     tokens_total: int | None = None
     if row is not None:
@@ -737,7 +771,8 @@ def _execute_spawn_blocking(
             "secs": done_secs,
             "tok": tokens_total,
             "d": context.current_depth,
-        }
+        },
+        ctx=runtime_context,
     )
 
     return SpawnActionOutput(
@@ -773,6 +808,7 @@ async def _execute_spawn_non_blocking(
     session_agent: str = "",
     session_agent_path: str = "",
     session_skill_paths: tuple[str, ...] = (),
+    ctx: RuntimeContext | None = None,
 ) -> None:
     _ = await _execute_existing_spawn(
         spawn_id=spawn_id,
@@ -789,6 +825,7 @@ async def _execute_spawn_non_blocking(
         session_agent=session_agent,
         session_agent_path=session_agent_path,
         session_skill_paths=session_skill_paths,
+        ctx=ctx,
     )
 
 
@@ -828,7 +865,12 @@ def _build_background_worker_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _background_worker_main(argv: Sequence[str] | None = None) -> int:
+def _background_worker_main(
+    argv: Sequence[str] | None = None,
+    *,
+    ctx: RuntimeContext | None = None,
+) -> int:
+    runtime_context = _runtime_context(ctx)
     parser = _build_background_worker_parser()
     parsed = parser.parse_args(list(argv) if argv is not None else None)
 
@@ -854,6 +896,7 @@ def _background_worker_main(argv: Sequence[str] | None = None) -> int:
             session_agent=str(parsed.session_agent),
             session_agent_path=str(parsed.session_agent_path),
             session_skill_paths=tuple(str(item) for item in parsed.session_skill_path),
+            ctx=runtime_context,
         )
     )
 

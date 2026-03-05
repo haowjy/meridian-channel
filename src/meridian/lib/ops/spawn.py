@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
-import sys
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -383,7 +382,9 @@ def _render_wait_heartbeat(pending: set[str], *, elapsed_secs: float, mode: str)
 
 
 def _emit_wait_heartbeat(message: str) -> None:
-    print(message, file=sys.stderr, flush=True)
+    from meridian.cli.output import TextSink, get_active_sink
+
+    get_active_sink(fallback=TextSink(format="text")).heartbeat(message)
 
 
 def spawn_wait_sync(payload: SpawnWaitInput) -> SpawnWaitMultiOutput:
