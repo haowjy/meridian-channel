@@ -8,6 +8,7 @@
 opus = "claude-opus-4-6"
 sonnet = "claude-sonnet-4-6"
 codex = "gpt-5.3-codex"
+gpt = "gpt-5.4"
 
 [metadata.opus]
 role = "Default / all-rounder"
@@ -23,3 +24,8 @@ cost_tier = "$$"
 role = "Executor / correctness"
 strengths = "Repo implementation and correctness passes"
 cost_tier = "$"
+
+[metadata.gpt]
+role = "Strong generalist"
+strengths = "Strong generalist reasoning plus coding"
+cost_tier = "$$"
