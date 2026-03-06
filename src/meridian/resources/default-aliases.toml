@@ -6,12 +6,18 @@
 
 [aliases]
 opus = "claude-opus-4-6"
+sonnet = "claude-sonnet-4-6"
 codex = "gpt-5.3-codex"
 
 [metadata.opus]
 role = "Default / all-rounder"
 strengths = "Best primary agent brain"
 cost_tier = "$$$"
+
+[metadata.sonnet]
+role = "Fast generalist"
+strengths = "UI iteration and fast implementation"
+cost_tier = "$$"
 
 [metadata.codex]
 role = "Executor / correctness"
