@@ -48,7 +48,7 @@ class CodexAdapter(BaseHarnessAdapter):
         "appended_system_prompt": FlagStrategy(effect=FlagEffect.DROP),
     }
     PROMPT_MODE: ClassVar[PromptMode] = PromptMode.POSITIONAL
-    BASE_COMMAND: ClassVar[tuple[str, ...]] = ("codex", "exec")
+    BASE_COMMAND: ClassVar[tuple[str, ...]] = ("codex", "exec", "--json")
     PRIMARY_BASE_COMMAND: ClassVar[tuple[str, ...]] = ("codex",)
     EVENT_CATEGORY_MAP: ClassVar[dict[str, str]] = {
         "response.completed": "lifecycle",

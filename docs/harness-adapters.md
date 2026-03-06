@@ -38,7 +38,7 @@ Model -> harness routing:
 
 ### Codex
 
-- Base: `codex exec ...`
+- Base: `codex exec --json ...`
 - Resume: `codex exec resume <harness_session_id> ...`
 
 ### OpenCode

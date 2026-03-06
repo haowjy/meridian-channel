@@ -3,26 +3,25 @@
 from __future__ import annotations
 
 import dataclasses
-from pathlib import Path
 
 from meridian.lib.harness.adapter import PermissionResolver, SpawnParams
 from meridian.lib.harness.claude import ClaudeAdapter
 from meridian.lib.harness.codex import CodexAdapter
 from meridian.lib.harness.opencode import OpenCodeAdapter
-from meridian.lib.prompt.assembly import resolve_run_defaults
 from meridian.lib.types import HarnessId, ModelId
 
 class StubPermissionResolver(PermissionResolver):
     def resolve_flags(self, harness_id: HarnessId) -> list[str]:
         return ["--perm", str(harness_id)]
 
-def _sample_run(*, model: str) -> SpawnParams:
+
+def _sample_run(*, model: str, extra_args: tuple[str, ...] = ()) -> SpawnParams:
     return SpawnParams(
         prompt="Implement feature X.",
         model=ModelId(model),
         skills=("reviewing",),
         agent="reviewer",
-        extra_args=("--json",),
+        extra_args=extra_args,
     )
 
 def test_every_run_params_field_is_mapped_for_each_adapter() -> None:
@@ -51,9 +50,9 @@ def test_claude_build_command_passes_agent_natively() -> None:
         "reviewer",
         "--perm",
         "claude",
-        "--json",
     ]
     assert "--skills" not in command
+
 
 def test_codex_build_command_drops_agent_and_uses_stdin_prompt_marker() -> None:
     command = CodexAdapter().build_command(
@@ -73,6 +72,21 @@ def test_codex_build_command_drops_agent_and_uses_stdin_prompt_marker() -> None:
     ]
     assert "--agent" not in command
     assert "--skills" not in command
+
+
+def test_codex_build_command_includes_json_without_extra_args() -> None:
+    command = CodexAdapter().build_command(
+        SpawnParams(
+            prompt="Implement feature X.",
+            model=ModelId("gpt-5.3-codex"),
+        ),
+        StubPermissionResolver(),
+    )
+
+    assert command[:3] == ["codex", "exec", "--json"]
+    assert command[-1] == "-"
+    assert command.count("--json") == 1
+
 
 def test_claude_build_command_resume_and_fork() -> None:
     command = ClaudeAdapter().build_command(
@@ -148,7 +162,6 @@ def test_opencode_build_command_strips_model_prefix_and_uses_positional_prompt()
         "gpt-5.3-codex",
         "--perm",
         "opencode",
-        "--json",
         "-",
     ]
     assert "--agent" not in command
@@ -183,4 +196,3 @@ def test_opencode_build_command_resume_and_fork() -> None:
     assert "--session" in command
     assert "session-789" in command
     assert "--fork" in command
-
