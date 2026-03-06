@@ -63,11 +63,11 @@ def test_codex_build_command_drops_agent_and_uses_stdin_prompt_marker() -> None:
     assert command == [
         "codex",
         "exec",
+        "--json",
         "--model",
         "gpt-5.3-codex",
         "--perm",
         "codex",
-        "--json",
         "-",
     ]
     assert "--agent" not in command
@@ -130,7 +130,7 @@ def test_codex_build_command_uses_resume_subcommand_when_session_available() -> 
         StubPermissionResolver(),
     )
 
-    assert command[:4] == ["codex", "exec", "resume", "session-456"]
+    assert command[:5] == ["codex", "exec", "--json", "resume", "session-456"]
     assert "--model" in command
     assert "--fork" not in command
     assert command[-1] == "-"

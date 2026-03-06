@@ -106,7 +106,7 @@ class CodexAdapter(BaseHarnessAdapter):
             command_run = replace(run, prompt=guarded_prompt) if guarded_prompt != run.prompt else run
         else:
             base_command = (
-                ("codex", "exec", "resume", harness_session_id)
+                ("codex", "exec", "--json", "resume", harness_session_id)
                 if harness_session_id
                 else self.BASE_COMMAND
             )
