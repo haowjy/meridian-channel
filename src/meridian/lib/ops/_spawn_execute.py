@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -362,6 +364,37 @@ def _init_spawn(
     )
 
 
+def _write_params_json(
+    repo_root: Path,
+    spawn_id: SpawnId,
+    space_id: str,
+    prepared: _PreparedCreateLike,
+) -> None:
+    """Write resolved execution params to the spawn directory."""
+    params_path = resolve_spawn_log_dir(repo_root, spawn_id, space_id) / "params.json"
+    params_path.parent.mkdir(parents=True, exist_ok=True)
+    params_payload = {
+        "model": prepared.model,
+        "harness": prepared.harness_id,
+        "agent": prepared.agent_name,
+        "prompt_length": len(prepared.composed_prompt),
+        "reference_files": list(prepared.reference_files),
+        "template_vars": prepared.template_vars,
+        "skills": list(prepared.skills),
+        "permission_tier": prepared.permission_config.tier.value,
+        "continue_session": prepared.continue_harness_session_id,
+        "continue_fork": prepared.continue_fork,
+    }
+    fd, tmp = tempfile.mkstemp(dir=str(params_path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(params_payload, handle, indent=2)
+        os.replace(tmp, params_path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
 @contextmanager
 def _session_execution_context(
     *,
@@ -583,6 +616,10 @@ def _execute_spawn_background(
     context = _init_spawn(payload=payload, prepared=prepared, runtime=runtime, ctx=runtime_context)
     spawn_id_text = str(context.spawn.spawn_id)
     space_id_str = str(context.space_id)
+    try:
+        _write_params_json(runtime.repo_root, context.spawn.spawn_id, space_id_str, prepared)
+    except Exception:
+        logger.warning("Failed to write params.json", spawn_id=spawn_id_text, exc_info=True)
 
     launch_command = _build_background_worker_command(
         spawn_id=spawn_id_text,
@@ -681,6 +718,10 @@ def _execute_spawn_blocking(
     runtime_context = _runtime_context(ctx)
     context = _init_spawn(payload=payload, prepared=prepared, runtime=runtime, ctx=runtime_context)
     spawn = context.spawn
+    try:
+        _write_params_json(runtime.repo_root, spawn.spawn_id, str(context.space_id), prepared)
+    except Exception:
+        logger.warning("Failed to write params.json", spawn_id=str(spawn.spawn_id), exc_info=True)
     started = time.monotonic()
     space_id_str = str(context.space_id)
     event_observer = None
