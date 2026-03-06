@@ -174,7 +174,13 @@ class ClaudeAdapter(BaseHarnessAdapter):
         "appended_system_prompt": FlagStrategy(effect=FlagEffect.DROP),
     }
     PROMPT_MODE: ClassVar[PromptMode] = PromptMode.FLAG
-    BASE_COMMAND: ClassVar[tuple[str, ...]] = ("claude", "-p")
+    BASE_COMMAND: ClassVar[tuple[str, ...]] = (
+        "claude",
+        "-p",
+        "--output-format",
+        "stream-json",
+        "--verbose",  # required by Claude CLI when using stream-json with -p
+    )
     PRIMARY_BASE_COMMAND: ClassVar[tuple[str, ...]] = ("claude",)
     EVENT_CATEGORY_MAP: ClassVar[dict[str, str]] = {
         "result": "lifecycle",

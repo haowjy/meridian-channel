@@ -43,6 +43,9 @@ def test_claude_build_command_passes_agent_natively() -> None:
     assert command == [
         "claude",
         "-p",
+        "--output-format",
+        "stream-json",
+        "--verbose",
         "-",
         "--model",
         "claude-opus-4-6",
@@ -99,6 +102,7 @@ def test_claude_build_command_resume_and_fork() -> None:
         StubPermissionResolver(),
     )
 
+    assert command[:5] == ["claude", "-p", "--output-format", "stream-json", "--verbose"]
     assert "--resume" in command
     assert "session-123" in command
     assert "--fork-session" in command
