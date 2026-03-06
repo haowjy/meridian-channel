@@ -163,7 +163,6 @@ def spawn_create_sync(
             agent=prepared.agent_name,
             reference_files=prepared.reference_files,
             template_vars=prepared.template_vars,
-            report_path=prepared.report_path,
             composed_prompt=prepared.composed_prompt,
             cli_command=prepared.cli_command,
             message="Dry run complete.",
@@ -256,7 +255,7 @@ def spawn_stats_sync(
     _ = sink
     runtime_context = _runtime_context(ctx)
     repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
-    current_space_id, space_dir = _resolve_space_dir(
+    _, space_dir = _resolve_space_dir(
         repo_root,
         payload.space,
         space_id=_context_space_id(str(runtime_context.space_id or "")),

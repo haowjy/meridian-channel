@@ -22,7 +22,6 @@ class SpawnCreateInput:
     files: tuple[str, ...] = ()
     template_vars: tuple[str, ...] = ()
     agent: str | None = None
-    report_path: str = "report.md"
     dry_run: bool = False
     verbose: bool = False
     quiet: bool = False
@@ -52,7 +51,6 @@ class SpawnActionOutput:
     agent: str | None = None
     reference_files: tuple[str, ...] = ()
     template_vars: dict[str, str] = field(default_factory=_empty_template_vars)
-    report_path: str | None = None
     report: str | None = None
     composed_prompt: str | None = None
     cli_command: tuple[str, ...] = ()

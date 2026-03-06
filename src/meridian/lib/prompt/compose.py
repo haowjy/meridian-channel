@@ -18,12 +18,9 @@ from meridian.lib.prompt.reference import (
 from meridian.lib.prompt.sanitize import sanitize_prior_output, strip_stale_report_paths
 
 
-def build_report_instruction(report_path: str) -> str:
+def build_report_instruction() -> str:
     """Build the report instruction appended to each composed run prompt."""
 
-    normalized = report_path.strip()
-    if not normalized:
-        raise ValueError("Report path must not be empty.")
     return (
         "# Report\n\n"
         "**IMPORTANT - As your final action, create the run report with Meridian.**\n\n"
@@ -80,7 +77,6 @@ def compose_run_prompt(
     skills: Sequence[SkillContent],
     references: Sequence[ReferenceFile],
     user_prompt: str,
-    report_path: str,
     agent_body: str = "",
     model_guidance: str = "",
     template_variables: Mapping[str, str | Path] | None = None,
@@ -132,7 +128,7 @@ def compose_run_prompt(
         strip_stale_report_paths(user_prompt),
         resolved_variables,
     )
-    report_instruction = build_report_instruction(report_path)
+    report_instruction = build_report_instruction()
 
     if sections_text:
         return f"""{sections_text}
@@ -152,7 +148,6 @@ def compose_run_prompt_text(
     skills: Sequence[SkillContent],
     references: Sequence[ReferenceFile],
     user_prompt: str,
-    report_path: str,
     agent_body: str = "",
     model_guidance: str = "",
     template_variables: Mapping[str, str | Path] | None = None,
@@ -165,7 +160,6 @@ def compose_run_prompt_text(
         skills=skills,
         references=references,
         user_prompt=user_prompt,
-        report_path=report_path,
         agent_body=agent_body,
         model_guidance=model_guidance,
         template_variables=template_variables,

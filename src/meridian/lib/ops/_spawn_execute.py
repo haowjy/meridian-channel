@@ -70,25 +70,59 @@ def _minutes_to_seconds(timeout_minutes: float | None) -> float | None:
 
 
 class _PreparedCreateLike(Protocol):
-    model: str
-    harness_id: str
-    warning: str | None
-    composed_prompt: str
-    skills: tuple[str, ...]
-    reference_files: tuple[str, ...]
-    template_vars: dict[str, str]
-    report_path: str
-    mcp_tools: tuple[str, ...]
-    agent_name: str | None
-    session_agent: str
-    session_agent_path: str
-    skill_paths: tuple[str, ...]
-    cli_command: tuple[str, ...]
-    permission_config: PermissionConfig
-    permission_resolver: PermissionResolver
-    allowed_tools: tuple[str, ...]
-    continue_harness_session_id: str | None
-    continue_fork: bool
+    @property
+    def model(self) -> str: ...
+
+    @property
+    def harness_id(self) -> str: ...
+
+    @property
+    def warning(self) -> str | None: ...
+
+    @property
+    def composed_prompt(self) -> str: ...
+
+    @property
+    def skills(self) -> tuple[str, ...]: ...
+
+    @property
+    def reference_files(self) -> tuple[str, ...]: ...
+
+    @property
+    def template_vars(self) -> dict[str, str]: ...
+
+    @property
+    def mcp_tools(self) -> tuple[str, ...]: ...
+
+    @property
+    def agent_name(self) -> str | None: ...
+
+    @property
+    def session_agent(self) -> str: ...
+
+    @property
+    def session_agent_path(self) -> str: ...
+
+    @property
+    def skill_paths(self) -> tuple[str, ...]: ...
+
+    @property
+    def cli_command(self) -> tuple[str, ...]: ...
+
+    @property
+    def permission_config(self) -> PermissionConfig: ...
+
+    @property
+    def permission_resolver(self) -> PermissionResolver: ...
+
+    @property
+    def allowed_tools(self) -> tuple[str, ...]: ...
+
+    @property
+    def continue_harness_session_id(self) -> str | None: ...
+
+    @property
+    def continue_fork(self) -> bool: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -684,7 +718,6 @@ def _execute_spawn_background(
             agent=prepared.agent_name,
             reference_files=prepared.reference_files,
             template_vars=prepared.template_vars,
-            report_path=prepared.report_path,
             exit_code=1,
         )
 
@@ -703,7 +736,6 @@ def _execute_spawn_background(
         agent=prepared.agent_name,
         reference_files=prepared.reference_files,
         template_vars=prepared.template_vars,
-        report_path=prepared.report_path,
         background=True,
     )
 
@@ -837,7 +869,6 @@ def _execute_spawn_blocking(
         agent=session_context.resolved_agent_name,
         reference_files=prepared.reference_files,
         template_vars=prepared.template_vars,
-        report_path=prepared.report_path,
         report=report_text,
         exit_code=exit_code,
         duration_secs=duration,

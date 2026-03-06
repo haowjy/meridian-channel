@@ -55,7 +55,6 @@ class _PreparedCreate:
     skills: tuple[str, ...]
     reference_files: tuple[str, ...]
     template_vars: dict[str, str]
-    report_path: str
     mcp_tools: tuple[str, ...]
     agent_name: str | None
     session_agent: str
@@ -280,7 +279,6 @@ def _build_create_payload(
         skills=() if native_agents else resolved_skills.loaded_skills,
         references=loaded_references,
         user_prompt=payload.prompt,
-        report_path=payload.report_path,
         agent_body="" if native_agents else defaults.agent_body,
         model_guidance=model_guidance,
         template_variables=parsed_template_vars,
@@ -394,7 +392,6 @@ def _build_create_payload(
         skills=resolved_skills.skill_names,
         reference_files=tuple(str(reference.path) for reference in loaded_references),
         template_vars=parsed_template_vars,
-        report_path=Path(payload.report_path).expanduser().resolve().as_posix(),
         mcp_tools=profile.mcp_tools if profile is not None else (),
         agent_name=agent_for_params,
         session_agent=profile.name if profile is not None else "",

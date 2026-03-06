@@ -17,7 +17,6 @@ from meridian.lib.prompt.reference import (
     resolve_template_variables,
     substitute_template_variables,
 )
-from meridian.lib.prompt.sanitize import sanitize_prior_output, strip_stale_report_paths
 from tests.helpers.fixtures import write_skill as _write_skill
 
 _STALE_FILE_PATH_INSTRUCTION = """
@@ -114,7 +113,6 @@ def test_compose_prompt_keeps_context_isolated_and_sanitized(tmp_path: Path) -> 
         skills=[skill],
         references=loaded_refs,
         user_prompt=user_prompt,
-        report_path=str(tmp_path / "report.md"),
         template_variables={"CTX": "context"},
     )
 
@@ -133,7 +131,6 @@ def test_compose_prompt_does_not_fail_on_unknown_reference_placeholders(tmp_path
         skills=[],
         references=loaded_refs,
         user_prompt="Inspect {{CTX}}.",
-        report_path=str(tmp_path / "report.md"),
         template_variables={"CTX": "context"},
     )
 

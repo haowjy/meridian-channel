@@ -77,14 +77,6 @@ def _spawn_create(
         str | None,
         Parameter(name=["--agent", "-a"], help="Agent profile name to execute."),
     ] = None,
-    report_path: Annotated[
-        str,
-        Parameter(
-            name="--report-path",
-            help="Relative path for generated spawn report.",
-            show=_HUMAN_ONLY,
-        ),
-    ] = "report.md",
     dry_run: Annotated[
         bool,
         Parameter(name="--dry-run", help="Preview without executing harness."),
@@ -152,7 +144,6 @@ def _spawn_create(
                 files=references,
                 template_vars=template_vars,
                 agent=agent,
-                report_path=report_path,
                 dry_run=dry_run,
                 verbose=verbose,
                 quiet=quiet,
