@@ -1,7 +1,7 @@
 # Backlog Execution Archive (2026-03-03)
 
-Execution source: `plans/backlog-execution.md`  
-Execution anomalies/workarounds: `plans/backlog-execution-anomalies.md`
+Execution source: `plans/archive/backlog-execution.md`  
+Execution anomalies/workarounds: `plans/archive/backlog-execution-anomalies.md`
 
 ## Closed Items
 

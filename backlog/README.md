@@ -4,7 +4,7 @@ Central backlog for cross-cutting work not tied to a single implementation plan.
 
 ## Current Status
 
-- Open items: `2` (TD-9: space-plumbing Steps 1+3; TD-17: prompt/resume policy extraction)
+- Open items: `1` (TD-9: space-plumbing Steps 1+3)
 - Archived from 2026-03-04 cleanup batch: `8` (TD-7, TD-10–TD-16)
 - Archived from backlog-execution batch: `17`
 - Previously closed (pre-batch): `2` (`BUG-2`, `BUG-7`)
@@ -12,8 +12,10 @@ Central backlog for cross-cutting work not tied to a single implementation plan.
 ## Archive
 
 - Batch archive: `backlog/archive/2026-03-03-backlog-execution.md`
-- Execution plan: `plans/backlog-execution.md`
-- Execution anomalies/workarounds: `plans/backlog-execution-anomalies.md`
+- Closed bug ledger: `backlog/archive/2026-03-07-bugs.md`
+- Closed improvement ledger: `backlog/archive/2026-03-07-improvements.md`
+- Execution plan: `plans/archive/backlog-execution.md`
+- Execution anomalies/workarounds: `plans/archive/backlog-execution-anomalies.md`
 
 ## Priority Index (Archived on 2026-03-03)
 
@@ -57,8 +59,8 @@ Central backlog for cross-cutting work not tied to a single implementation plan.
 
 ## Structure
 
-- `bugs.md` — archived bug ledger + legacy closed bug entries
-- `improvements.md` — archived improvement ledger
-- `tech-debt.md` — archived tech-debt ledger
+- `tech-debt.md` — active tech-debt backlog
 - `archive/2026-03-03-backlog-execution.md` — closed 17-item execution batch
+- `archive/2026-03-07-bugs.md` — closed bug ledger + legacy closed bug entries
+- `archive/2026-03-07-improvements.md` — closed improvement ledger
 - `_reference/migration-gotchas.md` — Historical notes from `run` → `spawn` migration (not actionable)

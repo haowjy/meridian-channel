@@ -151,4 +151,4 @@ Rules:
 1. Unit tests for parser/validation and operation logic.
 2. `uv run pytest-llm` passes.
 3. CLI smoke run(s) with `uv run meridian` (not unit-tests only).
-4. If anomalies occur, append to `plans/backlog-execution-anomalies.md`.
+4. If anomalies occur, append to `plans/archive/backlog-execution-anomalies.md`.

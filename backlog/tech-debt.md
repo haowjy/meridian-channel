@@ -44,4 +44,4 @@ Note: Steps 0 (thread space_id explicitly) and 2 (thread space into reference lo
 ## Archive Reference
 
 - Full batch archive: `backlog/archive/2026-03-03-backlog-execution.md`
-- Execution anomalies/workarounds: `plans/backlog-execution-anomalies.md`
+- Execution anomalies/workarounds: `plans/archive/backlog-execution-anomalies.md`
