@@ -60,6 +60,7 @@ class StatePaths:
     spawns_dir: Path
     all_spaces_dir: Path
     active_spaces_dir: Path
+    cache_dir: Path
     config_path: Path
     models_path: Path
 
@@ -87,6 +88,7 @@ def resolve_state_paths(repo_root: Path) -> StatePaths:
         spawns_dir=root_dir / "spawns",
         all_spaces_dir=root_dir / _SPACES_DIR,
         active_spaces_dir=root_dir / "active-spaces",
+        cache_dir=root_dir / "cache",
         config_path=root_dir / "config.toml",
         models_path=root_dir / "models.toml",
     )
@@ -96,6 +98,12 @@ def resolve_all_spaces_dir(repo_root: Path) -> Path:
     """Return `.meridian/.spaces/` for a repository root."""
 
     return resolve_state_paths(repo_root).all_spaces_dir
+
+
+def resolve_cache_dir(repo_root: Path) -> Path:
+    """Return `.meridian/cache/` for a repository root."""
+
+    return resolve_state_paths(repo_root).cache_dir
 
 
 def resolve_space_dir(repo_root: Path, space_id: SpaceId | str) -> Path:

@@ -13,6 +13,8 @@ from typing import cast
 from urllib import request
 from urllib.error import HTTPError, URLError
 
+from meridian.lib.config._paths import resolve_repo_root
+from meridian.lib.state.paths import resolve_cache_dir
 from meridian.lib.types import HarnessId
 
 type JSONScalar = str | int | float | bool | None
@@ -59,7 +61,7 @@ class DiscoveredModel:
 
 
 def _default_cache_dir() -> Path:
-    return Path.home() / ".meridian" / "cache"
+    return resolve_cache_dir(resolve_repo_root())
 
 
 def _resolve_cache_dir(cache_dir: Path | str | bool | None) -> tuple[Path, bool]:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from meridian.lib.exec.spawn import run_log_dir
-from meridian.lib.state.paths import resolve_spawn_log_dir, resolve_state_paths
+from meridian.lib.state.paths import resolve_cache_dir, resolve_spawn_log_dir, resolve_state_paths
 from meridian.lib.types import SpawnId, SpaceId
 
 
@@ -13,6 +13,7 @@ def test_resolve_state_paths_defaults_to_repo_meridian(tmp_path):
     assert paths.spawns_dir == tmp_path / ".meridian" / "spawns"
     assert paths.all_spaces_dir == tmp_path / ".meridian" / ".spaces"
     assert paths.active_spaces_dir == tmp_path / ".meridian" / "active-spaces"
+    assert paths.cache_dir == tmp_path / ".meridian" / "cache"
     assert paths.config_path == tmp_path / ".meridian" / "config.toml"
     assert paths.models_path == tmp_path / ".meridian" / "models.toml"
 
@@ -25,8 +26,13 @@ def test_resolve_state_paths_honors_state_root_override(tmp_path, monkeypatch):
 
     assert paths.root_dir == state_root
     assert paths.artifacts_dir == state_root / "artifacts"
+    assert paths.cache_dir == state_root / "cache"
     assert paths.config_path == state_root / "config.toml"
     assert paths.models_path == state_root / "models.toml"
+
+
+def test_resolve_cache_dir_uses_state_paths(tmp_path):
+    assert resolve_cache_dir(tmp_path) == tmp_path / ".meridian" / "cache"
 
 
 def test_run_log_dir_is_centralized(tmp_path):
