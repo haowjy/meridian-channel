@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, replace
+from datetime import date, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -190,23 +191,22 @@ def _date_variant_bases(model_id: str) -> tuple[str, ...]:
     return ()
 
 
+_DEFAULT_RECENCY_DAYS = 180
+
+
+def _recency_cutoff() -> str:
+    """Return YYYY-MM-DD string for the recency cutoff (6 months ago)."""
+    return (date.today() - timedelta(days=_DEFAULT_RECENCY_DAYS)).isoformat()
+
+
 def _is_default_visible(model: CatalogModel, all_model_ids: set[str]) -> bool:
+    # Aliased models are always visible — user explicitly configured them.
     if model.aliases:
         return True
 
     model_id = str(model.model_id)
 
-    if model_id == "gpt-4" or model_id.startswith(("gpt-4-", "gpt-4o")):
-        return False
-    if model_id.startswith(("o1", "o3", "o4")):
-        return False
-    if model_id.startswith("codex-mini"):
-        return False
-    if model_id.startswith(("gemini-1.", "gemini-2.0")):
-        return False
-    if model_id.startswith("claude-3-"):
-        return False
-
+    # --- Noise reduction (redundant variants) ---
     if model_id.endswith("-latest"):
         return False
     if "-chat-latest" in model_id:
@@ -216,8 +216,18 @@ def _is_default_visible(model: CatalogModel, all_model_ids: set[str]) -> bool:
     if model_id.startswith("gemini-live-"):
         return False
 
+    # Date-stamped variants when canonical exists.
     variant_bases = _date_variant_bases(model_id)
     if variant_bases and any(base in all_model_ids for base in variant_bases):
+        return False
+
+    # --- Recency: hide models older than 6 months ---
+    if model.release_date and model.release_date < _recency_cutoff():
+        return False
+
+    # --- Unusable models (no release_date to filter by age) ---
+    # o-series reasoning models don't work with the codex harness.
+    if model_id.startswith(("o1", "o3", "o4")):
         return False
 
     return True

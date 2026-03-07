@@ -31,6 +31,7 @@ def _discovered(
     name: str,
     provider: str,
     harness: str,
+    release_date: str | None = None,
 ) -> DiscoveredModel:
     return DiscoveredModel(
         id=model_id,
@@ -43,7 +44,7 @@ def _discovered(
         context_limit=128000,
         output_limit=64000,
         capabilities=("tool_call",),
-        release_date=None,
+        release_date=release_date,
     )
 
 
@@ -103,30 +104,35 @@ def test_models_list_default_filters_unusable_models(
                 name="GPT-4",
                 provider="openai",
                 harness="codex",
+                release_date="2023-11-06",
             ),
             _discovered(
                 model_id="o3",
                 name="o3",
                 provider="openai",
                 harness="codex",
+                release_date="2025-04-16",
             ),
             _discovered(
                 model_id="gemini-1.5-flash",
                 name="Gemini 1.5 Flash",
                 provider="google",
                 harness="opencode",
+                release_date="2024-05-14",
             ),
             _discovered(
                 model_id="claude-3-haiku",
                 name="Claude 3 Haiku",
                 provider="anthropic",
                 harness="claude",
+                release_date="2024-03-13",
             ),
             _discovered(
                 model_id="gpt-5.3-codex",
                 name="GPT-5.3 Codex",
                 provider="openai",
                 harness="codex",
+                release_date="2026-02-05",
             ),
         ],
     )
@@ -155,12 +161,14 @@ def test_models_list_default_keeps_aliased_models(
                 name="GPT-4o",
                 provider="openai",
                 harness="codex",
+                release_date="2024-05-13",
             ),
             _discovered(
                 model_id="gpt-4",
                 name="GPT-4",
                 provider="openai",
                 harness="codex",
+                release_date="2023-11-06",
             ),
         ],
     )
@@ -222,12 +230,14 @@ def test_models_list_filters_latest_suffix(
                 name="Claude Sonnet 4.6 Latest",
                 provider="anthropic",
                 harness="claude",
+                release_date="2026-02-17",
             ),
             _discovered(
                 model_id="gpt-5.3-codex",
                 name="GPT-5.3 Codex",
                 provider="openai",
                 harness="codex",
+                release_date="2026-02-05",
             ),
         ],
     )
