@@ -10,6 +10,7 @@ from pathlib import Path
 from meridian.lib.config.agent import AgentProfile
 from meridian.lib.harness.layout import (
     HarnessLayout,
+    _resolve_native_dir,
     harness_layout,
     is_agent_native,
     is_skill_native,
@@ -260,19 +261,21 @@ def _cleanup_matching(
 ) -> int:
     removed = 0
 
-    agents_dir = materialization_target_agents(layout, repo_root)
-    if agents_dir.is_dir():
-        for candidate in agents_dir.glob(agents_pattern):
-            if candidate.is_file():
-                candidate.unlink()
-                removed += 1
+    for raw_dir in layout.agents:
+        agents_dir = _resolve_native_dir(raw_dir, repo_root)
+        if agents_dir.is_dir():
+            for candidate in agents_dir.glob(agents_pattern):
+                if candidate.is_file():
+                    candidate.unlink()
+                    removed += 1
 
-    skills_dir = materialization_target_skills(layout, repo_root)
-    if skills_dir.is_dir():
-        for candidate in skills_dir.glob(skills_pattern):
-            if candidate.is_dir():
-                shutil.rmtree(candidate)
-                removed += 1
+    for raw_dir in layout.skills:
+        skills_dir = _resolve_native_dir(raw_dir, repo_root)
+        if skills_dir.is_dir():
+            for candidate in skills_dir.glob(skills_pattern):
+                if candidate.is_dir():
+                    shutil.rmtree(candidate)
+                    removed += 1
 
     return removed
 
@@ -321,24 +324,26 @@ def cleanup_orphaned_materializations(
 
     removed = 0
 
-    agents_dir = materialization_target_agents(layout, repo_root)
-    if agents_dir.is_dir():
-        for candidate in agents_dir.glob("_meridian-*.md"):
-            if not candidate.is_file():
-                continue
-            chat_id = _extract_chat_id_from_materialized(candidate.stem)
-            if chat_id is not None and chat_id not in active_chat_ids:
-                candidate.unlink()
-                removed += 1
+    for raw_dir in layout.agents:
+        agents_dir = _resolve_native_dir(raw_dir, repo_root)
+        if agents_dir.is_dir():
+            for candidate in agents_dir.glob("_meridian-*.md"):
+                if not candidate.is_file():
+                    continue
+                chat_id = _extract_chat_id_from_materialized(candidate.stem)
+                if chat_id is not None and chat_id not in active_chat_ids:
+                    candidate.unlink()
+                    removed += 1
 
-    skills_dir = materialization_target_skills(layout, repo_root)
-    if skills_dir.is_dir():
-        for candidate in skills_dir.glob("_meridian-*"):
-            if not candidate.is_dir():
-                continue
-            chat_id = _extract_chat_id_from_materialized(candidate.name)
-            if chat_id is not None and chat_id not in active_chat_ids:
-                shutil.rmtree(candidate)
-                removed += 1
+    for raw_dir in layout.skills:
+        skills_dir = _resolve_native_dir(raw_dir, repo_root)
+        if skills_dir.is_dir():
+            for candidate in skills_dir.glob("_meridian-*"):
+                if not candidate.is_dir():
+                    continue
+                chat_id = _extract_chat_id_from_materialized(candidate.name)
+                if chat_id is not None and chat_id not in active_chat_ids:
+                    shutil.rmtree(candidate)
+                    removed += 1
 
     return removed

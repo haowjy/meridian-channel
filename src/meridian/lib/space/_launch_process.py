@@ -160,12 +160,15 @@ def _sweep_orphaned_materializations(repo_root: Path, harness_id: str) -> None:
     """Best-effort sweep of materialized files not owned by active sessions."""
 
     from meridian.lib.harness.materialize import cleanup_orphaned_materializations
+    from meridian.lib.harness.layout import HARNESS_NATIVE_DIRS
     from meridian.lib.space.session_store import collect_active_chat_ids
 
     try:
         active_ids = collect_active_chat_ids(repo_root)
-        if active_ids is not None:
-            cleanup_orphaned_materializations(harness_id, repo_root, active_ids)
+        if active_ids is None:
+            return
+        for known_harness_id in HARNESS_NATIVE_DIRS:
+            cleanup_orphaned_materializations(known_harness_id, repo_root, active_ids)
     except Exception:
         logger.debug("Orphan materialization sweep failed", exc_info=True)
 

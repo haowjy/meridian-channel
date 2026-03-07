@@ -79,6 +79,31 @@ def test_cleanup_orphaned_no_artifacts(claude_layout: Path) -> None:
     assert removed == 0
 
 
+def test_cleanup_orphaned_scans_all_layout_directories(tmp_path: Path) -> None:
+    """Verify cleanup sweeps all directories in the harness layout, not just the first."""
+
+    agents_dir_1 = tmp_path / ".agents" / "agents"
+    agents_dir_2 = tmp_path / ".codex" / "agents"
+    skills_dir_1 = tmp_path / ".agents" / "skills"
+    skills_dir_2 = tmp_path / ".codex" / "skills"
+    for directory in (agents_dir_1, agents_dir_2, skills_dir_1, skills_dir_2):
+        directory.mkdir(parents=True)
+
+    (agents_dir_2 / "_meridian-c99-agent.md").write_text("orphan agent", encoding="utf-8")
+    skill_dir = skills_dir_2 / "_meridian-c99-skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("orphan skill", encoding="utf-8")
+
+    (agents_dir_1 / "_meridian-c1-agent.md").write_text("active agent", encoding="utf-8")
+
+    removed = cleanup_orphaned_materializations("codex", tmp_path, frozenset({"c1"}))
+
+    assert removed == 2
+    assert not (agents_dir_2 / "_meridian-c99-agent.md").exists()
+    assert not (skills_dir_2 / "_meridian-c99-skill").exists()
+    assert (agents_dir_1 / "_meridian-c1-agent.md").exists()
+
+
 def test_cleanup_scoped_only_removes_matching_chat(claude_layout: Path) -> None:
     _create_materialized_agent(claude_layout, "c6", "primary")
     _create_materialized_agent(claude_layout, "c7", "primary")
@@ -88,3 +113,19 @@ def test_cleanup_scoped_only_removes_matching_chat(claude_layout: Path) -> None:
     assert removed == 1
     assert not (claude_layout / ".claude" / "agents" / "_meridian-c6-primary.md").exists()
     assert (claude_layout / ".claude" / "agents" / "_meridian-c7-primary.md").exists()
+
+
+def test_cleanup_materialized_scans_all_codex_directories(tmp_path: Path) -> None:
+    agents_dir_1 = tmp_path / ".agents" / "agents"
+    agents_dir_2 = tmp_path / ".codex" / "agents"
+    agents_dir_1.mkdir(parents=True)
+    agents_dir_2.mkdir(parents=True)
+
+    (agents_dir_1 / "_meridian-c5-agent.md").write_text("agent in .agents", encoding="utf-8")
+    (agents_dir_2 / "_meridian-c5-backup.md").write_text("agent in .codex", encoding="utf-8")
+
+    removed = cleanup_materialized("codex", tmp_path, "c5")
+
+    assert removed == 2
+    assert not (agents_dir_1 / "_meridian-c5-agent.md").exists()
+    assert not (agents_dir_2 / "_meridian-c5-backup.md").exists()
