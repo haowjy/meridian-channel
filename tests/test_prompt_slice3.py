@@ -79,6 +79,13 @@ def test_run_defaults_merge_agent_profile_defaults() -> None:
     assert defaults.skills == ("reviewing", "agent")
     assert defaults.agent_body == "Profile body"
 
+def test_run_defaults_resolves_builtin_alias_for_old_callers() -> None:
+    defaults = resolve_run_defaults(
+        "codex",
+        profile=None,
+    )
+    assert defaults.model == "gpt-5.3-codex"
+
 def test_template_substitution_with_literals_and_file_values(tmp_path: Path) -> None:
     value_file = tmp_path / "context.txt"
     value_file.write_text("from-file", encoding="utf-8")
