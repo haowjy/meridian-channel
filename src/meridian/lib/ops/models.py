@@ -6,10 +6,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from meridian.lib.config.catalog import AliasEntry, load_merged_aliases, resolve_model
-from meridian.lib.config.discovery import DiscoveredModel, load_discovered_models, refresh_cache
+from meridian.lib.config.aliases import AliasEntry, load_merged_aliases, resolve_model
+from meridian.lib.config.discovery import DiscoveredModel, load_discovered_models, refresh_models_cache
+from meridian.lib.config.routing import route_model
 from meridian.lib.ops.registry import OperationSpec, operation
-from meridian.lib.types import ModelId
+from meridian.lib.types import HarnessId, ModelId
 
 if TYPE_CHECKING:
     from meridian.lib.formatting import FormatContext
@@ -33,8 +34,46 @@ class ModelsRefreshInput:
 
 
 @dataclass(frozen=True, slots=True)
+class CatalogModel:
+    model_id: ModelId
+    harness: HarnessId
+    aliases: tuple[AliasEntry, ...] = ()
+    name: str | None = None
+    family: str | None = None
+    provider: str | None = None
+    cost_input: float | None = None
+    cost_output: float | None = None
+    context_limit: int | None = None
+    output_limit: int | None = None
+    capabilities: tuple[str, ...] = ()
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        _ = ctx
+        from meridian.cli.format_helpers import kv_block
+
+        alias_names = ", ".join(alias.alias for alias in self.aliases) or None
+        alias_details = ", ".join(_format_alias_detail(alias) for alias in self.aliases) or None
+        capabilities = ", ".join(self.capabilities) or None
+        pairs: list[tuple[str, str | None]] = [
+            ("Model", str(self.model_id)),
+            ("Harness", str(self.harness)),
+            ("Name", self.name),
+            ("Family", self.family),
+            ("Provider", self.provider),
+            ("Aliases", alias_names),
+            ("Alias details", alias_details),
+            ("Capabilities", capabilities),
+            ("Cost input", _format_float(self.cost_input)),
+            ("Cost output", _format_float(self.cost_output)),
+            ("Context limit", _format_int(self.context_limit)),
+            ("Output limit", _format_int(self.output_limit)),
+        ]
+        return kv_block(pairs)
+
+
+@dataclass(frozen=True, slots=True)
 class ModelsListOutput:
-    models: tuple[AliasEntry, ...]
+    models: tuple[CatalogModel, ...]
 
     def format_text(self, ctx: FormatContext | None = None) -> str:
         """Columnar model table for text output mode."""
@@ -44,14 +83,13 @@ class ModelsListOutput:
 
         rows = [
             [
-                str(m.model_id),
-                str(m.harness),
-                f"({m.alias})" if m.alias else "",
-                m.role or "",
-                m.strengths or "",
-                m.cost_tier or "",
+                str(model.model_id),
+                str(model.harness),
+                ",".join(alias.alias for alias in model.aliases),
+                model.provider or "",
+                model.name or "",
             ]
-            for m in self.models
+            for model in self.models
         ]
         return tabular(rows)
 
@@ -69,52 +107,125 @@ def _repo_root(repo_root: str | None) -> Path | None:
         return None
     return Path(repo_root).expanduser().resolve()
 
-def _entry_from_discovered(model: DiscoveredModel) -> AliasEntry:
-    return AliasEntry(
-        alias="",
-        model_id=ModelId(model.id),
-        role=f"Discovered ({model.provider})",
-        strengths=model.name,
+
+def _format_float(value: float | None) -> str | None:
+    if value is None:
+        return None
+    return f"{value:g}"
+
+
+def _format_int(value: int | None) -> str | None:
+    if value is None:
+        return None
+    return str(value)
+
+
+def _format_alias_detail(alias: AliasEntry) -> str:
+    details: list[str] = [alias.alias]
+    if alias.role:
+        details.append(f"role={alias.role}")
+    if alias.strengths:
+        details.append(f"strengths={alias.strengths}")
+    return " ".join(details)
+
+
+def _build_catalog_model(
+    *,
+    model_id: str,
+    discovered: DiscoveredModel | None,
+    aliases: list[AliasEntry],
+) -> CatalogModel:
+    if discovered is not None:
+        harness = discovered.harness
+    elif aliases:
+        harness = aliases[0].harness
+    else:
+        harness = route_model(model_id).harness_id
+
+    sorted_aliases = tuple(sorted(aliases, key=lambda entry: entry.alias))
+
+    return CatalogModel(
+        model_id=ModelId(model_id),
+        harness=harness,
+        aliases=sorted_aliases,
+        name=discovered.name if discovered is not None else None,
+        family=discovered.family if discovered is not None else None,
+        provider=discovered.provider if discovered is not None else None,
+        cost_input=discovered.cost_input if discovered is not None else None,
+        cost_output=discovered.cost_output if discovered is not None else None,
+        context_limit=discovered.context_limit if discovered is not None else None,
+        output_limit=discovered.output_limit if discovered is not None else None,
+        capabilities=discovered.capabilities if discovered is not None else (),
     )
 
 
 def models_list_sync(payload: ModelsListInput) -> ModelsListOutput:
+    _ = payload.all
     root = _repo_root(payload.repo_root)
     aliases = load_merged_aliases(repo_root=root)
-    if not payload.all:
-        return ModelsListOutput(models=tuple(aliases))
+    discovered = load_discovered_models()
 
-    merged = list(aliases)
-    known_model_ids = {str(entry.model_id) for entry in aliases}
-    discovered = sorted(load_discovered_models(), key=lambda model: model.id)
-    for model in discovered:
-        if model.id in known_model_ids:
-            continue
-        merged.append(_entry_from_discovered(model))
-    return ModelsListOutput(models=tuple(merged))
+    aliases_by_model_id: dict[str, list[AliasEntry]] = {}
+    for alias in aliases:
+        aliases_by_model_id.setdefault(str(alias.model_id), []).append(alias)
+
+    discovered_by_model_id = {model.id: model for model in discovered}
+    model_ids = set(aliases_by_model_id) | set(discovered_by_model_id)
+
+    merged_models = [
+        _build_catalog_model(
+            model_id=model_id,
+            discovered=discovered_by_model_id.get(model_id),
+            aliases=aliases_by_model_id.get(model_id, []),
+        )
+        for model_id in sorted(model_ids)
+    ]
+    return ModelsListOutput(models=tuple(merged_models))
 
 
-def models_show_sync(payload: ModelsShowInput) -> AliasEntry:
+def models_show_sync(payload: ModelsShowInput) -> CatalogModel:
     model_name = payload.model.strip()
     if not model_name:
         raise ValueError("Model identifier must not be empty.")
 
     root = _repo_root(payload.repo_root)
     aliases = load_merged_aliases(repo_root=root)
-    for entry in aliases:
-        if model_name == entry.alias or model_name == str(entry.model_id):
-            return entry
+    discovered = load_discovered_models()
+    discovered_by_model_id = {model.id: model for model in discovered}
 
-    for model in load_discovered_models():
-        if model.id == model_name:
-            return _entry_from_discovered(model)
+    by_alias = {entry.alias: entry for entry in aliases}
+    resolved_alias = by_alias.get(model_name)
+    if resolved_alias is not None:
+        target_model_id = str(resolved_alias.model_id)
+        model_aliases = [entry for entry in aliases if str(entry.model_id) == target_model_id]
+        return _build_catalog_model(
+            model_id=target_model_id,
+            discovered=discovered_by_model_id.get(target_model_id),
+            aliases=model_aliases,
+        )
 
-    return resolve_model(model_name, repo_root=root)
+    discovered_match = discovered_by_model_id.get(model_name)
+    if discovered_match is not None:
+        model_aliases = [entry for entry in aliases if str(entry.model_id) == model_name]
+        return _build_catalog_model(
+            model_id=model_name,
+            discovered=discovered_match,
+            aliases=model_aliases,
+        )
+
+    resolved = resolve_model(model_name, repo_root=root)
+    target_model_id = str(resolved.model_id)
+    model_aliases = [entry for entry in aliases if str(entry.model_id) == target_model_id]
+    return _build_catalog_model(
+        model_id=target_model_id,
+        discovered=discovered_by_model_id.get(target_model_id),
+        aliases=model_aliases,
+    )
 
 
 def models_refresh_sync(payload: ModelsRefreshInput) -> ModelsRefreshOutput:
     _ = payload
-    refreshed = refresh_cache()
+    refreshed = refresh_models_cache()
     return ModelsRefreshOutput(refreshed=len(refreshed))
 
 
@@ -122,7 +233,7 @@ async def models_list(payload: ModelsListInput) -> ModelsListOutput:
     return models_list_sync(payload)
 
 
-async def models_show(payload: ModelsShowInput) -> AliasEntry:
+async def models_show(payload: ModelsShowInput) -> CatalogModel:
     return models_show_sync(payload)
 
 
@@ -145,12 +256,12 @@ operation(
 )
 
 operation(
-    OperationSpec[ModelsShowInput, AliasEntry](
+    OperationSpec[ModelsShowInput, CatalogModel](
         name="models.show",
         handler=models_show,
         sync_handler=models_show_sync,
         input_type=ModelsShowInput,
-        output_type=AliasEntry,
+        output_type=CatalogModel,
         cli_group="models",
         cli_name="show",
         mcp_name="models_show",
