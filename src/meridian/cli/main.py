@@ -384,8 +384,7 @@ spawn_app = App(
     name="spawn",
     help=(
         "Run subagents with a model and prompt. Returns immediately with a spawn_id.\n"
-        "Spawns run in background by default. Auto-creates a space if\n"
-        "MERIDIAN_SPACE_ID is not set. Use --foreground to block."
+        "Spawns run in background by default."
     ),
     help_epilogue=(
         "Examples:\n"
@@ -903,7 +902,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     cleaned_args, options = _extract_global_options(args)
 
     agent_mode = _agent_mode_enabled() and not force_human
-    if agent_mode and not options.output_explicit:
+    if agent_mode and not options.output_explicit and _agent_sink_enabled(output_explicit=False):
         options = replace(options, output=OutputConfig(format="json"))
 
     if agent_mode and (not cleaned_args or _is_root_help_request(cleaned_args)):
