@@ -6,6 +6,7 @@ from meridian.lib.config.catalog import (
     CatalogModel,
     load_merged_aliases,
     load_model_catalog,
+    resolve_alias,
     resolve_model,
 )
 from meridian.lib.config.routing import RoutingDecision, route_model
@@ -23,6 +24,7 @@ __all__ = [
     "load_merged_aliases",
     "load_model_catalog",
     "parse_skill_file",
+    "resolve_alias",
     "resolve_model",
     "route_model",
     "scan_agent_profiles",

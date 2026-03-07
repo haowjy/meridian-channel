@@ -8,6 +8,7 @@ from meridian.lib.config.catalog import (
     load_builtin_aliases,
     load_merged_aliases,
     load_user_aliases,
+    resolve_alias,
     resolve_model,
 )
 
@@ -26,7 +27,7 @@ def test_load_builtin_aliases_from_resource() -> None:
     assert str(by_alias["haiku"].model_id) == "claude-haiku-4-5"
     assert str(by_alias["gpt52h"].model_id) == "gpt-5.2-high"
     assert str(by_alias["gemini"].model_id) == "gemini-3.1-pro"
-    assert by_alias["opus"].role == ""
+    assert by_alias["opus"].role is None
     assert by_alias["codex"].harness == "codex"
 
 
@@ -62,7 +63,7 @@ opus = "claude-sonnet-4-6"
     by_alias = {entry.alias: entry for entry in entries}
 
     assert str(by_alias["opus"].model_id) == "claude-sonnet-4-6"
-    assert by_alias["opus"].role == ""
+    assert by_alias["opus"].role is None
 
 
 def test_resolve_model_alias_and_direct_passthrough(tmp_path: Path) -> None:
@@ -116,3 +117,36 @@ def test_load_user_aliases_empty_aliases_section_returns_empty_list(tmp_path: Pa
 def test_resolve_model_unknown_family_raises_value_error(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         _ = resolve_model("unknown-model-x", repo_root=tmp_path)
+
+
+def test_resolve_alias_returns_model_id_and_none_for_miss(tmp_path: Path) -> None:
+    _write_user_aliases(
+        tmp_path,
+        """
+[aliases]
+fast = "gpt-5.3-codex"
+""".strip(),
+    )
+
+    assert str(resolve_alias("fast", repo_root=tmp_path)) == "gpt-5.3-codex"
+    assert resolve_alias("missing", repo_root=tmp_path) is None
+
+
+def test_load_user_aliases_supports_alias_table_shape(tmp_path: Path) -> None:
+    _write_user_aliases(
+        tmp_path,
+        """
+[aliases.fast]
+model_id = "gpt-5.3-codex"
+role = "Primary"
+strengths = "Reliable coding"
+""".strip(),
+    )
+
+    entries = load_user_aliases(repo_root=tmp_path)
+
+    assert len(entries) == 1
+    assert entries[0].alias == "fast"
+    assert str(entries[0].model_id) == "gpt-5.3-codex"
+    assert entries[0].role == "Primary"
+    assert entries[0].strengths == "Reliable coding"

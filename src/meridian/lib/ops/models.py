@@ -45,11 +45,11 @@ class ModelsListOutput:
         rows = [
             [
                 str(m.model_id),
-                m.harness,
+                str(m.harness),
                 f"({m.alias})" if m.alias else "",
-                m.role,
-                m.strengths,
-                m.cost_tier,
+                m.role or "",
+                m.strengths or "",
+                m.cost_tier or "",
             ]
             for m in self.models
         ]
@@ -69,27 +69,12 @@ def _repo_root(repo_root: str | None) -> Path | None:
         return None
     return Path(repo_root).expanduser().resolve()
 
-
-def _cost_tier(model: DiscoveredModel) -> str:
-    costs = [cost for cost in (model.cost_input, model.cost_output) if cost is not None]
-    if not costs:
-        return ""
-    highest_cost = max(costs)
-    if highest_cost <= 1:
-        return "$"
-    if highest_cost <= 10:
-        return "$$"
-    return "$$$"
-
-
 def _entry_from_discovered(model: DiscoveredModel) -> AliasEntry:
     return AliasEntry(
-        model_id=ModelId(model.id),
         alias="",
+        model_id=ModelId(model.id),
         role=f"Discovered ({model.provider})",
         strengths=model.name,
-        cost_tier=_cost_tier(model),
-        harness=model.harness_id,
     )
 
 
