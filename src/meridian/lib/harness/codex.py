@@ -10,6 +10,7 @@ from typing import ClassVar
 
 from meridian.lib.harness._common import (
     categorize_stream_event,
+    extract_codex_report,
     extract_session_id_from_artifacts_with_patterns,
     extract_usage_from_artifacts,
     parse_json_stream_event,
@@ -196,3 +197,6 @@ class CodexAdapter(BaseHarnessAdapter):
             json_keys=self.SESSION_ID_KEYS,
             text_patterns=self.SESSION_ID_TEXT_PATTERNS,
         )
+
+    def extract_report(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> str | None:
+        return extract_codex_report(artifacts, spawn_id)

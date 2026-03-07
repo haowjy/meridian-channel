@@ -11,10 +11,11 @@ from typing import ClassVar, cast
 from uuid import uuid4
 
 from meridian.lib.harness._common import (
-    iter_nested_dicts,
     categorize_stream_event,
+    extract_claude_report,
     extract_session_id_from_artifacts,
     extract_usage_from_artifacts,
+    iter_nested_dicts,
     parse_json_stream_event,
 )
 from meridian.lib.harness._strategies import (
@@ -300,6 +301,9 @@ class ClaudeAdapter(BaseHarnessAdapter):
 
     def extract_session_id(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> str | None:
         return extract_session_id_from_artifacts(artifacts, spawn_id)
+
+    def extract_report(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> str | None:
+        return extract_claude_report(artifacts, spawn_id)
 
     def seed_session(
         self,
