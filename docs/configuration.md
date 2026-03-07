@@ -2,6 +2,10 @@
 
 Meridian works without config files, but you can override defaults in `.meridian/config.toml`.
 
+By default Meridian searches repo-local `.agents`, `.claude`, `.codex`,
+`.opencode`, `.cursor`, plus user-level `~/.claude`, `~/.codex`, and
+`~/.opencode` agent/skill directories.
+
 ## Quick Start
 
 ```bash
@@ -86,8 +90,10 @@ autocompact_pct = 70
 permission_tier = "full-access"
 
 [search_paths]
-agents = [".agents/agents", ".claude/agents"]
-skills = [".agents/skills", ".claude/skills"]
+agents = [".agents/agents", ".claude/agents", ".codex/agents", ".opencode/agents"]
+skills = [".agents/skills", ".claude/skills", ".codex/skills", ".opencode/skills"]
+global_agents = ["~/.claude/agents", "~/.codex/agents", "~/.opencode/agents"]
+global_skills = ["~/.claude/skills", "~/.codex/skills", "~/.opencode/skills"]
 ```
 
 ## Model Catalog Overrides

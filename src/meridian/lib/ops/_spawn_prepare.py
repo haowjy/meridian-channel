@@ -233,11 +233,14 @@ def _build_create_payload(
         space_id=payload.space,
     )
     parsed_template_vars = parse_template_assignments(payload.template_vars)
-    # --- Native agent passthrough for Claude ---
-    # When the harness supports native agents, skip injecting agent body and
-    # skill content into the composed prompt. Instead, pass agent name and
-    # skill names via SpawnParams so the harness loads them natively.
-    # This keeps skills persistent across context compaction.
+    # Native agent passthrough is stricter than native skill support.
+    # We only suppress agent/skill prompt injection when the harness can load
+    # the full agent profile natively. This avoids relying on partial native
+    # skill semantics that vary by harness. Claude is a concrete example:
+    # `claude --agent <name>` still does not reliably preload `skills:` in the
+    # same way as Claude subagents (see anthropics/claude-code#29902), so the
+    # composition path still needs a prompt-side workaround until the harness
+    # behavior is fixed.
     native_agents = harness.capabilities.supports_native_agents
 
     # With --skills removed, skills come exclusively from the agent profile.

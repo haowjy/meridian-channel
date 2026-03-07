@@ -26,8 +26,8 @@ HARNESS_NATIVE_DIRS: dict[str, HarnessLayout] = {
     "codex": HarnessLayout(
         agents=(".agents/agents", ".codex/agents"),
         skills=(".agents/skills", ".codex/skills"),
-        global_agents=(),
-        global_skills=(),
+        global_agents=("~/.codex/agents",),
+        global_skills=("~/.codex/skills",),
     ),
     "opencode": HarnessLayout(
         agents=(".agents/agents", ".opencode/agents"),

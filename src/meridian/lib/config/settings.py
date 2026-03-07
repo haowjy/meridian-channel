@@ -40,8 +40,16 @@ class SearchPathConfig:
         ".opencode/skills",
         ".cursor/skills",
     )
-    global_agents: tuple[str, ...] = ("~/.claude/agents", "~/.opencode/agents")
-    global_skills: tuple[str, ...] = ("~/.claude/skills", "~/.opencode/skills")
+    global_agents: tuple[str, ...] = (
+        "~/.claude/agents",
+        "~/.codex/agents",
+        "~/.opencode/agents",
+    )
+    global_skills: tuple[str, ...] = (
+        "~/.claude/skills",
+        "~/.codex/skills",
+        "~/.opencode/skills",
+    )
 
 
 @dataclass(frozen=True, slots=True)

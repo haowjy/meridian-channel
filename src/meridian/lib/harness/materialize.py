@@ -261,7 +261,7 @@ def _cleanup_matching(
 ) -> int:
     removed = 0
 
-    for raw_dir in layout.agents:
+    for raw_dir in (*layout.agents, *layout.global_agents):
         agents_dir = _resolve_native_dir(raw_dir, repo_root)
         if agents_dir.is_dir():
             for candidate in agents_dir.glob(agents_pattern):
@@ -269,7 +269,7 @@ def _cleanup_matching(
                     candidate.unlink()
                     removed += 1
 
-    for raw_dir in layout.skills:
+    for raw_dir in (*layout.skills, *layout.global_skills):
         skills_dir = _resolve_native_dir(raw_dir, repo_root)
         if skills_dir.is_dir():
             for candidate in skills_dir.glob(skills_pattern):
@@ -324,7 +324,7 @@ def cleanup_orphaned_materializations(
 
     removed = 0
 
-    for raw_dir in layout.agents:
+    for raw_dir in (*layout.agents, *layout.global_agents):
         agents_dir = _resolve_native_dir(raw_dir, repo_root)
         if agents_dir.is_dir():
             for candidate in agents_dir.glob("_meridian-*.md"):
@@ -335,7 +335,7 @@ def cleanup_orphaned_materializations(
                     candidate.unlink()
                     removed += 1
 
-    for raw_dir in layout.skills:
+    for raw_dir in (*layout.skills, *layout.global_skills):
         skills_dir = _resolve_native_dir(raw_dir, repo_root)
         if skills_dir.is_dir():
             for candidate in skills_dir.glob("_meridian-*"):
