@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -49,7 +49,7 @@ class CatalogModel:
     output_limit: int | None = None
     capabilities: tuple[str, ...] = ()
     release_date: str | None = None
-    is_latest: bool = False
+    cost_tier: str | None = None
 
     def format_text(self, ctx: FormatContext | None = None) -> str:
         _ = ctx
@@ -68,6 +68,7 @@ class CatalogModel:
             ("Alias details", alias_details),
             ("Capabilities", capabilities),
             ("Released", self.release_date),
+            ("Cost", self.cost_tier),
             ("Cost input", _format_float(self.cost_input)),
             ("Cost output", _format_float(self.cost_output)),
             ("Context limit", _format_int(self.context_limit)),
@@ -92,7 +93,7 @@ class ModelsListOutput:
                 str(model.harness),
                 ",".join(alias.alias for alias in model.aliases),
                 model.provider or "",
-                f"{model.name or ''} (latest)" if model.is_latest else (model.name or ""),
+                model.cost_tier or "",
                 model.release_date or "",
             ]
             for model in self.models
@@ -150,6 +151,8 @@ def _build_catalog_model(
 
     sorted_aliases = tuple(sorted(aliases, key=lambda entry: entry.alias))
 
+    cost_input = discovered.cost_input if discovered is not None else None
+
     return CatalogModel(
         model_id=ModelId(model_id),
         harness=harness,
@@ -157,12 +160,13 @@ def _build_catalog_model(
         name=discovered.name if discovered is not None else None,
         family=discovered.family if discovered is not None else None,
         provider=discovered.provider if discovered is not None else None,
-        cost_input=discovered.cost_input if discovered is not None else None,
+        cost_input=cost_input,
         cost_output=discovered.cost_output if discovered is not None else None,
         context_limit=discovered.context_limit if discovered is not None else None,
         output_limit=discovered.output_limit if discovered is not None else None,
         capabilities=discovered.capabilities if discovered is not None else (),
         release_date=discovered.release_date if discovered is not None else None,
+        cost_tier=_cost_tier(cost_input),
     )
 
 
@@ -233,26 +237,15 @@ def _is_default_visible(model: CatalogModel, all_model_ids: set[str]) -> bool:
     return True
 
 
-def _tag_latest_per_provider(models: list[CatalogModel]) -> list[CatalogModel]:
-    """Mark the most recently released model per provider with ``is_latest``."""
-    latest_date_by_provider: dict[str, str] = {}
-    for model in models:
-        provider = model.provider or str(model.harness)
-        if model.release_date and (
-            provider not in latest_date_by_provider
-            or model.release_date > latest_date_by_provider[provider]
-        ):
-            latest_date_by_provider[provider] = model.release_date
-
-    return [
-        replace(model, is_latest=True)
-        if (
-            model.release_date is not None
-            and model.release_date == latest_date_by_provider.get(model.provider or str(model.harness))
-        )
-        else model
-        for model in models
-    ]
+def _cost_tier(cost_input: float | None) -> str | None:
+    """Map input cost ($/M tokens) to a human-readable tier."""
+    if cost_input is None:
+        return None
+    if cost_input < 1.0:
+        return "$"
+    if cost_input < 5.0:
+        return "$$"
+    return "$$$"
 
 
 def models_list_sync(payload: ModelsListInput) -> ModelsListOutput:
@@ -280,7 +273,6 @@ def models_list_sync(payload: ModelsListInput) -> ModelsListOutput:
         merged_models = [
             model for model in merged_models if _is_default_visible(model, all_model_ids)
         ]
-    merged_models = _tag_latest_per_provider(merged_models)
     return ModelsListOutput(models=tuple(merged_models))
 
 

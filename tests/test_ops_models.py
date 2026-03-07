@@ -32,6 +32,7 @@ def _discovered(
     provider: str,
     harness: str,
     release_date: str | None = None,
+    cost_input: float | None = 1.0,
 ) -> DiscoveredModel:
     return DiscoveredModel(
         id=model_id,
@@ -39,7 +40,7 @@ def _discovered(
         family=model_id.split("-", maxsplit=1)[0],
         provider=provider,
         harness=HarnessId(harness),
-        cost_input=1.0,
+        cost_input=cost_input,
         cost_output=2.0,
         context_limit=128000,
         output_limit=64000,
@@ -273,6 +274,54 @@ def test_models_list_filters_date_stamped_variants(
     output = models_ops.models_list_sync(models_ops.ModelsListInput())
 
     assert [str(model.model_id) for model in output.models] == ["claude-opus-4-5"]
+
+
+def test_models_list_includes_cost_tiers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(models_ops, "load_merged_aliases", lambda repo_root=None: [])
+    monkeypatch.setattr(
+        models_ops,
+        "load_discovered_models",
+        lambda: [
+            _discovered(
+                model_id="cheap-model",
+                name="Cheap",
+                provider="openai",
+                harness="codex",
+                cost_input=0.5,
+            ),
+            _discovered(
+                model_id="mid-model",
+                name="Mid",
+                provider="openai",
+                harness="codex",
+                cost_input=2.0,
+            ),
+            _discovered(
+                model_id="expensive-model",
+                name="Expensive",
+                provider="openai",
+                harness="codex",
+                cost_input=15.0,
+            ),
+            _discovered(
+                model_id="unknown-cost",
+                name="Unknown",
+                provider="openai",
+                harness="codex",
+                cost_input=None,
+            ),
+        ],
+    )
+
+    output = models_ops.models_list_sync(models_ops.ModelsListInput(all=True))
+    by_id = {str(m.model_id): m for m in output.models}
+
+    assert by_id["cheap-model"].cost_tier == "$"
+    assert by_id["mid-model"].cost_tier == "$$"
+    assert by_id["expensive-model"].cost_tier == "$$$"
+    assert by_id["unknown-cost"].cost_tier is None
 
 
 def test_models_show_sync_includes_discovery_and_alias_info(
