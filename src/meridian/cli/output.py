@@ -137,6 +137,14 @@ class AgentSink:
         self._messages: list[dict[str, JSONValue]] = []
 
     def _append_typed(self, message_type: str, payload: Any) -> None:
+        # Prefer compact text rendering for agent mode — saves tokens.
+        if isinstance(payload, TextFormattable):
+            self._messages.append({
+                "type": message_type,
+                "text": payload.format_text(_DEFAULT_FORMAT_CTX),
+            })
+            return
+
         json_payload = _to_json_value(payload)
         entry: dict[str, JSONValue] = {"type": message_type}
         if isinstance(json_payload, dict):
