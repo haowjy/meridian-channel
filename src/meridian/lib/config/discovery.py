@@ -48,6 +48,7 @@ class DiscoveredModel:
     context_limit: int | None
     output_limit: int | None
     capabilities: tuple[str, ...]
+    release_date: str | None
 
     @property
     def harness_id(self) -> HarnessId:
@@ -194,6 +195,7 @@ def _parse_model_row(row: JSONObject) -> DiscoveredModel | None:
         context_limit=_coerce_int(limit.get("context")),
         output_limit=_coerce_int(limit.get("output")),
         capabilities=capabilities,
+        release_date=_coerce_string(row.get("release_date")),
     )
 
 
@@ -273,6 +275,7 @@ def _deserialize_cached_model(row: JSONObject) -> DiscoveredModel | None:
         context_limit=_coerce_int(row.get("context_limit")),
         output_limit=_coerce_int(row.get("output_limit")),
         capabilities=tuple(sorted(capabilities)),
+        release_date=_coerce_string(row.get("release_date")),
     )
 
 

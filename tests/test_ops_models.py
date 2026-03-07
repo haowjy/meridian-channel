@@ -43,6 +43,7 @@ def _discovered(
         context_limit=128000,
         output_limit=64000,
         capabilities=("tool_call",),
+        release_date=None,
     )
 
 
@@ -87,6 +88,181 @@ def test_models_list_sync_merges_discovered_and_aliases(
     assert tuple(alias.alias for alias in by_id["gpt-5.3-codex"].aliases) == ("codex", "fast")
     assert by_id["gemini-3.1-pro"].provider == "google"
     assert by_id["claude-sonnet-4-6"].provider is None
+
+
+def test_models_list_default_filters_unusable_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(models_ops, "load_merged_aliases", lambda repo_root=None: [])
+    monkeypatch.setattr(
+        models_ops,
+        "load_discovered_models",
+        lambda: [
+            _discovered(
+                model_id="gpt-4",
+                name="GPT-4",
+                provider="openai",
+                harness="codex",
+            ),
+            _discovered(
+                model_id="o3",
+                name="o3",
+                provider="openai",
+                harness="codex",
+            ),
+            _discovered(
+                model_id="gemini-1.5-flash",
+                name="Gemini 1.5 Flash",
+                provider="google",
+                harness="opencode",
+            ),
+            _discovered(
+                model_id="claude-3-haiku",
+                name="Claude 3 Haiku",
+                provider="anthropic",
+                harness="claude",
+            ),
+            _discovered(
+                model_id="gpt-5.3-codex",
+                name="GPT-5.3 Codex",
+                provider="openai",
+                harness="codex",
+            ),
+        ],
+    )
+
+    output = models_ops.models_list_sync(models_ops.ModelsListInput())
+
+    assert [str(model.model_id) for model in output.models] == ["gpt-5.3-codex"]
+
+
+def test_models_list_default_keeps_aliased_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        models_ops,
+        "load_merged_aliases",
+        lambda repo_root=None: [
+            AliasEntry(alias="legacy", model_id=ModelId("gpt-4o")),
+        ],
+    )
+    monkeypatch.setattr(
+        models_ops,
+        "load_discovered_models",
+        lambda: [
+            _discovered(
+                model_id="gpt-4o",
+                name="GPT-4o",
+                provider="openai",
+                harness="codex",
+            ),
+            _discovered(
+                model_id="gpt-4",
+                name="GPT-4",
+                provider="openai",
+                harness="codex",
+            ),
+        ],
+    )
+
+    output = models_ops.models_list_sync(models_ops.ModelsListInput())
+
+    assert [str(model.model_id) for model in output.models] == ["gpt-4o"]
+    assert tuple(alias.alias for alias in output.models[0].aliases) == ("legacy",)
+
+
+def test_models_list_all_shows_everything(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(models_ops, "load_merged_aliases", lambda repo_root=None: [])
+    monkeypatch.setattr(
+        models_ops,
+        "load_discovered_models",
+        lambda: [
+            _discovered(
+                model_id="gpt-4",
+                name="GPT-4",
+                provider="openai",
+                harness="codex",
+            ),
+            _discovered(
+                model_id="o3",
+                name="o3",
+                provider="openai",
+                harness="codex",
+            ),
+            _discovered(
+                model_id="gpt-5.3-codex",
+                name="GPT-5.3 Codex",
+                provider="openai",
+                harness="codex",
+            ),
+        ],
+    )
+
+    output = models_ops.models_list_sync(models_ops.ModelsListInput(all=True))
+
+    assert [str(model.model_id) for model in output.models] == [
+        "gpt-4",
+        "gpt-5.3-codex",
+        "o3",
+    ]
+
+
+def test_models_list_filters_latest_suffix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(models_ops, "load_merged_aliases", lambda repo_root=None: [])
+    monkeypatch.setattr(
+        models_ops,
+        "load_discovered_models",
+        lambda: [
+            _discovered(
+                model_id="claude-sonnet-4-6-latest",
+                name="Claude Sonnet 4.6 Latest",
+                provider="anthropic",
+                harness="claude",
+            ),
+            _discovered(
+                model_id="gpt-5.3-codex",
+                name="GPT-5.3 Codex",
+                provider="openai",
+                harness="codex",
+            ),
+        ],
+    )
+
+    output = models_ops.models_list_sync(models_ops.ModelsListInput())
+
+    assert [str(model.model_id) for model in output.models] == ["gpt-5.3-codex"]
+
+
+def test_models_list_filters_date_stamped_variants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(models_ops, "load_merged_aliases", lambda repo_root=None: [])
+    monkeypatch.setattr(
+        models_ops,
+        "load_discovered_models",
+        lambda: [
+            _discovered(
+                model_id="claude-opus-4-5",
+                name="Claude Opus 4.5",
+                provider="anthropic",
+                harness="claude",
+            ),
+            _discovered(
+                model_id="claude-opus-4-5-20251101",
+                name="Claude Opus 4.5 (20251101)",
+                provider="anthropic",
+                harness="claude",
+            ),
+        ],
+    )
+
+    output = models_ops.models_list_sync(models_ops.ModelsListInput())
+
+    assert [str(model.model_id) for model in output.models] == ["claude-opus-4-5"]
 
 
 def test_models_show_sync_includes_discovery_and_alias_info(

@@ -109,8 +109,37 @@ def test_fetch_models_dev_filters_and_maps_models(
             context_limit=200000,
             output_limit=64000,
             capabilities=("tool_call",),
+            release_date=None,
         )
     ]
+
+
+def test_fetch_models_dev_parses_release_date(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = {
+        "openai": {
+            "id": "openai",
+            "models": {
+                "gpt-5.3-codex": {
+                    "id": "gpt-5.3-codex",
+                    "name": "GPT-5.3 Codex",
+                    "tool_call": True,
+                    "release_date": "2026-02-05",
+                }
+            },
+        },
+    }
+
+    def _urlopen(*_args: object, **_kwargs: object) -> _FakeResponse:
+        return _FakeResponse(payload)
+
+    monkeypatch.setattr(discovery.request, "urlopen", _urlopen)
+
+    models = discovery.fetch_models_dev()
+
+    assert len(models) == 1
+    assert models[0].release_date == "2026-02-05"
 
 
 def test_load_discovered_models_uses_fresh_cache(
@@ -157,6 +186,7 @@ def test_load_discovered_models_uses_fresh_cache(
             context_limit=400000,
             output_limit=128000,
             capabilities=("tool_call",),
+            release_date=None,
         )
     ]
 
@@ -184,6 +214,7 @@ def test_load_discovered_models_refreshes_stale_cache(
                 context_limit=1048576,
                 output_limit=65536,
                 capabilities=("tool_call",),
+                release_date=None,
             )
         ],
     )

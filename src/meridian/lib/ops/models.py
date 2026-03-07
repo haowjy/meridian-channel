@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -46,6 +47,7 @@ class CatalogModel:
     context_limit: int | None = None
     output_limit: int | None = None
     capabilities: tuple[str, ...] = ()
+    release_date: str | None = None
 
     def format_text(self, ctx: FormatContext | None = None) -> str:
         _ = ctx
@@ -63,6 +65,7 @@ class CatalogModel:
             ("Aliases", alias_names),
             ("Alias details", alias_details),
             ("Capabilities", capabilities),
+            ("Released", self.release_date),
             ("Cost input", _format_float(self.cost_input)),
             ("Cost output", _format_float(self.cost_output)),
             ("Context limit", _format_int(self.context_limit)),
@@ -88,6 +91,7 @@ class ModelsListOutput:
                 ",".join(alias.alias for alias in model.aliases),
                 model.provider or "",
                 model.name or "",
+                model.release_date or "",
             ]
             for model in self.models
         ]
@@ -156,11 +160,64 @@ def _build_catalog_model(
         context_limit=discovered.context_limit if discovered is not None else None,
         output_limit=discovered.output_limit if discovered is not None else None,
         capabilities=discovered.capabilities if discovered is not None else (),
+        release_date=discovered.release_date if discovered is not None else None,
     )
 
 
+_DATE_SUFFIX_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^(?P<base>.+)-(?P<date>\d{8})$"),
+    re.compile(r"^(?P<base>.+)-(?P<date>\d{4}-\d{2}-\d{2})$"),
+    re.compile(r"^(?P<base>.+)-(?P<date>\d{2}-\d{2})$"),
+    re.compile(r"^(?P<base>.+)-(?P<date>\d{2}-\d{4})$"),
+)
+
+
+def _date_variant_bases(model_id: str) -> tuple[str, ...]:
+    for pattern in _DATE_SUFFIX_PATTERNS:
+        match = pattern.match(model_id)
+        if match is None:
+            continue
+        base = match.group("base")
+        if base.endswith("-preview"):
+            return (base, base.removesuffix("-preview"))
+        return (base,)
+    return ()
+
+
+def _is_default_visible(model: CatalogModel, all_model_ids: set[str]) -> bool:
+    if model.aliases:
+        return True
+
+    model_id = str(model.model_id)
+
+    if model_id == "gpt-4" or model_id.startswith(("gpt-4-", "gpt-4o")):
+        return False
+    if model_id.startswith(("o1", "o3", "o4")):
+        return False
+    if model_id.startswith("codex-mini"):
+        return False
+    if model_id.startswith(("gemini-1.", "gemini-2.0")):
+        return False
+    if model_id.startswith("claude-3-"):
+        return False
+
+    if model_id.endswith("-latest"):
+        return False
+    if "-chat-latest" in model_id:
+        return False
+    if "-deep-research" in model_id:
+        return False
+    if model_id.startswith("gemini-live-"):
+        return False
+
+    variant_bases = _date_variant_bases(model_id)
+    if variant_bases and any(base in all_model_ids for base in variant_bases):
+        return False
+
+    return True
+
+
 def models_list_sync(payload: ModelsListInput) -> ModelsListOutput:
-    _ = payload.all
     root = _repo_root(payload.repo_root)
     aliases = load_merged_aliases(repo_root=root)
     discovered = load_discovered_models()
@@ -180,6 +237,11 @@ def models_list_sync(payload: ModelsListInput) -> ModelsListOutput:
         )
         for model_id in sorted(model_ids)
     ]
+    if not payload.all:
+        all_model_ids = {str(model.model_id) for model in merged_models}
+        merged_models = [
+            model for model in merged_models if _is_default_visible(model, all_model_ids)
+        ]
     return ModelsListOutput(models=tuple(merged_models))
 
 
