@@ -29,12 +29,14 @@ class SearchPathConfig:
     agents: tuple[str, ...] = (
         ".agents/agents",
         ".claude/agents",
+        ".codex/agents",
         ".opencode/agents",
         ".cursor/agents",
     )
     skills: tuple[str, ...] = (
         ".agents/skills",
         ".claude/skills",
+        ".codex/skills",
         ".opencode/skills",
         ".cursor/skills",
     )
