@@ -120,6 +120,8 @@ class HarnessAdapter(Protocol):
 
     def extract_session_id(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> str | None: ...
 
+    def extract_report(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> str | None: ...
+
     def seed_session(
         self,
         *,
@@ -208,6 +210,10 @@ class BaseHarnessAdapter:
 
     def extract_summary(self, output: str) -> str | None:
         _ = output
+        return None
+
+    def extract_report(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> str | None:
+        _ = artifacts, spawn_id
         return None
 
 
