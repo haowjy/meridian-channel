@@ -15,6 +15,30 @@ uv run meridian --version
 uv run meridian doctor
 ```
 
+## Install Validation
+
+Use these when you want to verify the installed CLI behavior, not just `uv run`
+from the checkout.
+
+Editable install:
+
+```bash
+uv tool install --force --editable . --no-cache
+```
+
+Snapshot install from the current checkout:
+
+```bash
+uv tool install --force . --no-cache
+```
+
+Then verify the installed tool:
+
+```bash
+meridian --version
+uv tool list
+```
+
 ## Test
 
 ```bash
