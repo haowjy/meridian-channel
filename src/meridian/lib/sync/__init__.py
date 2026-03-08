@@ -11,6 +11,13 @@ from meridian.lib.sync.hash import (
     compute_item_hash,
     compute_tree_hash,
 )
+from meridian.lib.sync.engine import (
+    SyncItemAction,
+    SyncResult,
+    check_cross_source_collisions,
+    discover_items,
+    sync_items,
+)
 from meridian.lib.sync.lock import (
     SyncLockEntry,
     SyncLockFile,
@@ -25,11 +32,16 @@ __all__ = [
     "cleanup_failed_clone",
     "SyncLockEntry",
     "SyncLockFile",
+    "SyncItemAction",
+    "SyncResult",
+    "check_cross_source_collisions",
     "compute_file_body_hash",
     "compute_item_hash",
     "compute_tree_hash",
+    "discover_items",
     "lock_file_guard",
     "read_lock_file",
     "resolve_source",
+    "sync_items",
     "write_lock_file",
 ]
