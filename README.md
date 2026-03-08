@@ -326,8 +326,7 @@ meridian models list
 meridian config show
 ```
 
-See [Configuration](docs/configuration.md) and
-[Harness Adapters](docs/harness-adapters.md) for override details.
+See [Configuration](docs/configuration.md) for override details.
 
 ### Spawn commands behave as if they are in the wrong space
 
@@ -382,13 +381,9 @@ Writes use lock files plus atomic tmp+rename semantics in the state layer.
 
 ## Documentation
 
-- [Development Install](docs/development-install.md) - install from source and run local checks.
-- [Developer Terminology](docs/developer-terminology.md) - canonical `spawn` terminology.
 - [Spaces](docs/spaces.md) - space lifecycle, continuation rules, and state layout.
 - [Configuration](docs/configuration.md) - config keys, overrides, and environment variables.
-- [Safety](docs/safety.md) - permission tiers and operational safety model.
 - [MCP Tools](docs/mcp-tools.md) - FastMCP tool surface and payload examples.
-- [Harness Adapters](docs/harness-adapters.md) - how Meridian maps models and sessions to harness CLIs.
 
 ## Development
 
@@ -398,7 +393,7 @@ uv run pytest-llm
 uv run pyright
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
+See [DEVELOPMENT.md](DEVELOPMENT.md) for dev setup.
 
 ## License
 

@@ -149,7 +149,7 @@ cost_tier = "$$"
 |---|---|
 | `MERIDIAN_GUARDRAIL_RUN_ID` | Spawn id passed to guardrail scripts |
 | `MERIDIAN_GUARDRAIL_OUTPUT_LOG` | Path to `output.jsonl` |
-| `MERIDIAN_GUARDRAIL_REPORT_PATH` | Path to `report.md` |
+| `MERIDIAN_GUARDRAIL_REPORT_PATH` | Path to `report.md` when a report exists |
 | `MERIDIAN_SECRET_<KEY>` | Secret injection/redaction channel |
 
 ## Permission Naming
