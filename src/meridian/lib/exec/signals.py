@@ -1,4 +1,8 @@
-"""Signal forwarding utilities for run execution."""
+"""Signal forwarding utilities for run execution.
+
+Also includes process-group helpers for subprocess lifecycle management
+(formerly ``exec/process_groups.py``).
+"""
 
 from __future__ import annotations
 
@@ -11,7 +15,37 @@ from threading import Lock, RLock
 from types import FrameType
 from typing import Final, cast
 
-from meridian.lib.exec.process_groups import signal_process_group
+
+# ---------------------------------------------------------------------------
+# Process-group helpers (absorbed from exec/process_groups.py)
+# ---------------------------------------------------------------------------
+
+
+def signal_process_group(
+    process: asyncio.subprocess.Process,
+    signum: signal.Signals,
+) -> None:
+    """Send one signal to the subprocess process group.
+
+    The child may exit between returncode checks and signal delivery, so
+    ProcessLookupError is treated as an expected race.
+    """
+
+    if process.returncode is not None:
+        return
+
+    pid = process.pid
+
+    try:
+        pgid = os.getpgid(pid)
+        os.killpg(pgid, signum)
+    except ProcessLookupError:
+        return
+
+
+# ---------------------------------------------------------------------------
+# Signal forwarding
+# ---------------------------------------------------------------------------
 
 TARGET_SIGNALS: Final[tuple[signal.Signals, ...]] = (signal.SIGINT, signal.SIGTERM)
 

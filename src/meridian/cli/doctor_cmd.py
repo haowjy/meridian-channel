@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+from cyclopts import App
 from meridian.lib.ops.diag import DoctorInput, doctor_sync
 from meridian.lib.ops.registry import get_all_operations
-
-if TYPE_CHECKING:
-    from cyclopts import App
 
 Emitter = Callable[[Any], None]
 

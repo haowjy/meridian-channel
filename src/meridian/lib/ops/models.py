@@ -5,18 +5,15 @@ from __future__ import annotations
 import re
 from datetime import date, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.config.aliases import AliasEntry, load_merged_aliases, resolve_model
 from meridian.lib.config.discovery import DiscoveredModel, load_discovered_models, refresh_models_cache
 from meridian.lib.config.routing import route_model
+from meridian.lib.formatting import FormatContext
 from meridian.lib.ops.registry import OperationSpec, operation
 from meridian.lib.types import HarnessId, ModelId
-
-if TYPE_CHECKING:
-    from meridian.lib.formatting import FormatContext
 
 
 class ModelsListInput(BaseModel):

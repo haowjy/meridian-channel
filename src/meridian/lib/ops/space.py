@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
+from meridian.lib.formatting import FormatContext
 from meridian.lib.ops._runtime import build_runtime
 from meridian.lib.ops.registry import OperationSpec, operation
 from meridian.lib.space import crud as space_crud
@@ -16,9 +16,6 @@ from meridian.lib.space.summary import generate_space_summary
 from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_space_dir
 from meridian.lib.types import SpaceId
-
-if TYPE_CHECKING:
-    from meridian.lib.formatting import FormatContext
 
 
 class SpaceStartInput(BaseModel):

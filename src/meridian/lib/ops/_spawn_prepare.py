@@ -4,14 +4,13 @@ from __future__ import annotations
 
 from difflib import get_close_matches
 from pathlib import Path
-from typing import TYPE_CHECKING
-
 import structlog
 from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.config.aliases import load_merged_aliases, resolve_model
 from meridian.lib.config.discovery import load_discovered_models
-from meridian.lib.harness.registry import get_default_harness_registry
+from meridian.lib.config.settings import MeridianConfig
+from meridian.lib.harness.registry import HarnessRegistry, get_default_harness_registry
 from meridian.lib.launch_resolve import (
     load_agent_profile_with_fallback,
     resolve_permission_tier_from_profile,
@@ -19,6 +18,7 @@ from meridian.lib.launch_resolve import (
 )
 from meridian.lib.ops._runtime import OperationRuntime, build_runtime, resolve_runtime_root_and_config
 from meridian.lib.prompt import (
+    compose_skill_injections,
     compose_run_prompt_text,
     load_reference_files,
     parse_template_assignments,
@@ -36,10 +36,6 @@ from meridian.lib.types import ModelId
 
 from ._utils import merge_warnings
 from ._spawn_models import SpawnCreateInput
-
-if TYPE_CHECKING:
-    from meridian.lib.config.settings import MeridianConfig
-    from meridian.lib.harness.registry import HarnessRegistry
 
 logger = structlog.get_logger(__name__)
 _DISCOVERED_MODEL_CONTEXT_LIMIT = 12
@@ -240,9 +236,9 @@ def build_create_payload(
     # the full agent profile natively. This avoids relying on partial native
     # skill semantics that vary by harness. Claude is a concrete example:
     # `claude --agent <name>` still does not reliably preload `skills:` in the
-    # same way as Claude subagents (see anthropics/claude-code#29902), so the
-    # composition path still needs a prompt-side workaround until the harness
-    # behavior is fixed.
+    # same way as Claude subagents (see anthropics/claude-code#29902), so
+    # below we inject loaded skill content via appended_system_prompt as a
+    # prompt-side workaround until the harness behavior is fixed.
     native_agents = harness.capabilities.supports_native_agents
 
     # With --skills removed, skills come exclusively from the agent profile.
@@ -325,8 +321,10 @@ def build_create_payload(
         cli_permission_override=payload.permission_tier is not None,
     )
 
-    # Claude loads skills natively via --agent; no explicit injection needed.
-    appended_system_prompt = None
+    # Claude --agent does not expand skills: from the profile into the system
+    # prompt (anthropics/claude-code#29902). Inject skill content explicitly
+    # via appended_system_prompt as a workaround.
+    appended_system_prompt = compose_skill_injections(resolved_skills.loaded_skills) or None
 
     preview_command = tuple(
         harness.build_command(

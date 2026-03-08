@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from pydantic import BaseModel, ConfigDict, Field
 
 from meridian.lib.domain import SpawnStatus
-
-if TYPE_CHECKING:
-    from meridian.lib.formatting import FormatContext
+from meridian.lib.formatting import FormatContext
 
 
 def _empty_template_vars() -> dict[str, str]:

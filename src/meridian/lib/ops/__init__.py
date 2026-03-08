@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from meridian.lib.ops.registry import OperationSpec
+from meridian.lib.ops.registry import OperationSpec
 
 
 def get_all_operations() -> list[Any]:

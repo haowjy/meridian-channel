@@ -3,16 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.config.skill_registry import SkillRegistry
 from meridian.lib.domain import SkillContent, SkillManifest
+from meridian.lib.formatting import FormatContext
 from meridian.lib.ops.registry import OperationSpec, operation
-
-if TYPE_CHECKING:
-    from meridian.lib.formatting import FormatContext
 
 
 class SkillsListInput(BaseModel):

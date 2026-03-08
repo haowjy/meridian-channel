@@ -6,17 +6,15 @@ import importlib.resources
 import logging
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
 from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.config._paths import resolve_repo_root
 from meridian.lib.config.routing import route_model
+from meridian.lib.formatting import FormatContext
 from meridian.lib.state.paths import resolve_state_paths
 from meridian.lib.types import HarnessId, ModelId
-
-if TYPE_CHECKING:
-    from meridian.lib.formatting import FormatContext
 
 logger = logging.getLogger(__name__)
 

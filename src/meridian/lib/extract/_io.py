@@ -1,4 +1,8 @@
-"""Shared artifact read helpers for extraction modules."""
+"""Re-export shim -- canonical implementation lives in finalize.py.
+
+Uses a function wrapper to avoid a circular import at module-load time
+(files_touched -> _io -> finalize -> files_touched).
+"""
 
 from __future__ import annotations
 

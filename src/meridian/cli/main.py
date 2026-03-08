@@ -5,9 +5,10 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from collections.abc import Sequence
 from contextvars import ContextVar
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Literal, cast
+from typing import Annotated, Literal, cast
 
 from cyclopts import App, Parameter
 from pydantic import BaseModel, ConfigDict
@@ -43,9 +44,6 @@ from meridian.lib.space.summary import generate_space_summary
 from meridian.lib.state.paths import resolve_all_spaces_dir, resolve_space_dir
 from meridian.lib.types import SpaceId
 from meridian.server.main import run_server
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
 
 logger = logging.getLogger(__name__)
 

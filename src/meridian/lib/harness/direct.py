@@ -7,7 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from urllib import error, request
 
 from meridian.lib.domain import TokenUsage
@@ -26,12 +26,10 @@ from meridian.lib.ops.codec import (
     normalize_optional,
     schema_from_type,
 )
+from meridian.lib.ops.registry import OperationSpec
 from meridian.lib.safety.permissions import PermissionConfig
 from meridian.lib.serialization import to_jsonable
 from meridian.lib.types import HarnessId, ModelId, SpawnId
-
-if TYPE_CHECKING:
-    from meridian.lib.ops.registry import OperationSpec
 
 _normalize_optional = normalize_optional
 

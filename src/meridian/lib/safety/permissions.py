@@ -4,15 +4,13 @@ from __future__ import annotations
 
 import json
 from enum import StrEnum
-from typing import TYPE_CHECKING, Protocol
+from typing import Protocol
 
 import structlog
 from pydantic import BaseModel, ConfigDict
 
+from meridian.lib.config.agent import AgentProfile
 from meridian.lib.types import HarnessId
-
-if TYPE_CHECKING:
-    from meridian.lib.config.agent import AgentProfile
 
 logger = structlog.get_logger(__name__)
 

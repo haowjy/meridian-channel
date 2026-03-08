@@ -131,7 +131,7 @@ def test_claude_build_command_interactive_omits_dash_p_and_uses_append_prompt() 
     assert command[command.index("--append-system-prompt") + 1] == "space prompt"
 
 
-def test_claude_filter_launch_content_suppresses_skill_injection() -> None:
+def test_claude_filter_launch_content_preserves_skill_injection() -> None:
     policy = ClaudeAdapter().filter_launch_content(
         prompt="space prompt",
         skill_injection="# Skill: orchestrate\n\nSkill content here",
@@ -140,7 +140,7 @@ def test_claude_filter_launch_content_suppresses_skill_injection() -> None:
     )
 
     assert policy.prompt == "space prompt"
-    assert policy.skill_injection == ""
+    assert policy.skill_injection == "# Skill: orchestrate\n\nSkill content here"
 
 
 def test_claude_filter_launch_content_resume_suppresses_all() -> None:

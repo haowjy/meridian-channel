@@ -3,19 +3,16 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.context import RuntimeContext
+from meridian.lib.formatting import FormatContext
 from meridian.lib.ops._runtime import require_space_id, resolve_runtime_root_and_config
 from meridian.lib.ops._spawn_query import resolve_spawn_reference
 from meridian.lib.ops.registry import OperationSpec, operation
 from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_space_dir
-
-if TYPE_CHECKING:
-    from meridian.lib.formatting import FormatContext
 
 
 def _runtime_context(ctx: RuntimeContext | None) -> RuntimeContext:

@@ -8,7 +8,7 @@ import os
 import tempfile
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, cast
+from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict
 
@@ -20,13 +20,11 @@ from meridian.lib.config.settings import (
     USER_CONFIG_ENV_VAR,
     load_config,
 )
+from meridian.lib.formatting import FormatContext
 from meridian.lib.ops.registry import OperationSpec, operation
 from meridian.lib.safety.permissions import parse_permission_tier
 from meridian.lib.serialization import to_jsonable
 from meridian.lib.state.paths import resolve_state_paths
-
-if TYPE_CHECKING:
-    from meridian.lib.formatting import FormatContext
 
 
 _SECTION_ORDER: tuple[str, ...] = ("defaults", "timeouts", "permissions", "harness", "output")

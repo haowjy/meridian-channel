@@ -5,20 +5,17 @@ from __future__ import annotations
 import asyncio
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.config._paths import resolve_path_list
+from meridian.lib.formatting import FormatContext
 from meridian.lib.ops._runtime import build_runtime
 from meridian.lib.ops.registry import OperationSpec, operation
 from meridian.lib.space import space_file
 from meridian.lib.space.session_store import cleanup_stale_sessions, list_active_sessions
 from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_all_spaces_dir
-
-if TYPE_CHECKING:
-    from meridian.lib.formatting import FormatContext
 
 
 class DoctorInput(BaseModel):

@@ -62,10 +62,7 @@ meridian spawn --dry-run -m MODEL -p "Plan the migration"
 | `--prompt-var` | Template vars (`KEY=VALUE`) | Repeatable; replaces `{{KEY}}` in prompt |
 | `--foreground` | Run spawn in foreground | Spawns run in background by default; use this to block |
 | `--dry-run` | Preview composed spawn | No harness execution |
-| `--timeout` | Runtime timeout in minutes | Integer minutes |
 | `--permission` | Override permission tier | Example: `read-only`, `workspace-write` |
-| `--verbose` | Enable verbose spawn logging | |
-| `--quiet` | Reduce non-essential output | |
 | `--space-id` | Spawn within a specific space | Also `--space` |
 
 ## Parallel Execution

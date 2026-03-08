@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from functools import partial
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+from cyclopts import App
 from meridian.lib.ops.config import (
     ConfigGetInput,
     ConfigInitInput,
@@ -19,9 +20,6 @@ from meridian.lib.ops.config import (
     config_show_sync,
 )
 from meridian.lib.ops.registry import get_all_operations
-
-if TYPE_CHECKING:
-    from cyclopts import App
 
 Emitter = Callable[[Any], None]
 
