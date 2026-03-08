@@ -4,7 +4,6 @@ Also includes process-group helpers for subprocess lifecycle management
 (formerly ``exec/process_groups.py``).
 """
 
-from __future__ import annotations
 
 import asyncio
 import os
@@ -13,7 +12,7 @@ import signal
 from collections.abc import Iterator
 from threading import Lock, RLock
 from types import FrameType
-from typing import Final, cast
+from typing import Final, Self, cast
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +82,39 @@ def map_process_exit_code(
         if mapped is not None:
             return mapped
     return 1
+
+
+class SignalForwarder:
+    """Scoped SIGINT/SIGTERM forwarding from parent process to child process."""
+
+    def __init__(self, process: asyncio.subprocess.Process) -> None:
+        self._process = process
+        self._received_signal: signal.Signals | None = None
+        self._seen_signal_count = 0
+
+    @property
+    def received_signal(self) -> signal.Signals | None:
+        return self._received_signal
+
+    def __enter__(self) -> Self:
+        signal_coordinator().register_forwarder(self)
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        _ = (exc_type, exc, tb)
+        signal_coordinator().unregister_forwarder(self)
+
+    def forward_signal(self, signum: signal.Signals) -> None:
+        """Forward one signal to the child and remember it for exit-code mapping."""
+
+        self._received_signal = signum
+        self._seen_signal_count += 1
+
+        signal_process_group(self._process, signum)
+
+        if self._seen_signal_count >= 2 and self._process.returncode is None:
+            # Second termination signal means "force stop now".
+            signal_process_group(self._process, signal.SIGKILL)
 
 
 class SignalCoordinator:
@@ -205,36 +237,3 @@ def signal_coordinator() -> SignalCoordinator:
             if _coordinator is None:
                 _coordinator = SignalCoordinator()
     return _coordinator
-
-
-class SignalForwarder:
-    """Scoped SIGINT/SIGTERM forwarding from parent process to child process."""
-
-    def __init__(self, process: asyncio.subprocess.Process) -> None:
-        self._process = process
-        self._received_signal: signal.Signals | None = None
-        self._seen_signal_count = 0
-
-    @property
-    def received_signal(self) -> signal.Signals | None:
-        return self._received_signal
-
-    def __enter__(self) -> SignalForwarder:
-        signal_coordinator().register_forwarder(self)
-        return self
-
-    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
-        _ = (exc_type, exc, tb)
-        signal_coordinator().unregister_forwarder(self)
-
-    def forward_signal(self, signum: signal.Signals) -> None:
-        """Forward one signal to the child and remember it for exit-code mapping."""
-
-        self._received_signal = signum
-        self._seen_signal_count += 1
-
-        signal_process_group(self._process, signum)
-
-        if self._seen_signal_count >= 2 and self._process.returncode is None:
-            # Second termination signal means "force stop now".
-            signal_process_group(self._process, signal.SIGKILL)

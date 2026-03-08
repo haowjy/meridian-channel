@@ -1,6 +1,5 @@
 """File-backed space metadata CRUD for `.meridian/.spaces/<space-id>/space.json`."""
 
-from __future__ import annotations
 
 import fcntl
 import json

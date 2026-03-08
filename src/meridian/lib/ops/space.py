@@ -1,6 +1,5 @@
 """Space operations."""
 
-from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime

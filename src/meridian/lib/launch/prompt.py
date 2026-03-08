@@ -1,6 +1,5 @@
 """Prompt composition helpers for launch flows."""
 
-from __future__ import annotations
 
 import importlib
 import re

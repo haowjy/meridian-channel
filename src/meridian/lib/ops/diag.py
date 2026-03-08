@@ -1,6 +1,5 @@
 """Doctor operation for file-authoritative state health and repair."""
 
-from __future__ import annotations
 
 import asyncio
 import os

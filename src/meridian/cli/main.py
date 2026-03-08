@@ -1,6 +1,5 @@
 """Cyclopts CLI entry point for meridian."""
 
-from __future__ import annotations
 
 import logging
 import os

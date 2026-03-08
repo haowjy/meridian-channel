@@ -1,6 +1,5 @@
 """Terminal event filtering and formatting for harness stream output."""
 
-from __future__ import annotations
 
 import sys
 from typing import TextIO

@@ -1,6 +1,5 @@
 """Catalog discovery operations for models and skills."""
 
-from __future__ import annotations
 
 import re
 from datetime import date, timedelta
@@ -365,7 +364,7 @@ def models_refresh_sync(payload: ModelsRefreshInput) -> ModelsRefreshOutput:
 
 def skills_list_sync(payload: SkillsListInput) -> SkillsQueryOutput:
     registry = _registry(payload.repo_root, readonly=True)
-    return SkillsQueryOutput(skills=tuple(registry.list()))
+    return SkillsQueryOutput(skills=tuple(registry.list_skills()))
 
 
 def skills_search_sync(payload: SkillsSearchInput) -> SkillsQueryOutput:

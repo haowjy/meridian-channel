@@ -2,7 +2,6 @@
 
 # pyright: reportUnknownVariableType=false, reportUnknownArgumentType=false, reportUnknownMemberType=false, reportArgumentType=false
 
-from __future__ import annotations
 
 import asyncio
 import json
@@ -139,7 +138,7 @@ class DirectAdapter(BaseHarnessAdapter):
             )
         return tools
 
-    def _operation_by_mcp_name(self) -> dict[str, OperationSpec[Any, Any]]:
+    def _operation_by_mcp_name(self) -> "dict[str, OperationSpec[Any, Any]]":
         from meridian.lib.ops.manifest import get_operations_for_surface
 
         return {

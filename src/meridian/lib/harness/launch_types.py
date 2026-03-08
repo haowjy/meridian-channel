@@ -5,7 +5,6 @@ import-cycle pressure from ``space/__init__.py`` which eagerly imports
 ``space.launch``.
 """
 
-from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 

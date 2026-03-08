@@ -1,6 +1,5 @@
 """Prompt assembly and reference isolation invariants."""
 
-from __future__ import annotations
 
 from pathlib import Path
 

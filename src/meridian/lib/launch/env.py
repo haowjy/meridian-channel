@@ -1,6 +1,5 @@
 """Child-process environment helpers shared by launch and spawn paths."""
 
-from __future__ import annotations
 
 from collections.abc import Collection, Mapping
 from pathlib import Path

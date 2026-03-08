@@ -1,6 +1,5 @@
 """File-backed session tracking for `.meridian/.spaces/<space-id>/sessions.jsonl`."""
 
-from __future__ import annotations
 
 import fcntl
 import json

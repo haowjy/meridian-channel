@@ -1,6 +1,5 @@
 """Input/schema helpers shared by MCP and DirectAdapter surfaces."""
 
-from __future__ import annotations
 
 import inspect
 import types

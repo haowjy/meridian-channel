@@ -1,6 +1,5 @@
 """CLI command handlers for spawn.* operations."""
 
-from __future__ import annotations
 
 from collections.abc import Callable
 from functools import partial

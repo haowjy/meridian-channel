@@ -1,6 +1,5 @@
 """Spawn state query and shaping helpers backed by `spawns.jsonl`."""
 
-from __future__ import annotations
 
 import json
 import re

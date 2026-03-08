@@ -1,6 +1,5 @@
 """Materialize agents and skills into harness-native directories."""
 
-from __future__ import annotations
 
 import glob
 import logging

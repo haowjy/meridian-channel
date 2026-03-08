@@ -1,6 +1,5 @@
 """Shared launch-time resolution helpers for launch orchestration."""
 
-from __future__ import annotations
 
 import logging
 from pathlib import Path
@@ -87,10 +86,10 @@ def resolve_skills_from_profile(
         search_paths=search_paths,
         readonly=readonly,
     )
-    manifests = registry.list()
+    manifests = registry.list_skills()
     if not manifests and not registry.readonly:
         registry.reindex()
-        manifests = registry.list()
+        manifests = registry.list_skills()
 
     available_skill_names = {item.name for item in manifests}
     missing_skills = tuple(

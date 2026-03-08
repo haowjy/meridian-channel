@@ -1,8 +1,8 @@
-from __future__ import annotations
 
 import json
 import time
 from pathlib import Path
+from typing import Self
 
 import pytest
 
@@ -18,7 +18,7 @@ class _FakeResponse:
     def read(self) -> bytes:
         return self._payload
 
-    def __enter__(self) -> _FakeResponse:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type: object, exc: object, tb: object) -> bool:

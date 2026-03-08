@@ -1,6 +1,5 @@
 """ArtifactStore protocol and local/in-memory implementations."""
 
-from __future__ import annotations
 
 from collections.abc import MutableMapping
 from pathlib import Path

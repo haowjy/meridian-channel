@@ -1,6 +1,5 @@
 """Model routing, discovery, alias resolution, and catalog."""
 
-from __future__ import annotations
 
 import importlib.resources
 import json

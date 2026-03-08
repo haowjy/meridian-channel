@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 import asyncio
 from contextlib import contextmanager
@@ -248,8 +247,6 @@ def test_kill_running_parent_process_still_finalizes_run(
     worker_path.write_text(
         textwrap.dedent(
             f"""
-            from __future__ import annotations
-
             import asyncio
             import sys
             from pathlib import Path

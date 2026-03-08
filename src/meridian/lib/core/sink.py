@@ -1,6 +1,5 @@
 """Shared output sink protocol and no-op sink implementation."""
 
-from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 

@@ -1,6 +1,5 @@
 """Launch-time profile, skill, and permission resolution invariants."""
 
-from __future__ import annotations
 
 from pathlib import Path
 

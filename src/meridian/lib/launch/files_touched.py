@@ -1,6 +1,5 @@
 """File-touch extraction helpers from harness output artifacts."""
 
-from __future__ import annotations
 
 import json
 import re

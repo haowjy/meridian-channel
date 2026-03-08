@@ -1,6 +1,5 @@
 """Timeout helpers for subprocess execution."""
 
-from __future__ import annotations
 
 import asyncio
 import signal

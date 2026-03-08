@@ -1,6 +1,5 @@
 """Spawn execution helpers shared by sync and async spawn handlers."""
 
-from __future__ import annotations
 
 import argparse
 import asyncio

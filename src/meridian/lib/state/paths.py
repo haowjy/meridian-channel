@@ -1,9 +1,9 @@
 """Filesystem path helpers for file-authoritative Meridian state."""
 
-from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Self
 
 from pydantic import BaseModel, ConfigDict
 
@@ -36,7 +36,7 @@ class SpacePaths(BaseModel):
     spawns_dir: Path
 
     @classmethod
-    def from_space_dir(cls, space_dir: Path) -> SpacePaths:
+    def from_space_dir(cls, space_dir: Path) -> Self:
         """Build space-relative paths from an absolute space directory."""
 
         return cls(

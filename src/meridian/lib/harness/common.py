@@ -4,7 +4,6 @@ Merged from ``harness/_common.py`` (shared helpers) and
 ``harness/_strategies.py`` (strategy-driven command builder).
 """
 
-from __future__ import annotations
 
 import json
 import re

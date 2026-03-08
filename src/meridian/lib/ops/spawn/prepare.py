@@ -1,6 +1,5 @@
 """Spawn create-input validation and payload preparation helpers."""
 
-from __future__ import annotations
 
 from difflib import get_close_matches
 from pathlib import Path

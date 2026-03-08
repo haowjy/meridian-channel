@@ -1,6 +1,5 @@
 """Spawn operations used by CLI, MCP, and DirectAdapter surfaces."""
 
-from __future__ import annotations
 
 import asyncio
 import os

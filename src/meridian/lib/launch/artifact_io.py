@@ -1,6 +1,5 @@
 """Shared artifact read helpers for launch extraction."""
 
-from __future__ import annotations
 
 from meridian.lib.state.artifact_store import ArtifactStore
 from meridian.lib.core.types import ArtifactKey, SpawnId

@@ -3,7 +3,6 @@
 Also includes file-backed ID generation for spaces, spawns, and sessions.
 """
 
-from __future__ import annotations
 
 import fcntl
 import json

@@ -1,6 +1,5 @@
 """SKILL.md parsing, scanning, and filesystem-backed skill catalog."""
 
-from __future__ import annotations
 
 import logging
 from pathlib import Path
@@ -235,7 +234,7 @@ class SkillRegistry:
         self._filesystem_documents = documents
         return IndexReport(indexed_count=len(documents))
 
-    def list(self) -> list[SkillManifest]:
+    def list_skills(self) -> list[SkillManifest]:
         """List all discovered skills."""
 
         return sorted(
@@ -256,7 +255,7 @@ class SkillRegistry:
 
         normalized = query.strip().lower()
         if not normalized:
-            return self.list()
+            return self.list_skills()
 
         return sorted(
             [

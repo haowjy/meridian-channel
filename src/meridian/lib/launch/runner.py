@@ -1,6 +1,5 @@
 """Async subprocess execution and finalization guarantees."""
 
-from __future__ import annotations
 
 import asyncio
 import json

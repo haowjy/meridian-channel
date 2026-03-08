@@ -1,6 +1,5 @@
 """Script-based post-run guardrails."""
 
-from __future__ import annotations
 
 import os
 import subprocess

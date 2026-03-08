@@ -1,9 +1,8 @@
 """Explicit operation manifest shared by CLI, MCP, and DirectAdapter surfaces."""
 
-from __future__ import annotations
 
 from collections.abc import Callable, Coroutine
-from typing import Any, Generic, Literal, TypeVar
+from typing import Any, Generic, Literal, Self, TypeVar
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -138,7 +137,7 @@ class OperationSpec(BaseModel, Generic[InputT, OutputT]):
     surfaces: frozenset[OperationSurface] = frozenset({"cli", "mcp"})
 
     @model_validator(mode="after")
-    def _validate_surface_metadata(self) -> OperationSpec[InputT, OutputT]:
+    def _validate_surface_metadata(self) -> Self:
         if not self.surfaces:
             raise ValueError(f"Operation '{self.name}' must expose at least one surface")
         if "cli" in self.surfaces:

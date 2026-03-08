@@ -1,6 +1,5 @@
 """OpenCode CLI harness adapter."""
 
-from __future__ import annotations
 
 import json
 import re

@@ -4,7 +4,6 @@ Centralizes column alignment and key-value rendering so that all
 format_text() implementations produce consistent output.
 """
 
-from __future__ import annotations
 
 
 def tabular(rows: list[list[str]], sep: str = "  ") -> str:

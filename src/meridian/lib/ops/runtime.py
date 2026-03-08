@@ -1,6 +1,5 @@
 """Operation runtime helpers for state/store resolution."""
 
-from __future__ import annotations
 
 from pathlib import Path
 

@@ -1,8 +1,8 @@
 """Runtime context derived from MERIDIAN_* environment variables."""
 
-from __future__ import annotations
 
 from pathlib import Path
+from typing import Self
 
 from pydantic import BaseModel, ConfigDict
 
@@ -21,7 +21,7 @@ class RuntimeContext(BaseModel):
     chat_id: str = ""
 
     @classmethod
-    def from_environment(cls) -> RuntimeContext:
+    def from_environment(cls) -> Self:
         """Build context from MERIDIAN_* environment variables."""
 
         import os
@@ -50,7 +50,7 @@ class RuntimeContext(BaseModel):
             chat_id=chat_id_raw,
         )
 
-    def child_context(self, *, space_id: SpaceId, spawn_id: SpawnId) -> RuntimeContext:
+    def child_context(self, *, space_id: SpaceId, spawn_id: SpawnId) -> "RuntimeContext":
         """Create child context for a nested spawn."""
 
         return RuntimeContext(

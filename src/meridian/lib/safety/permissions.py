@@ -1,6 +1,5 @@
 """Permission tiers and harness-flag translation."""
 
-from __future__ import annotations
 
 import json
 from enum import StrEnum

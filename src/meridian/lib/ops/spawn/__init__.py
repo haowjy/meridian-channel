@@ -1,6 +1,5 @@
 """Public spawn operations package."""
 
-from __future__ import annotations
 
 from .api import (
     SpawnActionOutput,

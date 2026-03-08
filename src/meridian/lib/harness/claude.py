@@ -1,6 +1,5 @@
 """Claude CLI harness adapter."""
 
-from __future__ import annotations
 
 import hashlib
 import json

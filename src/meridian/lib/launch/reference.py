@@ -1,6 +1,5 @@
 """Reference-file loading and template substitution helpers."""
 
-from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence

@@ -1,6 +1,5 @@
 """Post-execution extraction pipeline used during run finalization."""
 
-from __future__ import annotations
 
 from pathlib import Path
 

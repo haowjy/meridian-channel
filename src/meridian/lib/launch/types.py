@@ -1,6 +1,5 @@
 """Shared types for the launch pipeline."""
 
-from __future__ import annotations
 
 from pathlib import Path
 

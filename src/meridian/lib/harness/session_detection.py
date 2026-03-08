@@ -5,7 +5,6 @@ log files) so that both launch.py and cli/main.py can reuse the same logic
 without duplicating regex patterns or filesystem heuristics.
 """
 
-from __future__ import annotations
 
 import json
 import logging

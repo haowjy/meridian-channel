@@ -1,6 +1,5 @@
 """Harness extraction invariants for report, usage, and session metadata."""
 
-from __future__ import annotations
 
 from meridian.lib.launch.report import extract_or_fallback_report
 from meridian.lib.harness.adapter import ArtifactStore

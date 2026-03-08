@@ -1,6 +1,5 @@
 """Report operations for spawn-scoped report files."""
 
-from __future__ import annotations
 
 from pathlib import Path
 

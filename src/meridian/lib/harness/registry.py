@@ -1,9 +1,8 @@
 """Harness registry for built-in and custom adapters."""
 
-from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, PrivateAttr
 
@@ -28,7 +27,7 @@ class HarnessRegistry(BaseModel):
     _adapters: dict[HarnessId, HarnessAdapter] = PrivateAttr(default_factory=_empty_adapters)
 
     @classmethod
-    def with_defaults(cls) -> HarnessRegistry:
+    def with_defaults(cls) -> Self:
         registry = cls()
         registry.register(ClaudeAdapter())
         registry.register(CodexAdapter())

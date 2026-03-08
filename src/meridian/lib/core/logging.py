@@ -1,6 +1,5 @@
 """Structlog configuration helpers."""
 
-from __future__ import annotations
 
 import logging as std_logging
 import sys

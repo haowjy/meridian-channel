@@ -1,6 +1,5 @@
 """Configurable mock harness process used by integration tests."""
 
-from __future__ import annotations
 
 import argparse
 import json

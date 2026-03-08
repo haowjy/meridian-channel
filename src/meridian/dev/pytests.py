@@ -1,6 +1,5 @@
 """Token-efficient pytest wrapper for agent spawns."""
 
-from __future__ import annotations
 
 import os
 import subprocess

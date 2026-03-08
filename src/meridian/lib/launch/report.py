@@ -1,6 +1,5 @@
 """Spawn report extraction from assistant output with report.md preference."""
 
-from __future__ import annotations
 
 import json
 import logging

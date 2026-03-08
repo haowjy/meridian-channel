@@ -1,6 +1,5 @@
 """Running-spawn query parser regressions."""
 
-from __future__ import annotations
 
 import json
 

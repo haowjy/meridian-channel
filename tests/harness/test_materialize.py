@@ -1,6 +1,5 @@
 """Harness materialization cleanup and orphan-reconciliation invariants."""
 
-from __future__ import annotations
 
 from pathlib import Path
 
