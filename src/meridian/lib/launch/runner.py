@@ -44,6 +44,7 @@ from .timeout import (
     SpawnTimeoutError,
     terminate_process,
     wait_for_process_exit,
+    wait_for_process_returncode,
 )
 
 OUTPUT_FILENAME = "output.jsonl"
@@ -51,6 +52,7 @@ STDERR_FILENAME = "stderr.log"
 TOKENS_FILENAME = "tokens.json"
 REPORT_FILENAME = "report.md"
 DEFAULT_INFRA_EXIT_CODE = 2
+POST_EXIT_PIPE_DRAIN_TIMEOUT_SECONDS = 1.0
 _DEFAULT_CONFIG = MeridianConfig()
 DEFAULT_MAX_RETRIES = _DEFAULT_CONFIG.max_retries
 DEFAULT_RETRY_BACKOFF_SECONDS = _DEFAULT_CONFIG.retry_backoff_seconds
@@ -99,6 +101,15 @@ def _extract_tokens_payload(raw_line: bytes) -> bytes | None:
     if not isinstance(tokens, dict):
         return None
     return json.dumps(tokens, sort_keys=True).encode("utf-8")
+
+
+def _extract_latest_tokens_payload(output_bytes: bytes) -> bytes | None:
+    latest_payload: bytes | None = None
+    for raw_line in output_bytes.splitlines():
+        parsed = _extract_tokens_payload(raw_line)
+        if parsed is not None:
+            latest_payload = parsed
+    return latest_payload
 
 
 async def _capture_stdout(
@@ -188,11 +199,11 @@ async def _terminate_after_cancellation(
     # Ctrl-C semantics and let children handle graceful SIGINT shutdown paths.
     signal_process_group(process, signal.SIGINT)
     try:
-        await asyncio.wait_for(process.wait(), timeout=kill_grace_seconds)
-    except TimeoutError:
+        await wait_for_process_returncode(process, timeout_seconds=kill_grace_seconds)
+    except SpawnTimeoutError:
         if process.returncode is None:
             signal_process_group(process, signal.SIGKILL)
-            await process.wait()
+            await wait_for_process_returncode(process)
 
 
 async def spawn_and_stream(
@@ -314,9 +325,42 @@ async def spawn_and_stream(
             await stdin_task
         if budget_termination_task is not None:
             await budget_termination_task
+        stdout_bytes = b""
+        stderr_bytes = b""
+        tokens_payload: bytes | None = None
 
-        stdout_bytes, tokens_payload = await stdout_task
-        stderr_bytes = await stderr_task
+        drain_done, drain_pending = await asyncio.wait(
+            {stdout_task, stderr_task},
+            timeout=POST_EXIT_PIPE_DRAIN_TIMEOUT_SECONDS,
+        )
+        if stdout_task in drain_done:
+            stdout_bytes, tokens_payload = await stdout_task
+        else:
+            logger.warning(
+                "Timed out draining harness stdout after process exit; using captured file contents.",
+                spawn_id=str(spawn_id),
+                timeout_seconds=POST_EXIT_PIPE_DRAIN_TIMEOUT_SECONDS,
+            )
+            stdout_task.cancel()
+        if stderr_task in drain_done:
+            stderr_bytes = await stderr_task
+        else:
+            logger.warning(
+                "Timed out draining harness stderr after process exit; using captured file contents.",
+                spawn_id=str(spawn_id),
+                timeout_seconds=POST_EXIT_PIPE_DRAIN_TIMEOUT_SECONDS,
+            )
+            stderr_task.cancel()
+
+        if drain_pending:
+            await asyncio.wait(drain_pending)
+
+        if not stdout_bytes and output_log_path.exists():
+            stdout_bytes = output_log_path.read_bytes()
+            if tokens_payload is None:
+                tokens_payload = _extract_latest_tokens_payload(stdout_bytes)
+        if not stderr_bytes and stderr_log_path.exists():
+            stderr_bytes = stderr_log_path.read_bytes()
 
         artifacts.put(make_artifact_key(spawn_id, OUTPUT_FILENAME), stdout_bytes)
         artifacts.put(make_artifact_key(spawn_id, STDERR_FILENAME), stderr_bytes)
