@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
 
 import structlog
+from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.types import HarnessId
 
@@ -37,9 +37,10 @@ _TIER_RANKS = {
 _APPROVAL_MODES = frozenset({"confirm", "auto"})
 
 
-@dataclass(frozen=True, slots=True)
-class PermissionConfig:
+class PermissionConfig(BaseModel):
     """Resolved permission configuration for one run."""
+
+    model_config = ConfigDict(frozen=True)
 
     tier: PermissionTier = PermissionTier.READ_ONLY
     approval: str = "confirm"
@@ -242,9 +243,10 @@ def permission_flags_for_harness(
     return []
 
 
-@dataclass(frozen=True, slots=True)
-class TieredPermissionResolver:
+class TieredPermissionResolver(BaseModel):
     """PermissionResolver implementation backed by one tier config."""
+
+    model_config = ConfigDict(frozen=True)
 
     config: PermissionConfig
 
@@ -252,13 +254,14 @@ class TieredPermissionResolver:
         return permission_flags_for_harness(harness_id, self.config)
 
 
-@dataclass(frozen=True, slots=True)
-class ExplicitToolsResolver:
+class ExplicitToolsResolver(BaseModel):
     """PermissionResolver backed by an explicit tool allowlist.
 
     For harnesses that don't support fine-grained tool lists (Codex),
     falls back to tier-based flags using the provided fallback config.
     """
+
+    model_config = ConfigDict(frozen=True)
 
     allowed_tools: tuple[str, ...]
     fallback_config: PermissionConfig
@@ -293,4 +296,4 @@ def build_permission_resolver(
             allowed_tools=allowed_tools,
             fallback_config=permission_config,
         )
-    return TieredPermissionResolver(permission_config)
+    return TieredPermissionResolver(config=permission_config)

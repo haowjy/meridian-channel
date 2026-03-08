@@ -5,9 +5,10 @@ from __future__ import annotations
 import importlib.resources
 import logging
 import tomllib
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
+
+from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.config._paths import resolve_repo_root
 from meridian.lib.config.routing import route_model
@@ -22,9 +23,10 @@ logger = logging.getLogger(__name__)
 _DEFAULT_ALIASES_RESOURCE = "default-aliases.toml"
 
 
-@dataclass(frozen=True, slots=True)
-class AliasEntry:
+class AliasEntry(BaseModel):
     """Alias entry for model lookup + operator-facing guidance."""
+
+    model_config = ConfigDict(frozen=True)
 
     alias: str
     model_id: ModelId

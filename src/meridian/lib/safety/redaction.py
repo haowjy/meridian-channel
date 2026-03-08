@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+
+from pydantic import BaseModel, ConfigDict
 
 _SECRET_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 
-@dataclass(frozen=True, slots=True)
-class SecretSpec:
+class SecretSpec(BaseModel):
     """In-memory secret assignment for one run."""
+
+    model_config = ConfigDict(frozen=True)
 
     key: str
     value: str

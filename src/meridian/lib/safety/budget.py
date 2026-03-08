@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from typing import Literal
+
+from pydantic import BaseModel, ConfigDict
 
 COST_KEYS: tuple[str, ...] = (
     "total_cost_usd",
@@ -15,26 +16,29 @@ COST_KEYS: tuple[str, ...] = (
 )
 
 
-@dataclass(frozen=True, slots=True)
-class Budget:
+class Budget(BaseModel):
     """Budget limits in USD."""
+
+    model_config = ConfigDict(frozen=True)
 
     per_run_usd: float | None = None
     per_space_usd: float | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class BudgetBreach:
+class BudgetBreach(BaseModel):
     """Observed budget breach metadata."""
+
+    model_config = ConfigDict(frozen=True)
 
     scope: Literal["run", "space"]
     observed_usd: float
     limit_usd: float
 
 
-@dataclass(slots=True)
-class LiveBudgetTracker:
+class LiveBudgetTracker(BaseModel):
     """Streaming budget tracker fed by harness stdout events."""
+
+    model_config = ConfigDict()
 
     budget: Budget
     space_spent_usd: float = 0.0

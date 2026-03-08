@@ -6,7 +6,6 @@ import logging
 import os
 import tomllib
 from contextvars import ContextVar
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
 
@@ -25,8 +24,9 @@ USER_CONFIG_ENV_VAR = "MERIDIAN_CONFIG"
 _DEFAULT_USER_CONFIG = Path("~/.config/meridian/config.toml").expanduser()
 
 
-@dataclass(frozen=True, slots=True)
-class _SettingsLoadContext:
+class _SettingsLoadContext(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     repo_root: Path
     user_config: Path | None
 

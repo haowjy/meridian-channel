@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Generic, TypeVar
+from collections.abc import Callable, Coroutine
+from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, ConfigDict
-
-if TYPE_CHECKING:
-    from collections.abc import Callable, Coroutine
 
 InputT = TypeVar("InputT")
 OutputT = TypeVar("OutputT")
@@ -29,6 +27,9 @@ class OperationSpec(BaseModel, Generic[InputT, OutputT]):
     sync_handler: Callable[[InputT], OutputT] | None = None
     cli_only: bool = False
     mcp_only: bool = False
+
+
+OperationSpec.model_rebuild()
 
 
 _REGISTRY: dict[str, OperationSpec[Any, Any]] = {}

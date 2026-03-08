@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import cast
+
+from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.config._paths import bundled_agents_root, resolve_path_list, resolve_repo_root
 from meridian.lib.config.settings import SearchPathConfig, load_config
@@ -28,9 +29,10 @@ _KNOWN_SANDBOX_VALUES = frozenset(
 )
 
 
-@dataclass(frozen=True, slots=True)
-class AgentProfile:
+class AgentProfile(BaseModel):
     """Parsed agent profile with frontmatter defaults + markdown body."""
+
+    model_config = ConfigDict(frozen=True)
 
     name: str
     description: str

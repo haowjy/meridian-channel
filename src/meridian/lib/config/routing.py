@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Literal
+
+from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.types import HarnessId
 
 SpawnMode = Literal["harness", "direct"]
 
 
-@dataclass(frozen=True, slots=True)
-class RoutingDecision:
+class RoutingDecision(BaseModel):
     """Routing result for a model selection request."""
+
+    model_config = ConfigDict(frozen=True)
 
     harness_id: HarnessId
     warning: str | None = None

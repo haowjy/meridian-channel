@@ -5,9 +5,10 @@ from __future__ import annotations
 import os
 import subprocess
 from collections.abc import Mapping
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.config.settings import MeridianConfig
 
@@ -18,18 +19,20 @@ if TYPE_CHECKING:
 DEFAULT_GUARDRAIL_TIMEOUT_SECONDS = MeridianConfig().guardrail_timeout_minutes * 60.0
 
 
-@dataclass(frozen=True, slots=True)
-class GuardrailFailure:
+class GuardrailFailure(BaseModel):
     """One failed guardrail execution."""
+
+    model_config = ConfigDict(frozen=True)
 
     script: str
     exit_code: int
     stderr: str
 
 
-@dataclass(frozen=True, slots=True)
-class GuardrailResult:
+class GuardrailResult(BaseModel):
     """Aggregate result for a post-run guardrail pass."""
+
+    model_config = ConfigDict(frozen=True)
 
     ok: bool
     failures: tuple[GuardrailFailure, ...] = ()

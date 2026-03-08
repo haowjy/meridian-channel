@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from meridian.lib.context import RuntimeContext
 from meridian.lib.ops._spawn_execute import _spawn_child_env
 from meridian.lib.ops.spawn import SpawnCreateInput, spawn_create, spawn_create_sync
 from meridian.server.main import mcp
@@ -100,6 +101,21 @@ async def test_mcp_run_spawn_refuses_when_depth_limit_reached(
 
 def test_run_child_env_increments_depth(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MERIDIAN_DEPTH", "2")
+    monkeypatch.setenv("MERIDIAN_REPO_ROOT", "/tmp/repo")
     env = _spawn_child_env("s9")
     assert env["MERIDIAN_DEPTH"] == "3"
     assert env["MERIDIAN_SPACE_ID"] == "s9"
+    assert env["MERIDIAN_SPACE_FS"] == "/tmp/repo/.meridian/.spaces/s9/fs"
+
+
+def test_runtime_context_exports_space_fs_from_state_root() -> None:
+    context = RuntimeContext(
+        space_id="s12",
+        repo_root=Path("/tmp/repo"),
+        state_root=Path("/tmp/custom-state"),
+    )
+
+    env = context.to_env_overrides()
+
+    assert env["MERIDIAN_SPACE_ID"] == "s12"
+    assert env["MERIDIAN_SPACE_FS"] == "/tmp/custom-state/.spaces/s12/fs"

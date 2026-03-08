@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
+
+from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.config.agent import AgentProfile, load_agent_profile
 from meridian.lib.config.settings import SearchPathConfig
@@ -70,8 +71,9 @@ def load_agent_profile_with_fallback(
     return None
 
 
-@dataclass(frozen=True, slots=True)
-class ResolvedSkills:
+class ResolvedSkills(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     skill_names: tuple[str, ...]
     loaded_skills: tuple[SkillContent, ...]
     skill_sources: dict[str, Path]

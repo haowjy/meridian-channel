@@ -7,11 +7,12 @@ import logging
 import os
 import tempfile
 import time
-from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import cast
 from urllib import request
 from urllib.error import HTTPError, URLError
+
+from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.config._paths import resolve_repo_root
 from meridian.lib.state.paths import resolve_cache_dir
@@ -34,9 +35,10 @@ _PROVIDER_TO_HARNESS: dict[str, HarnessId] = {
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
-class DiscoveredModel:
+class DiscoveredModel(BaseModel):
     """Normalized discovered model entry from models.dev."""
+
+    model_config = ConfigDict(frozen=True)
 
     id: str
     name: str
@@ -319,7 +321,7 @@ def _write_cache(cache_file: Path, models: list[DiscoveredModel]) -> None:
         "fetched_at": int(time.time()),
         "models": [
             {
-                **asdict(model),
+                **model.model_dump(),
                 "harness": str(model.harness),
                 "capabilities": list(model.capabilities),
             }

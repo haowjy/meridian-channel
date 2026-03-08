@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
+
+from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.config._paths import resolve_path_list, resolve_repo_root
 from meridian.lib.config.settings import load_config
@@ -14,9 +15,10 @@ logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
 
-@dataclass(frozen=True, slots=True)
-class SkillDocument:
+class SkillDocument(BaseModel):
     """Parsed representation of one SKILL.md file."""
+
+    model_config = ConfigDict(frozen=True)
 
     name: str
     description: str

@@ -36,7 +36,11 @@ def test_every_run_params_field_is_mapped_for_each_adapter() -> None:
         "interactive",
         "report_output_path",
     }
-    required = {field.name for field in dataclasses.fields(SpawnParams)} - skip
+    if dataclasses.is_dataclass(SpawnParams):
+        field_names = {field.name for field in dataclasses.fields(SpawnParams)}
+    else:
+        field_names = set(SpawnParams.model_fields)
+    required = field_names - skip
     adapter_classes = (ClaudeAdapter, CodexAdapter, OpenCodeAdapter)
 
     for adapter_class in adapter_classes:

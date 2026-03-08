@@ -6,7 +6,9 @@ import inspect
 import types
 from collections.abc import Mapping
 from dataclasses import MISSING, fields, is_dataclass
-from typing import Any, TypeVar, Union, cast, get_args, get_origin, get_type_hints
+from typing import Any, TypeGuard, TypeVar, Union, cast, get_args, get_origin, get_type_hints
+
+from pydantic import BaseModel
 
 PayloadT = TypeVar("PayloadT")
 
@@ -41,8 +43,10 @@ def schema_from_annotation(annotation: Any) -> dict[str, object]:
         schema = {"type": "boolean"}
     elif origin in {list, tuple} and args:
         schema = {"type": "array", "items": schema_from_annotation(args[0])}
-    elif isinstance(normalized, type) and is_dataclass(normalized):
-        schema = schema_from_type(normalized)
+    elif isinstance(normalized, type) and (
+        is_dataclass(normalized) or _is_pydantic_model_type(cast("object", normalized))
+    ):
+        schema = schema_from_type(cast("type[Any]", normalized))
     else:
         schema = {"type": "string"}
 
@@ -53,6 +57,9 @@ def schema_from_annotation(annotation: Any) -> dict[str, object]:
 
 def schema_from_type(payload_type: type[Any]) -> dict[str, object]:
     """Build a basic JSON schema from dataclass fields."""
+
+    if _is_pydantic_model_type(payload_type):
+        return cast("dict[str, object]", payload_type.model_json_schema())
 
     if not is_dataclass(payload_type):
         return {"type": "object", "properties": {}, "additionalProperties": False}
@@ -98,6 +105,17 @@ def coerce_scalar(annotation: Any, value: object) -> object:
 def coerce_input_payload(payload_type: type[PayloadT], raw_input: object) -> PayloadT:
     """Coerce untyped input dictionaries into typed dataclass payloads."""
 
+    if _is_pydantic_model_type(payload_type):
+        if raw_input is None:
+            data: dict[str, object] = {}
+        elif isinstance(raw_input, Mapping):
+            data = {
+                str(key): item for key, item in cast("Mapping[object, object]", raw_input).items()
+            }
+        else:
+            raise TypeError(f"Tool input must be an object, got {type(raw_input).__name__}")
+        return cast("PayloadT", payload_type.model_validate(data))
+
     if not is_dataclass(payload_type):
         return payload_type()
 
@@ -137,6 +155,13 @@ def coerce_input_payload(payload_type: type[PayloadT], raw_input: object) -> Pay
 def signature_from_dataclass(payload_type: type[object]) -> inspect.Signature:
     """Build a callable signature matching dataclass fields for FastMCP schemas."""
 
+    if _is_pydantic_model_type(payload_type):
+        signature = inspect.signature(payload_type)
+        return inspect.Signature(
+            parameters=list(signature.parameters.values()),
+            return_annotation=inspect.Signature.empty,
+        )
+
     if not is_dataclass(payload_type):
         return inspect.Signature(parameters=[])
 
@@ -160,3 +185,7 @@ def signature_from_dataclass(payload_type: type[object]) -> inspect.Signature:
         )
 
     return inspect.Signature(parameters=parameters)
+
+
+def _is_pydantic_model_type(payload_type: object) -> TypeGuard[type[BaseModel]]:
+    return isinstance(payload_type, type) and issubclass(payload_type, BaseModel)
