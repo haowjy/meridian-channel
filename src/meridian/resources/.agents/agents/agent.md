@@ -1,7 +1,7 @@
 ---
 name: agent
 description: Default agent
-model: gpt-5.3-codex
+model: gpt-5.4
 skills: []
 # mcp-tools: [spawn_list, spawn_show, skills_list]
 sandbox: workspace-write

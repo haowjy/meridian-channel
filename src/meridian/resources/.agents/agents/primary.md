@@ -3,8 +3,8 @@ name: primary
 description: Primary agent
 model: claude-opus-4-6
 skills:
-  - orchestrate
-  - meridian-spawn-agent
+  - orchestrate-meridian
+  - spawn-agent-meridian
 # mcp-tools: [spawn_create, spawn_list, spawn_show, spawn_wait, spawn_continue, spawn_stats, skills_list, skills_show, models_list, models_show, doctor]
 sandbox: unrestricted
 ---
