@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping
+from pathlib import Path
 
 from meridian.lib.harness.adapter import HarnessAdapter, SpawnParams, resolve_mcp_config
 from meridian.lib.safety.permissions import PermissionConfig
@@ -59,6 +60,30 @@ def _looks_like_secret_env_var(key: str) -> bool:
     return any(normalized.endswith(suffix) for suffix in _CHILD_ENV_SECRET_SUFFIXES)
 
 
+def _normalize_meridian_env(env: dict[str, str]) -> None:
+    space_id = env.get("MERIDIAN_SPACE_ID", "").strip()
+    if not space_id:
+        return
+
+    explicit_space_fs = env.get("MERIDIAN_SPACE_FS", "").strip()
+    if explicit_space_fs:
+        env["MERIDIAN_SPACE_FS"] = explicit_space_fs
+        return
+
+    state_root = env.get("MERIDIAN_STATE_ROOT", "").strip()
+    if state_root:
+        env["MERIDIAN_SPACE_FS"] = (
+            Path(state_root).expanduser() / ".spaces" / space_id / "fs"
+        ).as_posix()
+        return
+
+    repo_root = env.get("MERIDIAN_REPO_ROOT", "").strip()
+    if repo_root:
+        env["MERIDIAN_SPACE_FS"] = (
+            Path(repo_root).expanduser() / ".meridian" / ".spaces" / space_id / "fs"
+        ).as_posix()
+
+
 def sanitize_child_env(
     base_env: Mapping[str, str],
     env_overrides: Mapping[str, str] | None,
@@ -79,6 +104,7 @@ def sanitize_child_env(
     if env_overrides is not None:
         sanitized.update(env_overrides)
 
+    _normalize_meridian_env(sanitized)
     return sanitized
 
 

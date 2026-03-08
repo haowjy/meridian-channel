@@ -198,6 +198,35 @@ def test_sanitize_child_env_does_not_leak_primary_autocompact_override() -> None
     assert "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE" not in sanitized
 
 
+def test_sanitize_child_env_derives_space_fs_from_repo_root() -> None:
+    sanitized = sanitize_child_env(
+        base_env={"PATH": "/usr/bin"},
+        env_overrides={
+            "MERIDIAN_SPACE_ID": "s9",
+            "MERIDIAN_REPO_ROOT": "/tmp/repo",
+        },
+        pass_through=set(),
+    )
+
+    assert sanitized["MERIDIAN_SPACE_ID"] == "s9"
+    assert sanitized["MERIDIAN_REPO_ROOT"] == "/tmp/repo"
+    assert sanitized["MERIDIAN_SPACE_FS"] == "/tmp/repo/.meridian/.spaces/s9/fs"
+
+
+def test_sanitize_child_env_prefers_state_root_for_space_fs() -> None:
+    sanitized = sanitize_child_env(
+        base_env={"PATH": "/usr/bin"},
+        env_overrides={
+            "MERIDIAN_SPACE_ID": "s12",
+            "MERIDIAN_REPO_ROOT": "/tmp/repo",
+            "MERIDIAN_STATE_ROOT": "/tmp/custom-state",
+        },
+        pass_through=set(),
+    )
+
+    assert sanitized["MERIDIAN_SPACE_FS"] == "/tmp/custom-state/.spaces/s12/fs"
+
+
 @pytest.mark.asyncio
 async def test_execute_with_finalization_passes_required_credentials_only(
     tmp_path: Path,

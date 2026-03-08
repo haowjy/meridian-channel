@@ -69,9 +69,6 @@ class RuntimeContext(BaseModel):
         overrides: dict[str, str] = {"MERIDIAN_DEPTH": str(self.depth)}
         if self.space_id is not None:
             overrides["MERIDIAN_SPACE_ID"] = str(self.space_id)
-            space_fs = self._space_fs_path()
-            if space_fs is not None:
-                overrides["MERIDIAN_SPACE_FS"] = space_fs.as_posix()
         if self.spawn_id is not None:
             overrides["MERIDIAN_SPAWN_ID"] = str(self.spawn_id)
         if self.parent_spawn_id is not None:
@@ -83,12 +80,3 @@ class RuntimeContext(BaseModel):
         if self.chat_id:
             overrides["MERIDIAN_CHAT_ID"] = self.chat_id
         return overrides
-
-    def _space_fs_path(self) -> Path | None:
-        if self.space_id is None:
-            return None
-        if self.state_root is not None:
-            return self.state_root / ".spaces" / str(self.space_id) / "fs"
-        if self.repo_root is not None:
-            return self.repo_root / ".meridian" / ".spaces" / str(self.space_id) / "fs"
-        return None
