@@ -78,7 +78,6 @@ Practical impact:
       sessions/
         <chat-id>.lock      # live session lock while harness process spawns
       fs/
-        space-summary.md    # generated summary artifact
 ```
 
 - No SQLite authority.
@@ -106,4 +105,3 @@ Primary-space launch writes an active-space lock at:
 - If `MERIDIAN_STATE_ROOT=.meridian/state`: `.meridian/state/active-spaces/<space-id>.lock`
 
 Session lifetime locks live at `.meridian/.spaces/<space-id>/sessions/<chat-id>.lock`.
-

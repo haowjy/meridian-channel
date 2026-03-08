@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from meridian.lib.core.domain import Spawn, TokenUsage
+from meridian.lib.launch.env import build_harness_child_env
 from meridian.lib.launch.env import inherit_child_env
 from meridian.lib.launch.env import sanitize_child_env
 from meridian.lib.launch.runner import execute_with_finalization
@@ -253,60 +254,39 @@ def test_inherit_child_env_keeps_parent_env_but_drops_internal_launch_overrides(
     assert "MERIDIAN_SPACE_PROMPT" not in inherited
 
 
-@pytest.mark.asyncio
-async def test_execute_with_finalization_inherits_parent_env_for_trusted_harness(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "needed")
-    monkeypatch.setenv("UNRELATED_TOKEN", "allowed")
-    monkeypatch.setenv("MISC_VALUE", "kept")
-    monkeypatch.setenv("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", "67")
-
-    run, space_dir = _create_run(tmp_path, prompt="env-policy")
-    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
-
-    script = tmp_path / "env-policy.py"
-    _write_script(
-        script,
-        """
-        import json
-        import os
-
-        print(
-            json.dumps(
-                {
-                    "anthropic": os.getenv("ANTHROPIC_API_KEY"),
-                    "unrelated_token": os.getenv("UNRELATED_TOKEN"),
-                    "misc": os.getenv("MISC_VALUE"),
-                    "autocompact": os.getenv("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"),
-                },
-                sort_keys=True,
-            ),
-            flush=True,
-        )
-        """,
+def test_build_harness_child_env_uses_claude_specific_blocklist() -> None:
+    child_env = build_harness_child_env(
+        base_env={
+            "PATH": "/usr/bin",
+            "CLAUDECODE": "1",
+            "UNRELATED_TOKEN": "keep-me",
+            "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "67",
+        },
+        adapter=ClaudeAdapter(),
+        run_params=SpawnParams(prompt="test", model=ModelId("claude-sonnet-4-6")),
+        permission_config=PermissionConfig(),
+        runtime_env_overrides={"MERIDIAN_DEPTH": "2"},
     )
 
-    adapter = ScriptHarnessAdapter(command=(sys.executable, str(script)))
-    registry = HarnessRegistry()
-    registry.register(adapter)
+    assert child_env["PATH"] == "/usr/bin"
+    assert child_env["UNRELATED_TOKEN"] == "keep-me"
+    assert child_env["MERIDIAN_DEPTH"] == "2"
+    assert "CLAUDECODE" not in child_env
+    assert "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE" not in child_env
 
-    exit_code = await execute_with_finalization(
-        run,
-        repo_root=tmp_path,
-        space_dir=space_dir,
-        artifacts=artifacts,
-        registry=registry,
-        harness_id=adapter.id,
-        cwd=tmp_path,
+
+def test_build_harness_child_env_does_not_block_claudecode_for_other_harnesses() -> None:
+    child_env = build_harness_child_env(
+        base_env={
+            "PATH": "/usr/bin",
+            "CLAUDECODE": "1",
+        },
+        adapter=CodexAdapter(),
+        run_params=SpawnParams(prompt="test", model=ModelId("gpt-5.3-codex")),
+        permission_config=PermissionConfig(),
+        runtime_env_overrides={"MERIDIAN_DEPTH": "2"},
     )
 
-    assert exit_code == 0
-    output_text = artifacts.get(make_artifact_key(run.spawn_id, "output.jsonl")).decode("utf-8")
-    assert json.loads(output_text.strip()) == {
-        "anthropic": "needed",
-        "autocompact": None,
-        "misc": "kept",
-        "unrelated_token": "allowed",
-    }
+    assert child_env["PATH"] == "/usr/bin"
+    assert child_env["CLAUDECODE"] == "1"
+    assert child_env["MERIDIAN_DEPTH"] == "2"

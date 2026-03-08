@@ -1,0 +1,13 @@
+# Ignore everything by default
+*
+
+# Track .gitignore itself
+!.gitignore
+
+# Track designs/ and fs/ within spaces
+!.spaces/
+!.spaces/*/
+!.spaces/*/designs/
+!.spaces/*/designs/**
+!.spaces/*/fs/
+!.spaces/*/fs/**

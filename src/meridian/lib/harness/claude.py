@@ -184,6 +184,11 @@ class ClaudeAdapter(BaseHarnessAdapter):
         _ = config
         return {}
 
+    def blocked_child_env_vars(self) -> frozenset[str]:
+        # Meridian manages nesting limits itself; suppress Claude's parent-session
+        # sentinel so child Claude spawns can run under Meridian control.
+        return frozenset({"CLAUDECODE"})
+
     def parse_stream_event(self, line: str) -> StreamEvent | None:
         event = parse_json_stream_event(line)
         if event is None:

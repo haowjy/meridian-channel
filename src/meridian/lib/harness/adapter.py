@@ -123,6 +123,8 @@ class HarnessAdapter(Protocol):
 
     def env_overrides(self, config: PermissionConfig) -> dict[str, str]: ...
 
+    def blocked_child_env_vars(self) -> frozenset[str]: ...
+
     def parse_stream_event(self, line: str) -> StreamEvent | None: ...
 
     def extract_usage(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> TokenUsage: ...
@@ -177,6 +179,9 @@ class HarnessAdapter(Protocol):
 
 class BaseHarnessAdapter:
     """Base with default no-op implementations for optional adapter methods."""
+
+    def blocked_child_env_vars(self) -> frozenset[str]:
+        return frozenset()
 
     def seed_session(
         self,

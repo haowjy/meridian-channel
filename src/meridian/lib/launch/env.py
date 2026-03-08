@@ -142,7 +142,14 @@ def build_harness_child_env(
         permission_config=permission_config,
         runtime_env_overrides=runtime_env_overrides,
     )
+    blocked_child_env_vars = getattr(adapter, "blocked_child_env_vars", None)
+    adapter_blocked = (
+        blocked_child_env_vars()
+        if callable(blocked_child_env_vars)
+        else frozenset()
+    )
     return inherit_child_env(
         base_env=base_env,
         env_overrides=merged_env,
+        blocked=_NON_PROPAGATING_CHILD_ENV | adapter_blocked,
     )

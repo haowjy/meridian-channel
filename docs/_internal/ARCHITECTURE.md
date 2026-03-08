@@ -168,7 +168,6 @@ src/meridian/
 
     space/                     # Thin facade
       launch.py                # Public entry point -- delegates to launch/ internals
-      summary.py               # Space summary generation
 ```
 
 ---
@@ -345,7 +344,7 @@ Surfaces consume the manifest via `get_operations_for_surface("cli"|"mcp")`. Som
 Configuration uses pydantic-settings `BaseSettings` with layered precedence:
 
 ```
-Defaults -> Project TOML (.meridian/config.toml) -> User TOML (~/.config/meridian/) -> Env Vars (MERIDIAN_*) -> CLI Flags
+Defaults -> Project TOML (.meridian/config.toml) -> User TOML (~/.meridian/config.toml) -> Env Vars (MERIDIAN_*) -> CLI Flags
 ```
 
 Key env vars:
@@ -420,4 +419,3 @@ Context propagation per child: `MERIDIAN_SPAWN_ID`, `MERIDIAN_PARENT_SPAWN_ID`, 
 - All identifiers are `NewType` wrappers (`SpaceId`, `SpawnId`, `ModelId`, `HarnessId`, `ArtifactKey`) for compile-time safety
 - All domain and I/O types are frozen Pydantic `BaseModel` instances
 - State persistence uses `model_validate()` / `model_dump()` at I/O boundaries
-

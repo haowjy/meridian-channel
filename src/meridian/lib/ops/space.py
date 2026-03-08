@@ -17,7 +17,6 @@ from meridian.lib.state.space_store import (
     get_space as get_space_record,
     list_spaces as list_space_records,
 )
-from meridian.lib.space.summary import generate_space_summary
 from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_space_dir
 from meridian.lib.core.types import SpaceId
@@ -132,7 +131,6 @@ class SpaceActionOutput(BaseModel):
     exit_code: int | None = None
     command: tuple[str, ...] = ()
     lock_path: str | None = None
-    summary_path: str | None = None
     continue_ref: str | None = None
     resume_command: str | None = None
     warning: str | None = None
@@ -188,7 +186,6 @@ class SpaceDetailOutput(BaseModel):
 
     space_id: str
     name: str | None
-    summary_path: str | None
     pinned_files: tuple[str, ...]
     spawn_ids: tuple[str, ...]
 
@@ -208,11 +205,6 @@ class SpaceDetailOutput(BaseModel):
 def space_start_sync(payload: SpaceStartInput) -> SpaceActionOutput:
     runtime = build_runtime(payload.repo_root)
     space = create_space_record(runtime.repo_root, name=payload.name)
-
-    summary_path = generate_space_summary(
-        repo_root=runtime.repo_root,
-        space_id=SpaceId(space.id),
-    )
 
     launch_result = launch_primary(
         repo_root=runtime.repo_root,
@@ -236,7 +228,6 @@ def space_start_sync(payload: SpaceStartInput) -> SpaceActionOutput:
         exit_code=launch_result.exit_code,
         command=launch_result.command if payload.dry_run else (),
         lock_path=launch_result.lock_path.as_posix(),
-        summary_path=summary_path.as_posix(),
         continue_ref=launch_result.continue_ref,
         resume_command=(
             f"meridian --continue {launch_result.continue_ref}"
@@ -254,11 +245,6 @@ def space_resume_sync(payload: SpaceResumeInput) -> SpaceActionOutput:
     runtime = build_runtime(payload.repo_root)
     space_id = resolve_space_for_resume(runtime.repo_root, payload.space)
     space = get_space_or_raise(runtime.repo_root, space_id)
-
-    summary_path = generate_space_summary(
-        repo_root=runtime.repo_root,
-        space_id=space.space_id,
-    )
 
     launch_result = launch_primary(
         repo_root=runtime.repo_root,
@@ -282,7 +268,6 @@ def space_resume_sync(payload: SpaceResumeInput) -> SpaceActionOutput:
         exit_code=launch_result.exit_code,
         command=(),
         lock_path=launch_result.lock_path.as_posix(),
-        summary_path=summary_path.as_posix(),
         continue_ref=launch_result.continue_ref,
         resume_command=(
             f"meridian --continue {launch_result.continue_ref}"
@@ -328,13 +313,10 @@ def space_show_sync(payload: SpaceShowInput) -> SpaceDetailOutput:
 
     space_dir = resolve_space_dir(runtime.repo_root, space_id)
     spawns = spawn_store.list_spawns(space_dir)
-    summary_candidate = generate_space_summary(repo_root=runtime.repo_root, space_id=space_id)
-    summary_path: str | None = summary_candidate.as_posix() if summary_candidate.is_file() else None
 
     return SpaceDetailOutput(
         space_id=space.id,
         name=space.name,
-        summary_path=summary_path,
         pinned_files=(),
         spawn_ids=tuple(run.id for run in spawns),
     )

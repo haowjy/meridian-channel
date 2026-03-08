@@ -12,17 +12,17 @@ scratch/
 uv.lock
 tmp/
 
-
-.meridian/
 .orchestrate/
 .scratch/
 
 err
 out
 
-.agents/*/__*-c[0-9]*
-.claude/*/__*-c[0-9]*
-.codex/*/__*-c[0-9]*
-.opencode/*/__*-c[0-9]*
 .claude/agents/__*-c[0-9]*
 .claude/skills/__*-c[0-9]*
+.agents/agents/__*-c[0-9]*
+.codex/agents/__*-c[0-9]*
+.agents/skills/__*-c[0-9]*
+.codex/skills/__*-c[0-9]*
+.opencode/agents/__*-c[0-9]*
+.opencode/skills/__*-c[0-9]*

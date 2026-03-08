@@ -45,7 +45,6 @@ from meridian.lib.state.space_store import (
     get_space as get_space_record,
     list_spaces as list_space_records,
 )
-from meridian.lib.space.summary import generate_space_summary
 from meridian.lib.state.paths import resolve_all_spaces_dir, resolve_space_dir
 from meridian.lib.core.types import SpaceId
 from meridian.server.main import run_server
@@ -547,10 +546,6 @@ def _run_primary_launch(
             force_new=new,
             explicit_space=explicit_space,
         )
-    summary_path = generate_space_summary(
-        repo_root=repo_root,
-        space_id=SpaceId(selected.id),
-    )
 
     launch_result = launch_primary(
         repo_root=repo_root,
@@ -586,7 +581,6 @@ def _run_primary_launch(
             exit_code=launch_result.exit_code,
             command=launch_result.command if dry_run else (),
             lock_path=launch_result.lock_path.as_posix(),
-            summary_path=summary_path.as_posix(),
             continue_ref=launch_result.continue_ref,
             resume_command=(
                 f"meridian --continue {launch_result.continue_ref}"
