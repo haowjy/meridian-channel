@@ -45,18 +45,15 @@ def test_spawn_list_uses_explicit_space_without_env(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    first = create_space(tmp_path, name="first")
-    second = create_space(tmp_path, name="second")
-    first_dir = resolve_space_dir(tmp_path, first.id)
-    second_dir = resolve_space_dir(tmp_path, second.id)
+    space = create_space(tmp_path, name="first")
+    state_root = resolve_space_dir(tmp_path, space.id)
 
-    first_run = _start_run(first_dir, prompt="first")
-    _start_run(second_dir, prompt="second")
+    first_run = _start_run(state_root, prompt="first")
 
     monkeypatch.delenv("MERIDIAN_SPACE_ID", raising=False)
 
-    result = spawn_list_sync(SpawnListInput(space=first.id, repo_root=tmp_path.as_posix()))
+    result = spawn_list_sync(SpawnListInput(space=space.id, repo_root=tmp_path.as_posix()))
 
     assert len(result.spawns) == 1
     assert result.spawns[0].spawn_id == first_run
-    assert result.spawns[0].space_id == first.id
+    assert result.spawns[0].space_id == space.id

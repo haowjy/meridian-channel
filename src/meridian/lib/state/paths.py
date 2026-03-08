@@ -18,27 +18,20 @@ _GITIGNORE_CONTENT = (
     "# Track .gitignore itself\n"
     "!.gitignore\n"
     "\n"
-    "# Track sync lock for reproducible installs\n"
-    "!sync.lock\n"
-    "\n"
-    "# Track designs/ and fs/ within spaces\n"
-    "!.spaces/\n"
-    "!.spaces/*/\n"
-    "!.spaces/*/designs/\n"
-    "!.spaces/*/designs/**\n"
-    "!.spaces/*/fs/\n"
-    "!.spaces/*/fs/**\n"
+    "# Track fs/ and work/\n"
+    "!fs/\n"
+    "!fs/**\n"
+    "!work/\n"
+    "!work/**\n"
 )
 
 
 class SpacePaths(BaseModel):
-    """Resolved paths for one space directory."""
+    """Resolved paths for one space directory (now receives state root)."""
 
     model_config = ConfigDict(frozen=True)
 
     space_dir: Path
-    space_json: Path
-    space_lock: Path
     spawns_jsonl: Path
     spawns_lock: Path
     sessions_jsonl: Path
@@ -53,8 +46,6 @@ class SpacePaths(BaseModel):
 
         return cls(
             space_dir=space_dir,
-            space_json=space_dir / "space.json",
-            space_lock=space_dir / "space.lock",
             spawns_jsonl=space_dir / "spawns.jsonl",
             spawns_lock=space_dir / "spawns.lock",
             sessions_jsonl=space_dir / "sessions.jsonl",
@@ -126,21 +117,19 @@ def resolve_cache_dir(repo_root: Path) -> Path:
 
 
 def resolve_space_dir(repo_root: Path, space_id: SpaceId | str) -> Path:
-    """Return `.meridian/.spaces/<space-id>/` for a repository root."""
+    """Compat shim: returns state root, ignoring space_id."""
 
-    return resolve_all_spaces_dir(repo_root) / str(space_id)
+    return _resolve_state_root(repo_root)
 
 
-def spawn_log_subpath(spawn_id: SpawnId | str, space_id: SpaceId | str | None) -> Path:
+def spawn_log_subpath(spawn_id: SpawnId | str, space_id: SpaceId | str | None = None) -> Path:
     """Return spawn log path relative to the Meridian state root."""
 
-    if space_id is None:
-        return Path("spawns") / str(spawn_id)
-    return Path(_SPACES_DIR) / str(space_id) / "spawns" / str(spawn_id)
+    return Path("spawns") / str(spawn_id)
 
 
 def resolve_spawn_log_dir(
-    repo_root: Path, spawn_id: SpawnId | str, space_id: SpaceId | str | None
+    repo_root: Path, spawn_id: SpawnId | str, space_id: SpaceId | str | None = None
 ) -> Path:
     """Resolve absolute spawn log directory for spawn/space IDs."""
 

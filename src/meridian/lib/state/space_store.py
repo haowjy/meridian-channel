@@ -1,4 +1,9 @@
-"""File-backed space metadata CRUD for `.meridian/.spaces/<space-id>/space.json`."""
+"""Compat shim for space metadata CRUD.
+
+Multi-space support has been removed. All state now lives directly under
+`.meridian/` (the state root). This module keeps the same public API so
+that upper layers (ops/*, cli/*) continue to compile.
+"""
 
 
 import fcntl
@@ -11,8 +16,7 @@ from typing import cast
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
-from meridian.lib.state.spawn_store import next_space_id
-from meridian.lib.state.paths import SpacePaths, ensure_gitignore, resolve_all_spaces_dir, resolve_space_dir
+from meridian.lib.state.paths import SpacePaths, ensure_gitignore, resolve_state_paths
 from meridian.lib.core.types import SpaceId
 
 _SPACE_SCHEMA_VERSION = 1
@@ -90,47 +94,38 @@ def _read_space_json(path: Path) -> SpaceRecord | None:
 
 
 def create_space(repo_root: Path, name: str | None = None) -> SpaceRecord:
-    """Create one new space and write `space.json`."""
+    """Create the single space at the state root."""
 
-    spaces_dir = resolve_all_spaces_dir(repo_root)
-    spaces_dir.mkdir(parents=True, exist_ok=True)
-    with _lock_file(spaces_dir / ".lock"):
-        space_id = next_space_id(repo_root)
-        space_dir = resolve_space_dir(repo_root, space_id)
-        paths = SpacePaths.from_space_dir(space_dir)
-        paths.fs_dir.mkdir(parents=True, exist_ok=False)
+    state_root = resolve_state_paths(repo_root).root_dir
+    state_root.mkdir(parents=True, exist_ok=True)
+    with _lock_file(state_root / "space.lock"):
+        paths = SpacePaths.from_space_dir(state_root)
+        paths.fs_dir.mkdir(parents=True, exist_ok=True)
 
         record = SpaceRecord(
             schema_version=_SPACE_SCHEMA_VERSION,
-            id=str(space_id),
+            id="s1",
             name=name,
             created_at=_utc_now_iso(),
         )
-        _write_space_json(paths.space_json, record)
+        _write_space_json(state_root / "space.json", record)
 
     ensure_gitignore(repo_root)
     return record
 
 
 def get_space(repo_root: Path, space_id: SpaceId | str) -> SpaceRecord | None:
-    """Load one `space.json` record."""
+    """Load the single `space.json` record from the state root."""
 
-    path = SpacePaths.from_space_dir(resolve_space_dir(repo_root, space_id)).space_json
-    return _read_space_json(path)
+    state_root = resolve_state_paths(repo_root).root_dir
+    return _read_space_json(state_root / "space.json")
 
 
 def list_spaces(repo_root: Path) -> list[SpaceRecord]:
-    """Load all valid spaces from `.meridian/.spaces/*/space.json`."""
+    """Return the single space record if it exists."""
 
-    spaces_dir = resolve_all_spaces_dir(repo_root)
-    if not spaces_dir.exists():
+    state_root = resolve_state_paths(repo_root).root_dir
+    record = _read_space_json(state_root / "space.json")
+    if record is None:
         return []
-
-    records: list[SpaceRecord] = []
-    for child in sorted(spaces_dir.iterdir(), key=lambda path: path.name):
-        if not child.is_dir():
-            continue
-        record = _read_space_json(SpacePaths.from_space_dir(child).space_json)
-        if record is not None:
-            records.append(record)
-    return records
+    return [record]
