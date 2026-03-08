@@ -14,7 +14,7 @@ from meridian.lib.config.settings import MeridianConfig, SearchPathConfig
 from meridian.lib.config.skill_registry import SkillRegistry
 from meridian.lib.domain import SkillContent
 from meridian.lib.harness.registry import HarnessRegistry
-from meridian.lib.prompt.assembly import load_skill_contents, resolve_run_defaults
+from .prompt import load_skill_contents, resolve_run_defaults
 from meridian.lib.safety.permissions import permission_tier_from_profile
 from meridian.lib.types import HarnessId, ModelId
 

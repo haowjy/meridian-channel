@@ -17,7 +17,7 @@ import structlog
 
 from meridian.lib.config.settings import MeridianConfig
 from meridian.lib.domain import Spawn
-from meridian.lib.extract.finalize import (
+from .extract import (
     FinalizeExtraction,
     enrich_finalize,
     reset_finalize_attempt_artifacts,

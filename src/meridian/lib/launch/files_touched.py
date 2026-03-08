@@ -6,7 +6,7 @@ import json
 import re
 from typing import cast
 
-from meridian.lib.extract._io import read_artifact_text
+from .artifact_io import read_artifact_text
 from meridian.lib.state.artifact_store import ArtifactStore
 from meridian.lib.types import SpawnId
 
