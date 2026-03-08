@@ -25,28 +25,20 @@ def test_space_path_resolvers_and_dataclass_fields(tmp_path):
     assert paths.spawns_dir == space_dir / "spawns"
 
 
-def test_ensure_gitignore_writes_expected_content(tmp_path):
+def test_ensure_gitignore_seeds_on_first_init(tmp_path):
     gitignore = ensure_gitignore(tmp_path)
 
     assert gitignore == tmp_path / ".meridian" / ".gitignore"
-    assert gitignore.read_text(encoding="utf-8") == (
-        ".spaces/**\n"
-        "!.spaces/*/\n"
-        "!.spaces/*/fs/\n"
-        "!.spaces/*/fs/**\n"
-    )
+    content = gitignore.read_text(encoding="utf-8")
+    assert "!.spaces/*/designs/**" in content
+    assert "!.spaces/*/fs/**" in content
 
 
-def test_ensure_gitignore_rewrites_incorrect_content(tmp_path):
+def test_ensure_gitignore_does_not_overwrite_user_edits(tmp_path):
     path = tmp_path / ".meridian" / ".gitignore"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("wrong\n", encoding="utf-8")
+    path.write_text("custom user content\n", encoding="utf-8")
 
     ensure_gitignore(tmp_path)
 
-    assert path.read_text(encoding="utf-8") == (
-        ".spaces/**\n"
-        "!.spaces/*/\n"
-        "!.spaces/*/fs/\n"
-        "!.spaces/*/fs/**\n"
-    )
+    assert path.read_text(encoding="utf-8") == "custom user content\n"

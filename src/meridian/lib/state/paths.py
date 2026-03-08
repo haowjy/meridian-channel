@@ -12,8 +12,17 @@ from meridian.lib.core.types import SpawnId, SpaceId
 _MERIDIAN_DIR = ".meridian"
 _SPACES_DIR = ".spaces"
 _GITIGNORE_CONTENT = (
-    ".spaces/**\n"
+    "# Ignore everything by default\n"
+    "*\n"
+    "\n"
+    "# Track .gitignore itself\n"
+    "!.gitignore\n"
+    "\n"
+    "# Track designs/ and fs/ within spaces\n"
+    "!.spaces/\n"
     "!.spaces/*/\n"
+    "!.spaces/*/designs/\n"
+    "!.spaces/*/designs/**\n"
     "!.spaces/*/fs/\n"
     "!.spaces/*/fs/**\n"
 )
@@ -132,16 +141,14 @@ def resolve_spawn_log_dir(
 
 
 def ensure_gitignore(repo_root: Path) -> Path:
-    """Create `.meridian/.gitignore` with file-authority ignore rules."""
+    """Seed `.meridian/.gitignore` on first init. Never overwrites user edits."""
 
     meridian_dir = repo_root / _MERIDIAN_DIR
     meridian_dir.mkdir(parents=True, exist_ok=True)
     gitignore_path = meridian_dir / ".gitignore"
 
     if gitignore_path.exists():
-        current = gitignore_path.read_text(encoding="utf-8")
-        if current == _GITIGNORE_CONTENT:
-            return gitignore_path
+        return gitignore_path
 
     tmp_path = meridian_dir / ".gitignore.tmp"
     with tmp_path.open("w", encoding="utf-8") as handle:
