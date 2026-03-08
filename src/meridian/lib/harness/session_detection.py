@@ -11,6 +11,7 @@ import json
 import logging
 import re
 from pathlib import Path
+from typing import cast
 
 logger = logging.getLogger(__name__)
 
@@ -34,17 +35,21 @@ def resolve_codex_rollout_session_id(path: Path, resolved_repo: Path) -> str | N
     with path.open("r", encoding="utf-8", errors="ignore") as handle:
         for line in handle:
             try:
-                payload_obj = json.loads(line)
+                raw_payload_obj = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if not isinstance(payload_obj, dict):
+            if not isinstance(raw_payload_obj, dict):
                 continue
+            payload_obj = cast("dict[str, object]", raw_payload_obj)
             payload_type = payload_obj.get("type")
+            if not isinstance(payload_type, str):
+                continue
 
             if payload_type == "session_meta":
-                payload = payload_obj.get("payload")
-                if not isinstance(payload, dict):
+                raw_payload = payload_obj.get("payload")
+                if not isinstance(raw_payload, dict):
                     continue
+                payload = cast("dict[str, object]", raw_payload)
                 candidate_session_id = payload.get("id")
                 cwd = payload.get("cwd")
                 if not isinstance(candidate_session_id, str) or not candidate_session_id.strip():
@@ -61,16 +66,21 @@ def resolve_codex_rollout_session_id(path: Path, resolved_repo: Path) -> str | N
                 continue
 
             if payload_type == "response_item":
-                payload = payload_obj.get("payload")
-                if not isinstance(payload, dict):
+                raw_payload = payload_obj.get("payload")
+                if not isinstance(raw_payload, dict):
                     continue
+                payload = cast("dict[str, object]", raw_payload)
                 if payload.get("type") == "message" and payload.get("role") == "assistant":
                     saw_assistant_message = True
                 continue
 
             if payload_type == "event_msg":
-                payload = payload_obj.get("payload")
-                if isinstance(payload, dict) and payload.get("type") == "turn_aborted":
+                raw_payload = payload_obj.get("payload")
+                if isinstance(raw_payload, dict):
+                    payload = cast("dict[str, object]", raw_payload)
+                else:
+                    payload = None
+                if payload is not None and payload.get("type") == "turn_aborted":
                     saw_turn_aborted = True
                 continue
 
@@ -182,14 +192,16 @@ def infer_harness_from_untracked_session_ref(repo_root: Path, session_ref: str) 
                         line = handle.readline()
                         if not line:
                             break
-                        payload_obj = json.loads(line)
-                        if not isinstance(payload_obj, dict):
+                        raw_payload_obj = json.loads(line)
+                        if not isinstance(raw_payload_obj, dict):
                             continue
+                        payload_obj = cast("dict[str, object]", raw_payload_obj)
                         if payload_obj.get("type") != "session_meta":
                             continue
-                        payload = payload_obj.get("payload")
-                        if not isinstance(payload, dict):
+                        raw_payload = payload_obj.get("payload")
+                        if not isinstance(raw_payload, dict):
                             continue
+                        payload = cast("dict[str, object]", raw_payload)
                         session_id = payload.get("id")
                         cwd = payload.get("cwd")
                         if not isinstance(session_id, str) or session_id.strip() != normalized:
