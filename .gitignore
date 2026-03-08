@@ -20,7 +20,7 @@ tmp/
 err
 out
 
-.agents/*/_meridian-*
-.claude/*/_meridian-*
-.codex/*/_meridian-*
-.opencode/*/_meridian-*
+.agents/*/__*-c[0-9]*
+.claude/*/__*-c[0-9]*
+.codex/*/__*-c[0-9]*
+.opencode/*/__*-c[0-9]*
