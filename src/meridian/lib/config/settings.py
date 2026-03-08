@@ -408,7 +408,6 @@ def _normalize_toml_payload(
             "max_retries": "max_retries",
             "retry_backoff_seconds": "retry_backoff_seconds",
             "default_primary_agent": "default_primary_agent",
-            "primary_agent": "default_primary_agent",
             "agent": "default_agent",
             "default_agent": "default_agent",
             "model": "default_model",
@@ -435,7 +434,6 @@ def _normalize_toml_payload(
         "wait_timeout_minutes": "wait_timeout_minutes",
         "default_permission_tier": "default_permission_tier",
         "default_primary_agent": "default_primary_agent",
-        "primary_agent": "default_primary_agent",
         "default_agent": "default_agent",
         "default_model": "default_model",
     }
@@ -528,7 +526,6 @@ def _env_alias_overrides(repo_root: Path) -> dict[str, object]:
             ("default_permission_tier",),
             "str",
         ),
-        ("MERIDIAN_PRIMARY_AGENT", ("default_primary_agent",), "str"),
         ("MERIDIAN_DEFAULT_PRIMARY_AGENT", ("default_primary_agent",), "str"),
         ("MERIDIAN_DEFAULT_AGENT", ("default_agent",), "str"),
         ("MERIDIAN_DEFAULT_MODEL", ("default_model",), "str"),
@@ -755,11 +752,6 @@ class MeridianConfig(BaseSettings):
     def _validate_default_model(cls, value: str) -> str:
         normalized = _normalize_required_string(value, source="default_model")
         return _normalize_model_identifier(normalized, repo_root=_current_repo_root())
-
-    @property
-    def primary_agent(self) -> str:
-        """Backward-compatible alias for legacy config field name."""
-        return self.default_primary_agent
 
     def default_model_for_harness(self, harness_id: str) -> str | None:
         """Return configured default model for one harness ID."""

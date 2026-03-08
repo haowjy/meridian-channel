@@ -36,10 +36,7 @@ from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_spawn_log_dir, resolve_state_paths
 from meridian.lib.core.types import HarnessId, SpawnId, SpaceId
 
-from .env import (
-    build_harness_child_env,
-    sanitize_child_env as _sanitize_child_env,
-)
+from .env import build_harness_child_env
 from .errors import ErrorCategory, classify_error, should_retry
 from .signals import SignalForwarder, map_process_exit_code, signal_coordinator, signal_process_group
 from .timeout import (
@@ -59,10 +56,6 @@ DEFAULT_MAX_RETRIES = _DEFAULT_CONFIG.max_retries
 DEFAULT_RETRY_BACKOFF_SECONDS = _DEFAULT_CONFIG.retry_backoff_seconds
 DEFAULT_GUARDRAIL_TIMEOUT_SECONDS = _DEFAULT_CONFIG.guardrail_timeout_minutes * 60.0
 logger = structlog.get_logger(__name__)
-
-# Backward-compatible re-export for existing callers/tests.
-sanitize_child_env = _sanitize_child_env
-
 
 class SafeDefaultPermissionResolver(PermissionResolver):
     """Safe default resolver for run execution."""

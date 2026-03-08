@@ -9,7 +9,8 @@ import pytest
 
 from meridian.lib.core.domain import Spawn, TokenUsage
 from meridian.lib.launch.env import inherit_child_env
-from meridian.lib.launch.runner import execute_with_finalization, sanitize_child_env
+from meridian.lib.launch.env import sanitize_child_env
+from meridian.lib.launch.runner import execute_with_finalization
 from meridian.lib.harness.common import (
     extract_session_id_from_artifacts,
     extract_usage_from_artifacts,

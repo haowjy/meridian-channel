@@ -89,16 +89,6 @@ class DiscoveredModel(BaseModel):
     capabilities: tuple[str, ...]
     release_date: str | None
 
-    @property
-    def harness_id(self) -> HarnessId:
-        """Backward-compatible alias for callers still using `harness_id`."""
-        return self.harness
-
-    @property
-    def supports_tool_call(self) -> bool:
-        """Backward-compatible alias for callers still using `supports_tool_call`."""
-        return "tool_call" in self.capabilities
-
 
 def _parse_string(value: object) -> str | None:
     if isinstance(value, str):
@@ -227,13 +217,11 @@ class _CachedModelRow(BaseModel):
     family: str | None = None
     provider: str | None = None
     harness: str | None = None
-    harness_id: str | None = None
     cost_input: float | None = None
     cost_output: float | None = None
     context_limit: int | None = None
     output_limit: int | None = None
     capabilities: tuple[str, ...] = ()
-    supports_tool_call: bool = False
     release_date: str | None = None
 
     @field_validator(
@@ -242,7 +230,6 @@ class _CachedModelRow(BaseModel):
         "family",
         "provider",
         "harness",
-        "harness_id",
         "release_date",
         mode="before",
     )
@@ -282,12 +269,10 @@ def _default_cache_dir() -> Path:
     return resolve_cache_dir(resolve_repo_root())
 
 
-def _resolve_cache_dir(cache_dir: Path | str | bool | None) -> tuple[Path, bool]:
-    if isinstance(cache_dir, bool):
-        return _default_cache_dir(), cache_dir
+def _resolve_cache_dir(cache_dir: Path | str | None) -> Path:
     if cache_dir is None:
-        return _default_cache_dir(), False
-    return Path(cache_dir), False
+        return _default_cache_dir()
+    return Path(cache_dir)
 
 
 def _cache_file(cache_dir: Path) -> Path:
@@ -386,17 +371,12 @@ def fetch_models_dev() -> list[DiscoveredModel]:
 
 
 def _deserialize_cached_model(row: _CachedModelRow) -> DiscoveredModel | None:
-    capabilities = set(row.capabilities)
-    if not capabilities and row.supports_tool_call:
-        capabilities.add("tool_call")
-    harness_value = row.harness or row.harness_id
-
     if (
         row.id is None
         or row.name is None
         or row.family is None
         or row.provider is None
-        or harness_value is None
+        or row.harness is None
     ):
         return None
 
@@ -405,12 +385,12 @@ def _deserialize_cached_model(row: _CachedModelRow) -> DiscoveredModel | None:
         name=row.name,
         family=row.family,
         provider=row.provider,
-        harness=HarnessId(harness_value),
+        harness=HarnessId(row.harness),
         cost_input=row.cost_input,
         cost_output=row.cost_output,
         context_limit=row.context_limit,
         output_limit=row.output_limit,
-        capabilities=tuple(sorted(capabilities)),
+        capabilities=tuple(sorted(row.capabilities)),
         release_date=row.release_date,
     )
 
@@ -487,7 +467,7 @@ def refresh_models_cache(cache_dir: Path | str | None = None) -> list[Discovered
     If remote fetch fails and no cache exists, returns an empty list.
     """
 
-    resolved_dir, _ = _resolve_cache_dir(cache_dir)
+    resolved_dir = _resolve_cache_dir(cache_dir)
     cache_file = _cache_file(resolved_dir)
     cached = _read_cache(cache_file)
 
@@ -513,16 +493,14 @@ def refresh_models_cache(cache_dir: Path | str | None = None) -> list[Discovered
 
 
 def load_discovered_models(
-    cache_dir: Path | str | bool | None = None,
+    cache_dir: Path | str | None = None,
     *,
     force_refresh: bool = False,
 ) -> list[DiscoveredModel]:
     """Load discovered models from cache with 24-hour TTL."""
 
-    resolved_dir, legacy_force_refresh = _resolve_cache_dir(cache_dir)
-    use_force_refresh = force_refresh or legacy_force_refresh
-
-    if use_force_refresh:
+    resolved_dir = _resolve_cache_dir(cache_dir)
+    if force_refresh:
         return refresh_models_cache(resolved_dir)
 
     cache_file = _cache_file(resolved_dir)
@@ -533,16 +511,6 @@ def load_discovered_models(
             return models
 
     return refresh_models_cache(resolved_dir)
-
-
-# Compatibility wrappers for existing call sites.
-def fetch_from_models_dev() -> list[DiscoveredModel]:
-    return fetch_models_dev()
-
-
-def refresh_cache() -> list[DiscoveredModel]:
-    return refresh_models_cache(None)
-
 
 # ─── Aliases ───────────────────────────────────────────────────────────
 
@@ -565,12 +533,6 @@ class AliasEntry(BaseModel):
 
         return route_model(str(self.model_id)).harness_id
 
-    @property
-    def cost_tier(self) -> str:
-        """Backward-compatible catalog field retained for tabular output."""
-
-        return ""
-
     def format_text(self, ctx: FormatContext | None = None) -> str:
         """Key-value detail view for a single alias entry."""
         from meridian.cli.format_helpers import kv_block
@@ -586,8 +548,6 @@ class AliasEntry(BaseModel):
 
 
 # ─── Catalog ───────────────────────────────────────────────────────────
-# Backward-compatible export name.
-CatalogModel = AliasEntry
 
 
 def _catalog_path(repo_root: Path) -> Path:
@@ -724,12 +684,6 @@ def resolve_alias(name: str, repo_root: Path | None = None) -> ModelId | None:
         if entry.alias == normalized:
             return entry.model_id
     return None
-
-
-# Backward-compatible export name.
-def load_model_catalog(repo_root: Path | None = None) -> list[AliasEntry]:
-    return load_merged_aliases(repo_root=repo_root)
-
 
 def resolve_model(name_or_alias: str, repo_root: Path | None = None) -> AliasEntry:
     """Resolve alias to model id, or pass through a direct model identifier."""

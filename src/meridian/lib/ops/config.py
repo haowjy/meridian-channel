@@ -76,7 +76,7 @@ _CONFIG_KEY_SPECS: tuple[_ConfigKeySpec, ...] = (
         field_path=("default_primary_agent",),
         value_kind="str",
         env_var="MERIDIAN_DEFAULT_PRIMARY_AGENT",
-        aliases=("defaults.primary_agent", "default_primary_agent", "primary_agent"),
+        aliases=("default_primary_agent",),
     ),
     _ConfigKeySpec(
         canonical_key="defaults.agent",
