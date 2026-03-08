@@ -9,13 +9,12 @@ import time
 from pathlib import Path
 
 from meridian.lib.context import RuntimeContext
-from meridian.lib.ops._runtime import (
+from meridian.lib.ops.runtime import (
     build_runtime_from_root_and_config,
     require_space_id,
     resolve_runtime_root_and_config,
     resolve_space_id_or_none,
 )
-from meridian.lib.ops.registry import OperationSpec, operation
 from meridian.lib.sink import NullSink, OutputSink
 from meridian.lib.space import space_file
 from meridian.lib.state import spawn_store
@@ -645,104 +644,3 @@ async def spawn_continue(
     sink: OutputSink | None = None,
 ) -> SpawnActionOutput:
     return await asyncio.to_thread(spawn_continue_sync, payload, ctx=ctx, sink=sink)
-
-
-operation(
-    OperationSpec[SpawnCreateInput, SpawnActionOutput](
-        name="spawn.create",
-        handler=spawn_create,
-        sync_handler=spawn_create_sync,
-        input_type=SpawnCreateInput,
-        output_type=SpawnActionOutput,
-        cli_group="spawn",
-        cli_name="create",
-        mcp_name="spawn_create",
-        mcp_only=True,
-        description="Create and start a spawn.",
-    )
-)
-
-operation(
-    OperationSpec[SpawnListInput, SpawnListOutput](
-        name="spawn.list",
-        handler=spawn_list,
-        sync_handler=spawn_list_sync,
-        input_type=SpawnListInput,
-        output_type=SpawnListOutput,
-        cli_group="spawn",
-        cli_name="list",
-        mcp_name="spawn_list",
-        description="List recent spawns. Filter by --status, --model, or --space.",
-    )
-)
-
-operation(
-    OperationSpec[SpawnStatsInput, SpawnStatsOutput](
-        name="spawn.stats",
-        handler=spawn_stats,
-        sync_handler=spawn_stats_sync,
-        input_type=SpawnStatsInput,
-        output_type=SpawnStatsOutput,
-        cli_group="spawn",
-        cli_name="stats",
-        mcp_name="spawn_stats",
-        description="Show total runs, success/fail counts, cost, and duration.",
-    )
-)
-
-operation(
-    OperationSpec[SpawnShowInput, SpawnDetailOutput](
-        name="spawn.show",
-        handler=spawn_show,
-        sync_handler=spawn_show_sync,
-        input_type=SpawnShowInput,
-        output_type=SpawnDetailOutput,
-        cli_group="spawn",
-        cli_name="show",
-        mcp_name="spawn_show",
-        description="Show spawn status, duration, model, and report. Use --report to include report text.",
-    )
-)
-
-operation(
-    OperationSpec[SpawnCancelInput, SpawnActionOutput](
-        name="spawn.cancel",
-        handler=spawn_cancel,
-        sync_handler=spawn_cancel_sync,
-        input_type=SpawnCancelInput,
-        output_type=SpawnActionOutput,
-        cli_group="spawn",
-        cli_name="cancel",
-        mcp_name="spawn_cancel",
-        description="Cancel a running spawn.",
-    )
-)
-
-operation(
-    OperationSpec[SpawnContinueInput, SpawnActionOutput](
-        name="spawn.continue",
-        handler=spawn_continue,
-        sync_handler=spawn_continue_sync,
-        input_type=SpawnContinueInput,
-        output_type=SpawnActionOutput,
-        cli_group="spawn",
-        cli_name="continue",
-        mcp_name="spawn_continue",
-        mcp_only=True,
-        description="Continue a previous spawn.",
-    )
-)
-
-operation(
-    OperationSpec[SpawnWaitInput, SpawnWaitMultiOutput](
-        name="spawn.wait",
-        handler=spawn_wait,
-        sync_handler=spawn_wait_sync,
-        input_type=SpawnWaitInput,
-        output_type=SpawnWaitMultiOutput,
-        cli_group="spawn",
-        cli_name="wait",
-        mcp_name="spawn_wait",
-        description="Block until spawn(s) complete. Returns status and report by default.",
-    )
-)

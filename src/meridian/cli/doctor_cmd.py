@@ -7,7 +7,7 @@ from typing import Any
 
 from cyclopts import App
 from meridian.lib.ops.diag import DoctorInput, doctor_sync
-from meridian.lib.ops.registry import get_all_operations
+from meridian.lib.ops.manifest import get_operations_for_surface
 
 Emitter = Callable[[Any], None]
 
@@ -20,8 +20,8 @@ def register_doctor_command(app: App, emit: Emitter) -> tuple[set[str], dict[str
     registered: set[str] = set()
     descriptions: dict[str, str] = {}
 
-    for op in get_all_operations():
-        if op.name != "doctor" or op.mcp_only:
+    for op in get_operations_for_surface("cli"):
+        if op.name != "doctor":
             continue
 
         def cmd_doctor() -> None:

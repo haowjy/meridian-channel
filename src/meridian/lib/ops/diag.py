@@ -11,8 +11,7 @@ from pydantic import BaseModel, ConfigDict
 from meridian.lib.config._paths import resolve_path_list
 from meridian.lib.harness.materialize import cleanup_materialized
 from meridian.lib.formatting import FormatContext
-from meridian.lib.ops._runtime import build_runtime
-from meridian.lib.ops.registry import OperationSpec, operation
+from meridian.lib.ops.runtime import build_runtime
 from meridian.lib.space import space_file
 from meridian.lib.space.session_store import cleanup_stale_sessions, list_active_sessions
 from meridian.lib.state import spawn_store
@@ -207,18 +206,3 @@ def doctor_sync(payload: DoctorInput) -> DoctorOutput:
 
 async def doctor(payload: DoctorInput) -> DoctorOutput:
     return await asyncio.to_thread(doctor_sync, payload)
-
-
-operation(
-    OperationSpec[DoctorInput, DoctorOutput](
-        name="doctor",
-        handler=doctor,
-        sync_handler=doctor_sync,
-        input_type=DoctorInput,
-        output_type=DoctorOutput,
-        cli_group="doctor",
-        cli_name="doctor",
-        mcp_name="doctor",
-        description="Spawn diagnostics checks.",
-    )
-)

@@ -14,7 +14,7 @@ from meridian.lib.ops.models import (
     models_refresh_sync,
     models_show_sync,
 )
-from meridian.lib.ops.registry import get_all_operations
+from meridian.lib.ops.manifest import get_operations_for_surface
 
 Emitter = Callable[[Any], None]
 
@@ -41,8 +41,8 @@ def register_models_commands(app: Any, emit: Emitter) -> tuple[set[str], dict[st
     registered: set[str] = set()
     descriptions: dict[str, str] = {}
 
-    for op in get_all_operations():
-        if op.cli_group != "models" or op.mcp_only:
+    for op in get_operations_for_surface("cli"):
+        if op.cli_group != "models":
             continue
         handler_factory = handlers.get(op.name)
         if handler_factory is None:

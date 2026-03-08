@@ -1,102 +1,44 @@
-"""Operation registry shared by CLI, MCP, and DirectAdapter surfaces."""
+"""Compatibility shim for the explicit ops manifest."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Coroutine
-from typing import Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict
-
-InputT = TypeVar("InputT")
-OutputT = TypeVar("OutputT")
+if TYPE_CHECKING:
+    from meridian.lib.ops.manifest import OperationSpec
 
 
-class OperationSpec(BaseModel, Generic[InputT, OutputT]):
-    """Single source of truth for an operation exposed on both surfaces."""
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+def get_all_operations() -> list[Any]:
+    from meridian.lib.ops.manifest import get_all_operations as _get_all_operations
 
-    name: str
-    handler: Callable[[InputT], Coroutine[Any, Any, OutputT]]
-    input_type: type[InputT]
-    output_type: type[OutputT]
-    cli_group: str | None
-    cli_name: str
-    mcp_name: str
-    description: str
-    version: str = "1"
-    sync_handler: Callable[[InputT], OutputT] | None = None
-    cli_only: bool = False
-    mcp_only: bool = False
+    return _get_all_operations()
 
 
-OperationSpec.model_rebuild()
+def get_operation(name: str) -> Any:
+    from meridian.lib.ops.manifest import get_operation as _get_operation
 
-
-_REGISTRY: dict[str, OperationSpec[Any, Any]] = {}
-_bootstrapped = False
-
-
-def operation(spec: OperationSpec[InputT, OutputT]) -> OperationSpec[InputT, OutputT]:
-    """Register an operation and guard against duplicates."""
-
-    if spec.cli_only and spec.mcp_only:
-        raise ValueError(f"Operation '{spec.name}' cannot be both cli_only and mcp_only")
-    if spec.name in _REGISTRY:
-        raise ValueError(
-            f"Duplicate operation name '{spec.name}': already registered by "
-            f"{_REGISTRY[spec.name].handler}"
-        )
-    _REGISTRY[spec.name] = spec
-    return spec
-
-
-def get_all_operations() -> list[OperationSpec[Any, Any]]:
-    """Return all registered operations sorted by canonical name."""
-
-    _ensure_bootstrapped()
-    return [_REGISTRY[name] for name in sorted(_REGISTRY)]
-
-
-def get_operation(name: str) -> OperationSpec[Any, Any]:
-    """Fetch one operation spec by canonical name."""
-
-    _ensure_bootstrapped()
-    return _REGISTRY[name]
+    return _get_operation(name)
 
 
 def get_mcp_tool_names() -> frozenset[str]:
-    """Return non-CLI MCP tool names from the operation registry."""
+    from meridian.lib.ops.manifest import get_mcp_tool_names as _get_mcp_tool_names
 
-    _ensure_bootstrapped()
-    return frozenset(spec.mcp_name for spec in _REGISTRY.values() if not spec.cli_only)
+    return _get_mcp_tool_names()
 
 
-def _bootstrap_operation_modules() -> None:
-    # Imported lazily to keep the registry as the single source of truth while
-    # allowing operation modules to self-register via `operation(...)`.
-    import meridian.lib.ops.config as config_ops
-    import meridian.lib.ops.diag as diag_ops
-    import meridian.lib.ops.models as models_ops
-    import meridian.lib.ops.report as report_ops
-    import meridian.lib.ops.spawn as spawn_ops
-    import meridian.lib.ops.skills as skills_ops
-    import meridian.lib.ops.space as space_ops
-
-    _ = (
-        config_ops,
-        diag_ops,
-        models_ops,
-        report_ops,
-        spawn_ops,
-        skills_ops,
-        space_ops,
+def operation(spec: Any) -> Any:
+    raise RuntimeError(
+        "Operation self-registration has been removed. "
+        "Add operation metadata to meridian.lib.ops.manifest instead."
     )
 
 
-def _ensure_bootstrapped() -> None:
-    global _bootstrapped
-    if _bootstrapped:
-        return
-    # Only mark bootstrapped after a successful import sequence so failures retry.
-    _bootstrap_operation_modules()
-    _bootstrapped = True
+def __getattr__(name: str) -> Any:
+    if name == "OperationSpec":
+        from meridian.lib.ops.manifest import OperationSpec as _OperationSpec
+
+        return _OperationSpec
+    raise AttributeError(name)
+
+
+__all__ = ["OperationSpec", "get_all_operations", "get_mcp_tool_names", "get_operation", "operation"]

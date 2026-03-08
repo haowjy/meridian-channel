@@ -8,9 +8,8 @@ from typing import Any, cast
 from mcp.server.fastmcp import FastMCP
 
 from meridian.lib.logging import configure_logging
-from meridian.lib.ops import get_all_operations
+from meridian.lib.ops.manifest import OperationSpec, get_operations_for_surface
 from meridian.lib.ops.codec import coerce_input_payload, signature_from_model
-from meridian.lib.ops.registry import OperationSpec
 from meridian.lib.serialization import to_jsonable
 
 _REGISTERED_MCP_TOOLS: set[str] = set()
@@ -43,18 +42,17 @@ def _build_tool_handler(op: OperationSpec[Any, Any]) -> Any:
 
 
 def _register_operation_tool(op: OperationSpec[Any, Any]) -> None:
-    """Register one operation from the registry as an MCP tool."""
+    """Register one operation from the manifest as an MCP tool."""
 
-    if op.cli_only:
-        return
-
+    if op.mcp_name is None:
+        raise ValueError(f"Operation '{op.name}' is missing MCP tool name")
     mcp.tool(name=op.mcp_name, description=op.description)(_build_tool_handler(op))
     _REGISTERED_MCP_TOOLS.add(op.mcp_name)
     _REGISTERED_MCP_DESCRIPTIONS[op.name] = op.description
 
 
 def _register_operation_tools() -> None:
-    for op in get_all_operations():
+    for op in get_operations_for_surface("mcp"):
         _register_operation_tool(op)
 
 

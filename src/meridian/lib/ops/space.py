@@ -7,8 +7,7 @@ import asyncio
 from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.formatting import FormatContext
-from meridian.lib.ops._runtime import build_runtime
-from meridian.lib.ops.registry import OperationSpec, operation
+from meridian.lib.ops.runtime import build_runtime
 from meridian.lib.space import crud as space_crud
 from meridian.lib.space import space_file
 from meridian.lib.space.launch import SpaceLaunchRequest, launch_primary
@@ -278,64 +277,3 @@ def space_show_sync(payload: SpaceShowInput) -> SpaceDetailOutput:
 
 async def space_show(payload: SpaceShowInput) -> SpaceDetailOutput:
     return await asyncio.to_thread(space_show_sync, payload)
-
-
-operation(
-    OperationSpec[SpaceStartInput, SpaceActionOutput](
-        name="space.start",
-        handler=space_start,
-        sync_handler=space_start_sync,
-        input_type=SpaceStartInput,
-        output_type=SpaceActionOutput,
-        cli_group="space",
-        cli_name="start",
-        mcp_name="space_start",
-        description="Create a space and launch the primary agent harness.",
-        cli_only=True,
-    )
-)
-
-operation(
-    OperationSpec[SpaceResumeInput, SpaceActionOutput](
-        name="space.resume",
-        handler=space_resume,
-        sync_handler=space_resume_sync,
-        input_type=SpaceResumeInput,
-        output_type=SpaceActionOutput,
-        cli_group="space",
-        cli_name="resume",
-        mcp_name="space_resume",
-        description="Resume a space.",
-        cli_only=True,
-    )
-)
-
-operation(
-    OperationSpec[SpaceListInput, SpaceListOutput](
-        name="space.list",
-        handler=space_list,
-        sync_handler=space_list_sync,
-        input_type=SpaceListInput,
-        output_type=SpaceListOutput,
-        cli_group="space",
-        cli_name="list",
-        mcp_name="space_list",
-        description="List spaces.",
-        cli_only=True,
-    )
-)
-
-operation(
-    OperationSpec[SpaceShowInput, SpaceDetailOutput](
-        name="space.show",
-        handler=space_show,
-        sync_handler=space_show_sync,
-        input_type=SpaceShowInput,
-        output_type=SpaceDetailOutput,
-        cli_group="space",
-        cli_name="show",
-        mcp_name="space_show",
-        description="Show one space.",
-        cli_only=True,
-    )
-)

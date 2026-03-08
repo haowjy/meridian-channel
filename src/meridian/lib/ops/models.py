@@ -12,7 +12,6 @@ from meridian.lib.config.aliases import AliasEntry, load_merged_aliases, resolve
 from meridian.lib.config.discovery import DiscoveredModel, load_discovered_models, refresh_models_cache
 from meridian.lib.config.routing import route_model
 from meridian.lib.formatting import FormatContext
-from meridian.lib.ops.registry import OperationSpec, operation
 from meridian.lib.types import HarnessId, ModelId
 
 
@@ -337,46 +336,3 @@ async def models_show(payload: ModelsShowInput) -> CatalogModel:
 
 async def models_refresh(payload: ModelsRefreshInput) -> ModelsRefreshOutput:
     return models_refresh_sync(payload)
-
-
-operation(
-    OperationSpec[ModelsListInput, ModelsListOutput](
-        name="models.list",
-        handler=models_list,
-        sync_handler=models_list_sync,
-        input_type=ModelsListInput,
-        output_type=ModelsListOutput,
-        cli_group="models",
-        cli_name="list",
-        mcp_name="models_list",
-        description="List catalog models with routing guidance.",
-    )
-)
-
-operation(
-    OperationSpec[ModelsShowInput, CatalogModel](
-        name="models.show",
-        handler=models_show,
-        sync_handler=models_show_sync,
-        input_type=ModelsShowInput,
-        output_type=CatalogModel,
-        cli_group="models",
-        cli_name="show",
-        mcp_name="models_show",
-        description="Show one model by id or alias.",
-    )
-)
-
-operation(
-    OperationSpec[ModelsRefreshInput, ModelsRefreshOutput](
-        name="models.refresh",
-        handler=models_refresh,
-        sync_handler=models_refresh_sync,
-        input_type=ModelsRefreshInput,
-        output_type=ModelsRefreshOutput,
-        cli_group="models",
-        cli_name="refresh",
-        mcp_name="models_refresh",
-        description="Force-refresh the models.dev cache.",
-    )
-)

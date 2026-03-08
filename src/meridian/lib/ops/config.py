@@ -21,7 +21,6 @@ from meridian.lib.config.settings import (
     load_config,
 )
 from meridian.lib.formatting import FormatContext
-from meridian.lib.ops.registry import OperationSpec, operation
 from meridian.lib.safety.permissions import parse_permission_tier
 from meridian.lib.serialization import to_jsonable
 from meridian.lib.state.paths import resolve_state_paths
@@ -824,79 +823,3 @@ async def config_get(payload: ConfigGetInput) -> ConfigGetOutput:
 
 async def config_reset(payload: ConfigResetInput) -> ConfigResetOutput:
     return await asyncio.to_thread(config_reset_sync, payload)
-
-
-operation(
-    OperationSpec[ConfigInitInput, ConfigInitOutput](
-        name="config.init",
-        handler=config_init,
-        sync_handler=config_init_sync,
-        input_type=ConfigInitInput,
-        output_type=ConfigInitOutput,
-        cli_group="config",
-        cli_name="init",
-        mcp_name="config_init",
-        description="Scaffold .meridian/config.toml with commented defaults.",
-        cli_only=True,
-    )
-)
-
-operation(
-    OperationSpec[ConfigShowInput, ConfigShowOutput](
-        name="config.show",
-        handler=config_show,
-        sync_handler=config_show_sync,
-        input_type=ConfigShowInput,
-        output_type=ConfigShowOutput,
-        cli_group="config",
-        cli_name="show",
-        mcp_name="config_show",
-        description="Show resolved config values with source annotations.",
-        cli_only=True,
-    )
-)
-
-operation(
-    OperationSpec[ConfigSetInput, ConfigSetOutput](
-        name="config.set",
-        handler=config_set,
-        sync_handler=config_set_sync,
-        input_type=ConfigSetInput,
-        output_type=ConfigSetOutput,
-        cli_group="config",
-        cli_name="set",
-        mcp_name="config_set",
-        description="Set one config key in .meridian/config.toml.",
-        cli_only=True,
-    )
-)
-
-operation(
-    OperationSpec[ConfigGetInput, ConfigGetOutput](
-        name="config.get",
-        handler=config_get,
-        sync_handler=config_get_sync,
-        input_type=ConfigGetInput,
-        output_type=ConfigGetOutput,
-        cli_group="config",
-        cli_name="get",
-        mcp_name="config_get",
-        description="Get one resolved config key with source annotation.",
-        cli_only=True,
-    )
-)
-
-operation(
-    OperationSpec[ConfigResetInput, ConfigResetOutput](
-        name="config.reset",
-        handler=config_reset,
-        sync_handler=config_reset_sync,
-        input_type=ConfigResetInput,
-        output_type=ConfigResetOutput,
-        cli_group="config",
-        cli_name="reset",
-        mcp_name="config_reset",
-        description="Remove one config key from file overrides.",
-        cli_only=True,
-    )
-)

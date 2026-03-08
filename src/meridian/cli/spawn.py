@@ -10,7 +10,7 @@ from cyclopts import App, Parameter
 
 from meridian.cli.main import agent_mode_enabled, current_output_sink
 from meridian.lib.domain import SpawnStatus
-from meridian.lib.ops.registry import get_all_operations
+from meridian.lib.ops.manifest import get_operations_for_surface
 from meridian.lib.ops.spawn import (
     SpawnActionOutput,
     SpawnCancelInput,
@@ -352,8 +352,8 @@ def register_spawn_commands(app: App, emit: Emitter) -> tuple[set[str], dict[str
     registered: set[str] = set()
     descriptions: dict[str, str] = {}
 
-    for op in get_all_operations():
-        if op.cli_group != "spawn" or op.mcp_only:
+    for op in get_operations_for_surface("cli"):
+        if op.cli_group != "spawn":
             continue
         handler_factory = handlers.get(op.name)
         if handler_factory is None:

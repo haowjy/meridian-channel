@@ -7,7 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib import error, request
 
 from meridian.lib.domain import TokenUsage
@@ -26,10 +26,12 @@ from meridian.lib.ops.codec import (
     normalize_optional,
     schema_from_type,
 )
-from meridian.lib.ops.registry import OperationSpec
 from meridian.lib.safety.permissions import PermissionConfig
 from meridian.lib.serialization import to_jsonable
 from meridian.lib.types import HarnessId, ModelId, SpawnId
+
+if TYPE_CHECKING:
+    from meridian.lib.ops.manifest import OperationSpec
 
 _normalize_optional = normalize_optional
 
@@ -115,18 +117,18 @@ class DirectAdapter(BaseHarnessAdapter):
 
     @staticmethod
     def build_tool_definitions() -> list[dict[str, object]]:
-        """Generate Anthropic tool definitions from operation registry."""
+        """Generate Anthropic tool definitions from the explicit ops manifest."""
 
         # Imported lazily to avoid a startup cycle:
-        # harness.registry -> harness.direct -> ops.registry -> ops._runtime -> harness.registry.
-        from meridian.lib.ops.registry import get_all_operations
+        # harness.registry -> harness.direct -> ops.manifest -> ops.runtime -> harness.registry.
+        from meridian.lib.ops.manifest import get_operations_for_surface
 
         tools: list[dict[str, object]] = [
             {"type": "code_execution_20260120", "name": "code_execution"}
         ]
-        for operation in get_all_operations():
-            if operation.cli_only:
-                continue
+        for operation in get_operations_for_surface("mcp"):
+            if operation.mcp_name is None:
+                raise ValueError(f"Operation '{operation.name}' is missing MCP tool name")
             tools.append(
                 {
                     "name": operation.mcp_name,
@@ -138,12 +140,12 @@ class DirectAdapter(BaseHarnessAdapter):
         return tools
 
     def _operation_by_mcp_name(self) -> dict[str, OperationSpec[Any, Any]]:
-        from meridian.lib.ops.registry import get_all_operations
+        from meridian.lib.ops.manifest import get_operations_for_surface
 
         return {
             operation.mcp_name: operation
-            for operation in get_all_operations()
-            if not operation.cli_only
+            for operation in get_operations_for_surface("mcp")
+            if operation.mcp_name is not None
         }
 
     async def _invoke_operation_tool(self, tool_name: str, raw_input: object) -> object:

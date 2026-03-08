@@ -9,7 +9,6 @@ from pydantic import BaseModel, ConfigDict
 from meridian.lib.config.skill_registry import SkillRegistry
 from meridian.lib.domain import SkillContent, SkillManifest
 from meridian.lib.formatting import FormatContext
-from meridian.lib.ops.registry import OperationSpec, operation
 
 
 class SkillsListInput(BaseModel):
@@ -78,47 +77,3 @@ async def skills_search(payload: SkillsSearchInput) -> SkillsQueryOutput:
 
 async def skills_load(payload: SkillsLoadInput) -> SkillContent:
     return skills_load_sync(payload)
-
-
-operation(
-    OperationSpec[SkillsSearchInput, SkillsQueryOutput](
-        name="skills.search",
-        handler=skills_search,
-        sync_handler=skills_search_sync,
-        input_type=SkillsSearchInput,
-        output_type=SkillsQueryOutput,
-        cli_group="skills",
-        cli_name="search",
-        mcp_name="skills_search",
-        description="Search skills by keyword/tag.",
-        cli_only=True,
-    )
-)
-
-operation(
-    OperationSpec[SkillsLoadInput, SkillContent](
-        name="skills.show",
-        handler=skills_load,
-        sync_handler=skills_load_sync,
-        input_type=SkillsLoadInput,
-        output_type=SkillContent,
-        cli_group="skills",
-        cli_name="show",
-        mcp_name="skills_show",
-        description="Load full SKILL.md content for a skill.",
-    )
-)
-
-operation(
-    OperationSpec[SkillsListInput, SkillsQueryOutput](
-        name="skills.list",
-        handler=skills_list,
-        sync_handler=skills_list_sync,
-        input_type=SkillsListInput,
-        output_type=SkillsQueryOutput,
-        cli_group="skills",
-        cli_name="list",
-        mcp_name="skills_list",
-        description="List all indexed skills.",
-    )
-)

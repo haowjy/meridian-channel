@@ -10,7 +10,7 @@ from typing import cast
 from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_space_dir, resolve_state_paths
 
-from ._runtime import require_space_id
+from .runtime import require_space_id
 from ._spawn_models import SpawnDetailOutput
 
 _SPAWN_REFERENCE_STATUS_FILTERS: dict[str, tuple[str, ...] | None] = {

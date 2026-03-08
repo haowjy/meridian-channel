@@ -1,20 +1,20 @@
-"""Operation registry exports with lazy loading to avoid import cycles."""
+"""Operation manifest exports with lazy loading to avoid import cycles."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from meridian.lib.ops.registry import OperationSpec
-
+if TYPE_CHECKING:
+    from meridian.lib.ops.manifest import OperationSpec
 
 def get_all_operations() -> list[Any]:
-    from meridian.lib.ops.registry import get_all_operations as _get_all_operations
+    from meridian.lib.ops.manifest import get_all_operations as _get_all_operations
 
     return _get_all_operations()
 
 
 def get_operation(name: str) -> Any:
-    from meridian.lib.ops.registry import get_operation as _get_operation
+    from meridian.lib.ops.manifest import get_operation as _get_operation
 
     return _get_operation(name)
 
@@ -27,7 +27,7 @@ def operation(spec: Any) -> Any:
 
 def __getattr__(name: str) -> Any:
     if name == "OperationSpec":
-        from meridian.lib.ops.registry import OperationSpec as _OperationSpec
+        from meridian.lib.ops.manifest import OperationSpec as _OperationSpec
 
         return _OperationSpec
     raise AttributeError(name)

@@ -27,7 +27,7 @@ from meridian.lib.domain import Spawn
 from meridian.lib.exec.spawn import execute_with_finalization
 from meridian.lib.harness.adapter import PermissionResolver
 from meridian.lib.harness.materialize import cleanup_materialized, materialize_for_harness
-from meridian.lib.ops._runtime import (
+from meridian.lib.ops.runtime import (
     OperationRuntime,
     build_runtime,
     require_space_id,

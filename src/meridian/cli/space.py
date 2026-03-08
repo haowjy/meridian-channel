@@ -8,7 +8,7 @@ from typing import Annotated, Any
 
 from cyclopts import App, Parameter
 
-from meridian.lib.ops.registry import get_all_operations
+from meridian.lib.ops.manifest import get_operations_for_surface
 from meridian.lib.ops.space import (
     SpaceListInput,
     SpaceResumeInput,
@@ -129,8 +129,8 @@ def register_space_commands(app: App, emit: Any) -> tuple[set[str], dict[str, st
     registered: set[str] = set()
     descriptions: dict[str, str] = {}
 
-    for op in get_all_operations():
-        if op.cli_group != "space" or op.mcp_only:
+    for op in get_operations_for_surface("cli"):
+        if op.cli_group != "space":
             continue
         handler_factory = handlers.get(op.name)
         if handler_factory is None:

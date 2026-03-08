@@ -8,9 +8,8 @@ from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.context import RuntimeContext
 from meridian.lib.formatting import FormatContext
-from meridian.lib.ops._runtime import require_space_id, resolve_runtime_root_and_config
+from meridian.lib.ops.runtime import require_space_id, resolve_runtime_root_and_config
 from meridian.lib.ops._spawn_query import resolve_spawn_reference
-from meridian.lib.ops.registry import OperationSpec, operation
 from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_space_dir
 
@@ -262,46 +261,3 @@ async def report_search(
     ctx: RuntimeContext | None = None,
 ) -> ReportSearchOutput:
     return report_search_sync(payload, ctx=ctx)
-
-
-operation(
-    OperationSpec[ReportCreateInput, ReportCreateOutput](
-        name="report.create",
-        handler=report_create,
-        sync_handler=report_create_sync,
-        input_type=ReportCreateInput,
-        output_type=ReportCreateOutput,
-        cli_group="report",
-        cli_name="create",
-        mcp_name="report_create",
-        description="Create or overwrite a spawn report.",
-    )
-)
-
-operation(
-    OperationSpec[ReportShowInput, ReportShowOutput](
-        name="report.show",
-        handler=report_show,
-        sync_handler=report_show_sync,
-        input_type=ReportShowInput,
-        output_type=ReportShowOutput,
-        cli_group="report",
-        cli_name="show",
-        mcp_name="report_show",
-        description="Show one spawn report.",
-    )
-)
-
-operation(
-    OperationSpec[ReportSearchInput, ReportSearchOutput](
-        name="report.search",
-        handler=report_search,
-        sync_handler=report_search_sync,
-        input_type=ReportSearchInput,
-        output_type=ReportSearchOutput,
-        cli_group="report",
-        cli_name="search",
-        mcp_name="report_search",
-        description="Search spawn reports by keyword.",
-    )
-)
