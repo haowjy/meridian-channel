@@ -24,3 +24,5 @@ out
 .claude/*/__*-c[0-9]*
 .codex/*/__*-c[0-9]*
 .opencode/*/__*-c[0-9]*
+.claude/agents/__*-c[0-9]*
+.claude/skills/__*-c[0-9]*

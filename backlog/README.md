@@ -1,10 +1,11 @@
 # Backlog
 
-Central backlog for cross-cutting work not tied to a single implementation plan. Last verified: 2026-03-05.
+Central backlog for cross-cutting work not tied to a single implementation plan. Last verified: 2026-03-08.
 
 ## Current Status
 
-- Open items: `1` (TD-9: space-plumbing Steps 1+3)
+- Open tracked items: `1` (TD-9: space-plumbing Steps 1+3)
+- Condensed follow-up notes from deleted plan docs: `backlog/plan-cleanup-notes.md`
 - Archived from 2026-03-04 cleanup batch: `8` (TD-7, TD-10–TD-16)
 - Archived from backlog-execution batch: `17`
 - Previously closed (pre-batch): `2` (`BUG-2`, `BUG-7`)
@@ -14,8 +15,6 @@ Central backlog for cross-cutting work not tied to a single implementation plan.
 - Batch archive: `backlog/archive/2026-03-03-backlog-execution.md`
 - Closed bug ledger: `backlog/archive/2026-03-07-bugs.md`
 - Closed improvement ledger: `backlog/archive/2026-03-07-improvements.md`
-- Execution plan: `plans/archive/backlog-execution.md`
-- Execution anomalies/workarounds: `plans/archive/backlog-execution-anomalies.md`
 
 ## Priority Index (Archived on 2026-03-03)
 
@@ -55,11 +54,17 @@ Central backlog for cross-cutting work not tied to a single implementation plan.
 ## Active Plans (items tracked there, not here)
 
 - Space-plumbing follow-up cleanup/revalidation (Steps 1+3 remain) -> `plans/space-plumbing-fix.md`
-- Remote workspace viewer is requirements-only so far -> `plans/remote-workspace/requirements.md`
+- Test-suite rewrite + strictness cleanup -> `plans/test-suite-and-strictness-cleanup.md`
+
+## Plan Cleanup Notes
+
+- Deleted completed, obsolete, archive, and reference-heavy plan files on 2026-03-08 instead of keeping a plan archive.
+- Remaining follow-up work from deleted plans was condensed into `backlog/plan-cleanup-notes.md`.
 
 ## Structure
 
 - `tech-debt.md` — active tech-debt backlog
+- `plan-cleanup-notes.md` — condensed follow-up notes preserved from deleted plan docs
 - `archive/2026-03-03-backlog-execution.md` — closed 17-item execution batch
 - `archive/2026-03-07-bugs.md` — closed bug ledger + legacy closed bug entries
 - `archive/2026-03-07-improvements.md` — closed improvement ledger

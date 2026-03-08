@@ -52,4 +52,4 @@ uv run pyright
 
 ## Current Focus
 
-See `backlog/` for open items and `plans/` for active plans.
+See `backlog/` for open items. Keep `plans/` limited to current implementation plans only.
