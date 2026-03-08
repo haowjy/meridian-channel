@@ -159,18 +159,18 @@ class SignalCoordinator:
 
 
 _COORDINATOR_LOCK = Lock()
-_COORDINATOR: SignalCoordinator | None = None
+_coordinator: SignalCoordinator | None = None
 
 
 def signal_coordinator() -> SignalCoordinator:
     """Return the process-global signal coordinator singleton."""
 
-    global _COORDINATOR
-    if _COORDINATOR is None:
+    global _coordinator
+    if _coordinator is None:
         with _COORDINATOR_LOCK:
-            if _COORDINATOR is None:
-                _COORDINATOR = SignalCoordinator()
-    return _COORDINATOR
+            if _coordinator is None:
+                _coordinator = SignalCoordinator()
+    return _coordinator
 
 
 class SignalForwarder:

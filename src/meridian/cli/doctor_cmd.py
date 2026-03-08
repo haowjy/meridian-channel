@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from meridian.lib.ops.diag import DoctorInput, doctor_sync
@@ -26,9 +25,11 @@ def register_doctor_command(app: App, emit: Emitter) -> tuple[set[str], dict[str
     for op in get_all_operations():
         if op.name != "doctor" or op.mcp_only:
             continue
-        handler = partial(_doctor, emit)
-        handler.__name__ = "cmd_doctor"
-        app.command(handler, name="doctor", help=op.description)
+
+        def cmd_doctor() -> None:
+            _doctor(emit)
+
+        app.command(cmd_doctor, name="doctor", help=op.description)
         registered.add(f"{op.cli_group}.{op.cli_name}")
         descriptions[op.name] = op.description
 

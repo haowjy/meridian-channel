@@ -21,8 +21,6 @@ def signal_process_group(
         return
 
     pid = process.pid
-    if pid is None:
-        return
 
     try:
         pgid = os.getpgid(pid)

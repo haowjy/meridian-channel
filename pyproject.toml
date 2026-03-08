@@ -20,6 +20,8 @@ classifiers = [
 dependencies = [
   "cyclopts>=3.0",
   "mcp>=1.0",
+  "pydantic>=2.12",
+  "pydantic-settings>=2.13",
   "python-frontmatter>=1.1",
   "structlog>=25.0",
 ]
