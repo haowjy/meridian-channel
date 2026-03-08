@@ -11,12 +11,12 @@ import sys
 import tempfile
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Callable, Iterator, Protocol, cast
 
 import structlog
+from pydantic import BaseModel, ConfigDict
 from meridian.lib.config.agent import (
     AgentProfile,
     load_agent_profile,
@@ -113,16 +113,18 @@ class _PreparedCreateLike(Protocol):
     def continue_fork(self) -> bool: ...
 
 
-@dataclass(frozen=True, slots=True)
-class _SpawnContext:
+class _SpawnContext(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     spawn: Spawn
     space_id: SpaceId
     space_dir: Path
     current_depth: int
 
 
-@dataclass(frozen=True, slots=True)
-class _SessionExecutionContext:
+class _SessionExecutionContext(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     chat_id: str
     resolved_agent_name: str | None
     harness_session_id_observer: Callable[[str], None]

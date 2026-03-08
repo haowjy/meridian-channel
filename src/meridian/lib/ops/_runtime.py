@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from meridian.lib.config._paths import resolve_repo_root
 from meridian.lib.config.settings import MeridianConfig, load_config
@@ -19,15 +20,15 @@ SPACE_REQUIRED_ERROR = (
 )
 
 
-@dataclass(frozen=True, slots=True)
-class OperationRuntime:
+class OperationRuntime(BaseModel):
     """Resolved dependencies used by operation handlers."""
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     repo_root: Path
     config: MeridianConfig
     harness_registry: HarnessRegistry
     artifacts: LocalStore
-    sink: OutputSink = field(default_factory=NullSink)
+    sink: OutputSink = Field(default_factory=NullSink)
 
 
 def resolve_runtime_root_and_config(
@@ -55,7 +56,7 @@ def build_runtime_from_root_and_config(
         repo_root=repo_root,
         config=config,
         harness_registry=get_default_harness_registry(),
-        artifacts=LocalStore(resolve_state_paths(repo_root).artifacts_dir),
+        artifacts=LocalStore(root_dir=resolve_state_paths(repo_root).artifacts_dir),
         sink=sink or NullSink(),
     )
 

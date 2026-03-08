@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
+
+from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.ops._runtime import build_runtime
 from meridian.lib.ops.registry import OperationSpec, operation
@@ -20,8 +21,9 @@ if TYPE_CHECKING:
     from meridian.lib.formatting import FormatContext
 
 
-@dataclass(frozen=True, slots=True)
-class SpaceStartInput:
+class SpaceStartInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     name: str | None = None
     model: str = ""
     agent: str | None = None
@@ -33,8 +35,9 @@ class SpaceStartInput:
     approval: str = "confirm"
 
 
-@dataclass(frozen=True, slots=True)
-class SpaceResumeInput:
+class SpaceResumeInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     space: str | None = None
     fresh: bool = False
     model: str = ""
@@ -46,20 +49,23 @@ class SpaceResumeInput:
     approval: str = "confirm"
 
 
-@dataclass(frozen=True, slots=True)
-class SpaceListInput:
+class SpaceListInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     limit: int = 10
     repo_root: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class SpaceShowInput:
+class SpaceShowInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     space: str
     repo_root: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class SpaceActionOutput:
+class SpaceActionOutput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     space_id: str
     message: str
     exit_code: int | None = None
@@ -91,8 +97,9 @@ class SpaceActionOutput:
         return summary
 
 
-@dataclass(frozen=True, slots=True)
-class SpaceListEntry:
+class SpaceListEntry(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     space_id: str
     name: str | None
 
@@ -101,8 +108,9 @@ class SpaceListEntry:
         return [self.space_id, self.name if self.name is not None else "-"]
 
 
-@dataclass(frozen=True, slots=True)
-class SpaceListOutput:
+class SpaceListOutput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     spaces: tuple[SpaceListEntry, ...]
 
     def format_text(self, ctx: FormatContext | None = None) -> str:
@@ -114,8 +122,9 @@ class SpaceListOutput:
         return tabular([entry.as_row() for entry in self.spaces])
 
 
-@dataclass(frozen=True, slots=True)
-class SpaceDetailOutput:
+class SpaceDetailOutput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     space_id: str
     name: str | None
     summary_path: str | None

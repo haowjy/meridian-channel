@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import sys
-from dataclasses import dataclass
 from typing import Any, Literal, Protocol, TextIO, cast
+
+from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.formatting import FormatContext, TextFormattable
 from meridian.lib.sink import NullSink, OutputSink
@@ -18,8 +19,9 @@ type JSONValue = JSONScalar | list["JSONValue"] | dict[str, "JSONValue"]
 _DEFAULT_FORMAT_CTX = FormatContext()
 
 
-@dataclass(frozen=True, slots=True)
-class OutputConfig:
+class OutputConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     format: OutputFormat
 
 

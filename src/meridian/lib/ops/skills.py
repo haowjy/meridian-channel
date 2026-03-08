@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.config.skill_registry import SkillRegistry
 from meridian.lib.domain import SkillContent, SkillManifest
@@ -14,25 +15,29 @@ if TYPE_CHECKING:
     from meridian.lib.formatting import FormatContext
 
 
-@dataclass(frozen=True, slots=True)
-class SkillsListInput:
+class SkillsListInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     repo_root: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class SkillsSearchInput:
+class SkillsSearchInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     query: str = ""
     repo_root: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class SkillsLoadInput:
+class SkillsLoadInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     name: str = ""
     repo_root: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class SkillsQueryOutput:
+class SkillsQueryOutput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     skills: tuple[SkillManifest, ...]
 
     def format_text(self, ctx: FormatContext | None = None) -> str:

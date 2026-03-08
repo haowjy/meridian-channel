@@ -230,7 +230,7 @@ def _read_files_touched(
     from meridian.lib.state.artifact_store import LocalStore
     from meridian.lib.types import SpawnId
 
-    artifacts = LocalStore(resolve_state_paths(repo_root).artifacts_dir)
+    artifacts = LocalStore(root_dir=resolve_state_paths(repo_root).artifacts_dir)
     _ = (space, space_id)
     return extract_files_touched(artifacts, SpawnId(spawn_id))
 

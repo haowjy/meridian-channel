@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import os
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.config._paths import resolve_path_list
 from meridian.lib.ops._runtime import build_runtime
@@ -20,13 +21,15 @@ if TYPE_CHECKING:
     from meridian.lib.formatting import FormatContext
 
 
-@dataclass(frozen=True, slots=True)
-class DoctorInput:
+class DoctorInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     repo_root: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class DoctorOutput:
+class DoctorOutput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     ok: bool
     repo_root: str
     spaces_checked: int

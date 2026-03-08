@@ -6,7 +6,6 @@ import asyncio
 import os
 import signal
 import time
-from dataclasses import replace
 from pathlib import Path
 
 from meridian.lib.context import RuntimeContext
@@ -116,7 +115,7 @@ def spawn_create_sync(
         resolved_root,
         space_id=_context_space_id(str(runtime_context.space_id or "")),
     )
-    payload = replace(payload, space=space_id_str)
+    payload = payload.model_copy(update={"space": space_id_str})
     if auto_created:
         auto_warning = (
             f"Auto-created space {space_id_str}. Pass --space {space_id_str} to add more spawns to this space.\n"
@@ -600,7 +599,7 @@ def _model_for_follow_up(source_spawn: spawn_store.SpawnRecord, override_model: 
 
 
 def _with_command(result: SpawnActionOutput, command: str) -> SpawnActionOutput:
-    return replace(result, command=command)
+    return result.model_copy(update={"command": command})
 
 
 def spawn_continue_sync(

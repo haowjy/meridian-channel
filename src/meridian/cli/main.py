@@ -6,11 +6,11 @@ import logging
 import os
 import sys
 from contextvars import ContextVar
-from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Literal, cast
 
 from cyclopts import App, Parameter
+from pydantic import BaseModel, ConfigDict
 
 from meridian import __version__
 from meridian.cli.config_cmd import register_config_commands
@@ -68,9 +68,9 @@ Commands:
 """
 
 
-@dataclass(frozen=True, slots=True)
-class GlobalOptions:
+class GlobalOptions(BaseModel):
     """Top-level options that apply to all commands."""
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     output: OutputConfig
     config_file: str | None = None
@@ -83,8 +83,9 @@ class GlobalOptions:
 _GLOBAL_OPTIONS: ContextVar[GlobalOptions | None] = ContextVar("_GLOBAL_OPTIONS", default=None)
 
 
-@dataclass(frozen=True, slots=True)
-class _ResolvedContinueTarget:
+class _ResolvedContinueTarget(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     space: space_file.SpaceRecord
     harness_session_id: str | None
     harness: str | None
@@ -903,7 +904,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     agent_mode = agent_mode_enabled() and not force_human
     if agent_mode and not options.output_explicit:
-        options = replace(options, output=OutputConfig(format="json"))
+        options = options.model_copy(update={"output": OutputConfig(format="json")})
 
     if agent_mode and (not cleaned_args or _is_root_help_request(cleaned_args)):
         _print_agent_root_help()
@@ -915,7 +916,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         options.output,
         agent_mode=_agent_sink_enabled(output_explicit=options.output_explicit),
     )
-    options = replace(options, sink=active_sink)
+    options = options.model_copy(update={"sink": active_sink})
     token = _GLOBAL_OPTIONS.set(options)
     prior_user_config = os.environ.get("MERIDIAN_CONFIG")
     if options.config_file is not None:

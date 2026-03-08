@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
+
+from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -12,9 +13,9 @@ InputT = TypeVar("InputT")
 OutputT = TypeVar("OutputT")
 
 
-@dataclass(frozen=True, slots=True)
-class OperationSpec(Generic[InputT, OutputT]):
+class OperationSpec(BaseModel, Generic[InputT, OutputT]):
     """Single source of truth for an operation exposed on both surfaces."""
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     name: str
     handler: Callable[[InputT], Coroutine[Any, Any, OutputT]]

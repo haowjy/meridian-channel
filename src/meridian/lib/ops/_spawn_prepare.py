@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
 from difflib import get_close_matches
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import structlog
+from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.config.aliases import load_merged_aliases, resolve_model
 from meridian.lib.config.discovery import load_discovered_models
@@ -45,8 +45,9 @@ logger = structlog.get_logger(__name__)
 _DISCOVERED_MODEL_CONTEXT_LIMIT = 12
 
 
-@dataclass(frozen=True, slots=True)
-class _PreparedCreate:
+class _PreparedCreate(BaseModel):
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+
     model: str
     harness_id: str
     warning: str | None
@@ -67,8 +68,9 @@ class _PreparedCreate:
     continue_fork: bool
 
 
-@dataclass(frozen=True, slots=True)
-class _CreateRuntimeView:
+class _CreateRuntimeView(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     """Subset of runtime dependencies needed for payload composition."""
 
     repo_root: Path
@@ -163,7 +165,7 @@ def validate_create_input(payload: SpawnCreateInput) -> tuple[SpawnCreateInput, 
         repo_root=payload.repo_root,
     )
     if resolved_model and resolved_model != payload.model:
-        return replace(payload, model=resolved_model), model_warning
+        return payload.model_copy(update={"model": resolved_model}), model_warning
     return payload, model_warning
 
 

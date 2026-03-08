@@ -1,9 +1,10 @@
-"""Spawn operation input/output dataclasses and shared lightweight model helpers."""
+"""Spawn operation input/output models and shared lightweight helpers."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from meridian.lib.domain import SpawnStatus
 
@@ -15,8 +16,9 @@ def _empty_template_vars() -> dict[str, str]:
     return {}
 
 
-@dataclass(frozen=True, slots=True)
-class SpawnCreateInput:
+class SpawnCreateInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     prompt: str = ""
     model: str = ""
     files: tuple[str, ...] = ()
@@ -36,8 +38,9 @@ class SpawnCreateInput:
     continue_fork: bool = False
 
 
-@dataclass(frozen=True, slots=True)
-class SpawnActionOutput:
+class SpawnActionOutput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     command: str
     status: str
     spawn_id: str | None = None
@@ -50,7 +53,7 @@ class SpawnActionOutput:
     warning: str | None = None
     agent: str | None = None
     reference_files: tuple[str, ...] = ()
-    template_vars: dict[str, str] = field(default_factory=_empty_template_vars)
+    template_vars: dict[str, str] = Field(default_factory=_empty_template_vars)
     report: str | None = None
     composed_prompt: str | None = None
     cli_command: tuple[str, ...] = ()
@@ -81,8 +84,9 @@ class SpawnActionOutput:
         return wire
 
 
-@dataclass(frozen=True, slots=True)
-class SpawnListInput:
+class SpawnListInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     space: str | None = None
     status: SpawnStatus | None = None
     model: str | None = None
@@ -92,15 +96,17 @@ class SpawnListInput:
     repo_root: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class SpawnStatsInput:
+class SpawnStatsInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     session: str | None = None
     space: str | None = None
     repo_root: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class SpawnStatsOutput:
+class SpawnStatsOutput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     total_runs: int
     succeeded: int
     failed: int
@@ -130,8 +136,9 @@ class SpawnStatsOutput:
         return "\n".join(lines)
 
 
-@dataclass(frozen=True, slots=True)
-class SpawnListEntry:
+class SpawnListEntry(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     spawn_id: str
     status: str
     model: str
@@ -151,8 +158,9 @@ class SpawnListEntry:
         ]
 
 
-@dataclass(frozen=True, slots=True)
-class SpawnListOutput:
+class SpawnListOutput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     spawns: tuple[SpawnListEntry, ...]
 
     def format_text(self, ctx: FormatContext | None = None) -> str:
@@ -164,8 +172,9 @@ class SpawnListOutput:
         return tabular([entry.as_row() for entry in self.spawns])
 
 
-@dataclass(frozen=True, slots=True)
-class SpawnShowInput:
+class SpawnShowInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     spawn_id: str
     report: bool = False
     include_files: bool = False
@@ -173,15 +182,17 @@ class SpawnShowInput:
     repo_root: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class SpawnCancelInput:
+class SpawnCancelInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     spawn_id: str
     space: str | None = None
     repo_root: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class SpawnDetailOutput:
+class SpawnDetailOutput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     spawn_id: str
     status: str
     model: str
@@ -242,8 +253,9 @@ class SpawnDetailOutput:
         return kv_block(pairs)
 
 
-@dataclass(frozen=True, slots=True)
-class SpawnContinueInput:
+class SpawnContinueInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     spawn_id: str
     prompt: str
     model: str = ""
@@ -254,8 +266,9 @@ class SpawnContinueInput:
     repo_root: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class SpawnWaitInput:
+class SpawnWaitInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     spawn_ids: tuple[str, ...] = ()
     # Compatibility alias for MCP clients that still send `spawn_id`.
     spawn_id: str | None = None
@@ -269,8 +282,9 @@ class SpawnWaitInput:
     repo_root: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class SpawnWaitMultiOutput:
+class SpawnWaitMultiOutput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     spawns: tuple[SpawnDetailOutput, ...]
     total_runs: int
     succeeded_runs: int
@@ -299,8 +313,9 @@ class SpawnWaitMultiOutput:
         return tabular(rows)
 
 
-@dataclass(frozen=True, slots=True)
-class SpawnListFilters:
+class SpawnListFilters(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     """Type-safe run-list filters converted into parameterized SQL."""
 
     model: str | None = None

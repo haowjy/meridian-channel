@@ -7,9 +7,10 @@ import json
 import os
 import tempfile
 import tomllib
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
+
+from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.config._paths import resolve_repo_root
 from meridian.lib.config.settings import (
@@ -32,8 +33,9 @@ _SECTION_ORDER: tuple[str, ...] = ("defaults", "timeouts", "permissions", "harne
 _OUTPUT_VERBOSITY_PRESETS = frozenset({"quiet", "normal", "verbose", "debug"})
 
 
-@dataclass(frozen=True, slots=True)
-class _ConfigKeySpec:
+class _ConfigKeySpec(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     canonical_key: str
     section: str
     file_key: str
@@ -190,13 +192,15 @@ for spec in _CONFIG_KEY_SPECS:
         _CONFIG_KEY_ALIAS_MAP[alias] = spec
 
 
-@dataclass(frozen=True, slots=True)
-class ConfigInitInput:
+class ConfigInitInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     repo_root: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class ConfigInitOutput:
+class ConfigInitOutput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     path: str
     created: bool
 
@@ -206,21 +210,24 @@ class ConfigInitOutput:
         return f"{status}: {self.path}"
 
 
-@dataclass(frozen=True, slots=True)
-class ConfigShowInput:
+class ConfigShowInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     repo_root: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class ConfigResolvedValue:
+class ConfigResolvedValue(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     key: str
     value: object
     source: Literal["builtin", "file", "user-config", "env var"]
     env_var: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class ConfigShowOutput:
+class ConfigShowOutput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     path: str
     values: tuple[ConfigResolvedValue, ...]
     warning: str | None = None
@@ -240,15 +247,17 @@ class ConfigShowOutput:
         return "\n".join(lines)
 
 
-@dataclass(frozen=True, slots=True)
-class ConfigSetInput:
+class ConfigSetInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     key: str
     value: str
     repo_root: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class ConfigSetOutput:
+class ConfigSetOutput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     path: str
     key: str
     value: object
@@ -258,14 +267,16 @@ class ConfigSetOutput:
         return f"set {self.key} = {_format_value_for_text(self.value)} in {self.path}"
 
 
-@dataclass(frozen=True, slots=True)
-class ConfigGetInput:
+class ConfigGetInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     key: str
     repo_root: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class ConfigGetOutput:
+class ConfigGetOutput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     key: str
     value: object
     source: Literal["builtin", "file", "user-config", "env var"]
@@ -277,14 +288,16 @@ class ConfigGetOutput:
         return f"{self.key}: {_format_value_for_text(self.value)} [source: {source_note}]"
 
 
-@dataclass(frozen=True, slots=True)
-class ConfigResetInput:
+class ConfigResetInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     key: str
     repo_root: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class ConfigResetOutput:
+class ConfigResetOutput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     path: str
     key: str
     removed: bool

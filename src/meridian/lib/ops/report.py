@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.context import RuntimeContext
 from meridian.lib.ops._runtime import require_space_id, resolve_runtime_root_and_config
@@ -79,16 +80,18 @@ def _report_snippet(text: str, *, query: str) -> str:
     return normalized[start:end]
 
 
-@dataclass(frozen=True, slots=True)
-class ReportCreateInput:
+class ReportCreateInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     content: str = ""
     spawn_id: str | None = None
     space: str | None = None
     repo_root: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class ReportCreateOutput:
+class ReportCreateOutput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     command: str
     status: str
     spawn_id: str
@@ -103,15 +106,17 @@ class ReportCreateOutput:
         )
 
 
-@dataclass(frozen=True, slots=True)
-class ReportShowInput:
+class ReportShowInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     spawn_id: str | None = None
     space: str | None = None
     repo_root: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class ReportShowOutput:
+class ReportShowOutput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     spawn_id: str
     report_path: str
     report: str
@@ -121,8 +126,9 @@ class ReportShowOutput:
         return self.report
 
 
-@dataclass(frozen=True, slots=True)
-class ReportSearchInput:
+class ReportSearchInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     query: str = ""
     spawn_id: str | None = None
     limit: int = 20
@@ -130,15 +136,17 @@ class ReportSearchInput:
     repo_root: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class ReportSearchResult:
+class ReportSearchResult(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     spawn_id: str
     report_path: str
     snippet: str
 
 
-@dataclass(frozen=True, slots=True)
-class ReportSearchOutput:
+class ReportSearchOutput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     results: tuple[ReportSearchResult, ...]
 
     def format_text(self, ctx: FormatContext | None = None) -> str:

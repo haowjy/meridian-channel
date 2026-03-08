@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.config.aliases import AliasEntry, load_merged_aliases, resolve_model
 from meridian.lib.config.discovery import DiscoveredModel, load_discovered_models, refresh_models_cache
@@ -18,25 +19,29 @@ if TYPE_CHECKING:
     from meridian.lib.formatting import FormatContext
 
 
-@dataclass(frozen=True, slots=True)
-class ModelsListInput:
+class ModelsListInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     repo_root: str | None = None
     all: bool = False
 
 
-@dataclass(frozen=True, slots=True)
-class ModelsShowInput:
+class ModelsShowInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     model: str = ""
     repo_root: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class ModelsRefreshInput:
+class ModelsRefreshInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     repo_root: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class CatalogModel:
+class CatalogModel(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     model_id: ModelId
     harness: HarnessId
     aliases: tuple[AliasEntry, ...] = ()
@@ -77,8 +82,9 @@ class CatalogModel:
         return kv_block(pairs)
 
 
-@dataclass(frozen=True, slots=True)
-class ModelsListOutput:
+class ModelsListOutput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     models: tuple[CatalogModel, ...]
 
     def format_text(self, ctx: FormatContext | None = None) -> str:
@@ -102,8 +108,9 @@ class ModelsListOutput:
         return tabular([header] + rows)
 
 
-@dataclass(frozen=True, slots=True)
-class ModelsRefreshOutput:
+class ModelsRefreshOutput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     refreshed: int
 
     def format_text(self, ctx: FormatContext | None = None) -> str:
