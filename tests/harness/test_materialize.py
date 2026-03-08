@@ -7,9 +7,11 @@ from pathlib import Path
 import pytest
 
 from meridian.lib.harness.materialize import (
+    _ensure_materialized_gitignore,
     _extract_chat_id_from_materialized,
     cleanup_materialized,
     cleanup_orphaned_materializations,
+    harness_layout,
 )
 
 
@@ -118,6 +120,62 @@ def test_cleanup_materialized_scopes_to_chat_and_scans_codex_layouts(
     assert removed == 2
     assert not (agents_dir_1 / "__agent-c5.md").exists()
     assert not (agents_dir_2 / "__backup-c5.md").exists()
+
+
+def test_ensure_materialized_gitignore_adds_patterns(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".git").mkdir()
+    (repo_root / ".gitignore").write_text("*.pyc\n", encoding="utf-8")
+
+    layout = harness_layout("claude")
+    assert layout is not None
+    _ensure_materialized_gitignore(repo_root, layout)
+
+    content = (repo_root / ".gitignore").read_text(encoding="utf-8")
+    assert ".claude/agents/__*-c[0-9]*" in content
+    assert ".claude/skills/__*-c[0-9]*" in content
+    assert "*.pyc" in content
+
+
+def test_ensure_materialized_gitignore_is_idempotent(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".git").mkdir()
+    (repo_root / ".gitignore").write_text("", encoding="utf-8")
+
+    layout = harness_layout("claude")
+    assert layout is not None
+    _ensure_materialized_gitignore(repo_root, layout)
+    _ensure_materialized_gitignore(repo_root, layout)
+
+    content = (repo_root / ".gitignore").read_text(encoding="utf-8")
+    assert content.count(".claude/agents/__*-c[0-9]*") == 1
+
+
+def test_ensure_materialized_gitignore_skips_without_git(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    layout = harness_layout("claude")
+    assert layout is not None
+    _ensure_materialized_gitignore(repo_root, layout)
+
+    assert not (repo_root / ".gitignore").exists()
+
+
+def test_ensure_materialized_gitignore_creates_file_if_missing(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".git").mkdir()
+
+    layout = harness_layout("codex")
+    assert layout is not None
+    _ensure_materialized_gitignore(repo_root, layout)
+
+    content = (repo_root / ".gitignore").read_text(encoding="utf-8")
+    assert ".agents/agents/__*-c[0-9]*" in content
+    assert ".agents/skills/__*-c[0-9]*" in content
 
 
 def test_cleanup_orphaned_scans_global_codex_directories(

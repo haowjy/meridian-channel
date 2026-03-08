@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import glob
+import logging
+import os
 import shutil
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.catalog.agent import AgentProfile
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -255,6 +259,48 @@ def _materialize_agent(
     return materialized_name
 
 
+_MATERIALIZED_GITIGNORE_PATTERN = "__*-c[0-9]*"
+"""Glob pattern matching materialized agent/skill artifacts."""
+
+
+def _ensure_materialized_gitignore(repo_root: Path, layout: HarnessLayout) -> None:
+    """Ensure the root .gitignore excludes materialized artifacts.
+
+    Appends ignore rules for each harness-native directory that doesn't
+    already have a matching pattern.  Silently skips repos without git.
+    """
+    gitignore_path = repo_root / ".gitignore"
+    if not (repo_root / ".git").exists():
+        return
+
+    existing = ""
+    if gitignore_path.exists():
+        existing = gitignore_path.read_text(encoding="utf-8")
+
+    lines_to_add: list[str] = []
+    for raw_dir in (*layout.agents, *layout.skills):
+        if raw_dir.startswith("~"):
+            continue
+        pattern = f"{raw_dir}/{_MATERIALIZED_GITIGNORE_PATTERN}"
+        if pattern not in existing:
+            lines_to_add.append(pattern)
+
+    if not lines_to_add:
+        return
+
+    suffix = "\n".join(lines_to_add) + "\n"
+    if existing and not existing.endswith("\n"):
+        suffix = "\n" + suffix
+
+    try:
+        tmp_path = gitignore_path.with_suffix(".tmp")
+        with tmp_path.open("w", encoding="utf-8") as fh:
+            fh.write(existing + suffix)
+        os.replace(tmp_path, gitignore_path)
+    except OSError:
+        logger.debug("Could not update .gitignore", exc_info=True)
+
+
 def materialize_for_harness(
     agent_profile: AgentProfile | None,
     skill_sources: dict[str, Path],
@@ -310,6 +356,8 @@ def materialize_for_harness(
             materialized_skills=materialized_skills,
             native=False,
         )
+
+    _ensure_materialized_gitignore(repo_root, layout)
 
     if missing_skills:
         materialized_skills = _copy_missing_skills(
