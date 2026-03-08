@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from meridian.lib.domain import TokenUsage
-from meridian.lib.extract._io import _read_artifact_text
+from meridian.lib.extract._io import read_artifact_text
 from meridian.lib.extract.files_touched import extract_files_touched
 from meridian.lib.extract.report import ExtractedReport, extract_or_fallback_report
 from meridian.lib.harness.adapter import HarnessAdapter
@@ -84,7 +84,7 @@ def _is_empty_output(
 ) -> bool:
     if extracted_report.content and extracted_report.content.strip():
         return False
-    output_text = _read_artifact_text(artifacts, spawn_id, _OUTPUT_FILENAME)
+    output_text = read_artifact_text(artifacts, spawn_id, _OUTPUT_FILENAME)
     return not output_text.strip()
 
 

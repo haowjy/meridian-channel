@@ -205,7 +205,7 @@ def _coerce_optional_int(value: object) -> int | None:
     return None
 
 
-def _coerce_optional_float(value: object) -> float | None:
+def coerce_optional_float(value: object) -> float | None:
     if isinstance(value, bool):
         return float(value)
     if isinstance(value, int | float):
@@ -238,7 +238,7 @@ def iter_nested_dicts(value: object) -> list[dict[str, object]]:
 
 def _extract_cost(payload: dict[str, object]) -> float | None:
     for key in COST_KEYS:
-        value = _coerce_optional_float(payload.get(key))
+        value = coerce_optional_float(payload.get(key))
         if value is not None:
             return value
     return None

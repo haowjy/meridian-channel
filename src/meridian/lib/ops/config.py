@@ -16,7 +16,7 @@ from meridian.lib.config.settings import (
     MeridianConfig,
     PrimaryConfig,
     SearchPathConfig,
-    _USER_CONFIG_ENV_VAR,
+    USER_CONFIG_ENV_VAR,
     load_config,
 )
 from meridian.lib.ops.registry import OperationSpec, operation
@@ -583,7 +583,7 @@ def _source_for_key(
 
 
 def _user_config_path_from_env() -> Path | None:
-    raw_value = os.getenv(_USER_CONFIG_ENV_VAR, "").strip()
+    raw_value = os.getenv(USER_CONFIG_ENV_VAR, "").strip()
     if not raw_value:
         return None
     return Path(raw_value).expanduser()

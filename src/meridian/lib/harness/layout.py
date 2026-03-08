@@ -44,7 +44,7 @@ def harness_layout(harness_id: str) -> HarnessLayout | None:
     return HARNESS_NATIVE_DIRS.get(harness_id)
 
 
-def _resolve_native_dir(raw_path: str, repo_root: Path) -> Path:
+def resolve_native_dir(raw_path: str, repo_root: Path) -> Path:
     candidate = Path(raw_path).expanduser()
     if not candidate.is_absolute():
         candidate = repo_root / candidate
@@ -56,7 +56,7 @@ def materialization_target_agents(layout: HarnessLayout, repo_root: Path) -> Pat
 
     if not layout.agents:
         raise ValueError("HarnessLayout.agents must contain at least one path")
-    return _resolve_native_dir(layout.agents[0], repo_root)
+    return resolve_native_dir(layout.agents[0], repo_root)
 
 
 def materialization_target_skills(layout: HarnessLayout, repo_root: Path) -> Path:
@@ -64,7 +64,7 @@ def materialization_target_skills(layout: HarnessLayout, repo_root: Path) -> Pat
 
     if not layout.skills:
         raise ValueError("HarnessLayout.skills must contain at least one path")
-    return _resolve_native_dir(layout.skills[0], repo_root)
+    return resolve_native_dir(layout.skills[0], repo_root)
 
 
 def is_agent_native(agent_name: str, layout: HarnessLayout, repo_root: Path) -> bool:
@@ -72,7 +72,7 @@ def is_agent_native(agent_name: str, layout: HarnessLayout, repo_root: Path) -> 
 
     agent_filename = f"{agent_name}.md"
     for raw_dir in (*layout.agents, *layout.global_agents):
-        if (_resolve_native_dir(raw_dir, repo_root) / agent_filename).is_file():
+        if (resolve_native_dir(raw_dir, repo_root) / agent_filename).is_file():
             return True
     return False
 
@@ -81,6 +81,6 @@ def is_skill_native(skill_name: str, layout: HarnessLayout, repo_root: Path) -> 
     """Return whether a skill directory with SKILL.md exists in any native location."""
 
     for raw_dir in (*layout.skills, *layout.global_skills):
-        if (_resolve_native_dir(raw_dir, repo_root) / skill_name / "SKILL.md").is_file():
+        if (resolve_native_dir(raw_dir, repo_root) / skill_name / "SKILL.md").is_file():
             return True
     return False

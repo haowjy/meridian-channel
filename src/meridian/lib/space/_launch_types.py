@@ -47,7 +47,7 @@ class SpaceLaunchResult:
 
 
 @dataclass(frozen=True, slots=True)
-class _PrimarySessionMetadata:
+class PrimarySessionMetadata:
     harness: str
     model: str
     agent: str

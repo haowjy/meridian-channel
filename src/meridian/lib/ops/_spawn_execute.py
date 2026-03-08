@@ -50,8 +50,6 @@ from meridian.lib.types import ModelId, SpawnId, SpaceId
 from ._utils import minutes_to_seconds
 from ._spawn_models import SpawnActionOutput, SpawnCreateInput
 from ._spawn_query import _read_report_text, read_spawn_row  # pyright: ignore[reportPrivateUsage]
-
-_BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
 logger = structlog.get_logger(__name__)
 _BACKGROUND_SUBMIT_MESSAGE = "Background spawn submitted."
 _BACKGROUND_PID_FILENAME = "background.pid"
@@ -154,7 +152,7 @@ def _optional_spawn_id(spawn_id: str | None) -> SpawnId | None:
     return SpawnId(normalized)
 
 
-def _depth_limits(max_depth: int, *, ctx: RuntimeContext | None = None) -> tuple[int, int]:
+def depth_limits(max_depth: int, *, ctx: RuntimeContext | None = None) -> tuple[int, int]:
     current_depth = _runtime_context(ctx).depth
     if max_depth < 0:
         raise ValueError("max_depth must be >= 0.")
@@ -178,7 +176,7 @@ def _emit_subrun_event(
     sink.event(event_payload)
 
 
-def _depth_exceeded_output(current_depth: int, max_depth: int) -> SpawnActionOutput:
+def depth_exceeded_output(current_depth: int, max_depth: int) -> SpawnActionOutput:
     return SpawnActionOutput(
         command="spawn.create",
         status="failed",
@@ -477,13 +475,6 @@ def _session_execution_context(
             )
 
 
-def _stdout_is_tty() -> bool:
-    try:
-        return bool(sys.stdout.isatty())
-    except Exception:
-        return False
-
-
 async def _execute_existing_spawn(
     *,
     spawn_id: SpawnId,
@@ -627,7 +618,7 @@ def _build_background_worker_command(
     return tuple(command)
 
 
-def _execute_spawn_background(
+def execute_spawn_background(
     *,
     payload: SpawnCreateInput,
     prepared: _PreparedCreateLike,
@@ -730,7 +721,7 @@ def _execute_spawn_background(
     )
 
 
-def _execute_spawn_blocking(
+def execute_spawn_blocking(
     *,
     payload: SpawnCreateInput,
     prepared: _PreparedCreateLike,
@@ -838,61 +829,6 @@ def _execute_spawn_blocking(
         exit_code=exit_code,
         duration_secs=duration,
     )
-
-
-async def _execute_spawn_non_blocking(
-    *,
-    spawn_id: SpawnId,
-    repo_root: Path,
-    timeout: float | None,
-    skills: tuple[str, ...],
-    agent_name: str | None,
-    mcp_tools: tuple[str, ...],
-    permission_config: PermissionConfig,
-    allowed_tools: tuple[str, ...] = (),
-    cli_permission_override: bool = False,
-    continue_harness_session_id: str | None = None,
-    continue_fork: bool = False,
-    session_agent: str = "",
-    session_agent_path: str = "",
-    session_skill_paths: tuple[str, ...] = (),
-    sink: OutputSink | None = None,
-    ctx: RuntimeContext | None = None,
-) -> None:
-    _ = await _execute_existing_spawn(
-        spawn_id=spawn_id,
-        repo_root=repo_root,
-        timeout=timeout,
-        skills=skills,
-        agent_name=agent_name,
-        mcp_tools=mcp_tools,
-        permission_config=permission_config,
-        allowed_tools=allowed_tools,
-        cli_permission_override=cli_permission_override,
-        continue_harness_session_id=continue_harness_session_id,
-        continue_fork=continue_fork,
-        session_agent=session_agent,
-        session_agent_path=session_agent_path,
-        session_skill_paths=session_skill_paths,
-        sink=sink,
-        ctx=ctx,
-    )
-
-
-def _track_task(task: asyncio.Task[None]) -> None:
-    _BACKGROUND_TASKS.add(task)
-
-    def _cleanup(done: asyncio.Task[None]) -> None:
-        try:
-            done.result()
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            logger.exception("Background spawn task failed.")
-        finally:
-            _BACKGROUND_TASKS.discard(done)
-
-    task.add_done_callback(_cleanup)
 
 
 def _build_background_worker_parser() -> argparse.ArgumentParser:

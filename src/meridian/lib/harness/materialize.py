@@ -10,12 +10,12 @@ from pathlib import Path
 from meridian.lib.config.agent import AgentProfile
 from meridian.lib.harness.layout import (
     HarnessLayout,
-    _resolve_native_dir,
     harness_layout,
     is_agent_native,
     is_skill_native,
     materialization_target_agents,
     materialization_target_skills,
+    resolve_native_dir,
 )
 
 
@@ -262,7 +262,7 @@ def _cleanup_matching(
     removed = 0
 
     for raw_dir in (*layout.agents, *layout.global_agents):
-        agents_dir = _resolve_native_dir(raw_dir, repo_root)
+        agents_dir = resolve_native_dir(raw_dir, repo_root)
         if agents_dir.is_dir():
             for candidate in agents_dir.glob(agents_pattern):
                 if candidate.is_file():
@@ -270,7 +270,7 @@ def _cleanup_matching(
                     removed += 1
 
     for raw_dir in (*layout.skills, *layout.global_skills):
-        skills_dir = _resolve_native_dir(raw_dir, repo_root)
+        skills_dir = resolve_native_dir(raw_dir, repo_root)
         if skills_dir.is_dir():
             for candidate in skills_dir.glob(skills_pattern):
                 if candidate.is_dir():
@@ -325,7 +325,7 @@ def cleanup_orphaned_materializations(
     removed = 0
 
     for raw_dir in (*layout.agents, *layout.global_agents):
-        agents_dir = _resolve_native_dir(raw_dir, repo_root)
+        agents_dir = resolve_native_dir(raw_dir, repo_root)
         if agents_dir.is_dir():
             for candidate in agents_dir.glob("_meridian-*.md"):
                 if not candidate.is_file():
@@ -336,7 +336,7 @@ def cleanup_orphaned_materializations(
                     removed += 1
 
     for raw_dir in (*layout.skills, *layout.global_skills):
-        skills_dir = _resolve_native_dir(raw_dir, repo_root)
+        skills_dir = resolve_native_dir(raw_dir, repo_root)
         if skills_dir.is_dir():
             for candidate in skills_dir.glob("_meridian-*"):
                 if not candidate.is_dir():

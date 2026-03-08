@@ -34,7 +34,7 @@ from meridian.lib.safety.permissions import (
     build_permission_resolver,
     warn_profile_tier_escalation,
 )
-from meridian.lib.space._launch_resolve import _resolve_harness
+from meridian.lib.space._launch_resolve import resolve_harness
 from meridian.lib.space._launch_types import SpaceLaunchRequest
 from meridian.lib.state.paths import resolve_state_paths
 from meridian.lib.types import ModelId
@@ -43,14 +43,14 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
-class _PrimaryHarnessContext:
+class PrimaryHarnessContext:
     command: tuple[str, ...]
     adapter: HarnessAdapter | None = None
     run_params: SpawnParams | None = None
     permission_config: PermissionConfig | None = None
 
 
-def _normalize_system_prompt_passthrough_args(
+def normalize_system_prompt_passthrough_args(
     passthrough_args: tuple[str, ...],
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """Extract system-prompt passthroughs and return args without duplicate prompt flags."""
@@ -84,7 +84,7 @@ def _normalize_system_prompt_passthrough_args(
     return tuple(cleaned), tuple(prompt_fragments)
 
 
-def _build_harness_context(
+def build_harness_context(
     *,
     repo_root: Path | None = None,
     request: SpaceLaunchRequest,
@@ -92,7 +92,7 @@ def _build_harness_context(
     harness_registry: HarnessRegistry,
     chat_id: str = "",
     config: MeridianConfig | None = None,
-) -> _PrimaryHarnessContext:
+) -> PrimaryHarnessContext:
     """Build primary harness command and launch context for one space session."""
 
     passthrough_args = request.passthrough_args
@@ -102,7 +102,7 @@ def _build_harness_context(
         command = [*shlex.split(override), *passthrough_args]
         if not command:
             raise ValueError("MERIDIAN_HARNESS_COMMAND resolved to an empty command.")
-        return _PrimaryHarnessContext(command=tuple(command))
+        return PrimaryHarnessContext(command=tuple(command))
 
     resolved_root = resolve_repo_root(repo_root)
     resolved_config = config if config is not None else load_config(resolved_root)
@@ -129,7 +129,7 @@ def _build_harness_context(
         default_model=default_model,
     )
     model = ModelId(defaults.model)
-    harness = _resolve_harness(
+    harness = resolve_harness(
         model=model,
         harness_override=request.harness,
         harness_registry=harness_registry,
@@ -159,7 +159,7 @@ def _build_harness_context(
         dry_run=request.dry_run,
     )
 
-    passthrough_args, passthrough_prompt_fragments = _normalize_system_prompt_passthrough_args(
+    passthrough_args, passthrough_prompt_fragments = normalize_system_prompt_passthrough_args(
         passthrough_args
     )
     harness_session_id = (
@@ -234,7 +234,7 @@ def _build_harness_context(
         appended_system_prompt=appended_system_prompt,
     )
     command = tuple(adapter.build_command(run_params, resolver))
-    return _PrimaryHarnessContext(
+    return PrimaryHarnessContext(
         command=command,
         adapter=adapter,
         run_params=run_params,
@@ -242,7 +242,7 @@ def _build_harness_context(
     )
 
 
-def _build_harness_command(
+def build_harness_command(
     *,
     repo_root: Path,
     request: SpaceLaunchRequest,
@@ -252,7 +252,7 @@ def _build_harness_command(
     config: MeridianConfig | None = None,
 ) -> tuple[str, ...]:
     resolved_config = config if config is not None else load_config(repo_root)
-    return _build_harness_context(
+    return build_harness_context(
         repo_root=repo_root,
         request=request,
         prompt=prompt,
@@ -262,14 +262,14 @@ def _build_harness_command(
     ).command
 
 
-def _build_space_env(
+def build_space_env(
     repo_root: Path,
     request: SpaceLaunchRequest,
     prompt: str,
     *,
     default_autocompact_pct: int | None = None,
     spawn_id: str | None = None,
-    harness_context: _PrimaryHarnessContext | None = None,
+    harness_context: PrimaryHarnessContext | None = None,
 ) -> dict[str, str]:
     current_context = RuntimeContext.from_environment()
     runtime_context = RuntimeContext(

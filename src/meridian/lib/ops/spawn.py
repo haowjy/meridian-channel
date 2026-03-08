@@ -10,7 +10,6 @@ from dataclasses import replace
 from pathlib import Path
 
 from meridian.lib.context import RuntimeContext
-from meridian.lib.exec.spawn import execute_with_finalization
 from meridian.lib.ops._runtime import (
     build_runtime_from_root_and_config,
     require_space_id,
@@ -18,23 +17,16 @@ from meridian.lib.ops._runtime import (
     resolve_space_id_or_none,
 )
 from meridian.lib.ops.registry import OperationSpec, operation
-from meridian.lib.safety.permissions import (
-    build_permission_config,
-    validate_permission_config_for_harness,
-)
 from meridian.lib.sink import NullSink, OutputSink
 from meridian.lib.space import space_file
 from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_space_dir
 
-from . import _spawn_execute as _spawn_execute_module
-from . import _spawn_prepare as _spawn_prepare_module
 from ._spawn_execute import (
-    _depth_exceeded_output,
-    _depth_limits,
-    _execute_spawn_background,
-    _execute_spawn_blocking,
-    logger,
+    depth_exceeded_output,
+    depth_limits,
+    execute_spawn_background,
+    execute_spawn_blocking,
 )
 from ._spawn_models import (
     SpawnActionOutput,
@@ -51,7 +43,7 @@ from ._spawn_models import (
     SpawnWaitInput,
     SpawnWaitMultiOutput,
 )
-from ._spawn_prepare import _build_create_payload, _validate_create_input
+from ._spawn_prepare import build_create_payload, validate_create_input
 from ._spawn_query import (
     detail_from_row,
     read_spawn_row,
@@ -117,15 +109,7 @@ def spawn_create_sync(
     sink: OutputSink | None = None,
 ) -> SpawnActionOutput:
     runtime_context = _runtime_context(ctx)
-    _spawn_prepare_module.build_permission_config = build_permission_config
-    _spawn_prepare_module.validate_permission_config_for_harness = (
-        validate_permission_config_for_harness
-    )
-    _spawn_prepare_module.logger = logger
-    _spawn_execute_module.execute_with_finalization = execute_with_finalization
-    _spawn_execute_module.logger = logger
-
-    payload, preflight_warning = _validate_create_input(payload)
+    payload, preflight_warning = validate_create_input(payload)
     resolved_root, config = resolve_runtime_root_and_config(payload.repo_root)
     space_id_str, auto_created = _resolve_or_create_space(
         payload.space,
@@ -142,12 +126,12 @@ def spawn_create_sync(
 
     runtime = None
     if not payload.dry_run:
-        current_depth, max_depth = _depth_limits(config.max_depth, ctx=runtime_context)
+        current_depth, max_depth = depth_limits(config.max_depth, ctx=runtime_context)
         if current_depth >= max_depth:
-            return _depth_exceeded_output(current_depth, max_depth)
+            return depth_exceeded_output(current_depth, max_depth)
         runtime = build_runtime_from_root_and_config(resolved_root, config, sink=sink)
 
-    prepared = _build_create_payload(payload, runtime=runtime, preflight_warning=preflight_warning)
+    prepared = build_create_payload(payload, runtime=runtime, preflight_warning=preflight_warning)
     if payload.dry_run:
         return SpawnActionOutput(
             command="spawn.create",
@@ -166,13 +150,13 @@ def spawn_create_sync(
     if runtime is None:
         raise RuntimeError("Spawn runtime was not initialized.")
     if payload.background:
-        return _execute_spawn_background(
+        return execute_spawn_background(
             payload=payload,
             prepared=prepared,
             runtime=runtime,
             ctx=runtime_context,
         )
-    return _execute_spawn_blocking(
+    return execute_spawn_blocking(
         payload=payload,
         prepared=prepared,
         runtime=runtime,

@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass
 from typing import Literal, cast
 
-from meridian.lib.extract._io import _read_artifact_text
+from meridian.lib.extract._io import read_artifact_text
 from meridian.lib.harness.adapter import HarnessAdapter
 from meridian.lib.state.artifact_store import ArtifactStore
 from meridian.lib.types import SpawnId
@@ -115,7 +115,7 @@ def extract_or_fallback_report(
 ) -> ExtractedReport:
     """Extract report text from assistant output, preferring report.md when available."""
 
-    report_content = _read_artifact_text(artifacts, spawn_id, "report.md").strip()
+    report_content = read_artifact_text(artifacts, spawn_id, "report.md").strip()
     if report_content:
         return ExtractedReport(content=report_content, source="report_md")
 
@@ -133,7 +133,7 @@ def extract_or_fallback_report(
             if adapted_text:
                 return ExtractedReport(content=adapted_text, source="assistant_message")
 
-    output_lines = _read_artifact_text(artifacts, spawn_id, "output.jsonl")
+    output_lines = read_artifact_text(artifacts, spawn_id, "output.jsonl")
     assistant_message = _extract_last_assistant_message(output_lines)
     assistant_report = assistant_message.strip() if assistant_message else ""
     if not assistant_report:

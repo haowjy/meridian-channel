@@ -224,12 +224,12 @@ def _extract_human_flag(argv: Sequence[str]) -> tuple[list[str], bool]:
     return cleaned, force_human
 
 
-def _agent_mode_enabled() -> bool:
+def agent_mode_enabled() -> bool:
     return bool(os.getenv("MERIDIAN_SPACE_ID", "").strip())
 
 
 def _agent_sink_enabled(*, output_explicit: bool) -> bool:
-    if output_explicit or not _agent_mode_enabled():
+    if output_explicit or not agent_mode_enabled():
         return False
     raw_depth = os.getenv("MERIDIAN_DEPTH", "").strip()
     if not raw_depth:
@@ -901,7 +901,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     args, force_human = _extract_human_flag(args)
     cleaned_args, options = _extract_global_options(args)
 
-    agent_mode = _agent_mode_enabled() and not force_human
+    agent_mode = agent_mode_enabled() and not force_human
     if agent_mode and not options.output_explicit:
         options = replace(options, output=OutputConfig(format="json"))
 

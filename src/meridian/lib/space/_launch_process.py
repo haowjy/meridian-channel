@@ -11,20 +11,19 @@ import time
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 from meridian.lib.config.settings import MeridianConfig, load_config
 from meridian.lib.harness.materialize import cleanup_materialized
 from meridian.lib.harness.registry import HarnessRegistry
 from meridian.lib.space._launch_command import (
-    _PrimaryHarnessContext,
-    _build_harness_context,
-    _build_space_env,
+    build_harness_context,
+    build_space_env,
 )
-from meridian.lib.space._launch_resolve import _resolve_primary_session_metadata
+from meridian.lib.space._launch_resolve import resolve_primary_session_metadata
 from meridian.lib.space._launch_types import (
+    PrimarySessionMetadata,
     SpaceLaunchRequest,
-    _PrimarySessionMetadata,
     build_primary_prompt,
 )
 from meridian.lib.space.session_store import start_session, stop_session, update_session_harness_id
@@ -41,12 +40,12 @@ def space_lock_path(repo_root: Path, space_id: SpaceId) -> Path:
 
 
 @dataclass(frozen=True, slots=True)
-class _LaunchContext:
+class LaunchContext:
     """Resolved configuration for one primary launch."""
 
     config: MeridianConfig
     prompt: str
-    session_metadata: _PrimarySessionMetadata
+    session_metadata: PrimarySessionMetadata
     space_dir: Path
     lock_path: Path
     seed_harness_session_id: str
@@ -54,7 +53,7 @@ class _LaunchContext:
 
 
 @dataclass(frozen=True, slots=True)
-class _ProcessOutcome:
+class ProcessOutcome:
     """Result of running the harness subprocess."""
 
     command: tuple[str, ...]
@@ -173,15 +172,15 @@ def _sweep_orphaned_materializations(repo_root: Path, harness_id: str) -> None:
         logger.debug("Orphan materialization sweep failed", exc_info=True)
 
 
-def _prepare_launch_context(
+def prepare_launch_context(
     repo_root: Path,
     request: SpaceLaunchRequest,
     harness_registry: HarnessRegistry,
-) -> _LaunchContext:
+) -> LaunchContext:
     """Config loading, prompt building, session-ID seeding, command-request patching."""
 
     config = load_config(repo_root)
-    session_metadata = _resolve_primary_session_metadata(
+    session_metadata = resolve_primary_session_metadata(
         repo_root=repo_root,
         request=request,
         config=config,
@@ -211,7 +210,7 @@ def _prepare_launch_context(
             passthrough_args=(*request.passthrough_args, *seed.session_args),
         )
 
-    return _LaunchContext(
+    return LaunchContext(
         config=config,
         prompt=prompt,
         session_metadata=session_metadata,
@@ -222,12 +221,12 @@ def _prepare_launch_context(
     )
 
 
-def _run_harness_process(
+def run_harness_process(
     repo_root: Path,
     request: SpaceLaunchRequest,
-    ctx: _LaunchContext,
+    ctx: LaunchContext,
     harness_registry: HarnessRegistry,
-) -> _ProcessOutcome:
+) -> ProcessOutcome:
     """Start session, spawn tracking, launch process, wait for exit."""
 
     command: tuple[str, ...] = ()
@@ -265,7 +264,7 @@ def _run_harness_process(
         primary_started = time.monotonic()
         primary_started_epoch = time.time()
         primary_started_local_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-        harness_context = _build_harness_context(
+        harness_context = build_harness_context(
             repo_root=repo_root,
             request=ctx.command_request,
             prompt=ctx.prompt,
@@ -274,7 +273,7 @@ def _run_harness_process(
             config=ctx.config,
         )
         command = harness_context.command
-        child_env = _build_space_env(
+        child_env = build_space_env(
             repo_root,
             request,
             ctx.prompt,
@@ -352,7 +351,7 @@ def _run_harness_process(
         except OSError:
             logger.debug("Failed to clean up lock file %s", ctx.lock_path, exc_info=True)
 
-    return _ProcessOutcome(
+    return ProcessOutcome(
         command=command,
         exit_code=exit_code,
         chat_id=chat_id,

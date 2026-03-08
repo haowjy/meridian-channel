@@ -6,7 +6,7 @@ import json
 import re
 from typing import cast
 
-from meridian.lib.extract._io import _read_artifact_text
+from meridian.lib.extract._io import read_artifact_text
 from meridian.lib.state.artifact_store import ArtifactStore
 from meridian.lib.types import SpawnId
 
@@ -134,7 +134,7 @@ def extract_files_touched(artifacts: ArtifactStore, spawn_id: SpawnId) -> tuple[
     found: list[str] = []
     seen: set[str] = set()
 
-    explicit_json = _read_artifact_text(artifacts, spawn_id, "files_touched.json").strip()
+    explicit_json = read_artifact_text(artifacts, spawn_id, "files_touched.json").strip()
     if explicit_json:
         try:
             payload_obj = json.loads(explicit_json)
@@ -143,11 +143,11 @@ def extract_files_touched(artifacts: ArtifactStore, spawn_id: SpawnId) -> tuple[
         if payload_obj is not None:
             _extract_from_json_value(payload_obj, found, seen)
 
-    explicit_text = _read_artifact_text(artifacts, spawn_id, "files_touched.txt")
+    explicit_text = read_artifact_text(artifacts, spawn_id, "files_touched.txt")
     for line in explicit_text.splitlines():
         _append_path(found, seen, line)
 
-    output_lines = _read_artifact_text(artifacts, spawn_id, "output.jsonl")
+    output_lines = read_artifact_text(artifacts, spawn_id, "output.jsonl")
     for line in output_lines.splitlines():
         stripped = line.strip()
         if not stripped:
@@ -163,7 +163,7 @@ def extract_files_touched(artifacts: ArtifactStore, spawn_id: SpawnId) -> tuple[
         for candidate in _extract_paths_from_text(stripped):
             _append_path(found, seen, candidate)
 
-    report = _read_artifact_text(artifacts, spawn_id, "report.md")
+    report = read_artifact_text(artifacts, spawn_id, "report.md")
     for candidate in _extract_paths_from_text(report):
         _append_path(found, seen, candidate)
 

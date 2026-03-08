@@ -169,7 +169,7 @@ _HARNESS_KEYS = frozenset({"claude", "codex", "opencode"})
 _PERMISSION_TIERS = ("read-only", "workspace-write", "full-access")
 _PRIMARY_AUTOCOMPACT_PCT_MIN = 1
 _PRIMARY_AUTOCOMPACT_PCT_MAX = 100
-_USER_CONFIG_ENV_VAR = "MERIDIAN_CONFIG"
+USER_CONFIG_ENV_VAR = "MERIDIAN_CONFIG"
 
 
 def _validate_permission_tier(raw: str) -> None:
@@ -611,7 +611,7 @@ def _build_config(values: dict[str, object]) -> MeridianConfig:
 def _resolve_user_config_path(user_config: Path | None) -> Path | None:
     resolved = user_config.expanduser() if user_config is not None else None
     if resolved is None:
-        raw_env = os.getenv(_USER_CONFIG_ENV_VAR, "").strip()
+        raw_env = os.getenv(USER_CONFIG_ENV_VAR, "").strip()
         if raw_env:
             resolved = Path(raw_env).expanduser()
 

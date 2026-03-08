@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, cast
 
 from meridian.lib.config.routing import route_model
 from meridian.lib.config.settings import MeridianConfig
@@ -14,13 +13,13 @@ from meridian.lib.launch_resolve import (
     resolve_skills_from_profile,
 )
 from meridian.lib.prompt.assembly import resolve_run_defaults
-from meridian.lib.space._launch_types import SpaceLaunchRequest, _PrimarySessionMetadata
+from meridian.lib.space._launch_types import PrimarySessionMetadata, SpaceLaunchRequest
 from meridian.lib.types import HarnessId, ModelId
 
 logger = logging.getLogger(__name__)
 
 
-def _resolve_harness(
+def resolve_harness(
     *,
     model: ModelId,
     harness_override: str | None,
@@ -66,13 +65,13 @@ def _resolve_harness(
     return override_harness
 
 
-def _resolve_primary_session_metadata(
+def resolve_primary_session_metadata(
     *,
     repo_root: Path,
     request: SpaceLaunchRequest,
     config: MeridianConfig,
     harness_registry: HarnessRegistry,
-) -> _PrimarySessionMetadata:
+) -> PrimarySessionMetadata:
     profile = load_agent_profile_with_fallback(
         repo_root=repo_root,
         search_paths=config.search_paths,
@@ -96,7 +95,7 @@ def _resolve_primary_session_metadata(
         default_model=default_model,
     )
     model = ModelId(defaults.model)
-    harness = _resolve_harness(
+    harness = resolve_harness(
         model=model,
         harness_override=request.harness,
         harness_registry=harness_registry,
@@ -124,7 +123,7 @@ def _resolve_primary_session_metadata(
     if profile is not None and profile.path.is_absolute() and profile.path.exists():
         agent_path = profile.path.resolve().as_posix()
 
-    return _PrimarySessionMetadata(
+    return PrimarySessionMetadata(
         harness=str(harness),
         model=str(model),
         agent=profile.name if profile is not None else "",

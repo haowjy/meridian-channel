@@ -154,7 +154,7 @@ def _validate_requested_model(
     return normalized, None
 
 
-def _validate_create_input(payload: SpawnCreateInput) -> tuple[SpawnCreateInput, str | None]:
+def validate_create_input(payload: SpawnCreateInput) -> tuple[SpawnCreateInput, str | None]:
     if not payload.prompt.strip() and not payload.files:
         raise ValueError("prompt required: use --prompt/-p or attach at least one --file/-f.")
 
@@ -167,7 +167,7 @@ def _validate_create_input(payload: SpawnCreateInput) -> tuple[SpawnCreateInput,
     return payload, model_warning
 
 
-def _build_create_payload(
+def build_create_payload(
     payload: SpawnCreateInput,
     *,
     runtime: OperationRuntime | None = None,

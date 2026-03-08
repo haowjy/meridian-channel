@@ -8,7 +8,7 @@ from typing import Annotated, Any, cast
 
 from cyclopts import App, Parameter
 
-from meridian.cli.main import _agent_mode_enabled, current_output_sink
+from meridian.cli.main import agent_mode_enabled, current_output_sink
 from meridian.lib.domain import SpawnStatus
 from meridian.lib.ops.registry import get_all_operations
 from meridian.lib.ops.spawn import (
@@ -31,7 +31,7 @@ from meridian.lib.ops.spawn import (
 
 # In agent mode (MERIDIAN_SPACE_ID set), hide human-only flags from --help.
 # Flags still work when passed — show only affects help text.
-_HUMAN_ONLY = not _agent_mode_enabled()
+_HUMAN_ONLY = not agent_mode_enabled()
 
 Emitter = Callable[[Any], None]
 
