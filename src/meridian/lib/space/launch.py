@@ -1,11 +1,4 @@
-"""Primary agent launcher — thin orchestrator.
-
-The heavy lifting lives in:
-- _launch_types.py   — shared dataclasses and prompt builder
-- _launch_resolve.py — harness routing and session metadata resolution
-- _launch_command.py — command assembly and environment building
-- _launch_process.py — process lifecycle and lock management
-"""
+"""Primary agent launcher facade over launch internals."""
 
 from __future__ import annotations
 
@@ -14,26 +7,26 @@ from pathlib import Path
 from meridian.lib.harness.registry import HarnessRegistry
 
 # Re-export public API from submodules so existing imports keep working.
-from meridian.lib.space._launch_command import (
+from meridian.lib.launch.command import (
     PrimaryHarnessContext as PrimaryHarnessContext,
     build_harness_command as build_harness_command,
     build_harness_context as build_harness_context,
     build_space_env as build_space_env,
     normalize_system_prompt_passthrough_args as normalize_system_prompt_passthrough_args,
 )
-from meridian.lib.space._launch_process import (
+from meridian.lib.launch.process import (
     LaunchContext as LaunchContext,
     ProcessOutcome as ProcessOutcome,
+    cleanup_orphaned_locks as cleanup_orphaned_locks,
     prepare_launch_context,
     run_harness_process,
-    cleanup_orphaned_locks as cleanup_orphaned_locks,
     space_lock_path as space_lock_path,
 )
-from meridian.lib.space._launch_resolve import (
+from meridian.lib.launch.resolve import (
     resolve_harness as resolve_harness,
     resolve_primary_session_metadata as resolve_primary_session_metadata,
 )
-from meridian.lib.space._launch_types import (
+from meridian.lib.launch.types import (
     PrimarySessionMetadata as PrimarySessionMetadata,
     SpaceLaunchRequest as SpaceLaunchRequest,
     SpaceLaunchResult as SpaceLaunchResult,
