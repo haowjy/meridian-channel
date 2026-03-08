@@ -38,7 +38,6 @@ from meridian.lib.state.paths import resolve_spawn_log_dir, resolve_state_paths
 from meridian.lib.core.types import HarnessId, SpawnId, SpaceId
 
 from .env import (
-    HARNESS_ENV_PASS_THROUGH,
     build_harness_child_env,
     sanitize_child_env as _sanitize_child_env,
 )
@@ -506,7 +505,6 @@ async def execute_with_finalization(
         run_params=run_params,
         permission_config=resolved_permission_config,
         runtime_env_overrides=merged_env_overrides,
-        pass_through=HARNESS_ENV_PASS_THROUGH,
     )
     if spawn_store.get_spawn(space_dir, run.spawn_id) is None:
         spawn_store.start_spawn(

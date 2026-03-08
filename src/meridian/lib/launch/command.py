@@ -27,9 +27,8 @@ from meridian.lib.state.paths import resolve_state_paths
 from meridian.lib.core.types import ModelId
 
 from .env import (
-    HARNESS_ENV_PASS_THROUGH,
     build_harness_child_env,
-    sanitize_child_env,
+    inherit_child_env,
 )
 from .prompt import compose_skill_injections, resolve_run_defaults
 from .resolve import (
@@ -267,7 +266,6 @@ def build_harness_command(
 def build_space_env(
     repo_root: Path,
     request: SpaceLaunchRequest,
-    prompt: str,
     *,
     default_autocompact_pct: int | None = None,
     spawn_id: str | None = None,
@@ -281,7 +279,6 @@ def build_space_env(
         state_root=resolve_state_paths(repo_root).root_dir.resolve(),
     )
     env_overrides = runtime_context.to_env_overrides()
-    env_overrides["MERIDIAN_SPACE_PROMPT"] = prompt
     if spawn_id is not None and spawn_id.strip():
         env_overrides["MERIDIAN_SPAWN_ID"] = spawn_id.strip()
     autocompact_pct = (
@@ -304,13 +301,11 @@ def build_space_env(
             run_params=harness_context.run_params,
             permission_config=harness_context.permission_config,
             runtime_env_overrides=env_overrides,
-            pass_through=HARNESS_ENV_PASS_THROUGH,
         )
 
-    return sanitize_child_env(
+    return inherit_child_env(
         base_env=os.environ,
         env_overrides=env_overrides,
-        pass_through=HARNESS_ENV_PASS_THROUGH,
     )
 
 

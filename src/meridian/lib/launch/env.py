@@ -23,27 +23,11 @@ _CHILD_ENV_ALLOWLIST = frozenset(
 )
 _CHILD_ENV_ALLOWLIST_PREFIXES = ("LC_", "XDG_", "UV_")
 _CHILD_ENV_SECRET_SUFFIXES = ("_TOKEN", "_KEY", "_SECRET")
-
-# Harness CLIs need these credentials to authenticate. Keep this explicit so
-# secret-like env vars still default to redacted unless intentionally allowed.
-HARNESS_ENV_PASS_THROUGH = frozenset(
+_NON_PROPAGATING_CHILD_ENV = frozenset(
     {
-        "ANTHROPIC_API_KEY",
-        "ANTHROPIC_BASE_URL",
-        "OPENAI_API_KEY",
-        "OPENAI_ORG_ID",
-        "OPENAI_PROJECT_ID",
-        "OPENAI_BASE_URL",
-        "OPENROUTER_API_KEY",
-        "GEMINI_API_KEY",
-        "GOOGLE_API_KEY",
-        "GROQ_API_KEY",
-        "XAI_API_KEY",
-        "MISTRAL_API_KEY",
-        "COHERE_API_KEY",
-        "DEEPSEEK_API_KEY",
-        "TOGETHER_API_KEY",
-        "PERPLEXITY_API_KEY",
+        "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
+        "MERIDIAN_PARENT_RUN_ID",
+        "MERIDIAN_SPACE_PROMPT",
     }
 )
 
@@ -108,6 +92,24 @@ def sanitize_child_env(
     return sanitized
 
 
+def inherit_child_env(
+    base_env: Mapping[str, str],
+    env_overrides: Mapping[str, str] | None,
+    *,
+    blocked: Collection[str] = _NON_PROPAGATING_CHILD_ENV,
+) -> dict[str, str]:
+    """Return an inherited child environment with targeted non-propagation."""
+
+    blocked_keys = {name.upper() for name in blocked}
+    inherited = {
+        key: value for key, value in base_env.items() if key.upper() not in blocked_keys
+    }
+    if env_overrides is not None:
+        inherited.update(env_overrides)
+    _normalize_meridian_env(inherited)
+    return inherited
+
+
 def build_harness_env_overrides(
     *,
     adapter: HarnessAdapter,
@@ -132,9 +134,8 @@ def build_harness_child_env(
     run_params: SpawnParams,
     permission_config: PermissionConfig,
     runtime_env_overrides: Mapping[str, str] | None = None,
-    pass_through: Collection[str] = HARNESS_ENV_PASS_THROUGH,
 ) -> dict[str, str]:
-    """Build one sanitized child env for a harness launch."""
+    """Build one inherited child env for a trusted harness launch."""
 
     merged_env = build_harness_env_overrides(
         adapter=adapter,
@@ -142,8 +143,7 @@ def build_harness_child_env(
         permission_config=permission_config,
         runtime_env_overrides=runtime_env_overrides,
     )
-    return sanitize_child_env(
+    return inherit_child_env(
         base_env=base_env,
         env_overrides=merged_env,
-        pass_through=pass_through,
     )

@@ -9,14 +9,17 @@ from pathlib import Path
 import pytest
 
 from meridian.lib.core.domain import Spawn, TokenUsage
+from meridian.lib.launch.env import inherit_child_env
 from meridian.lib.launch.runner import execute_with_finalization, sanitize_child_env
 from meridian.lib.harness.common import (
     extract_session_id_from_artifacts,
     extract_usage_from_artifacts,
 )
-from meridian.lib.harness.adapter import ArtifactStore as HarnessArtifactStore
 from meridian.lib.harness.adapter import (
+    ArtifactStore as HarnessArtifactStore,
+    BaseHarnessAdapter,
     HarnessCapabilities,
+    McpConfig,
     PermissionResolver,
     SpawnParams,
     StreamEvent,
@@ -33,13 +36,12 @@ from meridian.lib.safety.permissions import (
     permission_flags_for_harness,
 )
 from meridian.lib.state.space_store import create_space
-from meridian.lib.state import spawn_store
 from meridian.lib.state.artifact_store import LocalStore, make_artifact_key
 from meridian.lib.state.paths import resolve_space_dir
 from meridian.lib.core.types import HarnessId, ModelId, SpawnId, SpaceId
 
 
-class ScriptHarnessAdapter:
+class ScriptHarnessAdapter(BaseHarnessAdapter):
     def __init__(self, *, command: tuple[str, ...]) -> None:
         self._command = command
 
@@ -53,6 +55,10 @@ class ScriptHarnessAdapter:
 
     def build_command(self, run: SpawnParams, perms: PermissionResolver) -> list[str]:
         return [*self._command, *perms.resolve_flags(self.id), *run.extra_args]
+
+    def mcp_config(self, run: SpawnParams) -> McpConfig | None:
+        _ = run
+        return None
 
     def env_overrides(self, config: PermissionConfig) -> dict[str, str]:
         _ = config
@@ -227,14 +233,35 @@ def test_sanitize_child_env_prefers_state_root_for_space_fs() -> None:
     assert sanitized["MERIDIAN_SPACE_FS"] == "/tmp/custom-state/.spaces/s12/fs"
 
 
+def test_inherit_child_env_keeps_parent_env_but_drops_internal_launch_overrides() -> None:
+    inherited = inherit_child_env(
+        base_env={
+            "PATH": "/usr/bin",
+            "UNRELATED_TOKEN": "keep-me",
+            "MISC_VALUE": "keep-too",
+            "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "67",
+            "MERIDIAN_SPACE_PROMPT": "stale",
+        },
+        env_overrides={"MERIDIAN_DEPTH": "2"},
+    )
+
+    assert inherited["PATH"] == "/usr/bin"
+    assert inherited["UNRELATED_TOKEN"] == "keep-me"
+    assert inherited["MISC_VALUE"] == "keep-too"
+    assert inherited["MERIDIAN_DEPTH"] == "2"
+    assert "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE" not in inherited
+    assert "MERIDIAN_SPACE_PROMPT" not in inherited
+
+
 @pytest.mark.asyncio
-async def test_execute_with_finalization_passes_required_credentials_only(
+async def test_execute_with_finalization_inherits_parent_env_for_trusted_harness(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "needed")
-    monkeypatch.setenv("UNRELATED_TOKEN", "blocked")
-    monkeypatch.setenv("MISC_VALUE", "drop")
+    monkeypatch.setenv("UNRELATED_TOKEN", "allowed")
+    monkeypatch.setenv("MISC_VALUE", "kept")
+    monkeypatch.setenv("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", "67")
 
     run, space_dir = _create_run(tmp_path, prompt="env-policy")
     artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
@@ -252,6 +279,7 @@ async def test_execute_with_finalization_passes_required_credentials_only(
                     "anthropic": os.getenv("ANTHROPIC_API_KEY"),
                     "unrelated_token": os.getenv("UNRELATED_TOKEN"),
                     "misc": os.getenv("MISC_VALUE"),
+                    "autocompact": os.getenv("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"),
                 },
                 sort_keys=True,
             ),
@@ -278,6 +306,7 @@ async def test_execute_with_finalization_passes_required_credentials_only(
     output_text = artifacts.get(make_artifact_key(run.spawn_id, "output.jsonl")).decode("utf-8")
     assert json.loads(output_text.strip()) == {
         "anthropic": "needed",
-        "misc": None,
-        "unrelated_token": None,
+        "autocompact": None,
+        "misc": "kept",
+        "unrelated_token": "allowed",
     }
