@@ -1,338 +1,75 @@
-"""Model alias and discovery operations."""
+"""Compatibility shims for model catalog operations."""
 
 from __future__ import annotations
 
-import re
-from datetime import date, timedelta
-from pathlib import Path
-
-from pydantic import BaseModel, ConfigDict
-
-from meridian.lib.config.aliases import AliasEntry, load_merged_aliases, resolve_model
-from meridian.lib.config.discovery import DiscoveredModel, load_discovered_models, refresh_models_cache
+from meridian.lib.config.aliases import load_merged_aliases, resolve_model
+from meridian.lib.config.discovery import load_discovered_models, refresh_models_cache
 from meridian.lib.config.routing import route_model
-from meridian.lib.formatting import FormatContext
-from meridian.lib.types import HarnessId, ModelId
-
-
-class ModelsListInput(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    repo_root: str | None = None
-    all: bool = False
-
-
-class ModelsShowInput(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    model: str = ""
-    repo_root: str | None = None
-
-
-class ModelsRefreshInput(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    repo_root: str | None = None
-
-
-class CatalogModel(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    model_id: ModelId
-    harness: HarnessId
-    aliases: tuple[AliasEntry, ...] = ()
-    name: str | None = None
-    family: str | None = None
-    provider: str | None = None
-    cost_input: float | None = None
-    cost_output: float | None = None
-    context_limit: int | None = None
-    output_limit: int | None = None
-    capabilities: tuple[str, ...] = ()
-    release_date: str | None = None
-    cost_tier: str | None = None
-
-    def format_text(self, ctx: FormatContext | None = None) -> str:
-        _ = ctx
-        from meridian.cli.format_helpers import kv_block
-
-        alias_names = ", ".join(alias.alias for alias in self.aliases) or None
-        alias_details = ", ".join(_format_alias_detail(alias) for alias in self.aliases) or None
-        capabilities = ", ".join(self.capabilities) or None
-        pairs: list[tuple[str, str | None]] = [
-            ("Model", str(self.model_id)),
-            ("Harness", str(self.harness)),
-            ("Name", self.name),
-            ("Family", self.family),
-            ("Provider", self.provider),
-            ("Aliases", alias_names),
-            ("Alias details", alias_details),
-            ("Capabilities", capabilities),
-            ("Released", self.release_date),
-            ("Cost", self.cost_tier),
-            ("Cost input", _format_float(self.cost_input)),
-            ("Cost output", _format_float(self.cost_output)),
-            ("Context limit", _format_int(self.context_limit)),
-            ("Output limit", _format_int(self.output_limit)),
-        ]
-        return kv_block(pairs)
-
-
-class ModelsListOutput(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    models: tuple[CatalogModel, ...]
-
-    def format_text(self, ctx: FormatContext | None = None) -> str:
-        """Columnar model table for text output mode."""
-        if not self.models:
-            return "(no models)"
-        from meridian.cli.format_helpers import tabular
-
-        header = ["MODEL", "HARNESS", "ALIAS", "PROVIDER", "COST", "RELEASED"]
-        rows = [
-            [
-                str(model.model_id),
-                str(model.harness),
-                ",".join(alias.alias for alias in model.aliases),
-                model.provider or "",
-                model.cost_tier or "",
-                model.release_date or "",
-            ]
-            for model in self.models
-        ]
-        return tabular([header] + rows)
-
-
-class ModelsRefreshOutput(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    refreshed: int
-
-    def format_text(self, ctx: FormatContext | None = None) -> str:
-        return f"Refreshed models.dev cache ({self.refreshed} models)."
-
-
-def _repo_root(repo_root: str | None) -> Path | None:
-    if repo_root is None:
-        return None
-    return Path(repo_root).expanduser().resolve()
-
-
-def _format_float(value: float | None) -> str | None:
-    if value is None:
-        return None
-    return f"{value:g}"
-
-
-def _format_int(value: int | None) -> str | None:
-    if value is None:
-        return None
-    return str(value)
-
-
-def _format_alias_detail(alias: AliasEntry) -> str:
-    details: list[str] = [alias.alias]
-    if alias.role:
-        details.append(f"role={alias.role}")
-    if alias.strengths:
-        details.append(f"strengths={alias.strengths}")
-    return " ".join(details)
-
-
-def _build_catalog_model(
-    *,
-    model_id: str,
-    discovered: DiscoveredModel | None,
-    aliases: list[AliasEntry],
-) -> CatalogModel:
-    if discovered is not None:
-        harness = discovered.harness
-    elif aliases:
-        harness = aliases[0].harness
-    else:
-        harness = route_model(model_id).harness_id
-
-    sorted_aliases = tuple(sorted(aliases, key=lambda entry: entry.alias))
-
-    cost_input = discovered.cost_input if discovered is not None else None
-
-    return CatalogModel(
-        model_id=ModelId(model_id),
-        harness=harness,
-        aliases=sorted_aliases,
-        name=discovered.name if discovered is not None else None,
-        family=discovered.family if discovered is not None else None,
-        provider=discovered.provider if discovered is not None else None,
-        cost_input=cost_input,
-        cost_output=discovered.cost_output if discovered is not None else None,
-        context_limit=discovered.context_limit if discovered is not None else None,
-        output_limit=discovered.output_limit if discovered is not None else None,
-        capabilities=discovered.capabilities if discovered is not None else (),
-        release_date=discovered.release_date if discovered is not None else None,
-        cost_tier=_cost_tier(cost_input),
-    )
-
-
-_DATE_SUFFIX_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"^(?P<base>.+)-(?P<date>\d{8})$"),
-    re.compile(r"^(?P<base>.+)-(?P<date>\d{4}-\d{2}-\d{2})$"),
-    re.compile(r"^(?P<base>.+)-(?P<date>\d{2}-\d{2})$"),
-    re.compile(r"^(?P<base>.+)-(?P<date>\d{2}-\d{4})$"),
+from meridian.lib.ops import catalog as _catalog
+from meridian.lib.ops.catalog import (
+    CatalogModel,
+    ModelsListInput,
+    ModelsListOutput,
+    ModelsRefreshInput,
+    ModelsRefreshOutput,
+    ModelsShowInput,
 )
 
 
-def _date_variant_bases(model_id: str) -> tuple[str, ...]:
-    for pattern in _DATE_SUFFIX_PATTERNS:
-        match = pattern.match(model_id)
-        if match is None:
-            continue
-        base = match.group("base")
-        candidates: list[str] = [base]
-        # Anthropic uses `claude-opus-4-0` as canonical but the date-stamped
-        # variant is `claude-opus-4-20250514` (base = `claude-opus-4`).
-        # Also check `{base}-0` so the variant gets filtered.
-        candidates.append(f"{base}-0")
-        if base.endswith("-preview"):
-            candidates.append(base.removesuffix("-preview"))
-        return tuple(candidates)
-    return ()
-
-
-_DEFAULT_RECENCY_DAYS = 180
-
-
-def _recency_cutoff() -> str:
-    """Return YYYY-MM-DD string for the recency cutoff (6 months ago)."""
-    return (date.today() - timedelta(days=_DEFAULT_RECENCY_DAYS)).isoformat()
-
-
-def _is_default_visible(model: CatalogModel, all_model_ids: set[str]) -> bool:
-    # Aliased models are always visible — user explicitly configured them.
-    if model.aliases:
-        return True
-
-    model_id = str(model.model_id)
-
-    # --- Noise reduction (redundant variants) ---
-    if model_id.endswith("-latest"):
-        return False
-    if "-chat-latest" in model_id:
-        return False
-    if "-deep-research" in model_id:
-        return False
-    if model_id.startswith("gemini-live-"):
-        return False
-
-    # Date-stamped variants when canonical exists.
-    variant_bases = _date_variant_bases(model_id)
-    if variant_bases and any(base in all_model_ids for base in variant_bases):
-        return False
-
-    # --- Recency: hide models older than 6 months ---
-    if model.release_date and model.release_date < _recency_cutoff():
-        return False
-
-    # --- Unusable models (no release_date to filter by age) ---
-    # o-series reasoning models don't work with the codex harness.
-    if model_id.startswith(("o1", "o3", "o4")):
-        return False
-
-    return True
-
-
-def _cost_tier(cost_input: float | None) -> str | None:
-    """Map input cost ($/M tokens) to a human-readable tier."""
-    if cost_input is None:
-        return None
-    if cost_input < 1.0:
-        return "$"
-    if cost_input < 5.0:
-        return "$$"
-    return "$$$"
+def _sync_catalog_bindings() -> None:
+    _catalog.load_merged_aliases = load_merged_aliases
+    _catalog.load_discovered_models = load_discovered_models
+    _catalog.refresh_models_cache = refresh_models_cache
+    _catalog.resolve_model = resolve_model
+    _catalog.route_model = route_model
 
 
 def models_list_sync(payload: ModelsListInput) -> ModelsListOutput:
-    root = _repo_root(payload.repo_root)
-    aliases = load_merged_aliases(repo_root=root)
-    discovered = load_discovered_models()
-
-    aliases_by_model_id: dict[str, list[AliasEntry]] = {}
-    for alias in aliases:
-        aliases_by_model_id.setdefault(str(alias.model_id), []).append(alias)
-
-    discovered_by_model_id = {model.id: model for model in discovered}
-    model_ids = set(aliases_by_model_id) | set(discovered_by_model_id)
-
-    merged_models = [
-        _build_catalog_model(
-            model_id=model_id,
-            discovered=discovered_by_model_id.get(model_id),
-            aliases=aliases_by_model_id.get(model_id, []),
-        )
-        for model_id in sorted(model_ids)
-    ]
-    if not payload.all:
-        all_model_ids = {str(model.model_id) for model in merged_models}
-        merged_models = [
-            model for model in merged_models if _is_default_visible(model, all_model_ids)
-        ]
-    return ModelsListOutput(models=tuple(merged_models))
+    _sync_catalog_bindings()
+    return _catalog.models_list_sync(payload)
 
 
 def models_show_sync(payload: ModelsShowInput) -> CatalogModel:
-    model_name = payload.model.strip()
-    if not model_name:
-        raise ValueError("Model identifier must not be empty.")
-
-    root = _repo_root(payload.repo_root)
-    aliases = load_merged_aliases(repo_root=root)
-    discovered = load_discovered_models()
-    discovered_by_model_id = {model.id: model for model in discovered}
-
-    by_alias = {entry.alias: entry for entry in aliases}
-    resolved_alias = by_alias.get(model_name)
-    if resolved_alias is not None:
-        target_model_id = str(resolved_alias.model_id)
-        model_aliases = [entry for entry in aliases if str(entry.model_id) == target_model_id]
-        return _build_catalog_model(
-            model_id=target_model_id,
-            discovered=discovered_by_model_id.get(target_model_id),
-            aliases=model_aliases,
-        )
-
-    discovered_match = discovered_by_model_id.get(model_name)
-    if discovered_match is not None:
-        model_aliases = [entry for entry in aliases if str(entry.model_id) == model_name]
-        return _build_catalog_model(
-            model_id=model_name,
-            discovered=discovered_match,
-            aliases=model_aliases,
-        )
-
-    resolved = resolve_model(model_name, repo_root=root)
-    target_model_id = str(resolved.model_id)
-    model_aliases = [entry for entry in aliases if str(entry.model_id) == target_model_id]
-    return _build_catalog_model(
-        model_id=target_model_id,
-        discovered=discovered_by_model_id.get(target_model_id),
-        aliases=model_aliases,
-    )
+    _sync_catalog_bindings()
+    return _catalog.models_show_sync(payload)
 
 
 def models_refresh_sync(payload: ModelsRefreshInput) -> ModelsRefreshOutput:
-    _ = payload
-    refreshed = refresh_models_cache()
-    return ModelsRefreshOutput(refreshed=len(refreshed))
+    _sync_catalog_bindings()
+    return _catalog.models_refresh_sync(payload)
 
 
 async def models_list(payload: ModelsListInput) -> ModelsListOutput:
-    return models_list_sync(payload)
+    _sync_catalog_bindings()
+    return await _catalog.models_list(payload)
 
 
 async def models_show(payload: ModelsShowInput) -> CatalogModel:
-    return models_show_sync(payload)
+    _sync_catalog_bindings()
+    return await _catalog.models_show(payload)
 
 
 async def models_refresh(payload: ModelsRefreshInput) -> ModelsRefreshOutput:
-    return models_refresh_sync(payload)
+    _sync_catalog_bindings()
+    return await _catalog.models_refresh(payload)
+
+
+__all__ = [
+    "CatalogModel",
+    "ModelsListInput",
+    "ModelsListOutput",
+    "ModelsRefreshInput",
+    "ModelsRefreshOutput",
+    "ModelsShowInput",
+    "load_discovered_models",
+    "load_merged_aliases",
+    "models_list",
+    "models_list_sync",
+    "models_refresh",
+    "models_refresh_sync",
+    "models_show",
+    "models_show_sync",
+    "refresh_models_cache",
+    "resolve_model",
+    "route_model",
+]

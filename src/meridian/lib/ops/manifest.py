@@ -31,19 +31,29 @@ from meridian.lib.ops.config import (
     config_show_sync,
 )
 from meridian.lib.ops.diag import DoctorInput, DoctorOutput, doctor, doctor_sync
-from meridian.lib.ops.models import (
+from meridian.lib.ops.catalog import (
     CatalogModel,
     ModelsListInput,
     ModelsListOutput,
     ModelsRefreshInput,
     ModelsRefreshOutput,
     ModelsShowInput,
+    SkillsListInput,
+    SkillsLoadInput,
+    SkillsQueryOutput,
+    SkillsSearchInput,
     models_list,
     models_list_sync,
     models_refresh,
     models_refresh_sync,
     models_show,
     models_show_sync,
+    skills_list,
+    skills_list_sync,
+    skills_load,
+    skills_load_sync,
+    skills_search,
+    skills_search_sync,
 )
 from meridian.lib.ops.report import (
     ReportCreateInput,
@@ -58,18 +68,6 @@ from meridian.lib.ops.report import (
     report_search_sync,
     report_show,
     report_show_sync,
-)
-from meridian.lib.ops.skills import (
-    SkillsListInput,
-    SkillsLoadInput,
-    SkillsQueryOutput,
-    SkillsSearchInput,
-    skills_list,
-    skills_list_sync,
-    skills_load,
-    skills_load_sync,
-    skills_search,
-    skills_search_sync,
 )
 from meridian.lib.ops.space import (
     SpaceActionOutput,
