@@ -8,32 +8,25 @@ description: Multi-agent coordination via the meridian CLI. Teaches how to spawn
 You have the `meridian` CLI for multi-agent coordination. Use it to spawn subagents, track progress, and inspect results.
 In agent mode, all CLI output is JSON.
 
-## Setup
-
-Use `meridian spawn` directly:
+## Core Loop: Spawn → Wait → Show
 
 ```bash
-# First spawn returns immediately by default.
-meridian spawn -m MODEL -p "first task"
+# Launch a spawn (returns immediately with spawn_id)
+SID=$(meridian spawn -m MODEL -p "task description" | jq -r .spawn_id)
+
+# Wait for completion (blocks, returns report by default)
+meridian spawn wait "$SID"
+
+# Inspect result details (includes report by default)
+meridian spawn show "$SID"
+meridian spawn show "$SID" --include-files   # also include file metadata
 ```
 
-Meridian stores shared coordination state under `.meridian/`. New spawns append to
-`.meridian/spawns.jsonl`, write artifacts under `.meridian/spawns/<spawn-id>/`, and
-share files through `.meridian/fs/`.
+State lives under `.meridian/` — spawns.jsonl for events, `spawns/<id>/` for artifacts, `fs/` for shared files between spawns.
 
-## Spawn Composition
-
-Compose each spawn from `model + prompt + context`:
-- `model`: model id or alias
-- `prompt`: task instructions
-- `context`: reference files, template vars, and agent profile defaults
-
-Start minimal, then add context only when needed.
+## Composing Spawns
 
 ```bash
-# Basic (meridian spawn is shorthand for meridian spawn create)
-meridian spawn -m MODEL -p "PROMPT"
-
 # With reference files (repeat -f)
 meridian spawn -m MODEL -p "Implement fix" \
   -f plans/step.md \
@@ -52,104 +45,33 @@ meridian spawn -m MODEL \
 meridian spawn --dry-run -m MODEL -p "Plan the migration"
 ```
 
-## Key Flags (`meridian spawn`)
+Start minimal, then add context only when needed. Use `meridian models list` to discover available models.
 
-| Flag | Purpose | Notes |
-| --- | --- | --- |
-| `--model`, `-m` | Select model id or alias | Optional if agent/defaults provide one |
-| `--prompt`, `-p` | Prompt text | Primary spawn instructions |
-| `--file`, `-f` | Add reference files | Repeatable; content included in prompt context |
-| `--agent`, `-a` | Use an agent profile | Applies profile model/skills/sandbox defaults |
-| `--prompt-var` | Template vars (`KEY=VALUE`) | Repeatable; replaces `{{KEY}}` in prompt |
-| `--foreground` | Run spawn in foreground | Spawns run in background by default; use this to block |
-| `--dry-run` | Preview composed spawn | No harness execution |
-| `--permission` | Override permission tier | Example: `read-only`, `workspace-write` |
-
-## Parallel Execution
+## Parallel Spawns
 
 Launch independent spawns in the background, then wait for all:
+
 ```bash
-# Each spawn returns JSON with a spawn_id field
-meridian spawn -m MODEL -p "Step A"
-meridian spawn -m MODEL -p "Step B"
-
-# Wait for specific spawns by ID
-meridian spawn wait SPAWN_ID_A SPAWN_ID_B
-
-# Or extract spawn_id from JSON output programmatically
-SID=$(meridian spawn -m MODEL -p "Task" | jq -r .spawn_id)
-meridian spawn wait "$SID"
+SID_A=$(meridian spawn -m MODEL -p "Step A" | jq -r .spawn_id)
+SID_B=$(meridian spawn -m MODEL -p "Step B" | jq -r .spawn_id)
+meridian spawn wait "$SID_A" "$SID_B"
 ```
 
-## Shared Filesystem
+## Checking Status
 
-Meridian exposes the shared filesystem at `$MERIDIAN_FS_DIR`. Use it to pass data between spawns:
-
-```bash
-# Write output for other spawns to consume
-mkdir -p "$MERIDIAN_FS_DIR"
-echo "result data" > "$MERIDIAN_FS_DIR/step-a-output.txt"
-
-# Read another spawn's output
-cat "$MERIDIAN_FS_DIR/step-a-output.txt"
-```
-
-Agents organize this directory however they want — meridian provides the container only.
-
-## Spawn Inspection
+Always track spawns by their ID. Use `spawn list` only for situational awareness.
 
 ```bash
-# List spawns
+# What's currently running?
 meridian spawn list
-meridian spawn list --failed
-meridian spawn list --model MODEL
-meridian spawn list --status STATUS
 
-# Inspect one spawn
-meridian spawn show SPAWN_ID
-meridian spawn show SPAWN_ID --report
-meridian spawn show SPAWN_ID --include-files
+# Quick overview (all active + most recent 5)
+meridian spawn list --all
 
-# Wait for completion
-meridian spawn wait SPAWN_ID
-meridian spawn wait SPAWN_ID
-
-# Continue an existing spawn
-meridian spawn --continue SPAWN_ID -p "Follow up instruction"
-meridian spawn --continue SPAWN_ID --fork -p "Try alternate approach"
-
-# Cancel a running spawn
-meridian spawn cancel SPAWN_ID
-
-# Aggregate stats
-meridian spawn stats
-meridian spawn stats --session ID
+# If output says there are more, increase the limit
+meridian spawn list --all --limit 20
 ```
 
-## Debugging & Logs
+## Beyond the Basics
 
-Each spawn writes logs to `.meridian/spawns/<spawn-id>/`. The `log_path` field in `spawn show` output points to the stderr log:
-
-```bash
-# Get the log path for a spawn
-meridian spawn show SPAWN_ID
-# → look for "log_path" in the JSON output
-
-# Read the full harness stderr log directly
-cat ".meridian/spawns/SPAWN_ID/stderr.log"
-
-# Tail a running spawn's log
-tail -f ".meridian/spawns/SPAWN_ID/stderr.log"
-```
-
-The stderr log contains the full harness session trace — every tool call, exec command, and reasoning step. Use it to diagnose stuck, slow, or failed spawns.
-## Model Selection
-
-Use model discovery commands before creating spawns:
-
-```bash
-meridian models list
-meridian models show MODEL
-```
-
-The CLI routes each model to the correct harness automatically.
+For continue/fork, cancel, stats, debugging logs, shared filesystem, model discovery, and permission tiers, see [`resources/advanced-commands.md`](resources/advanced-commands.md).

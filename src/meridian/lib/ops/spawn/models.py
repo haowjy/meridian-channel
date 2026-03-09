@@ -159,6 +159,8 @@ class SpawnListOutput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     spawns: tuple[SpawnListEntry, ...]
+    total_count: int | None = None
+    truncated: bool = False
 
     def format_text(self, ctx: FormatContext | None = None) -> str:
         """Columnar list of spawns for text output mode."""
@@ -168,7 +170,10 @@ class SpawnListOutput(BaseModel):
 
         rows = [["spawn", "status", "model", "duration", "cost"]]
         rows.extend(entry.as_row() for entry in self.spawns)
-        return tabular(rows)
+        result = tabular(rows)
+        if self.truncated and self.total_count is not None:
+            result += f"\n({len(self.spawns)} of {self.total_count} shown — use --limit to see more)"
+        return result
 
 
 class SpawnShowInput(BaseModel):

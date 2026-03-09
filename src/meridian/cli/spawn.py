@@ -196,6 +196,8 @@ def _spawn_list(
     normalized_view = view.strip().lower() if view.strip() else "active"
     if all_spawns:
         normalized_view = "all"
+        if limit == 20:  # user didn't override the default
+            limit = 5
     view_map: dict[str, tuple[SpawnStatus, ...]] = {
         "active": ("queued", "running"),
         "all": (),
@@ -238,8 +240,11 @@ def _spawn_show(
     spawn_id: str,
     report: Annotated[
         bool,
-        Parameter(name="--report", help="Include spawn report content in output."),
-    ] = False,
+        Parameter(
+            name="--report",
+            help="Include full spawn report in output (default: on). Use --no-report to omit.",
+        ),
+    ] = True,
     include_files: Annotated[
         bool,
         Parameter(name="--include-files", help="Include spawn file metadata in output."),

@@ -124,10 +124,15 @@ def spawn_list_sync(
     _ = (ctx, sink)
     repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
     spawns = list(reversed(spawn_store.list_spawns(_state_root(repo_root))))
+
+    # When statuses is empty tuple, show all statuses but cap intelligently:
+    # always include all active spawns, pad with recent non-active up to limit.
+    show_all = payload.statuses == ()
+
     if payload.statuses:
         wanted_statuses = set(payload.statuses)
         spawns = [row for row in spawns if row.status in wanted_statuses]
-    elif payload.statuses == ():
+    elif show_all:
         pass
     elif payload.status is not None:
         spawns = [row for row in spawns if row.status == payload.status]
@@ -139,7 +144,20 @@ def spawn_list_sync(
         wanted_model = payload.model.strip()
         spawns = [row for row in spawns if row.model == wanted_model]
 
+    total_count = len(spawns)
     limit = payload.limit if payload.limit > 0 else 20
+
+    if show_all:
+        # Always include all active spawns, fill remaining slots with recent non-active.
+        active = [row for row in spawns if row.status in {"queued", "running"}]
+        non_active = [row for row in spawns if row.status not in {"queued", "running"}]
+        effective_limit = max(len(active), limit)
+        remaining = effective_limit - len(active)
+        selected = active + non_active[:remaining]
+    else:
+        selected = spawns[:limit]
+
+    truncated = total_count > len(selected)
     return SpawnListOutput(
         spawns=tuple(
             SpawnListEntry(
@@ -149,8 +167,10 @@ def spawn_list_sync(
                 duration_secs=row.duration_secs,
                 cost_usd=row.total_cost_usd,
             )
-            for row in spawns[:limit]
-        )
+            for row in selected
+        ),
+        total_count=total_count if truncated else None,
+        truncated=truncated,
     )
 
 
