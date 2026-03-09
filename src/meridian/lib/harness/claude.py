@@ -1,5 +1,7 @@
 """Claude CLI harness adapter."""
 
+import json
+import logging
 from pathlib import Path
 from typing import ClassVar, cast
 from uuid import uuid4
@@ -33,6 +35,60 @@ from meridian.lib.harness.adapter import (
 from meridian.lib.harness.launch_types import PromptPolicy, SessionSeed
 from meridian.lib.safety.permissions import PermissionConfig
 from meridian.lib.core.types import HarnessId, SpawnId
+
+logger = logging.getLogger(__name__)
+
+
+def _project_slug(repo_root: Path) -> str:
+    return str(repo_root.resolve()).replace("/", "-")
+
+
+def _claude_project_dir(repo_root: Path) -> Path:
+    return Path.home() / ".claude" / "projects" / _project_slug(repo_root)
+
+
+def _read_claude_session_id(path: Path) -> str | None:
+    try:
+        with path.open("r", encoding="utf-8", errors="ignore") as handle:
+            first_line = handle.readline().strip()
+    except OSError:
+        logger.debug("Failed to read Claude session file %s", path, exc_info=True)
+        return None
+    if not first_line:
+        return None
+    try:
+        payload = json.loads(first_line)
+    except json.JSONDecodeError:
+        return path.stem.strip() or None
+    if not isinstance(payload, dict):
+        return path.stem.strip() or None
+    payload_dict = cast("dict[str, object]", payload)
+    session_id = payload_dict.get("sessionId")
+    if isinstance(session_id, str) and session_id.strip():
+        return session_id.strip()
+    return path.stem.strip() or None
+
+
+def _detect_primary_session_id(repo_root: Path, started_at_epoch: float) -> str | None:
+    project_dir = _claude_project_dir(repo_root)
+    if not project_dir.is_dir():
+        return None
+
+    candidates: list[tuple[float, Path]] = []
+    for candidate in project_dir.glob("*.jsonl"):
+        try:
+            modified_at = candidate.stat().st_mtime
+        except OSError:
+            continue
+        if modified_at + 1 < started_at_epoch:
+            continue
+        candidates.append((modified_at, candidate))
+
+    for _, candidate in sorted(candidates, key=lambda item: item[0], reverse=True):
+        resolved = _read_claude_session_id(candidate)
+        if resolved:
+            return resolved
+    return None
 
 
 def _extract_passthrough_session_id(args: tuple[str, ...]) -> str:
@@ -251,9 +307,18 @@ class ClaudeAdapter(BaseHarnessAdapter):
         # explicitly through Meridian's --append-system-prompt path.
         return PromptPolicy(prompt=prompt, skill_injection=skill_injection)
 
+    def detect_primary_session_id(
+        self,
+        *,
+        repo_root: Path,
+        started_at_epoch: float,
+        started_at_local_iso: str | None,
+    ) -> str | None:
+        _ = started_at_local_iso
+        return _detect_primary_session_id(repo_root, started_at_epoch)
+
     def owns_untracked_session(self, *, repo_root: Path, session_ref: str) -> bool:
-        slug = str(repo_root.resolve()).replace("/", "-")
-        session_file = Path.home() / ".claude" / "projects" / slug / f"{session_ref}.jsonl"
+        session_file = _claude_project_dir(repo_root) / f"{session_ref}.jsonl"
         return session_file.is_file()
 
     def extract_tasks(self, event: StreamEvent) -> list[dict[str, str]] | None:

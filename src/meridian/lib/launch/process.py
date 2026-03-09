@@ -3,29 +3,37 @@
 import json
 import logging
 import os
+import pty
+import select
 import signal
 import subprocess
+import sys
+import termios
 import time
+import tty
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.config.settings import MeridianConfig, load_config
-from meridian.lib.core.types import HarnessId
+from meridian.lib.core.types import HarnessId, SpawnId
 from meridian.lib.harness.materialize import cleanup_materialized
 from meridian.lib.harness.registry import HarnessRegistry
 from meridian.lib.state import spawn_store
+from meridian.lib.state.artifact_store import LocalStore, make_artifact_key
 from meridian.lib.state.atomic import atomic_write_text
-from meridian.lib.state.paths import resolve_state_paths
+from meridian.lib.state.paths import resolve_spawn_log_dir, resolve_state_paths
 from meridian.lib.state.session_store import start_session, stop_session, update_session_harness_id
 
 from .command import build_harness_context, build_launch_env
 from .resolve import resolve_primary_session_metadata
+from .session_ids import extract_latest_session_id
 from .types import LaunchRequest, PrimarySessionMetadata, build_primary_prompt
 
 logger = logging.getLogger(__name__)
+_PRIMARY_OUTPUT_FILENAME = "output.jsonl"
 
 
 def active_primary_lock_path(repo_root: Path) -> Path:
@@ -165,6 +173,101 @@ def _sweep_orphaned_materializations(
         logger.debug("Orphan materialization sweep failed", exc_info=True)
 
 
+def _copy_primary_pty_output(
+    *,
+    child_pid: int,
+    master_fd: int,
+    output_log_path: Path,
+) -> int:
+    stdin_fd = sys.stdin.fileno()
+    stdout_fd = sys.stdout.fileno()
+    stdin_open = True
+    saved_tty_attrs: Any = None
+
+    output_log_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if os.isatty(stdin_fd):
+            saved_tty_attrs = termios.tcgetattr(stdin_fd)
+            tty.setraw(stdin_fd)
+
+        with output_log_path.open("wb") as output_handle:
+            while True:
+                fds = [master_fd]
+                if stdin_open:
+                    fds.append(stdin_fd)
+                ready, _, _ = select.select(fds, [], [])
+
+                if master_fd in ready:
+                    try:
+                        chunk = os.read(master_fd, 4096)
+                    except OSError:
+                        chunk = b""
+                    if not chunk:
+                        break
+                    output_handle.write(chunk)
+                    output_handle.flush()
+                    os.write(stdout_fd, chunk)
+
+                if stdin_open and stdin_fd in ready:
+                    data = os.read(stdin_fd, 1024)
+                    if not data:
+                        stdin_open = False
+                    else:
+                        os.write(master_fd, data)
+    finally:
+        if saved_tty_attrs is not None:
+            termios.tcsetattr(stdin_fd, termios.TCSADRAIN, saved_tty_attrs)
+
+    _, status = os.waitpid(child_pid, 0)
+    return os.waitstatus_to_exitcode(status)
+
+
+def _run_primary_process_with_capture(
+    *,
+    command: tuple[str, ...],
+    cwd: Path,
+    env: dict[str, str],
+    output_log_path: Path | None,
+) -> tuple[int, int | None]:
+    if output_log_path is None or not sys.stdin.isatty() or not sys.stdout.isatty():
+        process = subprocess.Popen(
+            command,
+            cwd=cwd,
+            env=env,
+            text=True,
+        )
+        try:
+            return process.wait(), process.pid
+        except KeyboardInterrupt:
+            if process.poll() is None:
+                process.send_signal(signal.SIGINT)
+                return process.wait(), process.pid
+            return 130, process.pid
+
+    child_pid, master_fd = pty.fork()
+    if child_pid == 0:
+        try:
+            os.chdir(cwd)
+            os.execvpe(command[0], command, env)
+        except FileNotFoundError:
+            os._exit(127)
+        except Exception:
+            os._exit(1)
+
+    try:
+        exit_code = _copy_primary_pty_output(
+            child_pid=child_pid,
+            master_fd=master_fd,
+            output_log_path=output_log_path,
+        )
+        return exit_code, child_pid
+    finally:
+        try:
+            os.close(master_fd)
+        except OSError:
+            pass
+
+
 def prepare_launch_context(
     repo_root: Path,
     request: LaunchRequest,
@@ -223,11 +326,12 @@ def run_harness_process(
 
     command: tuple[str, ...] = ()
     chat_id: str | None = None
-    primary_spawn_id: str | None = None
+    primary_spawn_id: SpawnId | None = None
     primary_started = 0.0
     primary_started_epoch = 0.0
     primary_started_local_iso: str | None = None
     resolved_harness_session_id = ctx.seed_harness_session_id
+    artifacts = LocalStore(root_dir=resolve_state_paths(repo_root).artifacts_dir)
 
     exit_code = 2
     try:
@@ -246,16 +350,14 @@ def run_harness_process(
             skills=ctx.session_metadata.skills,
             skill_paths=ctx.session_metadata.skill_paths,
         )
-        primary_spawn_id = str(
-            spawn_store.start_spawn(
-                ctx.state_root,
-                chat_id=chat_id,
-                model=ctx.session_metadata.model,
-                agent=ctx.session_metadata.agent,
-                harness=ctx.session_metadata.harness,
-                kind="primary",
-                prompt=ctx.prompt,
-            )
+        primary_spawn_id = spawn_store.start_spawn(
+            ctx.state_root,
+            chat_id=chat_id,
+            model=ctx.session_metadata.model,
+            agent=ctx.session_metadata.agent,
+            harness=ctx.session_metadata.harness,
+            kind="primary",
+            prompt=ctx.prompt,
         )
         primary_started = time.monotonic()
         primary_started_epoch = time.time()
@@ -278,22 +380,19 @@ def run_harness_process(
             harness_context=harness_context,
         )
         _write_lock(path=ctx.lock_path, command=command, child_pid=None)
-        process = subprocess.Popen(
-            command,
+        output_log_path = resolve_spawn_log_dir(repo_root, primary_spawn_id) / _PRIMARY_OUTPUT_FILENAME
+        exit_code, child_pid = _run_primary_process_with_capture(
+            command=command,
             cwd=repo_root,
             env=child_env,
-            text=True,
+            output_log_path=output_log_path,
         )
-        _write_lock(path=ctx.lock_path, command=command, child_pid=process.pid)
-
-        try:
-            exit_code = process.wait()
-        except KeyboardInterrupt:
-            if process.poll() is None:
-                process.send_signal(signal.SIGINT)
-                exit_code = process.wait()
-            else:
-                exit_code = 130
+        _write_lock(path=ctx.lock_path, command=command, child_pid=child_pid)
+        if output_log_path.exists():
+            artifacts.put(
+                make_artifact_key(primary_spawn_id, _PRIMARY_OUTPUT_FILENAME),
+                output_log_path.read_bytes(),
+            )
     except FileNotFoundError:
         logger.debug("Harness command not found", exc_info=True)
         exit_code = 2
@@ -312,9 +411,13 @@ def run_harness_process(
         if chat_id is not None:
             try:
                 observed_harness_session_id = None
+                adapter = harness_registry.get(HarnessId(ctx.session_metadata.harness))
                 if primary_started_epoch > 0.0:
-                    adapter = harness_registry.get(HarnessId(ctx.session_metadata.harness))
-                    observed_harness_session_id = adapter.detect_primary_session_id(
+                    observed_harness_session_id = extract_latest_session_id(
+                        adapter=adapter,
+                        current_session_id=resolved_harness_session_id,
+                        artifacts=artifacts,
+                        spawn_id=primary_spawn_id,
                         repo_root=repo_root,
                         started_at_epoch=primary_started_epoch,
                         started_at_local_iso=primary_started_local_iso,

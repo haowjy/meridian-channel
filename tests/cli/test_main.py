@@ -8,6 +8,21 @@ from meridian.lib.launch.types import LaunchResult
 main_module = importlib.import_module("meridian.cli.main")
 
 
+def test_primary_launch_output_formats_resume_hint() -> None:
+    payload = main_module.PrimaryLaunchOutput(
+        message="Session resumed.",
+        exit_code=0,
+        lock_path="/tmp/.meridian/active-primary.lock",
+        continue_ref="session-2",
+        resume_command="meridian --continue session-2",
+    )
+
+    assert payload.format_text() == (
+        "To continue with meridian:\n"
+        "meridian --continue session-2"
+    )
+
+
 def test_run_primary_launch_allows_harness_override_on_continue(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

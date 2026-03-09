@@ -23,6 +23,7 @@ class SessionRecord(BaseModel):
     chat_id: str
     harness: str
     harness_session_id: str
+    harness_session_ids: tuple[str, ...]
     model: str
     agent: str
     agent_path: str
@@ -142,6 +143,7 @@ def _record_from_start_event(event: SessionStartEvent) -> SessionRecord:
         chat_id=event.chat_id,
         harness=event.harness,
         harness_session_id=event.harness_session_id,
+        harness_session_ids=(event.harness_session_id,),
         model=event.model,
         agent=event.agent,
         agent_path=event.agent_path,
@@ -175,8 +177,14 @@ def _records_by_session(state_root: Path) -> dict[str, SessionRecord]:
         existing = records.get(event.chat_id)
         if existing is None:
             continue
+        session_ids = existing.harness_session_ids
+        if event.harness_session_id not in session_ids:
+            session_ids = (*session_ids, event.harness_session_id)
         records[event.chat_id] = existing.model_copy(
-            update={"harness_session_id": event.harness_session_id}
+            update={
+                "harness_session_id": event.harness_session_id,
+                "harness_session_ids": session_ids,
+            }
         )
     return records
 
@@ -307,7 +315,7 @@ def resolve_session_ref(state_root: Path, ref: str) -> SessionRecord | None:
 
     records = _records_by_session(state_root)
     matches = [
-        record for record in records.values() if record.harness_session_id == normalized
+        record for record in records.values() if normalized in record.harness_session_ids
     ]
     if not matches:
         return None
@@ -321,6 +329,15 @@ def get_session_harness_id(state_root: Path, chat_id: str) -> str | None:
     if record is None:
         return None
     return record.harness_session_id
+
+
+def get_session_harness_ids(state_root: Path, chat_id: str) -> tuple[str, ...]:
+    """Return all harness session IDs observed for a meridian chat/session ID."""
+
+    record = _records_by_session(state_root).get(chat_id)
+    if record is None:
+        return ()
+    return record.harness_session_ids
 
 
 def collect_active_chat_ids(repo_root: Path) -> frozenset[str] | None:

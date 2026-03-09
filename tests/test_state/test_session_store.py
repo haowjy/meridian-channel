@@ -1,6 +1,13 @@
 import json
 
-from meridian.lib.state.session_store import cleanup_stale_sessions, start_session, stop_session
+from meridian.lib.state.session_store import (
+    cleanup_stale_sessions,
+    get_session_harness_ids,
+    resolve_session_ref,
+    start_session,
+    stop_session,
+    update_session_harness_id,
+)
 
 
 def _state_root(tmp_path):
@@ -58,3 +65,30 @@ def test_cleanup_stale_sessions_removes_dead_locks_and_writes_stop_events(tmp_pa
     assert isinstance(stop_rows[0]["stopped_at"], str)
 
     stop_session(state_root, live)
+
+
+def test_session_record_preserves_harness_session_history(tmp_path):
+    state_root = _state_root(tmp_path)
+    chat_id = start_session(
+        state_root,
+        harness="claude",
+        harness_session_id="session-1",
+        model="claude-opus-4-6",
+    )
+
+    update_session_harness_id(state_root, chat_id, "session-2")
+    update_session_harness_id(state_root, chat_id, "session-3")
+    update_session_harness_id(state_root, chat_id, "session-2")
+
+    record = resolve_session_ref(state_root, "session-1")
+    assert record is not None
+    assert record.chat_id == chat_id
+    assert record.harness_session_id == "session-2"
+    assert record.harness_session_ids == ("session-1", "session-2", "session-3")
+    assert get_session_harness_ids(state_root, chat_id) == ("session-1", "session-2", "session-3")
+
+    latest_record = resolve_session_ref(state_root, "session-3")
+    assert latest_record is not None
+    assert latest_record.chat_id == chat_id
+
+    stop_session(state_root, chat_id)

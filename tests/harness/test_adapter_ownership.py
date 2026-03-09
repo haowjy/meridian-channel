@@ -28,6 +28,48 @@ def test_claude_adapter_owns_native_layout_and_prompt_policy() -> None:
     assert policy.skill_injection_mode == "append-system-prompt"
 
 
+def test_claude_adapter_detects_latest_project_session(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    fake_home = tmp_path / "home"
+    monkeypatch.setenv("HOME", fake_home.as_posix())
+
+    old_session_id = str(uuid4())
+    new_session_id = str(uuid4())
+    project_dir = fake_home / ".claude" / "projects" / str(repo_root.resolve()).replace("/", "-")
+    project_dir.mkdir(parents=True)
+
+    old_path = project_dir / f"{old_session_id}.jsonl"
+    old_path.write_text(
+        json.dumps({"type": "agent-setting", "sessionId": old_session_id}) + "\n",
+        encoding="utf-8",
+    )
+    new_path = project_dir / f"{new_session_id}.jsonl"
+    new_path.write_text(
+        json.dumps({"type": "agent-setting", "sessionId": new_session_id}) + "\n",
+        encoding="utf-8",
+    )
+
+    now = time.time()
+    os.utime(old_path, (now - 10, now - 10))
+    os.utime(new_path, (now, now))
+
+    adapter = ClaudeAdapter()
+    assert (
+        adapter.detect_primary_session_id(
+            repo_root=repo_root,
+            started_at_epoch=now - 1,
+            started_at_local_iso=None,
+        )
+        == new_session_id
+    )
+    assert adapter.owns_untracked_session(repo_root=repo_root, session_ref=new_session_id) is True
+    assert infer_harness_from_untracked_session_ref(repo_root, new_session_id) == "claude"
+
+
 def test_codex_adapter_owns_session_detection(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

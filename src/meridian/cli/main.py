@@ -3,6 +3,7 @@
 
 import logging
 import os
+import shlex
 import sys
 from collections.abc import Sequence
 from contextvars import ContextVar
@@ -30,6 +31,7 @@ from meridian.lib.harness.materialize import cleanup_materialized
 from meridian.lib.harness.registry import get_default_harness_registry
 from meridian.lib.harness.session_detection import infer_harness_from_untracked_session_ref
 from meridian.lib.launch import LaunchRequest, cleanup_orphaned_locks, launch_primary
+from meridian.lib.core.util import FormatContext
 from meridian.lib.ops.spawn.api import SpawnActionOutput
 from meridian.lib.state.paths import resolve_state_paths
 from meridian.lib.state.session_store import cleanup_stale_sessions, resolve_session_ref
@@ -82,6 +84,22 @@ class PrimaryLaunchOutput(BaseModel):
     continue_ref: str | None = None
     resume_command: str | None = None
     warning: str | None = None
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        _ = ctx
+        lines: list[str] = []
+        if self.warning:
+            lines.append(f"warning: {self.warning}")
+        if self.resume_command:
+            lines.append("To continue with meridian:")
+            lines.append(self.resume_command)
+            return "\n".join(lines)
+        if self.command:
+            lines.append(self.message)
+            lines.append(shlex.join(self.command))
+            return "\n".join(lines)
+        lines.append(self.message)
+        return "\n".join(lines)
 
 
 class _ResolvedContinueTarget(BaseModel):

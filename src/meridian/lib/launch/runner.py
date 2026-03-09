@@ -21,6 +21,7 @@ from .extract import (
     enrich_finalize,
     reset_finalize_attempt_artifacts,
 )
+from .session_ids import extract_latest_session_id
 from meridian.lib.harness.adapter import (
     PermissionResolver,
     SpawnParams,
@@ -627,9 +628,13 @@ async def execute_with_finalization(
                 secrets=secrets,
             )
             extracted_harness_session_id = (
-                extracted.harness_session_id.strip()
-                if extracted.harness_session_id is not None
-                else ""
+                extract_latest_session_id(
+                    adapter=harness,
+                    current_session_id=observed_harness_session_id,
+                    artifacts=artifacts,
+                    spawn_id=run.spawn_id,
+                )
+                or ""
             )
             if (
                 extracted_harness_session_id
