@@ -32,7 +32,7 @@ from meridian.lib.harness.session_detection import infer_harness_from_untracked_
 from meridian.lib.launch import LaunchRequest, cleanup_orphaned_locks, launch_primary
 from meridian.lib.ops.spawn.api import SpawnActionOutput
 from meridian.lib.state.paths import resolve_state_paths
-from meridian.lib.state.session_store import cleanup_stale_sessions, get_last_session, resolve_session_ref
+from meridian.lib.state.session_store import cleanup_stale_sessions, resolve_session_ref
 from meridian.server.main import run_server
 
 logger = logging.getLogger(__name__)
@@ -479,17 +479,14 @@ def _run_primary_launch(
         if agent is not None and agent.strip():
             raise ValueError("Cannot combine --continue with --agent.")
         resolved_continue = _resolve_continue_target(repo_root=repo_root, continue_ref=resume_target)
-        if (
-            resolved_continue.tracked
-            and explicit_harness is not None
-            and resolved_continue.harness is not None
-            and explicit_harness != resolved_continue.harness
-        ):
-            raise ValueError(
-                "Cannot override --harness for a tracked session; resume it with its stored harness."
-            )
         continue_harness_session_id = resolved_continue.harness_session_id
         continue_harness = explicit_harness or resolved_continue.harness
+        if continue_harness is None:
+            raise ValueError(
+                f"Session '{resolved_continue.harness_session_id or resume_target}' "
+                "not recognized by any harness. "
+                "Use --harness to specify which harness owns this session."
+            )
         continue_warning = resolved_continue.warning
         fresh = False
 
@@ -546,33 +543,42 @@ def _resolve_continue_target(
         raise ValueError("--continue requires a non-empty session reference.")
 
     state_root = resolve_state_paths(repo_root).root_dir
+    registry = get_default_harness_registry()
+
+    # Look up what our session store says (hint, not authority).
     session = resolve_session_ref(state_root, normalized)
-    if session is not None:
-        return _ResolvedContinueTarget(
-            harness_session_id=session.harness_session_id.strip() or None,
-            harness=(session.harness.strip() or None),
-            tracked=True,
-        )
+    stored_harness_session_id = (
+        session.harness_session_id.strip() or None if session is not None else None
+    )
+    stored_harness = (
+        session.harness.strip() or None if session is not None else None
+    )
+    # The actual session ID to resume — either what the store recorded or the
+    # raw ref the user gave us.
+    session_id = stored_harness_session_id or normalized
 
-    if _looks_like_chat_alias(normalized):
-        raise ValueError(f"Session '{normalized}' not found.")
-
-    inferred_harness = infer_harness_from_untracked_session_ref(
+    # Ask adapters who actually owns this session (ground truth).
+    verified_harness = infer_harness_from_untracked_session_ref(
         repo_root,
-        normalized,
-        registry=get_default_harness_registry(),
+        session_id,
+        registry=registry,
     )
-    last_session = get_last_session(state_root)
+
+    # Resolution order: adapter verification > stored metadata.
+    # If nobody recognizes the session, return harness=None and let
+    # the caller decide — it may have an explicit --harness override.
+    harness = verified_harness or stored_harness
+
+    warning = None if session is not None else (
+        f"Session '{normalized}' is not tracked yet; resuming with the provided harness session id."
+    )
     return _ResolvedContinueTarget(
-        harness_session_id=normalized,
-        harness=inferred_harness or (last_session.harness.strip() or None if last_session is not None else None),
-        tracked=False,
-        warning=f"Session '{normalized}' is not tracked yet; resuming with the provided harness session id.",
+        harness_session_id=session_id,
+        harness=harness,
+        tracked=session is not None,
+        warning=warning,
     )
 
-
-def _looks_like_chat_alias(value: str) -> bool:
-    return value.startswith("c") and value[1:].isdigit()
 
 
 @app.command(name="init")

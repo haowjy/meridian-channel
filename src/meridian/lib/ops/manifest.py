@@ -381,7 +381,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
     ),
     _spec(
         name="spawn.list",
-        description="List recent spawns. Filter by --status or --model.",
+        description="List recent spawns (default: active). Filter by --view, --status, or --model.",
         handler=spawn_list,
         sync_handler=spawn_list_sync,
         input_type=SpawnListInput,

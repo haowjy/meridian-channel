@@ -18,15 +18,9 @@ tmp/
 err
 out
 
-.claude/agents/__*-c[0-9]*
-.claude/skills/__*-c[0-9]*
-.agents/agents/__*-c[0-9]*
-.codex/agents/__*-c[0-9]*
-.agents/skills/__*-c[0-9]*
-.codex/skills/__*-c[0-9]*
-.opencode/agents/__*-c[0-9]*
-.opencode/skills/__*-c[0-9]*
 .agents/agents/__meridian--*
 .codex/agents/__meridian--*
-.agents/skills/__meridian--*
 .codex/skills/__meridian--*
+.agents/skills/__meridian--*
+.claude/agents/__meridian--*
+.claude/skills/__meridian--*

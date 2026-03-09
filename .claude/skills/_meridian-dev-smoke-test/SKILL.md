@@ -59,6 +59,7 @@ uv run meridian spawn list
 ```
 
 This is the default path for quick validation after normal CLI edits.
+Note: `uv run meridian spawn list` now defaults to the active view (queued + running). Use `--all` or `--view completed` when your smoke test needs succeeded history.
 
 ### 2. Testing Against a Scratch Repo
 
@@ -128,6 +129,7 @@ uv run meridian --json spawn create --dry-run -p "test"
 uv run meridian --json models list
 uv run meridian --json config show
 uv run meridian spawn list
+uv run meridian spawn list --all
 MERIDIAN_DEPTH=1 uv run meridian --help
 ```
 

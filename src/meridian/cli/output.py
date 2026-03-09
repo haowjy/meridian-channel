@@ -104,15 +104,9 @@ class JsonSink:
         self._stderr = sys.stderr if stderr is None else stderr
         self._result: JSONValue | str | None = None
         self._has_result = False
-        self._is_text = False
 
     def result(self, payload: Any) -> None:
-        # Prefer compact text for TextFormattable payloads — saves tokens in agent mode.
-        if isinstance(payload, TextFormattable):
-            self._result = payload.format_text(_DEFAULT_FORMAT_CTX)
-            self._is_text = True
-        else:
-            self._result = _to_json_value(payload)
+        self._result = _to_json_value(payload)
         self._has_result = True
 
     def status(self, message: str) -> None:
@@ -133,10 +127,7 @@ class JsonSink:
 
     def flush(self) -> None:
         if self._has_result:
-            if self._is_text:
-                print(self._result, file=self._stdout)
-            else:
-                print(json.dumps(self._result, sort_keys=True), file=self._stdout)
+            print(json.dumps(self._result, sort_keys=True), file=self._stdout)
         self._stdout.flush()
         self._stderr.flush()
 

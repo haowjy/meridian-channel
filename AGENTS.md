@@ -1,55 +1,60 @@
 # Development Guide: meridian-channel
 
-There are no users and there is no real user data. No need for backwards compatibility. It's okay to completely change the schema to get it into the right shape.
+No real users, no real user data. No backwards compatibility needed — completely change the schema to get it right.
 
 ## Philosophy
 
-**Meridian-Channel** is a coordination layer for multi-agent systems—not a file system, execution engine, or data warehouse.
+**Meridian-Channel** is a coordination layer for multi-agent systems — not a file system, execution engine, or data warehouse.
 
-## Dev
+### Design Principles
 
-use `meridian spawn` to hand off tasks to subagents. Prefer to use gpt-5.4 right now as main implementer and reviewer. Always use reviewers who focus on different aspects of implementation and design so that we can make sure that wee are properly following plans.
-
-NEVER REVERT ANY CHANGES ALWAYS ASSUME THAT ITS SOMEONE ELSES WORK.
-
-Prefer to keep unit tests sparse and ACTUALLY USEFUL FOR KEY COMPONENTS. 
-
-Too many unit tests is bad... especially since we should be constantly refactatoring. Instead, plz follow testing plans to manually test the cli most of the time.
-
-`uv run meridian` to ACTUALLY test the cli in its current state. Please note that someone else could be doing work so it might be broken - u just have to wait - prefer SMOKE TESTS over unit tests. Since this is a tool for YOU to use, this is a perfect chance for yo to test it out yourself.
+1. **Separate Policy from Mechanism** *(Raymond, Rule of Separation)*: Harness adapters are mechanism (how to launch Claude/Codex/OpenCode). CLI commands are policy (what to do, which model, what output). Policy changes fast; mechanism stays stable. Keep them apart.
+2. **Extend, Don't Modify** *(Open/Closed)*: New harness = one adapter file + registration. New sync source = one config entry. New CLI command = one module. If a feature requires editing 10 files, the abstraction is wrong.
+3. **Knowledge in Data, Not Code** *(Raymond, Rule of Representation)*: Agent capabilities live in YAML profiles, not procedural code. State lives in JSONL events, not in-memory objects. This keeps the system inspectable and harness-agnostic.
+4. **Crash-Only Design** *(Candea & Fox)*: Every write is atomic (tmp+rename). Every read tolerates truncation. There is no "graceful shutdown" — if meridian is killed mid-spawn, the next `meridian status` detects and reports the orphaned state. Recovery IS startup.
+5. **Progressive Disclosure** *(clig.dev, Lengstorf)*: `meridian spawn "do the thing"` works with smart defaults. Power users override with `--model`, `--harness`, `--skills`. Don't force all-or-nothing configuration.
+6. **Simplest Orchestration That Works** *(Google Cloud AI patterns)*: Stay a thin coordination layer. Centralized spawn-and-report is enough. Don't build complex agent choreography until the simple model breaks.
 
 ### Core Principles
 
-1. **Harness-Agnostic**: Same `meridian` commands work across Claude, Codex, OpenCode, Cursor, **etc.** (extensible to future harnesses) for both primary agents and subagents, with per-harness adapters
-2. **Files as Authority**: All state lives in files under `.meridian/`. `spawns.jsonl` stores spawn events, `sessions.jsonl` tracks harness sessions, and `spawns/<spawn-id>/` holds per-spawn artifacts. Atomic writes via tmp+rename, `fcntl.flock` for concurrency.
-4. **Agent Profiles Own Skills**: Static skill definitions in agent profiles, loaded fresh on agent launch/resume
-5. **Minimal Constraints**: Agents organize `.meridian/fs/` however they want; Meridian provides container only
-6. **Result Over Metadata**: Spawn output answers "what happened?" — status, report, done. Input echo, null fields, and ceremony are noise. Detailed metadata (params, logs, tokens) lives in the spawn directory for those who need to dig deeper.
+1. **Harness-Agnostic**: One CLI, many runtimes. Meridian never assumes Claude, Codex, or any specific harness — adapters bridge the gap.
+2. **Files as Authority**: All state is files under `.meridian/`. No databases, no services, no hidden state. If it's not on disk, it doesn't exist. `cat spawns.jsonl | jq` should tell you everything.
+3. **Coordination, Not Control**: Meridian provides structure (spawns, sessions, skills, sync) but never dictates how agents do their work.
+4. **Idempotent Operations**: `meridian sync` twice = same result. Re-running after a crash converges to correct state, never doubles side effects.
 
 ### Architecture
 
-- **State Root**: Repo-local coordination state under `.meridian/`, including shared filesystem, spawn history, and session history.
-- **Primary Agent**: Entry point (any harness), launched via `meridian start`
-- **Agent Profile**: YAML markdown defining capabilities, tools, model, skills
-- **Skill**: Domain knowledge/capability loaded fresh on launch/resume (survives context compaction)
-- **State Layer**: `src/meridian/lib/state/paths.py` (path resolution), `src/meridian/lib/state/spawn_store.py` (spawn JSONL events), `src/meridian/lib/state/session_store.py` (session tracking)
+- **State Root**: `.meridian/` (flat layout, no nesting). JSONL event stores, per-spawn artifact dirs, shared filesystem.
+- **Harness Adapters**: `src/meridian/lib/harness/` — per-harness command building, output extraction, materialization. Adding a harness = one adapter file + registration.
+- **State Layer**: `src/meridian/lib/state/` — path resolution, spawn store, session store. Atomic writes via tmp+rename, `fcntl.flock` for concurrency.
+- **Sync**: `src/meridian/lib/sync/` — external skill/agent synchronization from local paths or git repos.
+- **Profiles & Skills**: Agent profiles (YAML markdown) define capabilities, model, and skills. Skills load fresh on launch/resume (survives compaction).
 
-## Development
+## Dev Workflow
+
+Use `meridian spawn` to hand off tasks to subagents. Prefer gpt-5.4 as main implementer and reviewer. Use reviewers who focus on different aspects (implementation correctness, design quality, extensibility) to ensure plans are properly followed.
+
+NEVER REVERT CHANGES — always assume it's someone else's work.
+
+### Testing
+
+**Prefer smoke tests over unit tests.** Too many unit tests is bad when you're constantly refactoring.
+
+- **Smoke tests** (`tests/smoke/`): Organized markdown guides for manually testing CLI behavior. See the `_meridian-dev-smoke-test` skill for methodology. Run `uv run meridian` to test the CLI in its current state.
+- **Unit tests** (~100, focused): Only for logic that's hard to smoke test — signals, concurrency, security/env sanitization, sync engine algorithms, parsing edge cases. Run with `uv run pytest-llm`.
+- **Type checking**: `uv run pyright` (must be 0 errors)
 
 ```bash
-# Install from source
-uv sync --extra dev
-
-# Run tests with token-efficient output (preferred for agents)
-uv run pytest-llm
-
-# Type check
-uv run pyright
+uv sync --extra dev      # Install from source
+uv run pytest-llm        # Unit tests (token-efficient output)
+uv run pyright            # Type check
+uv run meridian           # Smoke test the CLI directly
 ```
 
 ### Commit Checkpoints
 
-**Commit after each step that passes tests.** Don't accumulate changes across multiple steps — if a later step breaks things, you lose the ability to roll back cleanly. Each step's commit should be atomic and self-contained:
+Commit after each step that passes tests. Don't accumulate changes across multiple steps.
+
 1. Implement the step
 2. Verify tests pass
 3. Commit with a descriptive message
@@ -57,10 +62,11 @@ uv run pyright
 
 ### Never Delete Untracked Files
 
-**NEVER delete or remove untracked files without asking the user first.** Untracked files may be the user's in-progress work. If you need to clean up files you believe are stale:
-1. Ask the user before deleting
-2. If you must proceed, `git stash --include-untracked` first so the work is recoverable
-3. When reverting codex agent changes with `git checkout`, check `git status` for untracked files the agent created vs. untracked files that existed before — only clean up agent-created files after confirming with the user
+**NEVER delete or remove untracked files without asking the user first.** Untracked files may be someone else's in-progress work.
+
+1. Ask before deleting
+2. If you must proceed, `git stash --include-untracked` first
+3. When reverting agent changes, distinguish agent-created files from pre-existing untracked files
 
 ## Current Focus
 
