@@ -265,6 +265,7 @@ def _materialize_session_agent_name(
     *,
     repo_root: Path,
     harness_id: str,
+    harness_registry: Any,
     session_agent: str,
     session_agent_path: str,
     run_agent_name: str | None,
@@ -290,17 +291,23 @@ def _materialize_session_agent_name(
         skill_sources,
         normalized_harness,
         repo_root,
+        registry=harness_registry,
     )
     resolved_agent = materialized.agent_name.strip()
     return resolved_agent or None
 
 
-def _cleanup_session_materialized(*, harness_id: str, repo_root: Path) -> None:
+def _cleanup_session_materialized(
+    *,
+    harness_id: str,
+    repo_root: Path,
+    harness_registry: Any,
+) -> None:
     normalized_harness = harness_id.strip()
     if not normalized_harness:
         return
     try:
-        cleanup_materialized(normalized_harness, repo_root)
+        cleanup_materialized(normalized_harness, repo_root, registry=harness_registry)
     except Exception:
         logger.warning(
             "Failed to cleanup materialized harness resources.",
@@ -401,6 +408,7 @@ def _session_execution_context(
     session_skill_paths: tuple[str, ...],
     repo_root: Path,
     run_agent_name: str | None,
+    harness_registry: Any,
 ) -> Iterator[_SessionExecutionContext]:
     chat_id = start_session(
         state_root,
@@ -417,6 +425,7 @@ def _session_execution_context(
         materialized_agent_name = _materialize_session_agent_name(
             repo_root=repo_root,
             harness_id=harness_id,
+            harness_registry=harness_registry,
             session_agent=session_agent,
             session_agent_path=session_agent_path,
             run_agent_name=run_agent_name,
@@ -441,6 +450,7 @@ def _session_execution_context(
             _cleanup_session_materialized(
                 harness_id=harness_id,
                 repo_root=repo_root,
+                harness_registry=harness_registry,
             )
 
 
@@ -494,6 +504,7 @@ async def _execute_existing_spawn(
         session_skill_paths=session_skill_paths,
         repo_root=runtime.repo_root,
         run_agent_name=agent_name,
+        harness_registry=runtime.harness_registry,
     ) as session_context:
         return await execute_with_finalization(
             spawn,
@@ -707,6 +718,7 @@ def execute_spawn_blocking(
         session_skill_paths=prepared.skill_paths,
         repo_root=runtime.repo_root,
         run_agent_name=prepared.agent_name,
+        harness_registry=runtime.harness_registry,
     ) as session_context:
         exit_code = asyncio.run(
             execute_with_finalization(

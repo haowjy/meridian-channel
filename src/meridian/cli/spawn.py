@@ -167,6 +167,20 @@ def _spawn_list(
             help="Filter by status: queued, running, succeeded, failed, cancelled.",
         ),
     ] = None,
+    view: Annotated[
+        str,
+        Parameter(
+            name="--view",
+            help=(
+                "Preset list view: active, all, running, queued, completed, failed, cancelled. "
+                "Default: active."
+            ),
+        ),
+    ] = "active",
+    all_spawns: Annotated[
+        bool,
+        Parameter(name="--all", help="Shortcut for --view all."),
+    ] = False,
     model: Annotated[
         str | None,
         Parameter(name="--model", help="Filter by model id."),
@@ -178,18 +192,41 @@ def _spawn_list(
     ] = False,
 ) -> None:
     normalized_status: SpawnStatus | None = None
+    normalized_statuses: tuple[SpawnStatus, ...] | None = None
+    normalized_view = view.strip().lower() if view.strip() else "active"
+    if all_spawns:
+        normalized_view = "all"
+    view_map: dict[str, tuple[SpawnStatus, ...]] = {
+        "active": ("queued", "running"),
+        "all": (),
+        "running": ("running",),
+        "queued": ("queued",),
+        "completed": ("succeeded",),
+        "failed": ("failed",),
+        "cancelled": ("cancelled",),
+    }
+    if normalized_view not in view_map:
+        supported = ", ".join(view_map)
+        raise ValueError(f"Unsupported spawn view '{view}'. Supported views: {supported}")
+
     if status is not None and status.strip():
         candidate = status.strip()
         if candidate not in {"queued", "running", "succeeded", "failed", "cancelled"}:
             raise ValueError(f"Unsupported spawn status '{status}'")
         normalized_status = cast("SpawnStatus", candidate)
+    elif failed:
+        normalized_statuses = ("failed",)
+    else:
+        mapped_statuses = view_map[normalized_view]
+        normalized_statuses = mapped_statuses
 
     result = spawn_list_sync(
         SpawnListInput(
             status=normalized_status,
+            statuses=normalized_statuses,
             model=model,
             limit=limit,
-            failed=failed,
+            failed=False,
         ),
         sink=current_output_sink(),
     )

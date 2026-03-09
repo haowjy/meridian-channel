@@ -4,7 +4,31 @@ from pathlib import Path
 
 import pytest
 
+from meridian.lib.harness.adapter import BaseHarnessAdapter, HarnessCapabilities, HarnessNativeLayout
 from meridian.lib.harness.materialize import cleanup_orphaned_materializations, materialize_for_harness
+from meridian.lib.harness.registry import HarnessRegistry
+from meridian.lib.harness.session_detection import infer_harness_from_untracked_session_ref
+from meridian.lib.core.types import HarnessId
+
+
+class CustomHarnessAdapter(BaseHarnessAdapter):
+    @property
+    def id(self) -> HarnessId:
+        return HarnessId("custom")
+
+    @property
+    def capabilities(self) -> HarnessCapabilities:
+        return HarnessCapabilities()
+
+    def native_layout(self) -> HarnessNativeLayout | None:
+        return HarnessNativeLayout(
+            agents=(".custom/agents",),
+            skills=(".custom/skills",),
+        )
+
+    def owns_untracked_session(self, *, repo_root: Path, session_ref: str) -> bool:
+        _ = repo_root
+        return session_ref == "custom-session"
 
 
 @pytest.fixture
@@ -109,3 +133,49 @@ def test_materialized_skill_forces_disable_model_invocation(claude_layout: Path)
     ).read_text(encoding="utf-8")
     assert "name: __meridian--orchestrate" in skill_text
     assert "disable-model-invocation: true" in skill_text
+
+
+def test_materialize_and_cleanup_use_injected_registry(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    source_skill_dir = repo_root / "skills-src" / "orchestrate"
+    source_skill_dir.mkdir(parents=True)
+    (source_skill_dir / "SKILL.md").write_text("---\nname: orchestrate\n---\nBody\n", encoding="utf-8")
+
+    registry = HarnessRegistry()
+    registry.register(CustomHarnessAdapter())
+
+    result = materialize_for_harness(
+        agent_profile=None,
+        skill_sources={"orchestrate": source_skill_dir},
+        harness_id="custom",
+        repo_root=repo_root,
+        registry=registry,
+    )
+
+    assert result.materialized_skills == ("__meridian--orchestrate",)
+    assert (repo_root / ".custom" / "skills" / "__meridian--orchestrate" / "SKILL.md").exists()
+
+    removed = cleanup_orphaned_materializations(
+        "custom",
+        repo_root,
+        has_active_sessions=False,
+        registry=registry,
+    )
+
+    assert removed == 1
+    assert not (repo_root / ".custom" / "skills" / "__meridian--orchestrate").exists()
+
+
+def test_infer_harness_uses_injected_registry(tmp_path: Path) -> None:
+    registry = HarnessRegistry()
+    registry.register(CustomHarnessAdapter())
+
+    assert (
+        infer_harness_from_untracked_session_ref(
+            tmp_path,
+            "custom-session",
+            registry=registry,
+        )
+        == "custom"
+    )

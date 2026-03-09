@@ -11,6 +11,13 @@ def _empty_template_vars() -> dict[str, str]:
     return {}
 
 
+def _truncate_cell(value: str, *, max_chars: int) -> str:
+    compact = " ".join(value.split()).strip()
+    if len(compact) <= max_chars:
+        return compact
+    return f"{compact[: max_chars - 3].rstrip()}..."
+
+
 class SpawnCreateInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -82,6 +89,7 @@ class SpawnListInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     status: SpawnStatus | None = None
+    statuses: tuple[SpawnStatus, ...] | None = None
     model: str | None = None
     limit: int = 20
     failed: bool = False
@@ -141,7 +149,7 @@ class SpawnListEntry(BaseModel):
         return [
             self.spawn_id,
             self.status,
-            self.model,
+            _truncate_cell(self.model, max_chars=18),
             f"{self.duration_secs:.1f}s" if self.duration_secs is not None else "-",
             f"${self.cost_usd:.2f}" if self.cost_usd is not None else "-",
         ]
@@ -158,7 +166,9 @@ class SpawnListOutput(BaseModel):
             return "(no spawns)"
         from meridian.cli.format_helpers import tabular
 
-        return tabular([entry.as_row() for entry in self.spawns])
+        rows = [["spawn", "status", "model", "duration", "cost"]]
+        rows.extend(entry.as_row() for entry in self.spawns)
+        return tabular(rows)
 
 
 class SpawnShowInput(BaseModel):

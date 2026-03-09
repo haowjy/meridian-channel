@@ -9,18 +9,25 @@ from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.catalog.agent import AgentProfile
 from meridian.lib.harness.adapter import HarnessNativeLayout
-from meridian.lib.harness.registry import get_default_harness_registry
+from meridian.lib.harness.registry import HarnessRegistry, get_default_harness_registry
 from meridian.lib.core.types import HarnessId
 
 logger = logging.getLogger(__name__)
 
 
-def harness_layout(harness_id: str) -> HarnessNativeLayout | None:
+def _resolve_registry(registry: HarnessRegistry | None) -> HarnessRegistry:
+    return registry if registry is not None else get_default_harness_registry()
+
+
+def harness_layout(
+    harness_id: str,
+    *,
+    registry: HarnessRegistry | None = None,
+) -> HarnessNativeLayout | None:
     """Return adapter-provided native layout metadata for a harness ID."""
 
-    registry = get_default_harness_registry()
     try:
-        adapter = registry.get(HarnessId(harness_id))
+        adapter = _resolve_registry(registry).get(HarnessId(harness_id))
     except KeyError:
         return None
     return adapter.native_layout()
@@ -290,11 +297,13 @@ def materialize_for_harness(
     harness_id: str,
     repo_root: Path,
     dry_run: bool = False,
+    *,
+    registry: HarnessRegistry | None = None,
 ) -> MaterializeResult:
     """Materialize non-native agents/skills for a specific harness."""
 
     original_agent_name = agent_profile.name if agent_profile is not None else ""
-    layout = harness_layout(harness_id)
+    layout = harness_layout(harness_id, registry=registry)
     if layout is None:
         return MaterializeResult(
             agent_name=original_agent_name,
@@ -395,10 +404,15 @@ def _cleanup_matching(
     return removed
 
 
-def cleanup_materialized(harness_id: str, repo_root: Path) -> int:
+def cleanup_materialized(
+    harness_id: str,
+    repo_root: Path,
+    *,
+    registry: HarnessRegistry | None = None,
+) -> int:
     """Remove stable materialized files for one harness."""
 
-    layout = harness_layout(harness_id)
+    layout = harness_layout(harness_id, registry=registry)
     if layout is None:
         return 0
 
@@ -410,10 +424,15 @@ def cleanup_materialized(harness_id: str, repo_root: Path) -> int:
     )
 
 
-def cleanup_all_materialized(harness_id: str, repo_root: Path) -> int:
+def cleanup_all_materialized(
+    harness_id: str,
+    repo_root: Path,
+    *,
+    registry: HarnessRegistry | None = None,
+) -> int:
     """Remove all materialized files for a harness regardless of chat scope."""
 
-    layout = harness_layout(harness_id)
+    layout = harness_layout(harness_id, registry=registry)
     if layout is None:
         return 0
 
@@ -447,10 +466,11 @@ def cleanup_orphaned_materializations(
     repo_root: Path,
     *,
     has_active_sessions: bool,
+    registry: HarnessRegistry | None = None,
 ) -> int:
     """Remove stable materialized files when no sessions are active."""
 
-    layout = harness_layout(harness_id)
+    layout = harness_layout(harness_id, registry=registry)
     if layout is None:
         return 0
 

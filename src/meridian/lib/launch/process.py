@@ -117,11 +117,16 @@ def cleanup_orphaned_locks(repo_root: Path) -> bool:
     return True
 
 
-def _cleanup_launch_materialized(*, repo_root: Path, harness_id: str) -> None:
+def _cleanup_launch_materialized(
+    *,
+    repo_root: Path,
+    harness_id: str,
+    harness_registry: HarnessRegistry,
+) -> None:
     if not harness_id.strip():
         return
     try:
-        cleanup_materialized(harness_id, repo_root)
+        cleanup_materialized(harness_id, repo_root, registry=harness_registry)
     except Exception:
         logger.warning(
             "Failed to cleanup primary-session materialized harness resources (harness=%s).",
@@ -130,11 +135,15 @@ def _cleanup_launch_materialized(*, repo_root: Path, harness_id: str) -> None:
         )
 
 
-def _sweep_orphaned_materializations(repo_root: Path, harness_id: str) -> None:
+def _sweep_orphaned_materializations(
+    repo_root: Path,
+    harness_id: str,
+    *,
+    harness_registry: HarnessRegistry,
+) -> None:
     """Best-effort sweep of materialized files not owned by active sessions."""
 
     from meridian.lib.harness.materialize import cleanup_orphaned_materializations
-    from meridian.lib.harness.registry import get_default_harness_registry
     from meridian.lib.state.session_store import collect_active_chat_ids
 
     _ = harness_id
@@ -142,15 +151,15 @@ def _sweep_orphaned_materializations(repo_root: Path, harness_id: str) -> None:
         active_ids = collect_active_chat_ids(repo_root)
         if active_ids is None:
             return
-        registry = get_default_harness_registry()
-        for known_harness_id in registry.ids():
-            adapter = registry.get(known_harness_id)
+        for known_harness_id in harness_registry.ids():
+            adapter = harness_registry.get(known_harness_id)
             if adapter.native_layout() is None:
                 continue
             cleanup_orphaned_materializations(
                 str(known_harness_id),
                 repo_root,
                 has_active_sessions=bool(active_ids),
+                registry=harness_registry,
             )
     except Exception:
         logger.debug("Orphan materialization sweep failed", exc_info=True)
@@ -222,7 +231,11 @@ def run_harness_process(
 
     exit_code = 2
     try:
-        _sweep_orphaned_materializations(repo_root, ctx.session_metadata.harness)
+        _sweep_orphaned_materializations(
+            repo_root,
+            ctx.session_metadata.harness,
+            harness_registry=harness_registry,
+        )
         chat_id = start_session(
             ctx.state_root,
             harness=ctx.session_metadata.harness,
@@ -318,6 +331,7 @@ def run_harness_process(
                 _cleanup_launch_materialized(
                     repo_root=repo_root,
                     harness_id=ctx.session_metadata.harness,
+                    harness_registry=harness_registry,
                 )
         try:
             if ctx.lock_path.exists():

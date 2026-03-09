@@ -153,6 +153,7 @@ def build_harness_context(
         str(harness),
         resolved_root,
         dry_run=request.dry_run,
+        registry=harness_registry,
     )
 
     passthrough_args, passthrough_prompt_fragments = normalize_system_prompt_passthrough_args(

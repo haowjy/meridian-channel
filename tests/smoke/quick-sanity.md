@@ -97,6 +97,15 @@ fi
 
 ```bash
 uv run meridian --json spawn list >/tmp/meridian-qs-spawn-list.txt && \
-(grep -Fxq '(no spawns)' /tmp/meridian-qs-spawn-list.txt || grep -Eq '^p[0-9]+' /tmp/meridian-qs-spawn-list.txt) && \
+(python - <<'PY'
+import json
+from pathlib import Path
+
+payload = json.loads(Path("/tmp/meridian-qs-spawn-list.txt").read_text(encoding="utf-8"))
+assert isinstance(payload, dict)
+assert "spawns" in payload
+assert isinstance(payload["spawns"], list)
+PY
+) && \
 echo "PASS: spawn list returned a clean response" || echo "FAIL: spawn list output was unexpected"
 ```

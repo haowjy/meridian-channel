@@ -7,6 +7,19 @@ import tempfile
 from pathlib import Path
 
 
+def _fsync_directory(path: Path) -> None:
+    """Fsync a directory entry so a completed replace survives a crash."""
+
+    flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        flags |= os.O_DIRECTORY
+    directory_fd = os.open(path, flags)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
 def atomic_write_text(path: Path, content: str) -> None:
     """Write text via same-directory temp file + fsync + replace."""
 
@@ -21,6 +34,7 @@ def atomic_write_text(path: Path, content: str) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp_path, path)
+        _fsync_directory(path.parent)
     finally:
         if tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
@@ -40,6 +54,7 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp_path, path)
+        _fsync_directory(path.parent)
     finally:
         if tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
@@ -49,7 +64,10 @@ def append_text_line(path: Path, line: str) -> None:
     """Append one line and fsync before returning."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
+    file_existed = path.exists()
     with path.open("a", encoding="utf-8") as handle:
         handle.write(line)
         handle.flush()
         os.fsync(handle.fileno())
+    if not file_existed:
+        _fsync_directory(path.parent)

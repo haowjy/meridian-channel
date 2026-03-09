@@ -124,8 +124,15 @@ def spawn_list_sync(
     _ = (ctx, sink)
     repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
     spawns = list(reversed(spawn_store.list_spawns(_state_root(repo_root))))
-    if payload.status is not None:
+    if payload.statuses:
+        wanted_statuses = set(payload.statuses)
+        spawns = [row for row in spawns if row.status in wanted_statuses]
+    elif payload.statuses == ():
+        pass
+    elif payload.status is not None:
         spawns = [row for row in spawns if row.status == payload.status]
+    else:
+        spawns = [row for row in spawns if row.status in {"queued", "running"}]
     if payload.failed:
         spawns = [row for row in spawns if row.status == "failed"]
     if payload.model is not None and payload.model.strip():

@@ -89,6 +89,7 @@ class _ResolvedContinueTarget(BaseModel):
 
     harness_session_id: str | None
     harness: str | None
+    tracked: bool = False
     warning: str | None = None
 
 
@@ -458,6 +459,7 @@ def _run_primary_launch(
     """Shared primary launch flow for root command entry."""
 
     repo_root = Path.cwd().resolve()
+    harness_registry = get_default_harness_registry()
     normalized_continue_ref = continue_ref.strip() if continue_ref is not None else ""
     resume_target = normalized_continue_ref if normalized_continue_ref else None
     resolved_permission_tier = permission_tier
@@ -470,16 +472,24 @@ def _run_primary_launch(
     continue_harness: str | None = None
     continue_warning: str | None = None
     fresh = True
+    explicit_harness = harness.strip() if harness is not None and harness.strip() else None
     if resume_target is not None:
         if model.strip():
             raise ValueError("Cannot combine --continue with --model.")
-        if harness is not None and harness.strip():
-            raise ValueError("Cannot combine --continue with --harness.")
         if agent is not None and agent.strip():
             raise ValueError("Cannot combine --continue with --agent.")
         resolved_continue = _resolve_continue_target(repo_root=repo_root, continue_ref=resume_target)
+        if (
+            resolved_continue.tracked
+            and explicit_harness is not None
+            and resolved_continue.harness is not None
+            and explicit_harness != resolved_continue.harness
+        ):
+            raise ValueError(
+                "Cannot override --harness for a tracked session; resume it with its stored harness."
+            )
         continue_harness_session_id = resolved_continue.harness_session_id
-        continue_harness = resolved_continue.harness
+        continue_harness = explicit_harness or resolved_continue.harness
         continue_warning = resolved_continue.warning
         fresh = False
 
@@ -498,7 +508,7 @@ def _run_primary_launch(
             approval=resolved_approval,
             continue_harness_session_id=continue_harness_session_id,
         ),
-        harness_registry=get_default_harness_registry(),
+        harness_registry=harness_registry,
     )
 
     emit(
@@ -541,16 +551,22 @@ def _resolve_continue_target(
         return _ResolvedContinueTarget(
             harness_session_id=session.harness_session_id.strip() or None,
             harness=(session.harness.strip() or None),
+            tracked=True,
         )
 
     if _looks_like_chat_alias(normalized):
         raise ValueError(f"Session '{normalized}' not found.")
 
-    inferred_harness = infer_harness_from_untracked_session_ref(repo_root, normalized)
+    inferred_harness = infer_harness_from_untracked_session_ref(
+        repo_root,
+        normalized,
+        registry=get_default_harness_registry(),
+    )
     last_session = get_last_session(state_root)
     return _ResolvedContinueTarget(
         harness_session_id=normalized,
         harness=inferred_harness or (last_session.harness.strip() or None if last_session is not None else None),
+        tracked=False,
         warning=f"Session '{normalized}' is not tracked yet; resuming with the provided harness session id.",
     )
 
