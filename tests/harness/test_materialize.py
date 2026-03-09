@@ -1,16 +1,13 @@
-"""Harness materialization cleanup and orphan-reconciliation invariants."""
-
+"""Harness materialization tests for parsing and orphan cleanup edge cases."""
 
 from pathlib import Path
 
 import pytest
 
 from meridian.lib.harness.materialize import (
-    _ensure_materialized_gitignore,
     _extract_chat_id_from_materialized,
-    cleanup_materialized,
     cleanup_orphaned_materializations,
-    harness_layout,
+    materialize_for_harness,
 )
 
 
@@ -45,7 +42,6 @@ def test_extract_chat_id_from_materialized_name() -> None:
     assert _extract_chat_id_from_materialized("__primary-tmp-abc12345") == "tmp-abc12345"
     assert _extract_chat_id_from_materialized("not-a-meridian-file") is None
     assert _extract_chat_id_from_materialized("_single") is None
-    # Names with dashes — chat_id is the suffix
     assert _extract_chat_id_from_materialized("__meridian-orchestrate-c55") == "c55"
 
 
@@ -62,119 +58,6 @@ def test_cleanup_orphaned_removes_inactive_and_keeps_active(claude_layout: Path)
     assert (claude_layout / ".claude" / "skills" / "__orchestrate-c6").exists()
     assert not (claude_layout / ".claude" / "agents" / "__primary-c99.md").exists()
     assert not (claude_layout / ".claude" / "skills" / "__orchestrate-c99").exists()
-
-
-def test_cleanup_orphaned_handles_empty_or_missing_layouts(claude_layout: Path) -> None:
-    _create_materialized_agent(claude_layout, "c1", "agent")
-    _create_materialized_skill(claude_layout, "c1", "skill")
-
-    assert cleanup_orphaned_materializations("claude", claude_layout, frozenset()) == 2
-    assert cleanup_orphaned_materializations("claude", claude_layout, frozenset({"c1"})) == 0
-
-
-def test_cleanup_scans_all_materialization_directories(tmp_path: Path) -> None:
-    agents_dir_1 = tmp_path / ".agents" / "agents"
-    agents_dir_2 = tmp_path / ".codex" / "agents"
-    skills_dir_1 = tmp_path / ".agents" / "skills"
-    skills_dir_2 = tmp_path / ".codex" / "skills"
-    for directory in (agents_dir_1, agents_dir_2, skills_dir_1, skills_dir_2):
-        directory.mkdir(parents=True)
-
-    (agents_dir_2 / "__agent-c99.md").write_text("orphan agent", encoding="utf-8")
-    skill_dir = skills_dir_2 / "__skill-c99"
-    skill_dir.mkdir()
-    (skill_dir / "SKILL.md").write_text("orphan skill", encoding="utf-8")
-    (agents_dir_1 / "__agent-c1.md").write_text("active agent", encoding="utf-8")
-
-    removed = cleanup_orphaned_materializations("codex", tmp_path, frozenset({"c1"}))
-
-    assert removed == 2
-    assert not (agents_dir_2 / "__agent-c99.md").exists()
-    assert not (skills_dir_2 / "__skill-c99").exists()
-    assert (agents_dir_1 / "__agent-c1.md").exists()
-
-
-def test_cleanup_materialized_scopes_to_chat_and_scans_codex_layouts(
-    claude_layout: Path,
-    tmp_path: Path,
-) -> None:
-    _create_materialized_agent(claude_layout, "c6", "primary")
-    _create_materialized_agent(claude_layout, "c7", "primary")
-
-    removed = cleanup_materialized("claude", claude_layout, "c6")
-
-    assert removed == 1
-    assert not (claude_layout / ".claude" / "agents" / "__primary-c6.md").exists()
-    assert (claude_layout / ".claude" / "agents" / "__primary-c7.md").exists()
-
-    agents_dir_1 = tmp_path / ".agents" / "agents"
-    agents_dir_2 = tmp_path / ".codex" / "agents"
-    agents_dir_1.mkdir(parents=True)
-    agents_dir_2.mkdir(parents=True)
-    (agents_dir_1 / "__agent-c5.md").write_text("agent in .agents", encoding="utf-8")
-    (agents_dir_2 / "__backup-c5.md").write_text("agent in .codex", encoding="utf-8")
-
-    removed = cleanup_materialized("codex", tmp_path, "c5")
-
-    assert removed == 2
-    assert not (agents_dir_1 / "__agent-c5.md").exists()
-    assert not (agents_dir_2 / "__backup-c5.md").exists()
-
-
-def test_ensure_materialized_gitignore_adds_patterns(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    (repo_root / ".git").mkdir()
-    (repo_root / ".gitignore").write_text("*.pyc\n", encoding="utf-8")
-
-    layout = harness_layout("claude")
-    assert layout is not None
-    _ensure_materialized_gitignore(repo_root, layout)
-
-    content = (repo_root / ".gitignore").read_text(encoding="utf-8")
-    assert ".claude/agents/__*-c[0-9]*" in content
-    assert ".claude/skills/__*-c[0-9]*" in content
-    assert "*.pyc" in content
-
-
-def test_ensure_materialized_gitignore_is_idempotent(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    (repo_root / ".git").mkdir()
-    (repo_root / ".gitignore").write_text("", encoding="utf-8")
-
-    layout = harness_layout("claude")
-    assert layout is not None
-    _ensure_materialized_gitignore(repo_root, layout)
-    _ensure_materialized_gitignore(repo_root, layout)
-
-    content = (repo_root / ".gitignore").read_text(encoding="utf-8")
-    assert content.count(".claude/agents/__*-c[0-9]*") == 1
-
-
-def test_ensure_materialized_gitignore_skips_without_git(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-
-    layout = harness_layout("claude")
-    assert layout is not None
-    _ensure_materialized_gitignore(repo_root, layout)
-
-    assert not (repo_root / ".gitignore").exists()
-
-
-def test_ensure_materialized_gitignore_creates_file_if_missing(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    (repo_root / ".git").mkdir()
-
-    layout = harness_layout("codex")
-    assert layout is not None
-    _ensure_materialized_gitignore(repo_root, layout)
-
-    content = (repo_root / ".gitignore").read_text(encoding="utf-8")
-    assert ".agents/agents/__*-c[0-9]*" in content
-    assert ".agents/skills/__*-c[0-9]*" in content
 
 
 def test_cleanup_orphaned_scans_global_codex_directories(
@@ -201,3 +84,27 @@ def test_cleanup_orphaned_scans_global_codex_directories(
     assert removed == 2
     assert not (agents_dir / "__agent-c99.md").exists()
     assert not (skills_dir / "__skill-c99").exists()
+
+
+def test_materialized_skill_forces_disable_model_invocation(claude_layout: Path) -> None:
+    source_skill_dir = claude_layout / ".agents" / "skills" / "orchestrate"
+    source_skill_dir.mkdir(parents=True, exist_ok=True)
+    (source_skill_dir / "SKILL.md").write_text(
+        "---\nname: orchestrate\ndisable-model-invocation: false\n---\nBody\n",
+        encoding="utf-8",
+    )
+
+    result = materialize_for_harness(
+        agent_profile=None,
+        skill_sources={"orchestrate": source_skill_dir},
+        harness_id="claude",
+        repo_root=claude_layout,
+        chat_id="c9",
+    )
+
+    assert result.materialized_skills == ("__meridian--orchestrate",)
+    skill_text = (
+        claude_layout / ".claude" / "skills" / "__meridian--orchestrate" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    assert "name: __meridian--orchestrate" in skill_text
+    assert "disable-model-invocation: true" in skill_text

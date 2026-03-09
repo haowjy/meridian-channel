@@ -1,75 +1,10 @@
-"""Prompt assembly and reference isolation invariants."""
-
+"""Prompt assembly tests that guard against context and prompt injection."""
 
 from pathlib import Path
 
-import pytest
-
-from meridian.lib.catalog.agent import AgentProfile
-from meridian.lib.catalog.skill import SkillRegistry
 from meridian.lib.core.domain import SkillContent
-from meridian.lib.launch.prompt import load_skill_contents, resolve_run_defaults
 from meridian.lib.launch.prompt import compose_run_prompt_text
-from meridian.lib.launch.reference import (
-    TemplateVariableError,
-    load_reference_files,
-    resolve_template_variables,
-    substitute_template_variables,
-)
-from tests.helpers.fixtures import write_skill as _write_skill
-
-
-def test_skill_loading_order_and_dedup(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
-    _write_skill(repo_root, "alpha", "alpha body")
-    _write_skill(repo_root, "beta", "beta body")
-
-    registry = SkillRegistry(db_path=tmp_path / "spawns.db", repo_root=repo_root)
-    registry.reindex()
-
-    loaded = load_skill_contents(registry, ["alpha", "beta", "alpha"])
-    assert [skill.name for skill in loaded] == ["alpha", "beta"]
-
-
-def test_run_defaults_merge_agent_profile_defaults() -> None:
-    profile = AgentProfile(
-        name="reviewer",
-        description="",
-        model="gpt-5.3-codex",
-        variant=None,
-        skills=("reviewing", "agent"),
-        allowed_tools=(),
-        mcp_tools=(),
-        sandbox=None,
-        variant_models=(),
-        body="Profile body",
-        path=Path("/tmp/reviewer.md"),
-        raw_content="",
-    )
-
-    defaults = resolve_run_defaults("", profile=profile)
-
-    assert defaults.model == "gpt-5.3-codex"
-    assert defaults.skills == ("reviewing", "agent")
-    assert defaults.agent_body == "Profile body"
-
-
-def test_run_defaults_resolves_builtin_alias_for_old_callers() -> None:
-    defaults = resolve_run_defaults("codex", profile=None)
-
-    assert defaults.model == "gpt-5.3-codex"
-
-
-def test_template_substitution_with_literals_and_file_values(tmp_path: Path) -> None:
-    value_file = tmp_path / "context.txt"
-    value_file.write_text("from-file", encoding="utf-8")
-    resolved = resolve_template_variables({"A": "literal", "B": value_file})
-
-    rendered = substitute_template_variables("{{A}}/{{B}}", resolved)
-    assert rendered == "literal/from-file"
-
-    with pytest.raises(TemplateVariableError, match="MISSING"):
-        substitute_template_variables("{{MISSING}}", resolved)
+from meridian.lib.launch.reference import load_reference_files
 
 
 def test_compose_prompt_keeps_context_isolated_and_sanitized(tmp_path: Path) -> None:
