@@ -1,7 +1,6 @@
 """Materialize agents and skills into harness-native directories."""
 
 
-import glob
 import logging
 import os
 import shutil
@@ -116,23 +115,18 @@ class MaterializeResult(BaseModel):
     native: bool
 
 
-def _materialized_name(chat_id: str, name: str) -> str:
-    return f"__{name}-{chat_id}"
+_MATERIALIZED_STABLE_PREFIX = "__meridian--"
 
 
-def _extract_chat_id_from_materialized(name: str) -> str | None:
-    """Extract the chat scope from a materialized artifact name.
+def _materialized_name(name: str) -> str:
+    normalized = name.strip()
+    if normalized.startswith(_MATERIALIZED_STABLE_PREFIX):
+        return normalized
+    return f"{_MATERIALIZED_STABLE_PREFIX}{normalized}"
 
-    Format: __{original_name}-{chat_id}
-    Chat IDs match: c<digits> or tmp-<hex>
-    """
-    import re
 
-    if not name.startswith("__"):
-        return None
-
-    m = re.search(r"-(c\d+|tmp-[a-f0-9]+)$", name)
-    return m.group(1) if m else None
+def _is_stable_materialized_name(name: str) -> bool:
+    return name.startswith(_MATERIALIZED_STABLE_PREFIX)
 
 
 def _rewrite_agent_skills(raw_content: str, skill_mapping: dict[str, str]) -> str:
@@ -169,6 +163,25 @@ def _rewrite_frontmatter_name(raw_content: str, new_name: str) -> str:
     return str(frontmatter.dumps(post))
 
 
+def _rewrite_skill_frontmatter(raw_content: str, new_name: str) -> str:
+    """Rewrite skill frontmatter for materialized copies.
+
+    Materialized skills are implementation details. Force model auto-invocation
+    off so Claude does not proactively route to these temporary copies.
+    """
+    import frontmatter  # type: ignore[import-untyped]
+    import yaml
+
+    try:
+        post = frontmatter.loads(raw_content)
+    except yaml.YAMLError:
+        return raw_content
+
+    post.metadata["name"] = new_name
+    post.metadata["disable-model-invocation"] = True
+    return str(frontmatter.dumps(post))
+
+
 def _reconstruct_builtin_agent(profile: AgentProfile, skill_names: list[str], *, materialized_name: str = "") -> str:
     """Reconstruct a minimal markdown profile for built-in agents."""
     import frontmatter  # type: ignore[import-untyped]
@@ -186,22 +199,20 @@ def _reconstruct_builtin_agent(profile: AgentProfile, skill_names: list[str], *,
     return str(frontmatter.dumps(post))
 
 
-def _skill_final_name(skill_name: str, chat_id: str, native: bool) -> str:
+def _skill_final_name(skill_name: str, native: bool) -> str:
     if native:
         return skill_name
-    return _materialized_name(chat_id, skill_name)
+    return _materialized_name(skill_name)
 
 
 def _compute_skill_mapping(
     skill_sources: dict[str, Path],
     missing_skills: set[str],
-    chat_id: str,
 ) -> dict[str, str]:
     mapping: dict[str, str] = {}
     for skill_name in skill_sources:
         mapping[skill_name] = _skill_final_name(
             skill_name=skill_name,
-            chat_id=chat_id,
             native=skill_name not in missing_skills,
         )
     return mapping
@@ -211,7 +222,6 @@ def _copy_missing_skills(
     *,
     missing_skills: list[str],
     skill_sources: dict[str, Path],
-    chat_id: str,
     layout: HarnessLayout,
     repo_root: Path,
 ) -> tuple[str, ...]:
@@ -220,7 +230,7 @@ def _copy_missing_skills(
 
     materialized: list[str] = []
     for skill_name in missing_skills:
-        materialized_name = _materialized_name(chat_id, skill_name)
+        materialized_name = _materialized_name(skill_name)
         target_dir = target_skills_root / materialized_name
         if target_dir.exists():
             shutil.rmtree(target_dir)
@@ -228,7 +238,7 @@ def _copy_missing_skills(
         skill_file = target_dir / "SKILL.md"
         if skill_file.is_file():
             raw_skill = skill_file.read_text(encoding="utf-8")
-            rewritten_skill = _rewrite_frontmatter_name(raw_skill, materialized_name)
+            rewritten_skill = _rewrite_skill_frontmatter(raw_skill, materialized_name)
             skill_file.write_text(rewritten_skill, encoding="utf-8")
         materialized.append(materialized_name)
 
@@ -239,11 +249,10 @@ def _materialize_agent(
     *,
     profile: AgentProfile,
     skill_mapping: dict[str, str],
-    chat_id: str,
     layout: HarnessLayout,
     repo_root: Path,
 ) -> str:
-    materialized_name = _materialized_name(chat_id, profile.name)
+    materialized_name = _materialized_name(profile.name)
     target_agents_root = materialization_target_agents(layout, repo_root)
     target_agents_root.mkdir(parents=True, exist_ok=True)
 
@@ -258,8 +267,10 @@ def _materialize_agent(
     return materialized_name
 
 
-_MATERIALIZED_GITIGNORE_PATTERN = "__*-c[0-9]*"
-"""Glob pattern matching materialized agent/skill artifacts."""
+_MATERIALIZED_GITIGNORE_PATTERNS = (
+    "__meridian--*",
+)
+"""Glob patterns matching materialized agent/skill artifacts."""
 
 
 def _ensure_materialized_gitignore(repo_root: Path, layout: HarnessLayout) -> None:
@@ -280,9 +291,10 @@ def _ensure_materialized_gitignore(repo_root: Path, layout: HarnessLayout) -> No
     for raw_dir in (*layout.agents, *layout.skills):
         if raw_dir.startswith("~"):
             continue
-        pattern = f"{raw_dir}/{_MATERIALIZED_GITIGNORE_PATTERN}"
-        if pattern not in existing:
-            lines_to_add.append(pattern)
+        for glob_pattern in _MATERIALIZED_GITIGNORE_PATTERNS:
+            pattern = f"{raw_dir}/{glob_pattern}"
+            if pattern not in existing:
+                lines_to_add.append(pattern)
 
     if not lines_to_add:
         return
@@ -305,7 +317,6 @@ def materialize_for_harness(
     skill_sources: dict[str, Path],
     harness_id: str,
     repo_root: Path,
-    chat_id: str,
     dry_run: bool = False,
 ) -> MaterializeResult:
     """Materialize non-native agents/skills for a specific harness."""
@@ -342,12 +353,12 @@ def materialize_for_harness(
             native=True,
         )
 
-    skill_mapping = _compute_skill_mapping(skill_sources, missing_skills_set, chat_id)
+    skill_mapping = _compute_skill_mapping(skill_sources, missing_skills_set)
     final_agent_name = original_agent_name
     if needs_agent_materialization and agent_profile is not None:
-        final_agent_name = _materialized_name(chat_id, agent_profile.name)
+        final_agent_name = _materialized_name(agent_profile.name)
 
-    materialized_skills = tuple(_materialized_name(chat_id, name) for name in missing_skills)
+    materialized_skills = tuple(_materialized_name(name) for name in missing_skills)
     if dry_run:
         return MaterializeResult(
             agent_name=final_agent_name,
@@ -362,7 +373,6 @@ def materialize_for_harness(
         materialized_skills = _copy_missing_skills(
             missing_skills=missing_skills,
             skill_sources=skill_sources,
-            chat_id=chat_id,
             layout=layout,
             repo_root=repo_root,
         )
@@ -371,7 +381,6 @@ def materialize_for_harness(
         final_agent_name = _materialize_agent(
             profile=agent_profile,
             skill_mapping=skill_mapping,
-            chat_id=chat_id,
             layout=layout,
             repo_root=repo_root,
         )
@@ -412,19 +421,18 @@ def _cleanup_matching(
     return removed
 
 
-def cleanup_materialized(harness_id: str, repo_root: Path, chat_id: str) -> int:
-    """Remove materialized files for a specific chat scope."""
+def cleanup_materialized(harness_id: str, repo_root: Path) -> int:
+    """Remove stable materialized files for one harness."""
 
     layout = harness_layout(harness_id)
     if layout is None:
         return 0
 
-    suffix = f"-{glob.escape(chat_id)}"
     return _cleanup_matching(
         layout=layout,
         repo_root=repo_root,
-        agents_pattern=f"__*{suffix}.md",
-        skills_pattern=f"__*{suffix}",
+        agents_pattern=f"{_MATERIALIZED_STABLE_PREFIX}*.md",
+        skills_pattern=f"{_MATERIALIZED_STABLE_PREFIX}*",
     )
 
 
@@ -441,7 +449,9 @@ def cleanup_all_materialized(harness_id: str, repo_root: Path) -> int:
         agents_dir = resolve_native_dir(raw_dir, repo_root)
         if agents_dir.is_dir():
             for candidate in agents_dir.glob("__*.md"):
-                if candidate.is_file() and _extract_chat_id_from_materialized(candidate.stem) is not None:
+                if not candidate.is_file():
+                    continue
+                if _is_stable_materialized_name(candidate.stem):
                     candidate.unlink()
                     removed += 1
 
@@ -449,7 +459,9 @@ def cleanup_all_materialized(harness_id: str, repo_root: Path) -> int:
         skills_dir = resolve_native_dir(raw_dir, repo_root)
         if skills_dir.is_dir():
             for candidate in skills_dir.glob("__*"):
-                if candidate.is_dir() and _extract_chat_id_from_materialized(candidate.name) is not None:
+                if not candidate.is_dir():
+                    continue
+                if _is_stable_materialized_name(candidate.name):
                     shutil.rmtree(candidate)
                     removed += 1
 
@@ -459,9 +471,10 @@ def cleanup_all_materialized(harness_id: str, repo_root: Path) -> int:
 def cleanup_orphaned_materializations(
     harness_id: str,
     repo_root: Path,
-    active_chat_ids: frozenset[str],
+    *,
+    has_active_sessions: bool,
 ) -> int:
-    """Remove materialized files not owned by any active session."""
+    """Remove stable materialized files when no sessions are active."""
 
     layout = harness_layout(harness_id)
     if layout is None:
@@ -475,8 +488,7 @@ def cleanup_orphaned_materializations(
             for candidate in agents_dir.glob("__*.md"):
                 if not candidate.is_file():
                     continue
-                chat_id = _extract_chat_id_from_materialized(candidate.stem)
-                if chat_id is not None and chat_id not in active_chat_ids:
+                if _is_stable_materialized_name(candidate.stem) and not has_active_sessions:
                     candidate.unlink()
                     removed += 1
 
@@ -486,8 +498,7 @@ def cleanup_orphaned_materializations(
             for candidate in skills_dir.glob("__*"):
                 if not candidate.is_dir():
                     continue
-                chat_id = _extract_chat_id_from_materialized(candidate.name)
-                if chat_id is not None and chat_id not in active_chat_ids:
+                if _is_stable_materialized_name(candidate.name) and not has_active_sessions:
                     shutil.rmtree(candidate)
                     removed += 1
 

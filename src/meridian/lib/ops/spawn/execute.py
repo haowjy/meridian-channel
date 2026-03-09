@@ -264,7 +264,6 @@ def _materialize_session_agent_name(
     *,
     repo_root: Path,
     harness_id: str,
-    chat_id: str,
     session_agent: str,
     session_agent_path: str,
     run_agent_name: str | None,
@@ -290,23 +289,21 @@ def _materialize_session_agent_name(
         skill_sources,
         normalized_harness,
         repo_root,
-        chat_id,
     )
     resolved_agent = materialized.agent_name.strip()
     return resolved_agent or None
 
 
-def _cleanup_session_materialized(*, harness_id: str, repo_root: Path, chat_id: str) -> None:
+def _cleanup_session_materialized(*, harness_id: str, repo_root: Path) -> None:
     normalized_harness = harness_id.strip()
     if not normalized_harness:
         return
     try:
-        cleanup_materialized(normalized_harness, repo_root, chat_id)
+        cleanup_materialized(normalized_harness, repo_root)
     except Exception:
         logger.warning(
             "Failed to cleanup materialized harness resources.",
             harness_id=normalized_harness,
-            chat_id=chat_id,
             exc_info=True,
         )
 
@@ -419,7 +416,6 @@ def _session_execution_context(
         materialized_agent_name = _materialize_session_agent_name(
             repo_root=repo_root,
             harness_id=harness_id,
-            chat_id=chat_id,
             session_agent=session_agent,
             session_agent_path=session_agent_path,
             run_agent_name=run_agent_name,
@@ -444,7 +440,6 @@ def _session_execution_context(
             _cleanup_session_materialized(
                 harness_id=harness_id,
                 repo_root=repo_root,
-                chat_id=chat_id,
             )
 
 

@@ -26,3 +26,7 @@ out
 .codex/skills/__*-c[0-9]*
 .opencode/agents/__*-c[0-9]*
 .opencode/skills/__*-c[0-9]*
+.agents/agents/__meridian--*
+.codex/agents/__meridian--*
+.agents/skills/__meridian--*
+.codex/skills/__meridian--*

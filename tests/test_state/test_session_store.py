@@ -43,7 +43,7 @@ def test_cleanup_stale_sessions_removes_dead_locks_and_writes_stop_events(tmp_pa
 
     cleanup = cleanup_stale_sessions(state_root)
     assert cleanup.cleaned_ids == ("c2",)
-    assert cleanup.materialized_scopes == (("claude", "c2"),)
+    assert cleanup.materialized_scopes == ("claude",)
     assert not stale_lock.exists()
     assert (state_root / "sessions" / f"{live}.lock").exists()
 

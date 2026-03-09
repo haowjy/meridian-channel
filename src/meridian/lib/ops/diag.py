@@ -62,8 +62,8 @@ def _count_runs(repo_root: Path) -> int:
 
 def _repair_stale_session_locks(repo_root: Path) -> int:
     cleanup = cleanup_stale_sessions(_state_root(repo_root))
-    for harness_id, chat_id in cleanup.materialized_scopes:
-        cleanup_materialized(harness_id, repo_root, chat_id)
+    for harness_id in cleanup.materialized_scopes:
+        cleanup_materialized(harness_id, repo_root)
     return len(cleanup.cleaned_ids)
 
 

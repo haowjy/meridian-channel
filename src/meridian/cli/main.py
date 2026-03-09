@@ -728,8 +728,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             cleanup_orphaned_locks(repo_root)
             state_root = resolve_state_paths(repo_root).root_dir
             cleanup = cleanup_stale_sessions(state_root)
-            for harness_id, chat_id in cleanup.materialized_scopes:
-                cleanup_materialized(harness_id, repo_root, chat_id)
+            for harness_id in cleanup.materialized_scopes:
+                cleanup_materialized(harness_id, repo_root)
         except Exception:
             logger.debug("orphaned lock cleanup failed", exc_info=True)
 

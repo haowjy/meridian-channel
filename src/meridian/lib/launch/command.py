@@ -6,7 +6,6 @@ import os
 import shlex
 from pathlib import Path
 from typing import Any, cast
-from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict
 
@@ -148,13 +147,11 @@ def build_harness_context(
         )
     resolved_skill_sources = resolved_skills.skill_sources
 
-    materialization_chat_id = chat_id.strip() or f"tmp-{uuid4().hex[:8]}"
     materialized = materialize_for_harness(
         profile,
         resolved_skill_sources,
         str(harness),
         resolved_root,
-        materialization_chat_id,
         dry_run=request.dry_run,
     )
 

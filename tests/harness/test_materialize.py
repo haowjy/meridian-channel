@@ -4,11 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from meridian.lib.harness.materialize import (
-    _extract_chat_id_from_materialized,
-    cleanup_orphaned_materializations,
-    materialize_for_harness,
-)
+from meridian.lib.harness.materialize import cleanup_orphaned_materializations, materialize_for_harness
 
 
 @pytest.fixture
@@ -20,44 +16,50 @@ def claude_layout(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _create_materialized_agent(repo_root: Path, chat_id: str, name: str) -> Path:
-    path = repo_root / ".claude" / "agents" / f"__{name}-{chat_id}.md"
-    path.write_text(f"---\nname: __{name}-{chat_id}\n---\n", encoding="utf-8")
+def _create_materialized_agent(repo_root: Path, name: str) -> Path:
+    path = repo_root / ".claude" / "agents" / f"__meridian--{name}.md"
+    path.write_text(f"---\nname: __meridian--{name}\n---\n", encoding="utf-8")
     return path
 
 
-def _create_materialized_skill(repo_root: Path, chat_id: str, name: str) -> Path:
-    skill_dir = repo_root / ".claude" / "skills" / f"__{name}-{chat_id}"
+def _create_materialized_skill(repo_root: Path, name: str) -> Path:
+    skill_dir = repo_root / ".claude" / "skills" / f"__meridian--{name}"
     skill_dir.mkdir(parents=True, exist_ok=True)
     (skill_dir / "SKILL.md").write_text(
-        f"---\nname: __{name}-{chat_id}\n---\n",
+        f"---\nname: __meridian--{name}\n---\n",
         encoding="utf-8",
     )
     return skill_dir
 
 
-def test_extract_chat_id_from_materialized_name() -> None:
-    assert _extract_chat_id_from_materialized("__primary-c6") == "c6"
-    assert _extract_chat_id_from_materialized("__agent-c44") == "c44"
-    assert _extract_chat_id_from_materialized("__primary-tmp-abc12345") == "tmp-abc12345"
-    assert _extract_chat_id_from_materialized("not-a-meridian-file") is None
-    assert _extract_chat_id_from_materialized("_single") is None
-    assert _extract_chat_id_from_materialized("__meridian-orchestrate-c55") == "c55"
+def test_cleanup_orphaned_keeps_materialized_when_active_sessions_exist(claude_layout: Path) -> None:
+    _create_materialized_agent(claude_layout, "primary")
+    _create_materialized_skill(claude_layout, "orchestrate")
+
+    removed = cleanup_orphaned_materializations(
+        "claude",
+        claude_layout,
+        has_active_sessions=True,
+    )
+
+    assert removed == 0
+    assert (claude_layout / ".claude" / "agents" / "__meridian--primary.md").exists()
+    assert (claude_layout / ".claude" / "skills" / "__meridian--orchestrate").exists()
 
 
-def test_cleanup_orphaned_removes_inactive_and_keeps_active(claude_layout: Path) -> None:
-    _create_materialized_agent(claude_layout, "c6", "primary")
-    _create_materialized_skill(claude_layout, "c6", "orchestrate")
-    _create_materialized_agent(claude_layout, "c99", "primary")
-    _create_materialized_skill(claude_layout, "c99", "orchestrate")
+def test_cleanup_orphaned_removes_materialized_when_no_active_sessions(claude_layout: Path) -> None:
+    _create_materialized_agent(claude_layout, "primary")
+    _create_materialized_skill(claude_layout, "orchestrate")
 
-    removed = cleanup_orphaned_materializations("claude", claude_layout, frozenset({"c6"}))
+    removed = cleanup_orphaned_materializations(
+        "claude",
+        claude_layout,
+        has_active_sessions=False,
+    )
 
     assert removed == 2
-    assert (claude_layout / ".claude" / "agents" / "__primary-c6.md").exists()
-    assert (claude_layout / ".claude" / "skills" / "__orchestrate-c6").exists()
-    assert not (claude_layout / ".claude" / "agents" / "__primary-c99.md").exists()
-    assert not (claude_layout / ".claude" / "skills" / "__orchestrate-c99").exists()
+    assert not (claude_layout / ".claude" / "agents" / "__meridian--primary.md").exists()
+    assert not (claude_layout / ".claude" / "skills" / "__meridian--orchestrate").exists()
 
 
 def test_cleanup_orphaned_scans_global_codex_directories(
@@ -74,16 +76,16 @@ def test_cleanup_orphaned_scans_global_codex_directories(
     agents_dir.mkdir(parents=True)
     skills_dir.mkdir(parents=True)
 
-    (agents_dir / "__agent-c99.md").write_text("orphan agent", encoding="utf-8")
-    skill_dir = skills_dir / "__skill-c99"
+    (agents_dir / "__meridian--agent.md").write_text("orphan agent", encoding="utf-8")
+    skill_dir = skills_dir / "__meridian--skill"
     skill_dir.mkdir()
     (skill_dir / "SKILL.md").write_text("orphan skill", encoding="utf-8")
 
-    removed = cleanup_orphaned_materializations("codex", repo_root, frozenset())
+    removed = cleanup_orphaned_materializations("codex", repo_root, has_active_sessions=False)
 
     assert removed == 2
-    assert not (agents_dir / "__agent-c99.md").exists()
-    assert not (skills_dir / "__skill-c99").exists()
+    assert not (agents_dir / "__meridian--agent.md").exists()
+    assert not (skills_dir / "__meridian--skill").exists()
 
 
 def test_materialized_skill_forces_disable_model_invocation(claude_layout: Path) -> None:
@@ -99,7 +101,6 @@ def test_materialized_skill_forces_disable_model_invocation(claude_layout: Path)
         skill_sources={"orchestrate": source_skill_dir},
         harness_id="claude",
         repo_root=claude_layout,
-        chat_id="c9",
     )
 
     assert result.materialized_skills == ("__meridian--orchestrate",)

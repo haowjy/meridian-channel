@@ -68,7 +68,7 @@ class SessionUpdateEvent(BaseModel):
 
 
 type SessionEvent = SessionStartEvent | SessionStopEvent | SessionUpdateEvent
-type MaterializedCleanupScope = tuple[str, str]
+type MaterializedCleanupScope = str
 
 
 class StaleSessionCleanup(NamedTuple):
@@ -370,7 +370,7 @@ def cleanup_stale_sessions(state_root: Path) -> StaleSessionCleanup:
         return StaleSessionCleanup(cleaned_ids=(), materialized_scopes=())
 
     cleaned_ids = sorted((chat_id for chat_id, _, _ in stale), key=_session_sort_key)
-    stale_cleanup_scopes: list[tuple[str, str]] = []
+    stale_cleanup_scopes: list[str] = []
     with _lock_file(paths.sessions_lock):
         records = _records_by_session(state_root)
         stopped_at = _utc_now_iso()
@@ -384,7 +384,7 @@ def cleanup_stale_sessions(state_root: Path) -> StaleSessionCleanup:
                     ),
                 )
             if existing is not None and existing.harness.strip():
-                stale_cleanup_scopes.append((existing.harness.strip(), chat_id))
+                stale_cleanup_scopes.append(existing.harness.strip())
             lock_path.unlink(missing_ok=True)
 
     for chat_id, _, handle in stale:

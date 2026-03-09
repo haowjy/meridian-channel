@@ -118,17 +118,16 @@ def cleanup_orphaned_locks(repo_root: Path) -> bool:
     return True
 
 
-def _cleanup_launch_materialized(*, repo_root: Path, harness_id: str, chat_id: str) -> None:
+def _cleanup_launch_materialized(*, repo_root: Path, harness_id: str) -> None:
     if not harness_id.strip():
         return
     try:
-        cleanup_materialized(harness_id, repo_root, chat_id)
+        cleanup_materialized(harness_id, repo_root)
     except Exception:
         logger.warning(
             "Failed to cleanup primary-session materialized harness resources "
-            "(harness=%s, chat=%s).",
+            "(harness=%s).",
             harness_id,
-            chat_id,
             exc_info=True,
         )
 
@@ -146,7 +145,11 @@ def _sweep_orphaned_materializations(repo_root: Path, harness_id: str) -> None:
         if active_ids is None:
             return
         for known_harness_id in HARNESS_NATIVE_DIRS:
-            cleanup_orphaned_materializations(known_harness_id, repo_root, active_ids)
+            cleanup_orphaned_materializations(
+                known_harness_id,
+                repo_root,
+                has_active_sessions=bool(active_ids),
+            )
     except Exception:
         logger.debug("Orphan materialization sweep failed", exc_info=True)
 
@@ -311,7 +314,6 @@ def run_harness_process(
                 _cleanup_launch_materialized(
                     repo_root=repo_root,
                     harness_id=ctx.session_metadata.harness,
-                    chat_id=chat_id,
                 )
         try:
             if ctx.lock_path.exists():
