@@ -133,7 +133,7 @@ async def test_execute_retries_retryable_errors_up_to_max(tmp_path: Path) -> Non
 
 @pytest.mark.asyncio
 async def test_execute_does_not_retry_unrecoverable_errors(tmp_path: Path) -> None:
-    run, _space_dir = _create_run(tmp_path, prompt="fail once")
+    run, _state_root = _create_run(tmp_path, prompt="fail once")
     artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
 
     counter = tmp_path / "unrecoverable-count.txt"
