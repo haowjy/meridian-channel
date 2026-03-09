@@ -326,38 +326,24 @@ def get_session_harness_id(space_dir: Path, chat_id: str) -> str | None:
 
 
 def collect_active_chat_ids(repo_root: Path) -> frozenset[str] | None:
-    """Collect chat IDs from all spaces with start events that lack a stop event."""
+    """Collect chat IDs with start events that lack a stop event."""
 
-    from meridian.lib.state.paths import resolve_all_spaces_dir
+    from meridian.lib.state.paths import resolve_state_paths
 
     try:
-        spaces_dir = resolve_all_spaces_dir(repo_root)
-        if not spaces_dir.is_dir():
+        state_root = resolve_state_paths(repo_root).root_dir
+        sessions_file = state_root / "sessions.jsonl"
+        if not sessions_file.is_file():
             return frozenset()
 
-        active_ids: set[str] = set()
-        for space_dir in spaces_dir.iterdir():
-            if not space_dir.is_dir():
-                continue
-            sessions_file = space_dir / "sessions.jsonl"
-            if not sessions_file.is_file():
-                continue
-
-            try:
-                started: set[str] = set()
-                stopped: set[str] = set()
-                for event in _read_events(sessions_file):
-                    if isinstance(event, SessionStartEvent):
-                        started.add(event.chat_id)
-                        continue
-                    if isinstance(event, SessionStopEvent):
-                        stopped.add(event.chat_id)
-
-                active_ids.update(started - stopped)
-            except OSError:
-                continue
-
-        return frozenset(active_ids)
+        started: set[str] = set()
+        stopped: set[str] = set()
+        for event in _read_events(sessions_file):
+            if isinstance(event, SessionStartEvent):
+                started.add(event.chat_id)
+            elif isinstance(event, SessionStopEvent):
+                stopped.add(event.chat_id)
+        return frozenset(started - stopped)
     except OSError:
         return None
 

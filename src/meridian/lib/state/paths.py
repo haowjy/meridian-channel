@@ -7,10 +7,9 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict
 
-from meridian.lib.core.types import SpawnId, SpaceId
+from meridian.lib.core.types import SpawnId
 
 _MERIDIAN_DIR = ".meridian"
-_SPACES_DIR = ".spaces"
 _GITIGNORE_CONTENT = (
     "# Ignore everything by default\n"
     "*\n"
@@ -18,27 +17,20 @@ _GITIGNORE_CONTENT = (
     "# Track .gitignore itself\n"
     "!.gitignore\n"
     "\n"
-    "# Track sync lock for reproducible installs\n"
-    "!sync.lock\n"
-    "\n"
-    "# Track designs/ and fs/ within spaces\n"
-    "!.spaces/\n"
-    "!.spaces/*/\n"
-    "!.spaces/*/designs/\n"
-    "!.spaces/*/designs/**\n"
-    "!.spaces/*/fs/\n"
-    "!.spaces/*/fs/**\n"
+    "# Track fs/ and work/\n"
+    "!fs/\n"
+    "!fs/**\n"
+    "!work/\n"
+    "!work/**\n"
 )
 
 
 class SpacePaths(BaseModel):
-    """Resolved paths for one space directory."""
+    """Resolved paths for one Meridian state root."""
 
     model_config = ConfigDict(frozen=True)
 
     space_dir: Path
-    space_json: Path
-    space_lock: Path
     spawns_jsonl: Path
     spawns_lock: Path
     sessions_jsonl: Path
@@ -49,12 +41,10 @@ class SpacePaths(BaseModel):
 
     @classmethod
     def from_space_dir(cls, space_dir: Path) -> Self:
-        """Build space-relative paths from an absolute space directory."""
+        """Build state-root-relative paths from an absolute state directory."""
 
         return cls(
             space_dir=space_dir,
-            space_json=space_dir / "space.json",
-            space_lock=space_dir / "space.lock",
             spawns_jsonl=space_dir / "spawns.jsonl",
             spawns_lock=space_dir / "spawns.lock",
             sessions_jsonl=space_dir / "sessions.jsonl",
@@ -73,8 +63,7 @@ class StatePaths(BaseModel):
     root_dir: Path
     artifacts_dir: Path
     spawns_dir: Path
-    all_spaces_dir: Path
-    active_spaces_dir: Path
+    active_primary_lock: Path
     cache_dir: Path
     sync_lock_path: Path
     sync_cache_dir: Path
@@ -103,8 +92,7 @@ def resolve_state_paths(repo_root: Path) -> StatePaths:
         root_dir=root_dir,
         artifacts_dir=root_dir / "artifacts",
         spawns_dir=root_dir / "spawns",
-        all_spaces_dir=root_dir / _SPACES_DIR,
-        active_spaces_dir=root_dir / "active-spaces",
+        active_primary_lock=root_dir / "active-primary.lock",
         cache_dir=root_dir / "cache",
         sync_lock_path=root_dir / "sync.lock",
         sync_cache_dir=root_dir / "cache" / "sync",
@@ -113,38 +101,41 @@ def resolve_state_paths(repo_root: Path) -> StatePaths:
     )
 
 
-def resolve_all_spaces_dir(repo_root: Path) -> Path:
-    """Return the legacy `.meridian/.spaces/` compatibility path."""
-
-    return resolve_state_paths(repo_root).all_spaces_dir
-
-
 def resolve_cache_dir(repo_root: Path) -> Path:
     """Return `.meridian/cache/` for a repository root."""
 
     return resolve_state_paths(repo_root).cache_dir
 
 
-def resolve_space_dir(repo_root: Path, space_id: SpaceId | str) -> Path:
-    """Return a legacy per-space path for compatibility callers."""
+def resolve_all_spaces_dir(repo_root: Path) -> Path:
+    """Return the compatibility `.meridian/.spaces/` directory path."""
 
-    return resolve_all_spaces_dir(repo_root) / str(space_id)
+    return resolve_state_paths(repo_root).root_dir / ".spaces"
 
 
-def spawn_log_subpath(spawn_id: SpawnId | str, space_id: SpaceId | str | None) -> Path:
+def resolve_space_dir(repo_root: Path, space_id: str) -> Path:
+    """Return the compatibility state root path for a space lookup."""
+
+    del space_id
+    return resolve_state_paths(repo_root).root_dir
+
+
+def resolve_fs_dir(repo_root: Path) -> Path:
+    """Return `.meridian/fs/` for a repository root."""
+
+    return resolve_state_paths(repo_root).root_dir / "fs"
+
+
+def spawn_log_subpath(spawn_id: SpawnId | str) -> Path:
     """Return spawn log path relative to the Meridian state root."""
 
-    if space_id is None:
-        return Path("spawns") / str(spawn_id)
-    return Path(_SPACES_DIR) / str(space_id) / "spawns" / str(spawn_id)
+    return Path("spawns") / str(spawn_id)
 
 
-def resolve_spawn_log_dir(
-    repo_root: Path, spawn_id: SpawnId | str, space_id: SpaceId | str | None
-) -> Path:
-    """Resolve absolute spawn log directory for spawn/space IDs."""
+def resolve_spawn_log_dir(repo_root: Path, spawn_id: SpawnId | str) -> Path:
+    """Resolve absolute spawn log directory for a spawn ID."""
 
-    return resolve_state_paths(repo_root).root_dir / spawn_log_subpath(spawn_id, space_id)
+    return resolve_state_paths(repo_root).root_dir / spawn_log_subpath(spawn_id)
 
 
 def ensure_gitignore(repo_root: Path) -> Path:
