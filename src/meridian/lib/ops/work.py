@@ -135,18 +135,26 @@ class WorkDashboardOutput(BaseModel):
             lines.append("  (none)")
             return "\n".join(lines)
 
+        has_spawns = False
+
         for item in self.items:
             lines.append(f"  {item.name}  {item.status}")
             lines.extend(_format_spawn_rows(item.spawns, indent="    "))
+            if item.spawns:
+                has_spawns = True
             lines.append("")
 
         if self.ungrouped_spawns:
             lines.append("  (no work)")
             lines.extend(_format_spawn_rows(self.ungrouped_spawns, indent="    "))
+            has_spawns = True
             lines.append("")
 
         if lines[-1] == "":
             lines.pop()
+        if has_spawns:
+            lines.append("")
+            lines.append("Run `meridian spawn show <id>` for details.")
         return "\n".join(lines)
 
 

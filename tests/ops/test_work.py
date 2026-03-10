@@ -65,6 +65,13 @@ def test_work_dashboard_groups_active_spawns(tmp_path: Path) -> None:
     assert result.items[0].status == "open"
     assert tuple(spawn.id for spawn in result.items[0].spawns) == ("p1",)
     assert tuple(spawn.id for spawn in result.ungrouped_spawns) == ("p2",)
+    assert result.format_text().endswith("Run `meridian spawn show <id>` for details.")
+
+
+def test_work_dashboard_omits_hint_when_empty(tmp_path: Path) -> None:
+    result = work_dashboard_sync(WorkDashboardInput(repo_root=tmp_path.as_posix()))
+
+    assert result.format_text() == "ACTIVE\n  (none)"
 
 
 def test_work_start_switch_clear_and_show_round_trip(tmp_path: Path) -> None:

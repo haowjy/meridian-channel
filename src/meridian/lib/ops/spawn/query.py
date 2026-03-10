@@ -204,6 +204,8 @@ def detail_from_row(
         status=row.status,
         model=row.model or "",
         harness=row.harness or "",
+        work_id=row.work_id,
+        desc=row.desc,
         started_at=row.started_at or "",
         finished_at=row.finished_at,
         duration_secs=row.duration_secs,

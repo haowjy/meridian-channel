@@ -201,6 +201,8 @@ class SpawnDetailOutput(BaseModel):
     status: str
     model: str
     harness: str
+    work_id: str | None = None
+    desc: str | None = None
     started_at: str
     finished_at: str | None
     duration_secs: float | None
@@ -240,11 +242,16 @@ class SpawnDetailOutput(BaseModel):
         if self.failure_reason is not None:
             failure_label = "Warning" if self.status == "succeeded" else "Failure"
 
+        work_value = (self.work_id or "").strip() or None
+        desc_value = (self.desc or "").strip() or None
+
         pairs: list[tuple[str, str | None]] = [
             ("Spawn", self.spawn_id),
             ("Status", status_str),
             ("Model", f"{self.model} ({self.harness})"),
             ("Duration", duration_value),
+            ("Work", work_value),
+            ("Desc", desc_value),
             (failure_label or "Failure", self.failure_reason),
             ("Cost", cost_value),
             ("Report", self.report_path),
