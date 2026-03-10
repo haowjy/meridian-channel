@@ -208,6 +208,40 @@ async def _terminate_after_cancellation(
             await wait_for_process_returncode(process)
 
 
+async def _report_watchdog(
+    report_path: Path,
+    process: asyncio.subprocess.Process,
+    stale_check_path: Path,
+    grace_secs: float = 60.0,
+) -> None:
+    """Kill harness process if report.md appears and output goes idle.
+
+    Polls for report.md creation, then waits a grace period checking for
+    continued output activity. If the process is still alive after grace,
+    terminates it via the existing terminate_process() helper.
+    """
+    poll_interval = 5.0
+    while not report_path.exists():
+        if process.returncode is not None:
+            return  # Process exited cleanly, no watchdog needed
+        await asyncio.sleep(poll_interval)
+
+    # Report exists. Wait grace period, checking for activity.
+    deadline = asyncio.get_running_loop().time() + grace_secs
+    while asyncio.get_running_loop().time() < deadline:
+        if process.returncode is not None:
+            return  # Clean exit during grace
+        await asyncio.sleep(poll_interval)
+
+    # Still alive after grace — terminate
+    if process.returncode is None:
+        logger.info(
+            "Report watchdog: harness wrote report but process still alive after %.0fs grace. Terminating.",
+            grace_secs,
+        )
+        await terminate_process(process, grace_seconds=10.0)
+
+
 async def spawn_and_stream(
     *,
     spawn_id: SpawnId,
@@ -227,6 +261,7 @@ async def spawn_and_stream(
     stream_stdout_to_terminal: bool = False,
     stream_stderr_to_terminal: bool = False,
     log_dir: Path | None = None,
+    report_watchdog_path: Path | None = None,
 ) -> SpawnResult:
     """Spawn one process, stream/capture output, and return mapped exit metadata."""
 
@@ -268,6 +303,16 @@ async def spawn_and_stream(
             budget_termination_task = asyncio.create_task(
                 terminate_process(process, grace_seconds=kill_grace_seconds)
             )
+
+    watchdog_task: asyncio.Task[None] | None = None
+    if report_watchdog_path is not None:
+        watchdog_task = asyncio.create_task(
+            _report_watchdog(
+                report_path=report_watchdog_path,
+                process=process,
+                stale_check_path=output_log_path,
+            )
+        )
 
     stdout_task = asyncio.create_task(
         _capture_stdout(
@@ -332,6 +377,12 @@ async def spawn_and_stream(
             await stdin_task
         if budget_termination_task is not None:
             await budget_termination_task
+        if watchdog_task is not None:
+            watchdog_task.cancel()
+            try:
+                await watchdog_task
+            except asyncio.CancelledError:
+                pass
         stdout_bytes = b""
         stderr_bytes = b""
         tokens_payload: bytes | None = None
@@ -613,6 +664,7 @@ async def execute_with_finalization(
                 stream_stdout_to_terminal=stream_stdout_to_terminal,
                 stream_stderr_to_terminal=stream_stderr_to_terminal,
                 log_dir=log_dir,
+                report_watchdog_path=report_path,
             )
             exit_code = spawn_result.exit_code
             if spawn_result.timed_out:
