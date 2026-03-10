@@ -117,3 +117,32 @@ def test_session_record_tracks_active_work_id(tmp_path):
     assert cleared.harness_session_ids == ("session-1",)
 
     stop_session(state_root, chat_id)
+
+
+def test_start_session_can_reuse_existing_chat_id(tmp_path):
+    state_root = _state_root(tmp_path)
+    first_chat_id = start_session(
+        state_root,
+        harness="codex",
+        harness_session_id="session-1",
+        model="gpt-5.4",
+    )
+    stop_session(state_root, first_chat_id)
+
+    reused_chat_id = start_session(
+        state_root,
+        harness="codex",
+        harness_session_id="session-2",
+        model="gpt-5.4",
+        chat_id=first_chat_id,
+    )
+
+    assert reused_chat_id == first_chat_id
+
+    record = resolve_session_ref(state_root, "session-2")
+    assert record is not None
+    assert record.chat_id == first_chat_id
+    assert record.harness_session_id == "session-2"
+    assert record.harness_session_ids == ("session-2",)
+
+    stop_session(state_root, reused_chat_id)

@@ -107,6 +107,7 @@ class _ResolvedContinueTarget(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     harness_session_id: str | None
+    chat_id: str | None = None
     harness: str | None
     tracked: bool = False
     warning: str | None = None
@@ -494,6 +495,7 @@ def _run_primary_launch(
         resolved_approval = "auto"
 
     continue_harness_session_id: str | None = None
+    continue_chat_id: str | None = None
     continue_harness: str | None = None
     continue_warning: str | None = None
     fresh = True
@@ -505,6 +507,7 @@ def _run_primary_launch(
             raise ValueError("Cannot combine --continue with --agent.")
         resolved_continue = _resolve_continue_target(repo_root=repo_root, continue_ref=resume_target)
         continue_harness_session_id = resolved_continue.harness_session_id
+        continue_chat_id = resolved_continue.chat_id
         continue_harness = explicit_harness or resolved_continue.harness
         if continue_harness is None:
             raise ValueError(
@@ -529,6 +532,7 @@ def _run_primary_launch(
             permission_tier=resolved_permission_tier,
             approval=resolved_approval,
             continue_harness_session_id=continue_harness_session_id,
+            continue_chat_id=continue_chat_id,
         ),
         harness_registry=harness_registry,
     )
@@ -599,6 +603,7 @@ def _resolve_continue_target(
     )
     return _ResolvedContinueTarget(
         harness_session_id=session_id,
+        chat_id=session.chat_id if session is not None else None,
         harness=harness,
         tracked=session is not None,
         warning=warning,
@@ -807,6 +812,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     try:
         try:
             app(cleaned_args)
+        except SystemExit:
+            raise
         except TimeoutError as exc:
             _emit_error(_operation_error_message(exc), exit_code=124)
         except (KeyError, ValueError, FileNotFoundError, OSError) as exc:

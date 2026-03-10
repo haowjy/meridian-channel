@@ -35,6 +35,7 @@ def test_run_primary_launch_allows_harness_override_on_continue(
         "_resolve_continue_target",
         lambda **_: main_module._ResolvedContinueTarget(
             harness_session_id="session-2",
+            chat_id="c7",
             harness="claude",
             tracked=False,
             warning="untracked session",
@@ -71,6 +72,7 @@ def test_run_primary_launch_allows_harness_override_on_continue(
     request = captured["request"]
     assert getattr(request, "harness") == "codex"
     assert getattr(request, "continue_harness_session_id") == "session-2"
+    assert getattr(request, "continue_chat_id") == "c7"
 
 
 class _TTYStringIO(StringIO):

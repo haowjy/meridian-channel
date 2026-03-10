@@ -28,6 +28,7 @@ class LaunchRequest(BaseModel):
     permission_tier: str | None = None
     approval: str = "confirm"
     continue_harness_session_id: str | None = None
+    continue_chat_id: str | None = None
 
 
 class LaunchResult(BaseModel):

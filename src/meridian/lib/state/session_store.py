@@ -231,6 +231,7 @@ def start_session(
     harness: str,
     harness_session_id: str,
     model: str,
+    chat_id: str | None = None,
     params: tuple[str, ...] = (),
     agent: str = "",
     agent_path: str = "",
@@ -243,9 +244,11 @@ def start_session(
     started_at = _utc_now_iso()
 
     with _lock_file(paths.sessions_lock):
-        chat_id = next_chat_id(state_root)
+        resolved_chat_id = chat_id.strip() if chat_id is not None else ""
+        if not resolved_chat_id:
+            resolved_chat_id = next_chat_id(state_root)
         event = SessionStartEvent(
-            chat_id=chat_id,
+            chat_id=resolved_chat_id,
             harness=harness,
             harness_session_id=harness_session_id,
             model=model,
@@ -258,10 +261,10 @@ def start_session(
         )
         _append_event(paths.sessions_jsonl, event.model_dump())
 
-        lock_path = paths.sessions_dir / f"{chat_id}.lock"
+        lock_path = paths.sessions_dir / f"{resolved_chat_id}.lock"
         handle = _acquire_session_lock(lock_path)
-        _SESSION_LOCK_HANDLES[_session_lock_key(state_root, chat_id)] = handle
-        return chat_id
+        _SESSION_LOCK_HANDLES[_session_lock_key(state_root, resolved_chat_id)] = handle
+        return resolved_chat_id
 
 
 def stop_session(state_root: Path, chat_id: str) -> None:
