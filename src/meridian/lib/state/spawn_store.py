@@ -261,6 +261,32 @@ def finalize_spawn(
         _append_event(paths.spawns_jsonl, event.model_dump(exclude_none=True))
 
 
+def finalize_spawn_if_running(
+    state_root: Path,
+    spawn_id: SpawnId | str,
+    status: str,
+    exit_code: int,
+    *,
+    error: str | None = None,
+) -> bool:
+    """Append finalize event only if spawn is still running. Returns True if finalized."""
+    paths = StateRootPaths.from_root_dir(state_root)
+    with _lock_file(paths.spawns_lock):
+        records = _record_from_events(_read_events(paths.spawns_jsonl))
+        record = records.get(str(spawn_id))
+        if record is None or record.status != "running":
+            return False
+        event = SpawnFinalizeEvent(
+            id=str(spawn_id),
+            status=status,
+            exit_code=exit_code,
+            finished_at=_utc_now_iso(),
+            error=error,
+        )
+        _append_event(paths.spawns_jsonl, event.model_dump(exclude_none=True))
+        return True
+
+
 def _empty_record(spawn_id: str) -> SpawnRecord:
     return SpawnRecord(
         id=spawn_id,

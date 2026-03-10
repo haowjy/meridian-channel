@@ -34,7 +34,7 @@ from meridian.lib.safety.permissions import PermissionConfig
 from meridian.lib.safety.redaction import SecretSpec, redact_secret_bytes
 from meridian.lib.state import spawn_store
 from meridian.lib.state.artifact_store import ArtifactStore, make_artifact_key
-from meridian.lib.state.atomic import atomic_write_bytes
+from meridian.lib.state.atomic import atomic_write_bytes, atomic_write_text
 from meridian.lib.state.paths import resolve_spawn_log_dir, resolve_state_paths
 from meridian.lib.core.types import HarnessId, SpawnId
 
@@ -226,6 +226,7 @@ async def spawn_and_stream(
     event_observer: Callable[[StreamEvent], None] | None = None,
     stream_stdout_to_terminal: bool = False,
     stream_stderr_to_terminal: bool = False,
+    log_dir: Path | None = None,
 ) -> SpawnResult:
     """Spawn one process, stream/capture output, and return mapped exit metadata."""
 
@@ -243,6 +244,10 @@ async def spawn_and_stream(
     )
     if process.stdout is None or process.stderr is None:
         raise RuntimeError("Subprocess did not expose stdout/stderr pipes.")
+
+    # Write harness child PID for external cleanup
+    if log_dir is not None:
+        atomic_write_text(log_dir / "harness.pid", f"{process.pid}\n")
 
     budget_breach: BudgetBreach | None = None
     budget_termination_task: asyncio.Task[None] | None = None
@@ -607,6 +612,7 @@ async def execute_with_finalization(
                 event_observer=event_observer,
                 stream_stdout_to_terminal=stream_stdout_to_terminal,
                 stream_stderr_to_terminal=stream_stderr_to_terminal,
+                log_dir=log_dir,
             )
             exit_code = spawn_result.exit_code
             if spawn_result.timed_out:
