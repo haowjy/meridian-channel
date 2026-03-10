@@ -40,7 +40,7 @@ def _spawn_id_sort_key(spawn_id: str) -> tuple[int, str]:
 
 
 def _spawn_desc(spawn: spawn_store.SpawnRecord) -> str:
-    desc = (spawn.desc or spawn.prompt or "").strip()
+    desc = (spawn.desc or "").strip()
     if not desc:
         return ""
     return " ".join(desc.split())
