@@ -68,17 +68,14 @@ def _repair_stale_session_locks(repo_root: Path) -> int:
 
 
 def _repair_orphan_runs(repo_root: Path) -> int:
-    from meridian.lib.state.reaper import reap_stuck_spawn
+    from meridian.lib.state.reaper import reconcile_spawns
 
     state_root = _state_root(repo_root)
-    repaired = 0
-    for run in spawn_store.list_spawns(state_root):
-        if run.status != "running":
-            continue
-        reason = reap_stuck_spawn(state_root, run.id)
-        if reason is not None:
-            repaired += 1
-    return repaired
+    spawns = spawn_store.list_spawns(state_root)
+    running_before = sum(1 for s in spawns if s.status == "running")
+    reconciled = reconcile_spawns(state_root, spawns)
+    running_after = sum(1 for s in reconciled if s.status == "running")
+    return running_before - running_after
 
 
 def doctor_sync(payload: DoctorInput) -> DoctorOutput:
