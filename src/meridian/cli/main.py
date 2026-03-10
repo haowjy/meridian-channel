@@ -237,8 +237,12 @@ def agent_mode_enabled() -> bool:
     return int(os.getenv("MERIDIAN_DEPTH", "0")) > 0
 
 
+def _interactive_terminal_attached() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
 def _agent_sink_enabled(*, output_explicit: bool) -> bool:
-    if output_explicit or not agent_mode_enabled():
+    if output_explicit or not agent_mode_enabled() or _interactive_terminal_attached():
         return False
     raw_depth = os.getenv("MERIDIAN_DEPTH", "").strip()
     if not raw_depth:
@@ -776,7 +780,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     args, force_human = _extract_human_flag(args)
     cleaned_args, options = _extract_global_options(args)
 
-    agent_mode = agent_mode_enabled() and not force_human
+    agent_mode = agent_mode_enabled() and not force_human and not _interactive_terminal_attached()
     if agent_mode and not options.output_explicit:
         options = options.model_copy(update={"output": OutputConfig(format="json")})
 

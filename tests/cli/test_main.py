@@ -1,5 +1,6 @@
 from pathlib import Path
 import importlib
+from io import StringIO
 
 import pytest
 
@@ -70,3 +71,16 @@ def test_run_primary_launch_allows_harness_override_on_continue(
     request = captured["request"]
     assert getattr(request, "harness") == "codex"
     assert getattr(request, "continue_harness_session_id") == "session-2"
+
+
+class _TTYStringIO(StringIO):
+    def isatty(self) -> bool:
+        return True
+
+
+def test_agent_sink_disabled_for_interactive_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MERIDIAN_DEPTH", "1")
+    monkeypatch.setattr(main_module.sys, "stdin", _TTYStringIO())
+    monkeypatch.setattr(main_module.sys, "stdout", _TTYStringIO())
+
+    assert main_module._agent_sink_enabled(output_explicit=False) is False
