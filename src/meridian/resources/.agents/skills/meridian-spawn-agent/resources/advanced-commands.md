@@ -1,6 +1,6 @@
 # Advanced Spawn Commands
 
-Read this when you need continue, cancel, stats, shared filesystem, permissions, or model selection — commands outside the core spawn → wait → show loop. For troubleshooting, read `debugging.md`.
+Read this when you need continue, cancel, stats, permissions, template vars, or dry-run — commands outside the core spawn → wait → show loop. For troubleshooting, read `debugging.md`.
 
 ## Continue & Fork
 
@@ -37,26 +37,24 @@ meridian spawn show SPAWN_ID --no-report     # omit the full report text
 meridian spawn show SPAWN_ID --include-files  # include file metadata
 ```
 
-## Model Selection
+## Template Variables
 
 ```bash
-meridian models list          # discover available models
-meridian models show MODEL    # inspect model metadata and harness routing
+meridian spawn -m MODEL \
+  -p "Implement {{TASK}} with {{CONSTRAINT}}" \
+  --prompt-var TASK=auth-refactor \
+  --prompt-var CONSTRAINT=no-db
 ```
 
-The CLI routes each model to the correct harness automatically — you don't need to specify a harness.
+Use `{{KEY}}` placeholders in prompts, replaced at launch time.
 
-## Shared Filesystem
-
-Spawns can exchange data through `$MERIDIAN_FS_DIR`:
+## Dry Run
 
 ```bash
-mkdir -p "$MERIDIAN_FS_DIR"
-echo "result" > "$MERIDIAN_FS_DIR/step-a-output.txt"
-cat "$MERIDIAN_FS_DIR/step-b-output.txt"
+meridian spawn --dry-run -m MODEL -p "Plan the migration"
 ```
 
-Meridian provides the directory — agents organize it however they want.
+Preview the assembled prompt and command without executing the harness.
 
 ## Permission Tiers
 

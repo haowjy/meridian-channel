@@ -1,6 +1,6 @@
 ---
 name: meridian-spawn-agent
-description: Multi-agent coordination via the meridian CLI — spawning subagents, waiting for results, checking status, and inspecting outputs. Use this skill whenever you need to delegate work to another agent, run tasks in parallel, check on spawn progress, or coordinate multiple agents. Also use when working with `meridian spawn`, `meridian models`, shared filesystems, or any multi-agent workflow.
+description: Multi-agent coordination via the meridian CLI — spawning subagents, waiting for results, checking status, and inspecting outputs. Use this skill whenever you need to delegate work to another agent, run tasks in parallel, check on spawn progress, or coordinate multiple agents. Also use when working with `meridian spawn`, `meridian work`, `meridian models`, shared filesystems, or any multi-agent workflow.
 ---
 
 # meridian-spawn-agent
@@ -11,7 +11,7 @@ In agent mode, all CLI output is JSON.
 ## Core Loop: Spawn → Wait → Show
 
 ```bash
-meridian spawn -m MODEL -p "task description"
+meridian spawn -a agent -p "task description"
 # → {"spawn_id": "p107", "status": "running"}
 
 meridian spawn wait p107
@@ -23,39 +23,88 @@ meridian spawn show p107
 
 **Capturing spawn IDs:** Agent harnesses often sandbox shell execution, so command substitution like `ID=$(meridian spawn ...)` may silently fail. Always read the `spawn_id` from the JSON output and pass it literally to `spawn wait` or `spawn show`.
 
-If you need to pass files between spawns, use the shared filesystem at `$MERIDIAN_FS_DIR` (automatically set by meridian). On-disk state layout is an implementation detail; see `resources/debugging.md` for low-level inspection and `resources/advanced-commands.md` for advanced coordination.
-If something looks wrong — a spawn seems stuck, output is missing, or state does not match expectations — read [`resources/debugging.md`](resources/debugging.md).
+## Spawning
 
-## Composing Spawns
+Use `-a` to spawn with an agent profile (encodes model, system prompt, permissions) or `-m` to target a model directly. Both are first-class:
 
 ```bash
+# Agent profile — uses the profile's model, prompt, and permissions
+meridian spawn -a reviewer -p "Review this change"
+
+# Direct model — when you want a specific model without a profile
+meridian spawn -m MODEL -p "Implement the fix"
+
+# Override a profile's model (e.g. budget constraints, fan-out)
+meridian spawn -a reviewer -m sonnet -p "Quick review"
+
 # With reference files (repeat -f)
-meridian spawn -m MODEL -p "Implement fix" \
+meridian spawn -a agent -p "Implement fix" \
   -f plans/step.md \
   -f src/module.py
-
-# With an agent profile
-meridian spawn -a reviewer -m MODEL -p "Review this change"
-
-# With template vars (use {{KEY}} in prompt, no spaces)
-meridian spawn -m MODEL \
-  -p "Implement {{TASK}} with {{CONSTRAINT}}" \
-  --prompt-var TASK=auth-refactor \
-  --prompt-var CONSTRAINT=no-db
-
-# Dry-run preview (no execution)
-meridian spawn --dry-run -m MODEL -p "Plan the migration"
 ```
 
-Start minimal, then add context only when needed. Models support short aliases (e.g. `opus`, `sonnet`, `gpt`) — run `meridian models list` to see what's available.
+Run `meridian models list` to see available models and aliases. Model and agent preferences belong in your project's agent profiles, `meridian config`, or project docs (CLAUDE.md, AGENTS.md) — not hardcoded into spawn commands.
+
+To create your own agent profiles, see [`resources/creating-agents.md`](resources/creating-agents.md).
+
+## Work Items
+
+Work items group spawns by purpose and give project-level visibility. Use `--work` and `--desc` to connect spawns to an effort:
+
+```bash
+# Set active work item for your session
+meridian work start "auth refactor"
+
+# Spawns automatically inherit the active work item
+meridian spawn -a agent --desc "Implement step 2" -p "..."
+# → spawn gets work_id: "auth-refactor"
+
+# Or attach explicitly (useful for automation)
+meridian spawn -a reviewer --work auth-refactor --desc "Review step 1" -p "..."
+```
+
+### Dashboard
+
+`meridian work` shows what's happening, grouped by effort:
+
+```bash
+meridian work                    # dashboard — what's in flight
+meridian work list               # list all work items
+meridian work list --active      # hide done items
+meridian work show auth-refactor # drill into one work item
+```
+
+Dashboard output groups spawns by work item:
+
+```
+ACTIVE
+  auth-refactor          implementing step 2
+    p5  model-a  running   Implement step 2
+    p6  model-b  running   Review step 1
+
+  (no work)
+    p12 model-a  running   Fix off-by-one
+```
+
+### Managing Work Items
+
+```bash
+meridian work start "auth refactor"              # create + set active
+meridian work switch auth-refactor               # change active for this session
+meridian work clear                              # unset active
+meridian work update auth-refactor --status "step 2"
+meridian work done auth-refactor                 # mark complete
+```
+
+Work items are directories under `.meridian/work/<slug>/` — they can hold design docs, plans, diagrams. Spawns snapshot `work_id` at creation time, so changing your active work item later doesn't move old spawns.
 
 ## Parallel Spawns
 
 Launch independent spawns in the background, then wait for all:
 
 ```bash
-meridian spawn -m MODEL -p "Step A"
-meridian spawn -m MODEL -p "Step B"
+meridian spawn -a agent -p "Step A" --desc "Step A"
+meridian spawn -a agent -p "Step B" --desc "Step B"
 
 # Read both returned spawn_ids from the JSON results, then wait for both.
 meridian spawn wait p108 p109
@@ -82,7 +131,19 @@ Stuck spawns auto-recover: if a spawn's process dies or goes stale, the next rea
 
 If `spawn wait` returns `"status": "failed"`, check the `report` field first — it usually contains the error or the agent's last output. For deeper investigation, use `spawn show SPAWN_ID` and see [`resources/debugging.md`](resources/debugging.md) for log inspection.
 
+## Shared Filesystem
+
+Spawns can exchange data through `$MERIDIAN_FS_DIR`:
+
+```bash
+echo "result" > "$MERIDIAN_FS_DIR/step-a-output.txt"
+```
+
+Meridian provides the directory — agents organize it however they want.
+
 ## Beyond the Basics
 
-For continue/fork, cancel, stats, shared filesystem, model discovery, and permission tiers, see [`resources/advanced-commands.md`](resources/advanced-commands.md).
+For continue/fork, cancel, stats, permission tiers, template vars, and dry-run, see [`resources/advanced-commands.md`](resources/advanced-commands.md).
 For troubleshooting strange behavior, see [`resources/debugging.md`](resources/debugging.md).
+For writing your own agent profiles, see [`resources/creating-agents.md`](resources/creating-agents.md).
+For project defaults (model, agent, permissions, timeouts), see [`resources/configuration.md`](resources/configuration.md).
