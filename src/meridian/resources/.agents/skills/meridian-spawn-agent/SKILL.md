@@ -143,17 +143,11 @@ Meridian provides the directory — agents organize it however they want.
 
 ## Committing Spawn Changes
 
-After a spawn finishes, use `spawn files` to get the list of touched files and pipe it to git:
+Use `spawn files` to get the files a spawn touched and pipe them to git:
 
 ```bash
-# Stage all files the spawn touched
 meridian spawn files p107 | xargs git add
-
-# Null-delimited for paths with spaces
-meridian spawn files p107 -0 | xargs -0 git add
-
-# Review what changed before staging
-meridian spawn files p107
+meridian spawn files p107 -0 | xargs -0 git add   # paths with spaces
 ```
 
 ## Beyond the Basics

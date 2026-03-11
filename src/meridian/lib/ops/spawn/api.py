@@ -297,7 +297,6 @@ def spawn_files_sync(
     return SpawnFilesOutput(
         spawn_id=spawn_id,
         files=files,
-        null_delimited=payload.null_delimited,
     )
 
 
@@ -323,6 +322,36 @@ def _read_background_pid(state_root: Path, spawn_id: str) -> int | None:
     return pid
 
 
+def _read_harness_pid(state_root: Path, spawn_id: str) -> int | None:
+    pid_path = state_root / "spawns" / spawn_id / "harness.pid"
+    if not pid_path.is_file():
+        return None
+    try:
+        pid = int(pid_path.read_text(encoding="utf-8").strip())
+    except ValueError:
+        return None
+    if pid <= 0:
+        return None
+    return pid
+
+
+def _resolve_cancel_pid(state_root: Path, row: spawn_store.SpawnRecord) -> int | None:
+    launch_mode = (row.launch_mode or "").strip().lower()
+    if launch_mode == "background":
+        if row.wrapper_pid is not None and row.wrapper_pid > 0:
+            return row.wrapper_pid
+        return _read_background_pid(state_root, row.id)
+    if launch_mode == "foreground":
+        return _read_harness_pid(state_root, row.id)
+
+    if row.wrapper_pid is not None and row.wrapper_pid > 0:
+        return row.wrapper_pid
+    background_pid = _read_background_pid(state_root, row.id)
+    if background_pid is not None:
+        return background_pid
+    return _read_harness_pid(state_root, row.id)
+
+
 def spawn_cancel_sync(
     payload: SpawnCancelInput,
     ctx: RuntimeContext | None = None,
@@ -346,15 +375,14 @@ def spawn_cancel_sync(
             model=row.model,
             harness_id=row.harness,
         )
-
-    pid = _read_background_pid(state_root, spawn_id)
+    pid = _resolve_cancel_pid(state_root, row)
     if pid is not None:
         try:
             os.kill(pid, signal.SIGTERM)
         except ProcessLookupError:
             pass
 
-    finalized = spawn_store.finalize_spawn_if_running(
+    finalized = spawn_store.finalize_spawn_if_active(
         state_root,
         spawn_id,
         status="cancelled",
@@ -374,7 +402,6 @@ def spawn_cancel_sync(
             harness_id=latest.harness,
             exit_code=latest.exit_code,
         )
-
     return SpawnActionOutput(
         command="spawn.cancel",
         status="cancelled",

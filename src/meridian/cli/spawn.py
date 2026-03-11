@@ -364,13 +364,16 @@ def _spawn_files(
     ] = False,
 ) -> None:
     result = spawn_files_sync(
-        SpawnFilesInput(
-            spawn_id=spawn_id,
-            null_delimited=null,
-        ),
+        SpawnFilesInput(spawn_id=spawn_id),
         sink=current_output_sink(),
     )
-    emit(result)
+    if null and result.files:
+        import sys
+
+        sys.stdout.write("\0".join(result.files))
+        sys.stdout.flush()
+    else:
+        emit(result)
 
 
 def register_spawn_commands(app: App, emit: Emitter) -> tuple[set[str], dict[str, str]]:

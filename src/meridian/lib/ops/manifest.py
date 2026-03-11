@@ -398,6 +398,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="spawn",
         cli_name="files",
         mcp_name="spawn_files",
+        surfaces=frozenset({"cli"}),
     ),
     _spec(
         name="spawn.continue",
