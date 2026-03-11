@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from meridian.lib.launch import runner as launch_runner
 from meridian.lib.core.domain import Spawn, TokenUsage
 from meridian.lib.launch.runner import execute_with_finalization
 from meridian.lib.harness.common import (
@@ -17,6 +18,7 @@ from meridian.lib.harness.adapter import ArtifactStore as HarnessArtifactStore
 from meridian.lib.harness.adapter import (
     BaseHarnessAdapter,
     HarnessCapabilities,
+    McpConfig,
     PermissionResolver,
     SpawnParams,
     StreamEvent,
@@ -47,6 +49,10 @@ class ScriptHarnessAdapter(BaseHarnessAdapter):
     def env_overrides(self, config: PermissionConfig) -> dict[str, str]:
         _ = config
         return {}
+
+    def mcp_config(self, run: SpawnParams) -> McpConfig | None:
+        _ = run
+        return None
 
     def parse_stream_event(self, line: str) -> StreamEvent | None:
         _ = line
@@ -217,6 +223,133 @@ async def test_execute_sets_timeout_failure_reason(tmp_path: Path) -> None:
         "exit_code": 3,
         "timed_out": True,
     }
+
+
+@pytest.mark.asyncio
+async def test_execute_handles_large_stdout_json_lines(tmp_path: Path) -> None:
+    run, state_root = _create_run(tmp_path, prompt="large line")
+    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
+
+    script = tmp_path / "large_line.py"
+    _write_script(
+        script,
+        """
+        import json
+        import sys
+        from pathlib import Path
+
+        report_path = Path(sys.argv[1])
+        payload = {"type": "tool_result", "content": "x" * 70000}
+        print(json.dumps(payload), flush=True)
+        report_path.write_text("# Large Line OK\\n", encoding="utf-8")
+        print(json.dumps({"type": "result", "subtype": "success"}), flush=True)
+        """,
+    )
+
+    class LargeLineHarnessAdapter(ScriptHarnessAdapter):
+        def build_command(self, run: SpawnParams, perms: PermissionResolver) -> list[str]:
+            return [
+                *self._command,
+                run.report_output_path or "",
+                *perms.resolve_flags(self.id),
+                *run.extra_args,
+            ]
+
+    adapter = LargeLineHarnessAdapter(command=(sys.executable, str(script)))
+    registry = HarnessRegistry()
+    registry.register(adapter)
+
+    exit_code = await execute_with_finalization(
+        run,
+        repo_root=tmp_path,
+        state_root=state_root,
+        artifacts=artifacts,
+        registry=registry,
+        harness_id=adapter.id,
+        cwd=tmp_path,
+        max_retries=0,
+    )
+
+    assert exit_code == 0
+    row = _fetch_run_row(state_root, run.spawn_id)
+    assert row.status == "succeeded"
+    output = artifacts.get(make_artifact_key(run.spawn_id, "output.jsonl")).decode("utf-8")
+    assert '"type": "tool_result"' in output
+    assert len(output) > 70000
+
+
+@pytest.mark.asyncio
+async def test_execute_treats_watchdog_termination_after_report_as_success(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    run, state_root = _create_run(tmp_path, prompt="report then linger")
+    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
+
+    script = tmp_path / "report_then_linger.py"
+    _write_script(
+        script,
+        """
+        import json
+        import sys
+        import time
+        from pathlib import Path
+
+        report_path = Path(sys.argv[1])
+        print(json.dumps({"type": "message", "text": "working"}), flush=True)
+        report_path.write_text("# Finished\\n\\nActual work is done.\\n", encoding="utf-8")
+        print(json.dumps({"type": "result", "subtype": "success"}), flush=True)
+        time.sleep(5.0)
+        """,
+    )
+
+    class ReportHarnessAdapter(ScriptHarnessAdapter):
+        def build_command(self, run: SpawnParams, perms: PermissionResolver) -> list[str]:
+            return [
+                *self._command,
+                run.report_output_path or "",
+                *perms.resolve_flags(self.id),
+                *run.extra_args,
+            ]
+
+    async def fast_watchdog(
+        report_path: Path,
+        process: asyncio.subprocess.Process,
+        grace_secs: float = 60.0,
+    ) -> bool:
+        _ = grace_secs
+        while not report_path.exists():
+            if process.returncode is not None:
+                return False
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.05)
+        if process.returncode is not None:
+            return False
+        await launch_runner.terminate_process(process, grace_seconds=0.05)
+        return True
+
+    adapter = ReportHarnessAdapter(command=(sys.executable, str(script)))
+    registry = HarnessRegistry()
+    registry.register(adapter)
+    monkeypatch.setattr(launch_runner, "_report_watchdog", fast_watchdog)
+
+    exit_code = await execute_with_finalization(
+        run,
+        repo_root=tmp_path,
+        state_root=state_root,
+        artifacts=artifacts,
+        registry=registry,
+        harness_id=adapter.id,
+        cwd=tmp_path,
+        max_retries=0,
+    )
+
+    assert exit_code == 0
+    row = _fetch_run_row(state_root, run.spawn_id)
+    assert row.status == "succeeded"
+    assert row.exit_code == 0
+    report = (state_root / "spawns" / str(run.spawn_id) / "report.md").read_text(encoding="utf-8")
+    assert "Actual work is done." in report
 
 
 @pytest.mark.asyncio

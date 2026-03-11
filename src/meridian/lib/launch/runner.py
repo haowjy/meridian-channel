@@ -5,23 +5,30 @@ import asyncio
 import json
 import os
 import signal
-import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
 
 from pydantic import BaseModel, ConfigDict
 import structlog
 
 from meridian.lib.config.settings import MeridianConfig
 from meridian.lib.core.domain import Spawn
+from meridian.lib.core.spawn_lifecycle import (
+    has_durable_report_completion,
+    resolve_execution_terminal_state,
+)
 from .extract import (
     FinalizeExtraction,
     enrich_finalize,
     reset_finalize_attempt_artifacts,
 )
 from .session_ids import extract_latest_session_id
+from .stream_capture import (
+    capture_stderr_stream,
+    capture_stdout_stream,
+    extract_latest_tokens_payload,
+)
 from meridian.lib.harness.adapter import (
     PermissionResolver,
     SpawnParams,
@@ -36,6 +43,7 @@ from meridian.lib.state import spawn_store
 from meridian.lib.state.artifact_store import ArtifactStore, make_artifact_key
 from meridian.lib.state.atomic import atomic_write_bytes, atomic_write_text
 from meridian.lib.state.paths import resolve_spawn_log_dir, resolve_state_paths
+from meridian.lib.state.spawn_store import FOREGROUND_LAUNCH_MODE
 from meridian.lib.core.types import HarnessId, SpawnId
 
 from .env import build_harness_child_env
@@ -61,6 +69,16 @@ DEFAULT_RETRY_BACKOFF_SECONDS = _DEFAULT_CONFIG.retry_backoff_seconds
 DEFAULT_GUARDRAIL_TIMEOUT_SECONDS = _DEFAULT_CONFIG.guardrail_timeout_minutes * 60.0
 logger = structlog.get_logger(__name__)
 
+
+def _raw_return_code_matches_sigterm(raw_return_code: int) -> bool:
+    if raw_return_code >= 0:
+        return False
+    try:
+        return signal.Signals(-raw_return_code) == signal.SIGTERM
+    except ValueError:
+        return False
+
+
 class SafeDefaultPermissionResolver(PermissionResolver):
     """Safe default resolver for run execution."""
 
@@ -81,6 +99,7 @@ class SpawnResult(BaseModel):
     output_log_path: Path
     stderr_log_path: Path
     budget_breach: BudgetBreach | None = None
+    terminated_by_report_watchdog: bool = False
 
 
 def run_log_dir(repo_root: Path, spawn_id: SpawnId) -> Path:
@@ -89,104 +108,30 @@ def run_log_dir(repo_root: Path, spawn_id: SpawnId) -> Path:
     return resolve_spawn_log_dir(repo_root, spawn_id)
 
 
-def _extract_tokens_payload(raw_line: bytes) -> bytes | None:
-    try:
-        payload_obj = json.loads(raw_line.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        return None
-
-    if not isinstance(payload_obj, dict):
-        return None
-
-    payload = cast("dict[str, object]", payload_obj)
-    tokens = payload.get("tokens")
-    if not isinstance(tokens, dict):
-        return None
-    return json.dumps(tokens, sort_keys=True).encode("utf-8")
+def _read_captured_output(path: Path) -> bytes:
+    if not path.exists():
+        return b""
+    return path.read_bytes()
 
 
-def _extract_latest_tokens_payload(output_bytes: bytes) -> bytes | None:
-    latest_payload: bytes | None = None
-    for raw_line in output_bytes.splitlines():
-        parsed = _extract_tokens_payload(raw_line)
-        if parsed is not None:
-            latest_payload = parsed
-    return latest_payload
-
-
-async def _capture_stdout(
-    reader: asyncio.StreamReader,
-    output_file: Path,
+def _persist_captured_artifacts(
     *,
-    secrets: tuple[SecretSpec, ...],
-    line_observer: Callable[[bytes], None] | None,
-    parse_stream_event: Callable[[str], StreamEvent | None] | None = None,
-    event_observer: Callable[[StreamEvent], None] | None = None,
-    stream_to_terminal: bool = False,
-) -> tuple[bytes, bytes | None]:
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-    buffer = bytearray()
-    last_tokens_payload: bytes | None = None
-    with output_file.open("wb") as handle:
-        while True:
-            chunk = await reader.readline()
-            if not chunk:
-                break
+    artifacts: ArtifactStore,
+    spawn_id: SpawnId,
+    output_log_path: Path,
+    stderr_log_path: Path,
+    tokens_payload: bytes | None,
+) -> None:
+    stdout_bytes = _read_captured_output(output_log_path)
+    stderr_bytes = _read_captured_output(stderr_log_path)
+    resolved_tokens_payload = tokens_payload
+    if resolved_tokens_payload is None and stdout_bytes:
+        resolved_tokens_payload = extract_latest_tokens_payload(stdout_bytes)
 
-            redacted_chunk = redact_secret_bytes(chunk, secrets)
-            if line_observer is not None:
-                line_observer(redacted_chunk)
-
-            line_text = redacted_chunk.decode("utf-8", errors="replace")
-            if parse_stream_event is not None and event_observer is not None:
-                try:
-                    parsed_event = parse_stream_event(line_text)
-                except Exception:
-                    logger.warning("Failed to parse harness stream event.", exc_info=True)
-                else:
-                    if parsed_event is not None:
-                        try:
-                            event_observer(parsed_event)
-                        except Exception:
-                            logger.warning("Stream event observer failed.", exc_info=True)
-
-            if stream_to_terminal:
-                sys.stderr.write(line_text)
-                sys.stderr.flush()
-
-            parsed_tokens = _extract_tokens_payload(chunk)
-            if parsed_tokens is not None:
-                last_tokens_payload = redact_secret_bytes(parsed_tokens, secrets)
-
-            handle.write(redacted_chunk)
-            handle.flush()
-            buffer.extend(redacted_chunk)
-
-    return bytes(buffer), last_tokens_payload
-
-
-async def _capture_stderr(
-    reader: asyncio.StreamReader,
-    stderr_file: Path,
-    *,
-    secrets: tuple[SecretSpec, ...],
-    stream_to_terminal: bool = False,
-) -> bytes:
-    stderr_file.parent.mkdir(parents=True, exist_ok=True)
-    buffer = bytearray()
-    with stderr_file.open("wb") as handle:
-        while True:
-            chunk = await reader.readline()
-            if not chunk:
-                break
-            redacted_chunk = redact_secret_bytes(chunk, secrets)
-            handle.write(redacted_chunk)
-            handle.flush()
-            buffer.extend(redacted_chunk)
-            if stream_to_terminal:
-                sys.stderr.write(redacted_chunk.decode("utf-8", errors="replace"))
-                sys.stderr.flush()
-    return bytes(buffer)
+    artifacts.put(make_artifact_key(spawn_id, OUTPUT_FILENAME), stdout_bytes)
+    artifacts.put(make_artifact_key(spawn_id, STDERR_FILENAME), stderr_bytes)
+    if resolved_tokens_payload is not None:
+        artifacts.put(make_artifact_key(spawn_id, TOKENS_FILENAME), resolved_tokens_payload)
 
 
 async def _terminate_after_cancellation(
@@ -212,7 +157,7 @@ async def _report_watchdog(
     report_path: Path,
     process: asyncio.subprocess.Process,
     grace_secs: float = 60.0,
-) -> None:
+) -> bool:
     """Kill harness process if report.md appears but process doesn't exit.
 
     Polls for report.md creation, then waits a grace period for clean exit.
@@ -222,14 +167,14 @@ async def _report_watchdog(
     poll_interval = 5.0
     while not report_path.exists():
         if process.returncode is not None:
-            return  # Process exited cleanly, no watchdog needed
+            return False  # Process exited cleanly, no watchdog needed
         await asyncio.sleep(poll_interval)
 
     # Report exists. Wait grace period, checking for activity.
     deadline = asyncio.get_running_loop().time() + grace_secs
     while asyncio.get_running_loop().time() < deadline:
         if process.returncode is not None:
-            return  # Clean exit during grace
+            return False  # Clean exit during grace
         await asyncio.sleep(poll_interval)
 
     # Still alive after grace — terminate
@@ -239,6 +184,8 @@ async def _report_watchdog(
             grace_secs,
         )
         await terminate_process(process, grace_seconds=10.0)
+        return True
+    return False
 
 
 async def spawn_and_stream(
@@ -261,6 +208,7 @@ async def spawn_and_stream(
     stream_stderr_to_terminal: bool = False,
     log_dir: Path | None = None,
     report_watchdog_path: Path | None = None,
+    on_process_started: Callable[[int], None] | None = None,
 ) -> SpawnResult:
     """Spawn one process, stream/capture output, and return mapped exit metadata."""
 
@@ -282,9 +230,16 @@ async def spawn_and_stream(
     # Write harness child PID for external cleanup
     if log_dir is not None:
         atomic_write_text(log_dir / "harness.pid", f"{process.pid}\n")
+    if on_process_started is not None:
+        try:
+            on_process_started(process.pid)
+        except Exception:
+            await terminate_process(process, grace_seconds=kill_grace_seconds)
+            raise
 
     budget_breach: BudgetBreach | None = None
     budget_termination_task: asyncio.Task[None] | None = None
+    terminated_by_report_watchdog = False
 
     def _on_stdout_line(chunk: bytes) -> None:
         nonlocal budget_breach, budget_termination_task
@@ -305,15 +260,19 @@ async def spawn_and_stream(
 
     watchdog_task: asyncio.Task[None] | None = None
     if report_watchdog_path is not None:
-        watchdog_task = asyncio.create_task(
-            _report_watchdog(
+        async def _run_report_watchdog() -> None:
+            nonlocal terminated_by_report_watchdog
+            terminated_by_report_watchdog = await _report_watchdog(
                 report_path=report_watchdog_path,
                 process=process,
             )
+
+        watchdog_task = asyncio.create_task(
+            _run_report_watchdog()
         )
 
     stdout_task = asyncio.create_task(
-        _capture_stdout(
+        capture_stdout_stream(
             process.stdout,
             output_log_path,
             secrets=secrets,
@@ -324,7 +283,7 @@ async def spawn_and_stream(
         )
     )
     stderr_task = asyncio.create_task(
-        _capture_stderr(
+        capture_stderr_stream(
             process.stderr,
             stderr_log_path,
             secrets=secrets,
@@ -376,13 +335,14 @@ async def spawn_and_stream(
         if budget_termination_task is not None:
             await budget_termination_task
         if watchdog_task is not None:
-            watchdog_task.cancel()
-            try:
+            if not watchdog_task.done():
+                watchdog_task.cancel()
+                try:
+                    await watchdog_task
+                except asyncio.CancelledError:
+                    pass
+            else:
                 await watchdog_task
-            except asyncio.CancelledError:
-                pass
-        stdout_bytes = b""
-        stderr_bytes = b""
         tokens_payload: bytes | None = None
 
         drain_done, drain_pending = await asyncio.wait(
@@ -390,7 +350,7 @@ async def spawn_and_stream(
             timeout=POST_EXIT_PIPE_DRAIN_TIMEOUT_SECONDS,
         )
         if stdout_task in drain_done:
-            stdout_bytes, tokens_payload = await stdout_task
+            tokens_payload = await stdout_task
         else:
             logger.warning(
                 "Timed out draining harness stdout after process exit; using captured file contents.",
@@ -399,7 +359,7 @@ async def spawn_and_stream(
             )
             stdout_task.cancel()
         if stderr_task in drain_done:
-            stderr_bytes = await stderr_task
+            await stderr_task
         else:
             logger.warning(
                 "Timed out draining harness stderr after process exit; using captured file contents.",
@@ -411,17 +371,13 @@ async def spawn_and_stream(
         if drain_pending:
             await asyncio.wait(drain_pending)
 
-        if not stdout_bytes and output_log_path.exists():
-            stdout_bytes = output_log_path.read_bytes()
-            if tokens_payload is None:
-                tokens_payload = _extract_latest_tokens_payload(stdout_bytes)
-        if not stderr_bytes and stderr_log_path.exists():
-            stderr_bytes = stderr_log_path.read_bytes()
-
-        artifacts.put(make_artifact_key(spawn_id, OUTPUT_FILENAME), stdout_bytes)
-        artifacts.put(make_artifact_key(spawn_id, STDERR_FILENAME), stderr_bytes)
-        if tokens_payload is not None:
-            artifacts.put(make_artifact_key(spawn_id, TOKENS_FILENAME), tokens_payload)
+        _persist_captured_artifacts(
+            artifacts=artifacts,
+            spawn_id=spawn_id,
+            output_log_path=output_log_path,
+            stderr_log_path=stderr_log_path,
+            tokens_payload=tokens_payload,
+        )
 
     if budget_breach is not None:
         mapped_exit_code = DEFAULT_INFRA_EXIT_CODE
@@ -441,6 +397,7 @@ async def spawn_and_stream(
         output_log_path=output_log_path,
         stderr_log_path=stderr_log_path,
         budget_breach=budget_breach,
+        terminated_by_report_watchdog=terminated_by_report_watchdog,
     )
 
 
@@ -605,7 +562,18 @@ async def execute_with_finalization(
         permission_config=resolved_permission_config,
         runtime_env_overrides=merged_env_overrides,
     )
-    if spawn_store.get_spawn(state_root, run.spawn_id) is None:
+    spawn_row = spawn_store.get_spawn(state_root, run.spawn_id)
+    raw_launch_mode = (
+        (spawn_row.launch_mode or "").strip().lower()
+        if spawn_row is not None and spawn_row.launch_mode is not None
+        else FOREGROUND_LAUNCH_MODE
+    )
+    resolved_launch_mode: spawn_store.LaunchMode = (
+        spawn_store.BACKGROUND_LAUNCH_MODE
+        if raw_launch_mode == spawn_store.BACKGROUND_LAUNCH_MODE
+        else spawn_store.FOREGROUND_LAUNCH_MODE
+    )
+    if spawn_row is None:
         spawn_store.start_spawn(
             state_root,
             spawn_id=run.spawn_id,
@@ -616,6 +584,16 @@ async def execute_with_finalization(
             kind="child",
             prompt=run.prompt,
             harness_session_id=continue_harness_session_id,
+            launch_mode=FOREGROUND_LAUNCH_MODE,
+            status="queued",
+        )
+
+    def _record_worker_started(worker_pid: int) -> None:
+        spawn_store.mark_spawn_running(
+            state_root,
+            run.spawn_id,
+            launch_mode=resolved_launch_mode,
+            worker_pid=worker_pid,
         )
 
     budget_tracker = (
@@ -630,6 +608,10 @@ async def execute_with_finalization(
     extracted: FinalizeExtraction | None = None
     failure_reason: str | None = None
     observed_harness_session_id: str | None = None
+    terminated_after_completion = False
+    last_raw_return_code = DEFAULT_INFRA_EXIT_CODE
+    last_received_signal: signal.Signals | None = None
+    last_timed_out = False
 
     try:
         command = tuple(harness.build_command(run_params, resolved_perms))
@@ -677,8 +659,13 @@ async def execute_with_finalization(
                 stream_stderr_to_terminal=stream_stderr_to_terminal,
                 log_dir=log_dir,
                 report_watchdog_path=report_path,
+                on_process_started=_record_worker_started,
             )
             exit_code = spawn_result.exit_code
+            last_raw_return_code = spawn_result.raw_return_code
+            last_received_signal = spawn_result.received_signal
+            last_timed_out = spawn_result.timed_out
+            terminated_after_completion = spawn_result.terminated_by_report_watchdog
             if spawn_result.timed_out:
                 failure_reason = "timeout"
 
@@ -864,7 +851,21 @@ async def execute_with_finalization(
     finally:
         duration_seconds = time.monotonic() - started_at
         finalized_usage = extracted.usage if extracted is not None else None
-        status = "succeeded" if exit_code == 0 else "failed"
+        durable_report_completion = (
+            extracted is not None and has_durable_report_completion(extracted.report.content)
+        )
+        terminated_after_completion = terminated_after_completion or (
+            durable_report_completion
+            and not last_timed_out
+            and last_received_signal is None
+            and _raw_return_code_matches_sigterm(last_raw_return_code)
+        )
+        status, exit_code, failure_reason = resolve_execution_terminal_state(
+            exit_code=exit_code,
+            failure_reason=failure_reason,
+            durable_report_completion=durable_report_completion,
+            terminated_after_completion=terminated_after_completion,
+        )
         with signal_coordinator().mask_sigterm():
             spawn_store.finalize_spawn(
                 state_root,

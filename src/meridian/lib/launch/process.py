@@ -13,6 +13,7 @@ import termios
 import time
 import tty
 import struct
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -20,6 +21,7 @@ from typing import Any, cast
 from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.config.settings import MeridianConfig, load_config
+from meridian.lib.core.spawn_lifecycle import resolve_execution_terminal_state
 from meridian.lib.core.types import HarnessId, SpawnId
 from meridian.lib.harness.materialize import cleanup_materialized
 from meridian.lib.harness.registry import HarnessRegistry
@@ -27,6 +29,7 @@ from meridian.lib.state import spawn_store
 from meridian.lib.state.artifact_store import LocalStore, make_artifact_key
 from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.paths import resolve_spawn_log_dir, resolve_state_paths
+from meridian.lib.state.spawn_store import FOREGROUND_LAUNCH_MODE
 from meridian.lib.state.session_store import start_session, stop_session, update_session_harness_id
 
 from .command import build_harness_context, build_launch_env
@@ -232,6 +235,7 @@ def _run_primary_process_with_capture(
     cwd: Path,
     env: dict[str, str],
     output_log_path: Path | None,
+    on_child_started: Callable[[int], None] | None = None,
 ) -> tuple[int, int | None]:
     if output_log_path is None or not sys.stdin.isatty() or not sys.stdout.isatty():
         process = subprocess.Popen(
@@ -240,6 +244,14 @@ def _run_primary_process_with_capture(
             env=env,
             text=True,
         )
+        if on_child_started is not None:
+            try:
+                on_child_started(process.pid)
+            except Exception:
+                if process.poll() is None:
+                    process.terminate()
+                    process.wait()
+                raise
         try:
             return process.wait(), process.pid
         except KeyboardInterrupt:
@@ -259,6 +271,19 @@ def _run_primary_process_with_capture(
             os._exit(1)
 
     try:
+        if on_child_started is not None:
+            try:
+                on_child_started(child_pid)
+            except Exception:
+                try:
+                    os.kill(child_pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                try:
+                    os.waitpid(child_pid, 0)
+                except ChildProcessError:
+                    pass
+                raise
         _sync_pty_winsize(source_fd=sys.stdout.fileno(), target_fd=master_fd)
         exit_code = _copy_primary_pty_output(
             child_pid=child_pid,
@@ -415,6 +440,8 @@ def run_harness_process(
             harness=ctx.session_metadata.harness,
             kind="primary",
             prompt=ctx.prompt,
+            launch_mode=FOREGROUND_LAUNCH_MODE,
+            status="queued",
         )
         primary_started = time.monotonic()
         primary_started_epoch = time.time()
@@ -438,13 +465,27 @@ def run_harness_process(
         )
         _write_lock(path=ctx.lock_path, command=command, child_pid=None)
         output_log_path = resolve_spawn_log_dir(repo_root, primary_spawn_id) / _PRIMARY_OUTPUT_FILENAME
-        exit_code, child_pid = _run_primary_process_with_capture(
+
+        def _record_primary_started(child_pid: int) -> None:
+            _write_lock(path=ctx.lock_path, command=command, child_pid=child_pid)
+            atomic_write_text(
+                resolve_spawn_log_dir(repo_root, primary_spawn_id) / "harness.pid",
+                f"{child_pid}\n",
+            )
+            spawn_store.mark_spawn_running(
+                ctx.state_root,
+                primary_spawn_id,
+                launch_mode=FOREGROUND_LAUNCH_MODE,
+                worker_pid=child_pid,
+            )
+
+        exit_code, _child_pid = _run_primary_process_with_capture(
             command=command,
             cwd=repo_root,
             env=child_env,
             output_log_path=output_log_path,
+            on_child_started=_record_primary_started,
         )
-        _write_lock(path=ctx.lock_path, command=command, child_pid=child_pid)
         if output_log_path.exists():
             artifacts.put(
                 make_artifact_key(primary_spawn_id, _PRIMARY_OUTPUT_FILENAME),
@@ -454,6 +495,10 @@ def run_harness_process(
         logger.debug("Harness command not found", exc_info=True)
         exit_code = 2
     finally:
+        status, exit_code, _failure_reason = resolve_execution_terminal_state(
+            exit_code=exit_code,
+            failure_reason=None,
+        )
         if primary_spawn_id is not None:
             duration = (
                 max(0.0, time.monotonic() - primary_started) if primary_started > 0.0 else None
@@ -461,7 +506,7 @@ def run_harness_process(
             spawn_store.finalize_spawn(
                 ctx.state_root,
                 primary_spawn_id,
-                status="succeeded" if exit_code == 0 else "failed",
+                status=status,
                 exit_code=exit_code,
                 duration_secs=duration,
             )
