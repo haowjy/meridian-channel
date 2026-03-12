@@ -214,6 +214,21 @@ def test_extract_written_files_ignores_report_and_output_without_explicit_signal
     assert extract_written_files(artifacts, spawn_id) == ()
 
 
+def test_extract_written_files_ignores_legacy_touched_artifacts() -> None:
+    artifacts = InMemoryStore()
+    spawn_id = SpawnId("r-files-legacy-ignored")
+    artifacts.put(
+        make_artifact_key(spawn_id, "files_touched.json"),
+        b'{"files_touched":["src/legacy.py"]}',
+    )
+    artifacts.put(
+        make_artifact_key(spawn_id, "files_touched.txt"),
+        b"src/legacy-again.py\n",
+    )
+
+    assert extract_written_files(artifacts, spawn_id) == ()
+
+
 def test_extract_or_fallback_report_tolerates_malformed_jsonl_and_blank_adapter_output() -> None:
     artifacts = InMemoryStore()
     codex_spawn = SpawnId("r-codex-report-malformed-lines")

@@ -24,8 +24,6 @@ _FILE_LIST_KEYS: frozenset[str] = frozenset(
         "written_files",
         "edited_files",
         "modified_files",
-        "files_touched",
-        "touched_files",
         "paths",
     }
 )
@@ -43,8 +41,8 @@ _KNOWN_DIR_PREFIXES: tuple[str, ...] = (
     ".meridian/",
     "config/",
 )
-_EXPLICIT_JSON_FILENAMES: tuple[str, ...] = ("written_files.json", "files_touched.json")
-_EXPLICIT_TEXT_FILENAMES: tuple[str, ...] = ("written_files.txt", "files_touched.txt")
+_EXPLICIT_JSON_FILENAMES: tuple[str, ...] = ("written_files.json",)
+_EXPLICIT_TEXT_FILENAMES: tuple[str, ...] = ("written_files.txt",)
 
 
 def _strip_relative_prefixes(path: str) -> str:
