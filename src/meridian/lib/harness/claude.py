@@ -3,9 +3,11 @@
 import json
 import logging
 from pathlib import Path
-from typing import ClassVar, cast
+from typing import Any, ClassVar, cast
 from uuid import uuid4
 
+from meridian.lib.core.conversation import Conversation, ConversationTurn, ToolCall
+from meridian.lib.core.types import ArtifactKey, HarnessId, SpawnId
 from meridian.lib.harness.common import (
     categorize_stream_event,
     extract_claude_report,
@@ -34,7 +36,6 @@ from meridian.lib.harness.adapter import (
 )
 from meridian.lib.harness.launch_types import PromptPolicy, SessionSeed
 from meridian.lib.safety.permissions import PermissionConfig
-from meridian.lib.core.types import HarnessId, SpawnId
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +151,47 @@ def _extract_todowrite_tasks(metadata: dict[str, object]) -> list[dict[str, str]
             if normalized is not None:
                 tasks.append(normalized)
     return tasks
+
+
+def _read_artifact_text(artifacts: ArtifactStore, spawn_id: SpawnId, name: str) -> str:
+    key = ArtifactKey(f"{spawn_id}/{name}")
+    if not artifacts.exists(key):
+        return ""
+    return artifacts.get(key).decode("utf-8", errors="ignore")
+
+
+def _read_output_payloads(artifacts: ArtifactStore, spawn_id: SpawnId) -> list[dict[str, object]]:
+    raw_output = _read_artifact_text(artifacts, spawn_id, "output.jsonl")
+    payloads: list[dict[str, object]] = []
+    for line in raw_output.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            payload_obj = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload_obj, dict):
+            payloads.append(cast("dict[str, object]", payload_obj))
+    return payloads
+
+
+def _tool_call_from_payload(payload: dict[str, object]) -> ToolCall | None:
+    event_type = str(payload.get("type", payload.get("event", ""))).strip().lower()
+    if event_type != "tool_use":
+        return None
+
+    tool_name = str(payload.get("name", "")).strip()
+    if not tool_name:
+        return None
+
+    raw_input = payload.get("input")
+    tool_input: dict[str, Any] = cast("dict[str, Any]", raw_input) if isinstance(raw_input, dict) else {}
+    output_text: str | None = None
+    output_value = payload.get("output")
+    if isinstance(output_value, str):
+        output_text = output_value.strip() or None
+    return ToolCall(tool_name=tool_name, input=tool_input, output=output_text)
 
 
 class ClaudeAdapter(BaseSubprocessHarness):
@@ -270,6 +312,46 @@ class ClaudeAdapter(BaseSubprocessHarness):
 
     def extract_report(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> str | None:
         return extract_claude_report(artifacts, spawn_id)
+
+    def extract_conversation(
+        self, artifacts: ArtifactStore, spawn_id: SpawnId
+    ) -> Conversation | None:
+        payloads = _read_output_payloads(artifacts, spawn_id)
+        tool_calls = tuple(
+            tool_call
+            for payload in payloads
+            if (tool_call := _tool_call_from_payload(payload)) is not None
+        )
+
+        prompt_text = _read_artifact_text(artifacts, spawn_id, "prompt.md").strip()
+        report_text = _read_artifact_text(artifacts, spawn_id, "report.md").strip()
+        if not report_text:
+            fallback_report = extract_claude_report(artifacts, spawn_id)
+            report_text = fallback_report.strip() if fallback_report else ""
+
+        if not prompt_text and not report_text and not tool_calls:
+            return None
+
+        turns: list[ConversationTurn] = []
+        if prompt_text:
+            turns.append(ConversationTurn(role="user", content=prompt_text))
+        if report_text or tool_calls:
+            turns.append(
+                ConversationTurn(
+                    role="assistant",
+                    content=report_text,
+                    tool_calls=tool_calls,
+                )
+            )
+
+        if not turns:
+            return None
+
+        return Conversation(
+            spawn_id=str(spawn_id),
+            harness=str(self.id),
+            turns=tuple(turns),
+        )
 
     def seed_session(
         self,

@@ -5,6 +5,7 @@ from typing import Any, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from meridian.lib.core.conversation import Conversation
 from meridian.lib.core.domain import TokenUsage
 from meridian.lib.harness.launch_types import PromptPolicy, SessionSeed
 from meridian.lib.safety.permissions import PermissionConfig
@@ -222,7 +223,9 @@ class InProcessHarness(Protocol):
 class ConversationExtractingHarness(Protocol):
     """Optional protocol for harnesses that provide conversation extraction."""
 
-    def extract_conversation(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> Any: ...
+    def extract_conversation(
+        self, artifacts: ArtifactStore, spawn_id: SpawnId
+    ) -> Conversation | None: ...
 
 
 class BaseSubprocessHarness:
