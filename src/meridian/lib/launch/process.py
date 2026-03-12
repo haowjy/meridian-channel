@@ -26,23 +26,18 @@ from meridian.lib.core.spawn_lifecycle import resolve_execution_terminal_state
 from meridian.lib.core.types import HarnessId, SpawnId
 from meridian.lib.harness.materialize import cleanup_materialized
 from meridian.lib.harness.registry import HarnessRegistry
+from meridian.lib.ops.session_policy import ensure_session_work_item
 from meridian.lib.state import spawn_store
 from meridian.lib.state.artifact_store import LocalStore, make_artifact_key
 from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.paths import resolve_spawn_log_dir, resolve_state_paths
+from meridian.lib.state.session_store import start_session, stop_session, update_session_harness_id
 from meridian.lib.state.spawn_store import FOREGROUND_LAUNCH_MODE
-from meridian.lib.state import work_store
-from meridian.lib.state.session_store import (
-    get_session_active_work_id,
-    start_session,
-    stop_session,
-    update_session_harness_id,
-    update_session_work_id,
-)
 
 from .command import build_harness_context, build_launch_env
 from .heartbeat import threaded_heartbeat_scope
 from .resolve import resolve_primary_session_metadata
+from .session_scope import ManagedSession, session_scope
 from .session_ids import extract_latest_session_id
 from .types import LaunchRequest, PrimarySessionMetadata, build_primary_prompt
 
@@ -426,6 +421,7 @@ def run_harness_process(
     primary_started_epoch = 0.0
     primary_started_local_iso: str | None = None
     resolved_harness_session_id = ctx.seed_harness_session_id
+    managed_session: ManagedSession | None = None
     artifacts = LocalStore(root_dir=resolve_state_paths(repo_root).artifacts_dir)
 
     exit_code = 2
@@ -439,8 +435,8 @@ def run_harness_process(
                 ctx.session_metadata.harness,
                 harness_registry=harness_registry,
             )
-            chat_id = start_session(
-                ctx.state_root,
+            with session_scope(
+                state_root=ctx.state_root,
                 harness=ctx.session_metadata.harness,
                 harness_session_id=ctx.seed_harness_session_id,
                 model=ctx.session_metadata.model,
@@ -449,100 +445,99 @@ def run_harness_process(
                 agent_path=ctx.session_metadata.agent_path,
                 skills=ctx.session_metadata.skills,
                 skill_paths=ctx.session_metadata.skill_paths,
-            )
-            # Auto-create work item if session has none
-            existing_work_id = get_session_active_work_id(ctx.state_root, chat_id)
-            if not existing_work_id:
-                auto_item = work_store.create_auto_work_item(ctx.state_root)
-                update_session_work_id(ctx.state_root, chat_id, auto_item.name)
-            primary_spawn_id = spawn_store.start_spawn(
-                ctx.state_root,
-                chat_id=chat_id,
-                model=ctx.session_metadata.model,
-                agent=ctx.session_metadata.agent,
-                harness=ctx.session_metadata.harness,
-                kind="primary",
-                prompt=ctx.prompt,
-                launch_mode=FOREGROUND_LAUNCH_MODE,
-                status="queued",
-            )
-            log_dir = resolve_spawn_log_dir(repo_root, primary_spawn_id)
-            with threaded_heartbeat_scope(log_dir / "heartbeat"):
-                primary_started = time.monotonic()
-                primary_started_epoch = time.time()
-                primary_started_local_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-                harness_context = build_harness_context(
-                    repo_root=repo_root,
-                    request=ctx.command_request,
-                    prompt=ctx.prompt,
-                    harness_registry=harness_registry,
-                    chat_id=chat_id,
-                    config=ctx.config,
-                )
-                command = harness_context.command
-                _rewrite_primary_launch_lock_payload(
-                    lock_handle,
-                    _primary_launch_lock_payload(command=command, child_pid=None),
-                )
-                child_env = build_launch_env(
-                    repo_root,
-                    request,
-                    chat_id=chat_id,
-                    default_autocompact_pct=ctx.config.primary.autocompact_pct,
-                    spawn_id=primary_spawn_id,
-                    harness_context=harness_context,
-                )
-                output_log_path = log_dir / _PRIMARY_OUTPUT_FILENAME
-
-                def _record_primary_started(child_pid: int) -> None:
-                    _rewrite_primary_launch_lock_payload(
-                        lock_handle,
-                        _primary_launch_lock_payload(command=command, child_pid=child_pid),
-                    )
-                    atomic_write_text(
-                        log_dir / "harness.pid",
-                        f"{child_pid}\n",
-                    )
-                    spawn_store.mark_spawn_running(
-                        ctx.state_root,
-                        primary_spawn_id,
-                        launch_mode=FOREGROUND_LAUNCH_MODE,
-                        worker_pid=child_pid,
-                    )
-
-                exit_code, _child_pid = _run_primary_process_with_capture(
-                    command=command,
-                    cwd=repo_root,
-                    env=child_env,
-                    output_log_path=output_log_path,
-                    on_child_started=_record_primary_started,
-                )
-                if output_log_path.exists():
-                    artifacts.put(
-                        make_artifact_key(primary_spawn_id, _PRIMARY_OUTPUT_FILENAME),
-                        output_log_path.read_bytes(),
-                    )
-        except FileNotFoundError:
-            logger.debug("Harness command not found", exc_info=True)
-            exit_code = 2
-        finally:
-            status, exit_code, _failure_reason = resolve_execution_terminal_state(
-                exit_code=exit_code,
-                failure_reason=None,
-            )
-            if primary_spawn_id is not None:
-                duration = (
-                    max(0.0, time.monotonic() - primary_started) if primary_started > 0.0 else None
-                )
-                spawn_store.finalize_spawn(
-                    ctx.state_root,
-                    primary_spawn_id,
-                    status=status,
-                    exit_code=exit_code,
-                    duration_secs=duration,
-                )
-            if chat_id is not None:
+                _start_session=start_session,
+                _stop_session=stop_session,
+                _update_session_harness_id=update_session_harness_id,
+            ) as managed:
+                managed_session = managed
+                chat_id = managed.chat_id
+                ensure_session_work_item(ctx.state_root, chat_id)
                 try:
+                    primary_spawn_id = spawn_store.start_spawn(
+                        ctx.state_root,
+                        chat_id=chat_id,
+                        model=ctx.session_metadata.model,
+                        agent=ctx.session_metadata.agent,
+                        harness=ctx.session_metadata.harness,
+                        kind="primary",
+                        prompt=ctx.prompt,
+                        launch_mode=FOREGROUND_LAUNCH_MODE,
+                        status="queued",
+                    )
+                    log_dir = resolve_spawn_log_dir(repo_root, primary_spawn_id)
+                    with threaded_heartbeat_scope(log_dir / "heartbeat"):
+                        primary_started = time.monotonic()
+                        primary_started_epoch = time.time()
+                        primary_started_local_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+                        harness_context = build_harness_context(
+                            repo_root=repo_root,
+                            request=ctx.command_request,
+                            prompt=ctx.prompt,
+                            harness_registry=harness_registry,
+                            chat_id=chat_id,
+                            config=ctx.config,
+                        )
+                        command = harness_context.command
+                        _rewrite_primary_launch_lock_payload(
+                            lock_handle,
+                            _primary_launch_lock_payload(command=command, child_pid=None),
+                        )
+                        child_env = build_launch_env(
+                            repo_root,
+                            request,
+                            chat_id=chat_id,
+                            default_autocompact_pct=ctx.config.primary.autocompact_pct,
+                            spawn_id=primary_spawn_id,
+                            harness_context=harness_context,
+                        )
+                        output_log_path = log_dir / _PRIMARY_OUTPUT_FILENAME
+
+                        def _record_primary_started(child_pid: int) -> None:
+                            _rewrite_primary_launch_lock_payload(
+                                lock_handle,
+                                _primary_launch_lock_payload(command=command, child_pid=child_pid),
+                            )
+                            atomic_write_text(
+                                log_dir / "harness.pid",
+                                f"{child_pid}\n",
+                            )
+                            spawn_store.mark_spawn_running(
+                                ctx.state_root,
+                                primary_spawn_id,
+                                launch_mode=FOREGROUND_LAUNCH_MODE,
+                                worker_pid=child_pid,
+                            )
+
+                        exit_code, _child_pid = _run_primary_process_with_capture(
+                            command=command,
+                            cwd=repo_root,
+                            env=child_env,
+                            output_log_path=output_log_path,
+                            on_child_started=_record_primary_started,
+                        )
+                        if output_log_path.exists():
+                            artifacts.put(
+                                make_artifact_key(primary_spawn_id, _PRIMARY_OUTPUT_FILENAME),
+                                output_log_path.read_bytes(),
+                            )
+                finally:
+                    status, exit_code, _failure_reason = resolve_execution_terminal_state(
+                        exit_code=exit_code,
+                        failure_reason=None,
+                    )
+                    if primary_spawn_id is not None:
+                        duration = (
+                            max(0.0, time.monotonic() - primary_started)
+                            if primary_started > 0.0
+                            else None
+                        )
+                        spawn_store.finalize_spawn(
+                            ctx.state_root,
+                            primary_spawn_id,
+                            status=status,
+                            exit_code=exit_code,
+                            duration_secs=duration,
+                        )
                     observed_harness_session_id = None
                     adapter = harness_registry.get(HarnessId(ctx.session_metadata.harness))
                     if primary_started_epoch > 0.0:
@@ -561,14 +556,17 @@ def run_harness_process(
                         and observed_harness_session_id.strip() != resolved_harness_session_id.strip()
                     ):
                         resolved_harness_session_id = observed_harness_session_id.strip()
-                        update_session_harness_id(ctx.state_root, chat_id, resolved_harness_session_id)
-                    stop_session(ctx.state_root, chat_id)
-                finally:
-                    _cleanup_launch_materialized(
-                        repo_root=repo_root,
-                        harness_id=ctx.session_metadata.harness,
-                        harness_registry=harness_registry,
-                    )
+                        managed.record_harness_session_id(resolved_harness_session_id)
+        except FileNotFoundError:
+            logger.debug("Harness command not found", exc_info=True)
+            exit_code = 2
+        finally:
+            if managed_session is not None:
+                _cleanup_launch_materialized(
+                    repo_root=repo_root,
+                    harness_id=ctx.session_metadata.harness,
+                    harness_registry=harness_registry,
+                )
 
     return ProcessOutcome(
         command=command,

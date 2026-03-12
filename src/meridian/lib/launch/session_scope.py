@@ -1,0 +1,65 @@
+"""Session lifecycle context manager helpers."""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass
+from pathlib import Path
+
+from meridian.lib.state.session_store import (
+    start_session,
+    stop_session,
+    update_session_harness_id,
+)
+
+
+@dataclass(frozen=True)
+class ManagedSession:
+    chat_id: str
+    record_harness_session_id: Callable[[str], None]
+
+
+@contextmanager
+def session_scope(
+    *,
+    state_root: Path,
+    harness: str,
+    harness_session_id: str,
+    model: str,
+    chat_id: str | None = None,
+    params: tuple[str, ...] = (),
+    agent: str = "",
+    agent_path: str = "",
+    skills: tuple[str, ...] = (),
+    skill_paths: tuple[str, ...] = (),
+    _start_session: Callable[..., str] = start_session,
+    _stop_session: Callable[[Path, str], None] = stop_session,
+    _update_session_harness_id: Callable[[Path, str, str], None] = update_session_harness_id,
+) -> Iterator[ManagedSession]:
+    resolved_chat_id = _start_session(
+        state_root,
+        harness=harness,
+        harness_session_id=harness_session_id,
+        model=model,
+        chat_id=chat_id,
+        params=params,
+        agent=agent,
+        agent_path=agent_path,
+        skills=skills,
+        skill_paths=skill_paths,
+    )
+
+    def _record_harness_session_id(session_id: str) -> None:
+        _update_session_harness_id(state_root, resolved_chat_id, session_id)
+
+    try:
+        yield ManagedSession(
+            chat_id=resolved_chat_id,
+            record_harness_session_id=_record_harness_session_id,
+        )
+    finally:
+        _stop_session(state_root, resolved_chat_id)
+
+
+__all__ = ["ManagedSession", "session_scope"]

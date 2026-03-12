@@ -23,6 +23,7 @@ from meridian.lib.catalog.agent import (
 from meridian.lib.core.context import RuntimeContext
 from meridian.lib.core.domain import Spawn, SpawnStatus
 from meridian.lib.launch.runner import execute_with_finalization
+from meridian.lib.launch.session_scope import session_scope
 from meridian.lib.harness.adapter import PermissionResolver
 from meridian.lib.harness.materialize import cleanup_materialized, materialize_for_harness
 from meridian.lib.safety.permissions import (
@@ -31,15 +32,7 @@ from meridian.lib.safety.permissions import (
     parse_permission_tier,
 )
 from meridian.lib.core.sink import OutputSink
-from meridian.lib.state.session_store import (
-    get_session_active_work_id,
-    start_session,
-    stop_session,
-    update_session_harness_id,
-    update_session_work_id,
-)
 from meridian.lib.state import spawn_store
-from meridian.lib.state import work_store
 from meridian.lib.state.spawn_store import (
     BACKGROUND_LAUNCH_MODE,
     FOREGROUND_LAUNCH_MODE,
@@ -50,6 +43,7 @@ from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.paths import resolve_spawn_log_dir, resolve_state_paths
 from meridian.lib.core.types import ModelId, SpawnId
 
+from ..session_policy import ensure_session_work_item
 from ..runtime import OperationRuntime, build_runtime, resolve_chat_id, runtime_context
 from .models import SpawnActionOutput, SpawnCreateInput
 from .query import read_report_text, read_spawn_row
@@ -457,48 +451,40 @@ def _session_execution_context(
     run_agent_name: str | None,
     harness_registry: Any,
 ) -> Iterator[_SessionExecutionContext]:
-    chat_id = start_session(
-        state_root,
-        harness=harness_id,
-        harness_session_id=harness_session_id,
-        model=model,
-        agent=session_agent,
-        agent_path=session_agent_path,
-        skills=skills,
-        skill_paths=session_skill_paths,
-    )
-    # Auto-create work item if session has none
-    existing_work_id = get_session_active_work_id(state_root, chat_id)
-    if not existing_work_id:
-        auto_item = work_store.create_auto_work_item(state_root)
-        update_session_work_id(state_root, chat_id, auto_item.name)
-    resolved_agent_name = run_agent_name
+    entered_session_scope = False
     try:
-        materialized_agent_name = _materialize_session_agent_name(
-            repo_root=repo_root,
-            harness_id=harness_id,
-            harness_registry=harness_registry,
-            session_agent=session_agent,
-            session_agent_path=session_agent_path,
-            run_agent_name=run_agent_name,
+        with session_scope(
+            state_root=state_root,
+            harness=harness_id,
+            harness_session_id=harness_session_id,
+            model=model,
+            agent=session_agent,
+            agent_path=session_agent_path,
             skills=skills,
-            session_skill_paths=session_skill_paths,
-        )
-        if materialized_agent_name is not None and materialized_agent_name != resolved_agent_name:
-            resolved_agent_name = materialized_agent_name
-        yield _SessionExecutionContext(
-            chat_id=chat_id,
-            resolved_agent_name=resolved_agent_name,
-            harness_session_id_observer=lambda session_id: update_session_harness_id(
-                state_root,
-                chat_id,
-                session_id,
-            ),
-        )
+            skill_paths=session_skill_paths,
+        ) as managed:
+            entered_session_scope = True
+            ensure_session_work_item(state_root, managed.chat_id)
+            resolved_agent_name = run_agent_name
+            materialized_agent_name = _materialize_session_agent_name(
+                repo_root=repo_root,
+                harness_id=harness_id,
+                harness_registry=harness_registry,
+                session_agent=session_agent,
+                session_agent_path=session_agent_path,
+                run_agent_name=run_agent_name,
+                skills=skills,
+                session_skill_paths=session_skill_paths,
+            )
+            if materialized_agent_name is not None and materialized_agent_name != resolved_agent_name:
+                resolved_agent_name = materialized_agent_name
+            yield _SessionExecutionContext(
+                chat_id=managed.chat_id,
+                resolved_agent_name=resolved_agent_name,
+                harness_session_id_observer=managed.record_harness_session_id,
+            )
     finally:
-        try:
-            stop_session(state_root, chat_id)
-        finally:
+        if entered_session_scope:
             _cleanup_session_materialized(
                 harness_id=harness_id,
                 repo_root=repo_root,
