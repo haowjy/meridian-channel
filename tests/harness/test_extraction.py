@@ -2,6 +2,7 @@
 
 
 from meridian.lib.launch.report import extract_or_fallback_report
+from meridian.lib.launch.files_touched import extract_files_touched
 from meridian.lib.harness.adapter import ArtifactStore
 from meridian.lib.harness.claude import ClaudeAdapter
 from meridian.lib.harness.codex import CodexAdapter
@@ -167,6 +168,54 @@ def test_extract_or_fallback_report_tolerates_adapter_errors_and_bad_jsonl() -> 
     assert extracted.content == "generic fallback"
     assert extracted.source == "assistant_message"
 
+
+def test_extract_files_touched_prefers_explicit_artifacts_only() -> None:
+    artifacts = InMemoryStore()
+    spawn_id = SpawnId("r-files-explicit")
+    artifacts.put(
+        make_artifact_key(spawn_id, "files_touched.json"),
+        (
+            b'{"files_touched":["src/kept.py"],"events":[{"path":"docs/also-kept.md"}],'
+            b'"ignored":"tests/read_only_fixture.py"}'
+        ),
+    )
+    artifacts.put(
+        make_artifact_key(spawn_id, "files_touched.txt"),
+        b"scripts/finalize.sh\nsrc/kept.py\n",
+    )
+    artifacts.put(
+        make_artifact_key(spawn_id, "output.jsonl"),
+        b'{"type":"tool.call","tool":"read","path":"src/should_not_leak.py"}\n',
+    )
+    artifacts.put(
+        make_artifact_key(spawn_id, "report.md"),
+        b"Reviewed `docs/mentioned_only.md` while working.\n",
+    )
+
+    assert extract_files_touched(artifacts, spawn_id) == (
+        "src/kept.py",
+        "docs/also-kept.md",
+        "scripts/finalize.sh",
+    )
+
+
+def test_extract_files_touched_ignores_report_and_output_without_explicit_signal() -> None:
+    artifacts = InMemoryStore()
+    spawn_id = SpawnId("r-files-no-fallback")
+    artifacts.put(
+        make_artifact_key(spawn_id, "output.jsonl"),
+        b'{"type":"tool.call","tool":"read","path":"src/read_only.py"}\n',
+    )
+    artifacts.put(
+        make_artifact_key(spawn_id, "report.md"),
+        b"Referenced `docs/mentioned_only.md` and `scripts/check-mermaid.sh`.\n",
+    )
+
+    assert extract_files_touched(artifacts, spawn_id) == ()
+
+
+def test_extract_or_fallback_report_tolerates_malformed_jsonl_and_blank_adapter_output() -> None:
+    artifacts = InMemoryStore()
     codex_spawn = SpawnId("r-codex-report-malformed-lines")
     artifacts.put(
         make_artifact_key(codex_spawn, "output.jsonl"),

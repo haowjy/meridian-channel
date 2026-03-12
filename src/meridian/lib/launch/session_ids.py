@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from meridian.lib.core.types import SpawnId
-from meridian.lib.harness.adapter import ArtifactStore, HarnessAdapter
+from meridian.lib.harness.adapter import ArtifactStore, SubprocessHarness
 
 
 def _normalize_session_id(value: str | None) -> str | None:
@@ -15,7 +15,7 @@ def _normalize_session_id(value: str | None) -> str | None:
 
 def extract_latest_session_id(
     *,
-    adapter: HarnessAdapter,
+    adapter: SubprocessHarness,
     current_session_id: str | None = None,
     artifacts: ArtifactStore | None = None,
     spawn_id: SpawnId | None = None,

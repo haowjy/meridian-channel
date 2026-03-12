@@ -1,8 +1,7 @@
-"""File-touch extraction helpers from harness output artifacts."""
+"""File-touch extraction helpers from explicit harness artifacts."""
 
 
 import json
-import re
 from typing import cast
 
 from .artifact_io import read_artifact_text
@@ -27,9 +26,6 @@ _FILE_LIST_KEYS: frozenset[str] = frozenset(
         "modified_files",
         "paths",
     }
-)
-_PATH_PATTERN = re.compile(
-    r"(?<![\w/.-])(?:[A-Za-z]:\\)?(?:\.{1,2}/)?(?:[\w.-]+[\\/])+[\w.-]+(?:\.[\w.-]+)?"
 )
 _KNOWN_DIR_PREFIXES: tuple[str, ...] = (
     "src/",
@@ -90,11 +86,6 @@ def _append_path(found: list[str], seen: set[str], candidate: str) -> None:
     seen.add(normalized)
     found.append(normalized)
 
-
-def _extract_paths_from_text(text: str) -> list[str]:
-    return [match.group(0) for match in _PATH_PATTERN.finditer(text)]
-
-
 def _extract_from_json_value(value: object, found: list[str], seen: set[str]) -> None:
     if isinstance(value, dict):
         payload = cast("dict[str, object]", value)
@@ -110,10 +101,7 @@ def _extract_from_json_value(value: object, found: list[str], seen: set[str]) ->
                     else:
                         _extract_from_json_value(item, found, seen)
                 continue
-            if isinstance(nested, str):
-                for candidate in _extract_paths_from_text(nested):
-                    _append_path(found, seen, candidate)
-            else:
+            if not isinstance(nested, str):
                 _extract_from_json_value(nested, found, seen)
         return
 
@@ -122,13 +110,9 @@ def _extract_from_json_value(value: object, found: list[str], seen: set[str]) ->
             _extract_from_json_value(nested, found, seen)
         return
 
-    if isinstance(value, str):
-        for candidate in _extract_paths_from_text(value):
-            _append_path(found, seen, candidate)
-
 
 def extract_files_touched(artifacts: ArtifactStore, spawn_id: SpawnId) -> tuple[str, ...]:
-    """Extract touched file paths from explicit and inferred artifact content."""
+    """Extract touched file paths from explicit file-touch artifacts only."""
 
     found: list[str] = []
     seen: set[str] = set()
@@ -145,25 +129,5 @@ def extract_files_touched(artifacts: ArtifactStore, spawn_id: SpawnId) -> tuple[
     explicit_text = read_artifact_text(artifacts, spawn_id, "files_touched.txt")
     for line in explicit_text.splitlines():
         _append_path(found, seen, line)
-
-    output_lines = read_artifact_text(artifacts, spawn_id, "output.jsonl")
-    for line in output_lines.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            payload_obj = json.loads(stripped)
-        except json.JSONDecodeError:
-            payload_obj = None
-        if payload_obj is not None:
-            _extract_from_json_value(payload_obj, found, seen)
-            continue
-
-        for candidate in _extract_paths_from_text(stripped):
-            _append_path(found, seen, candidate)
-
-    report = read_artifact_text(artifacts, spawn_id, "report.md")
-    for candidate in _extract_paths_from_text(report):
-        _append_path(found, seen, candidate)
 
     return tuple(found)

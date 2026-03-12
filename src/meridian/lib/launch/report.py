@@ -8,7 +8,7 @@ from typing import Literal, cast
 from pydantic import BaseModel, ConfigDict
 
 from .artifact_io import read_artifact_text
-from meridian.lib.harness.adapter import HarnessAdapter
+from meridian.lib.harness.adapter import SubprocessHarness
 from meridian.lib.state.artifact_store import ArtifactStore
 from meridian.lib.core.types import SpawnId
 
@@ -112,7 +112,7 @@ def extract_or_fallback_report(
     artifacts: ArtifactStore,
     spawn_id: SpawnId,
     *,
-    adapter: HarnessAdapter | None = None,
+    adapter: SubprocessHarness | None = None,
 ) -> ExtractedReport:
     """Extract report text from assistant output, preferring report.md when available."""
 

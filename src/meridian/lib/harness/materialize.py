@@ -27,8 +27,8 @@ def harness_layout(
     """Return adapter-provided native layout metadata for a harness ID."""
 
     try:
-        adapter = _resolve_registry(registry).get(HarnessId(harness_id))
-    except KeyError:
+        adapter = _resolve_registry(registry).get_subprocess_harness(HarnessId(harness_id))
+    except (KeyError, TypeError):
         return None
     return adapter.native_layout()
 

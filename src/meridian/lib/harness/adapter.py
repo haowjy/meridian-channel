@@ -1,7 +1,7 @@
 """Harness adapter protocol and shared data models."""
 
 from pathlib import Path
-from typing import Literal, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -128,8 +128,8 @@ class ArtifactStore(Protocol):
 
 
 @runtime_checkable
-class HarnessAdapter(Protocol):
-    """Protocol for harness-specific launch/parsing/extraction behavior."""
+class SubprocessHarness(Protocol):
+    """Protocol for subprocess-launching harness behavior."""
 
     @property
     def id(self) -> HarnessId: ...
@@ -205,7 +205,27 @@ class HarnessAdapter(Protocol):
         return None
 
 
-class BaseHarnessAdapter:
+@runtime_checkable
+class InProcessHarness(Protocol):
+    """Protocol for in-process harness execution behavior."""
+
+    @property
+    def id(self) -> HarnessId: ...
+
+    @property
+    def capabilities(self) -> HarnessCapabilities: ...
+
+    async def execute(self, *, prompt: str, model: ModelId, **kwargs: Any) -> SpawnResult: ...
+
+
+@runtime_checkable
+class ConversationExtractingHarness(Protocol):
+    """Optional protocol for harnesses that provide conversation extraction."""
+
+    def extract_conversation(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> Any: ...
+
+
+class BaseSubprocessHarness:
     """Base with default no-op implementations for optional adapter methods."""
 
     def native_layout(self) -> HarnessNativeLayout | None:
@@ -269,10 +289,16 @@ class BaseHarnessAdapter:
         return None
 
 
-def resolve_mcp_config(adapter: HarnessAdapter, run: SpawnParams) -> McpConfig | None:
+def resolve_mcp_config(adapter: SubprocessHarness, run: SpawnParams) -> McpConfig | None:
     """Resolve adapter MCP config if the adapter implements the optional hook."""
 
     resolver = getattr(adapter, "mcp_config", None)
     if resolver is None:
         return None
     return resolver(run)
+
+
+# Backward compatibility: existing code that references HarnessAdapter continues
+# to work during migration.
+HarnessAdapter = SubprocessHarness
+BaseHarnessAdapter = BaseSubprocessHarness

@@ -22,7 +22,7 @@ from meridian.lib.harness.common import (
 )
 from meridian.lib.harness.adapter import (
     ArtifactStore,
-    BaseHarnessAdapter,
+    BaseSubprocessHarness,
     HarnessCapabilities,
     HarnessNativeLayout,
     McpConfig,
@@ -130,8 +130,8 @@ def _owns_session(repo_root: Path, session_ref: str) -> bool:
     return False
 
 
-class OpenCodeAdapter(BaseHarnessAdapter):
-    """HarnessAdapter implementation for `opencode`."""
+class OpenCodeAdapter(BaseSubprocessHarness):
+    """SubprocessHarness implementation for `opencode`."""
 
     STRATEGIES: ClassVar[StrategyMap] = {
         "model": FlagStrategy(effect=FlagEffect.TRANSFORM, transform=_opencode_model_transform),

@@ -22,7 +22,7 @@ from meridian.lib.harness.common import (
 )
 from meridian.lib.harness.adapter import (
     ArtifactStore,
-    BaseHarnessAdapter,
+    BaseSubprocessHarness,
     HarnessCapabilities,
     HarnessNativeLayout,
     McpConfig,
@@ -186,8 +186,8 @@ def _owns_session(repo_root: Path, session_ref: str) -> bool:
     return False
 
 
-class CodexAdapter(BaseHarnessAdapter):
-    """HarnessAdapter implementation for `codex`."""
+class CodexAdapter(BaseSubprocessHarness):
+    """SubprocessHarness implementation for `codex`."""
 
     STRATEGIES: ClassVar[StrategyMap] = {
         "model": FlagStrategy(effect=FlagEffect.CLI_FLAG, cli_flag="--model"),

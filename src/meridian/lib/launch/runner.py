@@ -532,7 +532,7 @@ async def execute_with_finalization(
     if harness_id is None:
         harness, _warning = registry.route(str(run.model), repo_root=repo_root)
     else:
-        harness = registry.get(harness_id)
+        harness = registry.get_subprocess_harness(harness_id)
 
     run_params = SpawnParams(
         prompt=run.prompt,

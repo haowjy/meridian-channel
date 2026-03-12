@@ -23,7 +23,7 @@ from meridian.lib.harness.common import (
 )
 from meridian.lib.harness.adapter import (
     ArtifactStore,
-    BaseHarnessAdapter,
+    BaseSubprocessHarness,
     HarnessCapabilities,
     HarnessNativeLayout,
     McpConfig,
@@ -152,8 +152,8 @@ def _extract_todowrite_tasks(metadata: dict[str, object]) -> list[dict[str, str]
     return tasks
 
 
-class ClaudeAdapter(BaseHarnessAdapter):
-    """HarnessAdapter implementation for `claude`."""
+class ClaudeAdapter(BaseSubprocessHarness):
+    """SubprocessHarness implementation for `claude`."""
 
     STRATEGIES: ClassVar[StrategyMap] = {
         "model": FlagStrategy(effect=FlagEffect.CLI_FLAG, cli_flag="--model"),

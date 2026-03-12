@@ -5,7 +5,7 @@ from collections.abc import Collection, Mapping
 from pathlib import Path
 from typing import Callable, cast
 
-from meridian.lib.harness.adapter import HarnessAdapter, SpawnParams, resolve_mcp_config
+from meridian.lib.harness.adapter import SpawnParams, SubprocessHarness, resolve_mcp_config
 from meridian.lib.safety.permissions import PermissionConfig
 
 _CHILD_ENV_ALLOWLIST = frozenset(
@@ -104,7 +104,7 @@ def inherit_child_env(
 
 def build_harness_env_overrides(
     *,
-    adapter: HarnessAdapter,
+    adapter: SubprocessHarness,
     run_params: SpawnParams,
     permission_config: PermissionConfig,
     runtime_env_overrides: Mapping[str, str] | None = None,
@@ -122,7 +122,7 @@ def build_harness_env_overrides(
 def build_harness_child_env(
     *,
     base_env: Mapping[str, str],
-    adapter: HarnessAdapter,
+    adapter: SubprocessHarness,
     run_params: SpawnParams,
     permission_config: PermissionConfig,
     runtime_env_overrides: Mapping[str, str] | None = None,

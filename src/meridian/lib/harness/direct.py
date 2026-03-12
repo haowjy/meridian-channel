@@ -11,26 +11,16 @@ from urllib import error, request
 
 from meridian.lib.core.domain import TokenUsage
 from meridian.lib.harness.adapter import (
-    ArtifactStore,
-    BaseHarnessAdapter,
     HarnessCapabilities,
-    McpConfig,
-    PermissionResolver,
-    SpawnParams,
     SpawnResult,
-    StreamEvent,
 )
 from meridian.lib.core.codec import (
     coerce_input_payload,
-    normalize_optional,
     schema_from_type,
 )
 from meridian.lib.ops.manifest import OperationSpec, get_operations_for_surface
-from meridian.lib.safety.permissions import PermissionConfig
 from meridian.lib.core.util import to_jsonable
-from meridian.lib.core.types import HarnessId, ModelId, SpawnId
-
-_normalize_optional = normalize_optional
+from meridian.lib.core.types import HarnessId, ModelId
 
 
 def _usage_from_response(response: dict[str, object]) -> TokenUsage:
@@ -70,8 +60,8 @@ def _extract_text_blocks(content: object) -> str:
     return "\n".join(part for part in text_parts if part).strip()
 
 
-class DirectAdapter(BaseHarnessAdapter):
-    """HarnessAdapter implementation for Anthropic Messages API mode."""
+class DirectAdapter:
+    """InProcessHarness implementation for Anthropic Messages API mode."""
 
     @property
     def id(self) -> HarnessId:
@@ -85,32 +75,6 @@ class DirectAdapter(BaseHarnessAdapter):
             supports_native_skills=False,
             supports_programmatic_tools=True,
         )
-
-    def build_command(self, run: SpawnParams, perms: PermissionResolver) -> list[str]:
-        _ = (run, perms)
-        return ["direct"]
-
-    def mcp_config(self, run: SpawnParams) -> McpConfig | None:
-        _ = run
-        # Direct mode calls Meridian operations in-process via the API/tool loop, so
-        # there is no external MCP sidecar to configure or reconnect.
-        return None
-
-    def env_overrides(self, config: PermissionConfig) -> dict[str, str]:
-        _ = config
-        return {}
-
-    def parse_stream_event(self, line: str) -> StreamEvent | None:
-        _ = line
-        return None
-
-    def extract_usage(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> TokenUsage:
-        _ = (artifacts, spawn_id)
-        return TokenUsage()
-
-    def extract_session_id(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> str | None:
-        _ = (artifacts, spawn_id)
-        return None
 
     @staticmethod
     def build_tool_definitions() -> list[dict[str, object]]:
@@ -194,8 +158,11 @@ class DirectAdapter(BaseHarnessAdapter):
         api_key: str | None = None,
         max_tokens: int = 2048,
         max_tool_round_trips: int = 8,
+        **kwargs: Any,
     ) -> SpawnResult:
         """Execute one prompt via Anthropic Messages API with tool-calling support."""
+
+        _ = kwargs
 
         key = api_key or os.getenv("ANTHROPIC_API_KEY")
         if not key:

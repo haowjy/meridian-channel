@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict
 from meridian.lib.config.settings import resolve_repo_root
 from meridian.lib.config.settings import MeridianConfig, load_config
 from meridian.lib.core.context import RuntimeContext
-from meridian.lib.harness.adapter import HarnessAdapter, SpawnParams
+from meridian.lib.harness.adapter import SpawnParams, SubprocessHarness
 from meridian.lib.harness.materialize import materialize_for_harness
 from meridian.lib.harness.registry import HarnessRegistry
 from meridian.lib.safety.permissions import (
@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 class PrimaryHarnessContext(BaseModel):
     command: tuple[str, ...]
-    adapter: HarnessAdapter | None = None
+    adapter: SubprocessHarness | None = None
     run_params: SpawnParams | None = None
     permission_config: PermissionConfig | None = None
 
@@ -133,7 +133,7 @@ def build_harness_context(
         harness_registry=harness_registry,
         repo_root=resolved_root,
     )
-    adapter = harness_registry.get(harness)
+    adapter = harness_registry.get_subprocess_harness(harness)
     resolved_skills = resolve_skills_from_profile(
         profile_skills=defaults.skills,
         repo_root=resolved_root,

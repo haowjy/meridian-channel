@@ -6,7 +6,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.core.domain import TokenUsage
-from meridian.lib.harness.adapter import HarnessAdapter
+from meridian.lib.harness.adapter import SubprocessHarness
 from meridian.lib.launch.artifact_io import read_artifact_text
 from meridian.lib.launch.files_touched import extract_files_touched
 from meridian.lib.launch.report import ExtractedReport, extract_or_fallback_report
@@ -96,7 +96,7 @@ def _is_empty_output(
 def enrich_finalize(
     *,
     artifacts: ArtifactStore,
-    adapter: HarnessAdapter,
+    adapter: SubprocessHarness,
     spawn_id: SpawnId,
     log_dir: Path,
     secrets: tuple[SecretSpec, ...] = (),

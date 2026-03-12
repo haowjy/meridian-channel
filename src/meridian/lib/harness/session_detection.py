@@ -19,7 +19,10 @@ def infer_harness_from_untracked_session_ref(
 
     active_registry = registry if registry is not None else get_default_harness_registry()
     for harness_id in active_registry.ids():
-        adapter = active_registry.get(harness_id)
+        try:
+            adapter = active_registry.get_subprocess_harness(harness_id)
+        except TypeError:
+            continue
         if adapter.owns_untracked_session(repo_root=repo_root, session_ref=normalized):
             return str(harness_id)
     return None

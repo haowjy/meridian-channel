@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict
 from meridian.lib.config.settings import MeridianConfig, load_config
 from meridian.lib.core.spawn_lifecycle import resolve_execution_terminal_state
 from meridian.lib.core.types import HarnessId, SpawnId
+from meridian.lib.harness.adapter import SubprocessHarness
 from meridian.lib.harness.materialize import cleanup_materialized
 from meridian.lib.harness.registry import HarnessRegistry
 from meridian.lib.ops.session_policy import ensure_session_work_item
@@ -175,6 +176,8 @@ def _sweep_orphaned_materializations(
             return
         for known_harness_id in harness_registry.ids():
             adapter = harness_registry.get(known_harness_id)
+            if not isinstance(adapter, SubprocessHarness):
+                continue
             if adapter.native_layout() is None:
                 continue
             cleanup_orphaned_materializations(
@@ -382,7 +385,7 @@ def prepare_launch_context(
     )
     prompt = build_primary_prompt(request)
 
-    adapter = harness_registry.get(HarnessId(session_metadata.harness))
+    adapter = harness_registry.get_subprocess_harness(HarnessId(session_metadata.harness))
     seed = adapter.seed_session(
         is_resume=bool(explicit_session_id),
         harness_session_id=explicit_session_id,
@@ -539,7 +542,9 @@ def run_harness_process(
                             duration_secs=duration,
                         )
                     observed_harness_session_id = None
-                    adapter = harness_registry.get(HarnessId(ctx.session_metadata.harness))
+                    adapter = harness_registry.get_subprocess_harness(
+                        HarnessId(ctx.session_metadata.harness)
+                    )
                     if primary_started_epoch > 0.0:
                         observed_harness_session_id = extract_latest_session_id(
                             adapter=adapter,
