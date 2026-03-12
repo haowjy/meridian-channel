@@ -7,6 +7,24 @@ spawn from succeeded to failed.
 
 from meridian.lib.core.domain import SpawnStatus
 
+ACTIVE_SPAWN_STATUSES: frozenset[str] = frozenset({"queued", "running"})
+TERMINAL_SPAWN_STATUSES: frozenset[str] = frozenset({"succeeded", "failed", "cancelled"})
+
+_ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
+    "queued": frozenset({"running", "succeeded", "failed", "cancelled"}),
+    "running": frozenset({"succeeded", "failed", "cancelled"}),
+}
+
+
+def is_active_spawn_status(status: str) -> bool:
+    return status in ACTIVE_SPAWN_STATUSES
+
+
+def validate_transition(from_status: SpawnStatus, to_status: SpawnStatus) -> None:
+    allowed = _ALLOWED_TRANSITIONS.get(from_status, frozenset())
+    if to_status not in allowed:
+        raise ValueError(f"Illegal spawn transition: {from_status} -> {to_status}")
+
 
 def has_durable_report_completion(report_text: str | None) -> bool:
     """Return True when a non-empty final report is available on disk."""

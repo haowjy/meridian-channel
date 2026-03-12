@@ -6,9 +6,9 @@ import re
 from pathlib import Path
 from typing import cast
 
+from meridian.lib.core.spawn_lifecycle import is_active_spawn_status
 from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_state_paths
-from meridian.lib.state.spawn_store import is_active_spawn_status
 
 from .models import SpawnDetailOutput
 

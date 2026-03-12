@@ -7,6 +7,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.core.context import RuntimeContext
+from meridian.lib.core.spawn_lifecycle import is_active_spawn_status
 from meridian.lib.core.util import FormatContext
 from meridian.lib.ops.runtime import async_from_sync, resolve_chat_id, resolve_roots, runtime_context
 from meridian.lib.state import session_store, spawn_store, work_store
@@ -78,7 +79,7 @@ def _annotate_primary_spawn(state_root: Path, *, chat_id: str, work_id: str) -> 
     for spawn in spawn_store.list_spawns(
         state_root, filters={"kind": "primary", "chat_id": chat_id}
     ):
-        if spawn_store.is_active_spawn_status(spawn.status):
+        if is_active_spawn_status(spawn.status):
             spawn_store.update_spawn(state_root, spawn.id, work_id=work_id)
             break
 
@@ -343,7 +344,7 @@ def work_dashboard_sync(
 
     from meridian.lib.state.reaper import reconcile_spawns
     for spawn in reconcile_spawns(state_root, spawn_store.list_spawns(state_root)):
-        if not spawn_store.is_active_spawn_status(spawn.status):
+        if not is_active_spawn_status(spawn.status):
             continue
         row = _dashboard_spawn(spawn)
         if spawn.work_id:

@@ -8,12 +8,12 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.config.settings import resolve_path_list
+from meridian.lib.core.spawn_lifecycle import is_active_spawn_status
 from meridian.lib.core.util import FormatContext
 from meridian.lib.harness.materialize import cleanup_materialized
 from meridian.lib.ops.runtime import build_runtime
 from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_state_paths
-from meridian.lib.state.spawn_store import is_active_spawn_status
 from meridian.lib.state.session_store import cleanup_stale_sessions
 
 

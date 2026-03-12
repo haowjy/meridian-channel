@@ -5,11 +5,16 @@ Also includes file-backed ID generation for spawns and sessions.
 
 
 from pathlib import Path
-from typing import Any, Literal, Mapping
+from typing import Any, Literal, Mapping, cast
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from meridian.lib.core.domain import SpawnStatus
+from meridian.lib.core.spawn_lifecycle import (
+    ACTIVE_SPAWN_STATUSES as _ACTIVE_SPAWN_STATUSES,
+    is_active_spawn_status as _is_active_spawn_status,
+    validate_transition,
+)
 from meridian.lib.core.types import SpawnId
 from meridian.lib.state.event_store import append_event, lock_file, read_events, utc_now_iso
 from meridian.lib.state.paths import StateRootPaths
@@ -45,13 +50,11 @@ def next_chat_id(state_root: Path) -> str:
 
 
 LaunchMode = Literal["background", "foreground"]
-ACTIVE_SPAWN_STATUSES = frozenset({"queued", "running"})
 BACKGROUND_LAUNCH_MODE: LaunchMode = "background"
 FOREGROUND_LAUNCH_MODE: LaunchMode = "foreground"
 
-
-def is_active_spawn_status(status: str) -> bool:
-    return status in ACTIVE_SPAWN_STATUSES
+ACTIVE_SPAWN_STATUSES = _ACTIVE_SPAWN_STATUSES
+is_active_spawn_status = _is_active_spawn_status
 
 
 # ---------------------------------------------------------------------------
@@ -256,7 +259,12 @@ def finalize_spawn(
     finished_at: str | None = None,
     error: str | None = None,
 ) -> None:
-    """Append a spawn finalize event under `spawns.lock`."""
+    """Append a spawn finalize event under ``spawns.lock``.
+
+    Unguarded: does not read current state, so no transition validation.
+    Callers that need state-consistent transitions should use
+    ``finalize_spawn_if_running`` or ``finalize_spawn_if_active`` instead.
+    """
 
     paths = StateRootPaths.from_root_dir(state_root)
     event = SpawnFinalizeEvent(
@@ -295,6 +303,7 @@ def finalize_spawn_if_running(
         record = records.get(str(spawn_id))
         if record is None or record.status != "running":
             return False
+        validate_transition(cast("SpawnStatus", record.status), status)
         event = SpawnFinalizeEvent(
             id=str(spawn_id),
             status=status,
@@ -328,6 +337,7 @@ def finalize_spawn_if_active(
         record = records.get(str(spawn_id))
         if record is None or not is_active_spawn_status(record.status):
             return False
+        validate_transition(cast("SpawnStatus", record.status), status)
         event = SpawnFinalizeEvent(
             id=str(spawn_id),
             status=status,

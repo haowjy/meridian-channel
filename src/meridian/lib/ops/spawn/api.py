@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 from meridian.lib.core.context import RuntimeContext
+from meridian.lib.core.spawn_lifecycle import ACTIVE_SPAWN_STATUSES, is_active_spawn_status
 from meridian.lib.core.sink import NullSink, OutputSink
 from meridian.lib.ops.runtime import (
     build_runtime_from_root_and_config,
@@ -16,7 +17,6 @@ from meridian.lib.ops.runtime import (
     runtime_context,
 )
 from meridian.lib.state import spawn_store
-from meridian.lib.state.spawn_store import ACTIVE_SPAWN_STATUSES, is_active_spawn_status
 
 from .execute import (
     depth_exceeded_output,
