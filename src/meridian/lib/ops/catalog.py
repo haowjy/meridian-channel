@@ -16,6 +16,7 @@ from meridian.lib.catalog.skill import SkillRegistry
 from meridian.lib.core.domain import SkillContent, SkillManifest
 from meridian.lib.core.util import FormatContext
 from meridian.lib.core.types import HarnessId, ModelId
+from meridian.lib.ops.runtime import async_from_sync
 
 
 class ModelsListInput(BaseModel):
@@ -387,28 +388,12 @@ def skills_load_sync(payload: SkillsLoadInput) -> SkillContent:
     return registry.show(name)
 
 
-async def models_list(payload: ModelsListInput) -> ModelsListOutput:
-    return models_list_sync(payload)
-
-
-async def models_show(payload: ModelsShowInput) -> CatalogModel:
-    return models_show_sync(payload)
-
-
-async def models_refresh(payload: ModelsRefreshInput) -> ModelsRefreshOutput:
-    return models_refresh_sync(payload)
-
-
-async def skills_list(payload: SkillsListInput) -> SkillsQueryOutput:
-    return skills_list_sync(payload)
-
-
-async def skills_search(payload: SkillsSearchInput) -> SkillsQueryOutput:
-    return skills_search_sync(payload)
-
-
-async def skills_load(payload: SkillsLoadInput) -> SkillContent:
-    return skills_load_sync(payload)
+models_list = async_from_sync(models_list_sync)
+models_show = async_from_sync(models_show_sync)
+models_refresh = async_from_sync(models_refresh_sync)
+skills_list = async_from_sync(skills_list_sync)
+skills_search = async_from_sync(skills_search_sync)
+skills_load = async_from_sync(skills_load_sync)
 
 
 # ---------------------------------------------------------------------------
@@ -490,5 +475,4 @@ def agents_list_sync(payload: AgentsListInput) -> AgentsListOutput:
     return AgentsListOutput(agents=entries)
 
 
-async def agents_list(payload: AgentsListInput) -> AgentsListOutput:
-    return agents_list_sync(payload)
+agents_list = async_from_sync(agents_list_sync)

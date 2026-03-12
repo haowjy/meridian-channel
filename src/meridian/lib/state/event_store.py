@@ -16,6 +16,19 @@ from meridian.lib.state.atomic import append_text_line
 
 T = TypeVar("T")
 _THREAD_LOCAL = threading.local()
+EventObserver = Callable[[str, dict[str, Any]], None]  # (store_name, event_payload)
+_observers: list[EventObserver] = []
+
+
+def register_observer(observer: EventObserver) -> None:
+    _observers.append(observer)
+
+
+def unregister_observer(observer: EventObserver) -> None:
+    try:
+        _observers.remove(observer)
+    except ValueError:
+        pass
 
 
 def utc_now_iso() -> str:
@@ -67,11 +80,19 @@ def append_event(
     store_name: str,
     exclude_none: bool = False,
 ) -> None:
-    del store_name  # Reserved for store-specific diagnostics.
     payload = event.model_dump(exclude_none=exclude_none)
     line = json.dumps(payload, separators=(",", ":"), sort_keys=True) + "\n"
     with lock_file(lock_path):
         append_text_line(data_path, line)
+
+    # Notify observers after durable write, outside the lock.
+    # Snapshot the list so mutations during dispatch are safe.
+    for observer in list(_observers):
+        try:
+            observer(store_name, payload)
+        except Exception:
+            # Observer failures are isolated and must not break writers.
+            pass
 
 
 def read_events(

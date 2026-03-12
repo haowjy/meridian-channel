@@ -39,6 +39,8 @@ class StateRootPaths(BaseModel):
     sessions_dir: Path
     fs_dir: Path
     work_dir: Path
+    work_lock: Path
+    work_rename_intent: Path
     spawns_dir: Path
 
     @classmethod
@@ -54,6 +56,8 @@ class StateRootPaths(BaseModel):
             sessions_dir=root_dir / "sessions",
             fs_dir=root_dir / "fs",
             work_dir=root_dir / "work",
+            work_lock=root_dir / "work.lock",
+            work_rename_intent=root_dir / "work" / "work-rename.intent.json",
             spawns_dir=root_dir / "spawns",
         )
 

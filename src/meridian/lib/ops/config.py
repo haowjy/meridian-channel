@@ -1,7 +1,6 @@
 """Config file management operations."""
 
 
-import asyncio
 import json
 import os
 import tempfile
@@ -22,6 +21,7 @@ from meridian.lib.config.settings import (
 from meridian.lib.core.util import FormatContext
 from meridian.lib.safety.permissions import parse_permission_tier
 from meridian.lib.core.util import to_jsonable
+from meridian.lib.ops.runtime import async_from_sync
 from meridian.lib.state.paths import ensure_gitignore, resolve_state_paths
 
 
@@ -811,21 +811,8 @@ def config_reset_sync(payload: ConfigResetInput) -> ConfigResetOutput:
     return ConfigResetOutput(path=path.as_posix(), key=spec.canonical_key, removed=removed)
 
 
-async def config_init(payload: ConfigInitInput) -> ConfigInitOutput:
-    return await asyncio.to_thread(config_init_sync, payload)
-
-
-async def config_show(payload: ConfigShowInput) -> ConfigShowOutput:
-    return await asyncio.to_thread(config_show_sync, payload)
-
-
-async def config_set(payload: ConfigSetInput) -> ConfigSetOutput:
-    return await asyncio.to_thread(config_set_sync, payload)
-
-
-async def config_get(payload: ConfigGetInput) -> ConfigGetOutput:
-    return await asyncio.to_thread(config_get_sync, payload)
-
-
-async def config_reset(payload: ConfigResetInput) -> ConfigResetOutput:
-    return await asyncio.to_thread(config_reset_sync, payload)
+config_init = async_from_sync(config_init_sync)
+config_show = async_from_sync(config_show_sync)
+config_set = async_from_sync(config_set_sync)
+config_get = async_from_sync(config_get_sync)
+config_reset = async_from_sync(config_reset_sync)

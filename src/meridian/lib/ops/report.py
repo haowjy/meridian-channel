@@ -7,17 +7,11 @@ from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.core.context import RuntimeContext
 from meridian.lib.core.util import FormatContext
-from meridian.lib.ops.runtime import resolve_runtime_root_and_config
+from meridian.lib.ops.runtime import async_from_sync, resolve_runtime_root_and_config, runtime_context
 from meridian.lib.ops.spawn.query import resolve_spawn_reference
 from meridian.lib.state import spawn_store
 from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.paths import resolve_state_paths
-
-
-def _runtime_context(ctx: RuntimeContext | None) -> RuntimeContext:
-    if ctx is not None:
-        return ctx
-    return RuntimeContext.from_environment()
 
 
 def _resolve_target_spawn_id(
@@ -41,11 +35,11 @@ def _resolve_spawn(
     spawn_id: str | None,
     ctx: RuntimeContext | None = None,
 ) -> str:
-    runtime_context = _runtime_context(ctx)
+    resolved_ctx = runtime_context(ctx)
     resolved_spawn = _resolve_target_spawn_id(
         repo_root,
         spawn_id,
-        current_spawn_id=str(runtime_context.spawn_id or ""),
+        current_spawn_id=str(resolved_ctx.spawn_id or ""),
     )
     if spawn_store.get_spawn(resolve_state_paths(repo_root).root_dir, resolved_spawn) is None:
         raise ValueError(f"Spawn '{resolved_spawn}' not found")
@@ -189,15 +183,15 @@ def report_search_sync(
     payload: ReportSearchInput,
     ctx: RuntimeContext | None = None,
 ) -> ReportSearchOutput:
-    runtime_context = _runtime_context(ctx)
+    resolved_ctx = runtime_context(ctx)
     repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
     limit = payload.limit if payload.limit > 0 else 20
     query = payload.query.strip()
 
     if payload.spawn_id is not None and payload.spawn_id.strip():
         spawn_ids = (resolve_spawn_reference(repo_root, payload.spawn_id.strip()),)
-    elif runtime_context.spawn_id is not None:
-        spawn_ids = (resolve_spawn_reference(repo_root, str(runtime_context.spawn_id)),)
+    elif resolved_ctx.spawn_id is not None:
+        spawn_ids = (resolve_spawn_reference(repo_root, str(resolved_ctx.spawn_id)),)
     else:
         spawn_ids = tuple(
             row.id for row in reversed(spawn_store.list_spawns(resolve_state_paths(repo_root).root_dir))
@@ -224,22 +218,6 @@ def report_search_sync(
     return ReportSearchOutput(results=tuple(matches))
 
 
-async def report_create(
-    payload: ReportCreateInput,
-    ctx: RuntimeContext | None = None,
-) -> ReportCreateOutput:
-    return report_create_sync(payload, ctx=ctx)
-
-
-async def report_show(
-    payload: ReportShowInput,
-    ctx: RuntimeContext | None = None,
-) -> ReportShowOutput:
-    return report_show_sync(payload, ctx=ctx)
-
-
-async def report_search(
-    payload: ReportSearchInput,
-    ctx: RuntimeContext | None = None,
-) -> ReportSearchOutput:
-    return report_search_sync(payload, ctx=ctx)
+report_create = async_from_sync(report_create_sync)
+report_show = async_from_sync(report_show_sync)
+report_search = async_from_sync(report_search_sync)

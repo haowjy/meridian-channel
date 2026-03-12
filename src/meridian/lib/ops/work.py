@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.core.context import RuntimeContext
 from meridian.lib.core.util import FormatContext
-from meridian.lib.ops.runtime import resolve_chat_id, resolve_roots, runtime_context
+from meridian.lib.ops.runtime import async_from_sync, resolve_chat_id, resolve_roots, runtime_context
 from meridian.lib.state import session_store, spawn_store, work_store
 
 
@@ -554,67 +554,15 @@ def work_clear_sync(
     return WorkClearOutput(message=message)
 
 
-async def work_dashboard(
-    payload: WorkDashboardInput,
-    ctx: RuntimeContext | None = None,
-) -> WorkDashboardOutput:
-    return work_dashboard_sync(payload, ctx=ctx)
-
-
-async def work_start(
-    payload: WorkStartInput,
-    ctx: RuntimeContext | None = None,
-) -> WorkStartOutput:
-    return work_start_sync(payload, ctx=ctx)
-
-
-async def work_list(
-    payload: WorkListInput,
-    ctx: RuntimeContext | None = None,
-) -> WorkListOutput:
-    return work_list_sync(payload, ctx=ctx)
-
-
-async def work_show(
-    payload: WorkShowInput,
-    ctx: RuntimeContext | None = None,
-) -> WorkShowOutput:
-    return work_show_sync(payload, ctx=ctx)
-
-
-async def work_update(
-    payload: WorkUpdateInput,
-    ctx: RuntimeContext | None = None,
-) -> WorkUpdateOutput:
-    return work_update_sync(payload, ctx=ctx)
-
-
-async def work_done(
-    payload: WorkDoneInput,
-    ctx: RuntimeContext | None = None,
-) -> WorkUpdateOutput:
-    return work_done_sync(payload, ctx=ctx)
-
-
-async def work_switch(
-    payload: WorkSwitchInput,
-    ctx: RuntimeContext | None = None,
-) -> WorkSwitchOutput:
-    return work_switch_sync(payload, ctx=ctx)
-
-
-async def work_rename(
-    payload: WorkRenameInput,
-    ctx: RuntimeContext | None = None,
-) -> WorkRenameOutput:
-    return work_rename_sync(payload, ctx=ctx)
-
-
-async def work_clear(
-    payload: WorkClearInput,
-    ctx: RuntimeContext | None = None,
-) -> WorkClearOutput:
-    return work_clear_sync(payload, ctx=ctx)
+work_dashboard = async_from_sync(work_dashboard_sync)
+work_start = async_from_sync(work_start_sync)
+work_list = async_from_sync(work_list_sync)
+work_show = async_from_sync(work_show_sync)
+work_update = async_from_sync(work_update_sync)
+work_done = async_from_sync(work_done_sync)
+work_switch = async_from_sync(work_switch_sync)
+work_rename = async_from_sync(work_rename_sync)
+work_clear = async_from_sync(work_clear_sync)
 
 
 __all__ = [

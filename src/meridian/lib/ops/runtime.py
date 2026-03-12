@@ -1,9 +1,12 @@
 """Operation runtime helpers for state/store resolution."""
 
 
+import asyncio
+import functools
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Coroutine, ParamSpec, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -13,6 +16,18 @@ from meridian.lib.core.context import RuntimeContext
 from meridian.lib.core.sink import NullSink, OutputSink
 from meridian.lib.state.artifact_store import LocalStore
 from meridian.lib.state.paths import resolve_state_paths
+
+
+P = ParamSpec("P")
+T = TypeVar("T")
+
+
+def async_from_sync(sync_fn: Callable[P, T]) -> Callable[P, Coroutine[Any, Any, T]]:
+    @functools.wraps(sync_fn)
+    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+        return await asyncio.to_thread(sync_fn, *args, **kwargs)
+
+    return wrapper
 
 
 class OperationRuntime(BaseModel):
