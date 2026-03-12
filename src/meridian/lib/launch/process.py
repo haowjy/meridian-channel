@@ -41,6 +41,7 @@ from meridian.lib.state.session_store import (
 )
 
 from .command import build_harness_context, build_launch_env
+from .heartbeat import threaded_heartbeat_scope
 from .resolve import resolve_primary_session_metadata
 from .session_ids import extract_latest_session_id
 from .types import LaunchRequest, PrimarySessionMetadata, build_primary_prompt
@@ -465,60 +466,62 @@ def run_harness_process(
                 launch_mode=FOREGROUND_LAUNCH_MODE,
                 status="queued",
             )
-            primary_started = time.monotonic()
-            primary_started_epoch = time.time()
-            primary_started_local_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-            harness_context = build_harness_context(
-                repo_root=repo_root,
-                request=ctx.command_request,
-                prompt=ctx.prompt,
-                harness_registry=harness_registry,
-                chat_id=chat_id,
-                config=ctx.config,
-            )
-            command = harness_context.command
-            _rewrite_primary_launch_lock_payload(
-                lock_handle,
-                _primary_launch_lock_payload(command=command, child_pid=None),
-            )
-            child_env = build_launch_env(
-                repo_root,
-                request,
-                chat_id=chat_id,
-                default_autocompact_pct=ctx.config.primary.autocompact_pct,
-                spawn_id=primary_spawn_id,
-                harness_context=harness_context,
-            )
-            output_log_path = resolve_spawn_log_dir(repo_root, primary_spawn_id) / _PRIMARY_OUTPUT_FILENAME
-
-            def _record_primary_started(child_pid: int) -> None:
+            log_dir = resolve_spawn_log_dir(repo_root, primary_spawn_id)
+            with threaded_heartbeat_scope(log_dir / "heartbeat"):
+                primary_started = time.monotonic()
+                primary_started_epoch = time.time()
+                primary_started_local_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+                harness_context = build_harness_context(
+                    repo_root=repo_root,
+                    request=ctx.command_request,
+                    prompt=ctx.prompt,
+                    harness_registry=harness_registry,
+                    chat_id=chat_id,
+                    config=ctx.config,
+                )
+                command = harness_context.command
                 _rewrite_primary_launch_lock_payload(
                     lock_handle,
-                    _primary_launch_lock_payload(command=command, child_pid=child_pid),
+                    _primary_launch_lock_payload(command=command, child_pid=None),
                 )
-                atomic_write_text(
-                    resolve_spawn_log_dir(repo_root, primary_spawn_id) / "harness.pid",
-                    f"{child_pid}\n",
+                child_env = build_launch_env(
+                    repo_root,
+                    request,
+                    chat_id=chat_id,
+                    default_autocompact_pct=ctx.config.primary.autocompact_pct,
+                    spawn_id=primary_spawn_id,
+                    harness_context=harness_context,
                 )
-                spawn_store.mark_spawn_running(
-                    ctx.state_root,
-                    primary_spawn_id,
-                    launch_mode=FOREGROUND_LAUNCH_MODE,
-                    worker_pid=child_pid,
-                )
+                output_log_path = log_dir / _PRIMARY_OUTPUT_FILENAME
 
-            exit_code, _child_pid = _run_primary_process_with_capture(
-                command=command,
-                cwd=repo_root,
-                env=child_env,
-                output_log_path=output_log_path,
-                on_child_started=_record_primary_started,
-            )
-            if output_log_path.exists():
-                artifacts.put(
-                    make_artifact_key(primary_spawn_id, _PRIMARY_OUTPUT_FILENAME),
-                    output_log_path.read_bytes(),
+                def _record_primary_started(child_pid: int) -> None:
+                    _rewrite_primary_launch_lock_payload(
+                        lock_handle,
+                        _primary_launch_lock_payload(command=command, child_pid=child_pid),
+                    )
+                    atomic_write_text(
+                        log_dir / "harness.pid",
+                        f"{child_pid}\n",
+                    )
+                    spawn_store.mark_spawn_running(
+                        ctx.state_root,
+                        primary_spawn_id,
+                        launch_mode=FOREGROUND_LAUNCH_MODE,
+                        worker_pid=child_pid,
+                    )
+
+                exit_code, _child_pid = _run_primary_process_with_capture(
+                    command=command,
+                    cwd=repo_root,
+                    env=child_env,
+                    output_log_path=output_log_path,
+                    on_child_started=_record_primary_started,
                 )
+                if output_log_path.exists():
+                    artifacts.put(
+                        make_artifact_key(primary_spawn_id, _PRIMARY_OUTPUT_FILENAME),
+                        output_log_path.read_bytes(),
+                    )
         except FileNotFoundError:
             logger.debug("Harness command not found", exc_info=True)
             exit_code = 2
