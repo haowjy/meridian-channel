@@ -100,8 +100,8 @@ def _pid_is_alive(pid: int, pid_file: Path) -> bool:
 def _spawn_is_stale(spawn_dir: Path, pid_file: Path) -> bool:
     """Check if a spawn has stopped producing output for >5 minutes."""
     now = time.time()
-    # Check output files first
-    for name in ("output.jsonl", "stderr.log"):
+    # Check output files and heartbeat first
+    for name in ("output.jsonl", "stderr.log", "heartbeat"):
         path = spawn_dir / name
         try:
             if now - path.stat().st_mtime < _STALE_THRESHOLD_SECS:
@@ -135,7 +135,7 @@ def _started_at_epoch(started_at: str | None) -> float | None:
 
 
 def _recent_spawn_activity(spawn_dir: Path, *, now: float) -> bool:
-    for name in ("output.jsonl", "stderr.log", "report.md", "prompt.md", "params.json"):
+    for name in ("output.jsonl", "stderr.log", "report.md", "prompt.md", "params.json", "heartbeat"):
         path = spawn_dir / name
         try:
             if now - path.stat().st_mtime < _STARTUP_GRACE_SECS:
@@ -428,8 +428,9 @@ def _reconcile_background_spawn(state_root: Path, inspection: _SpawnInspection) 
         return _finalize_failed(state_root, record, "orphan_run")
 
     if inspection.stale:
-        _terminate_observed_processes(inspection)
-        return _finalize_failed(state_root, record, "stale")
+        # At least one process is alive (orphan_run check above handled the dead case).
+        # Quiet but alive is suspect, not terminal; preserve the spawn.
+        return record
 
     if (
         inspection.wrapper_pid == record.wrapper_pid
@@ -484,8 +485,9 @@ def _reconcile_foreground_spawn(state_root: Path, inspection: _SpawnInspection) 
         return _finalize_failed(state_root, record, "orphan_run")
 
     if inspection.stale:
-        _terminate_observed_processes(inspection)
-        return _finalize_failed(state_root, record, "stale")
+        # Harness is alive (orphan_run handled the dead case).
+        # Quiet but alive is suspect, not terminal; preserve the spawn.
+        return record
 
     if inspection.harness_pid == record.worker_pid:
         return record

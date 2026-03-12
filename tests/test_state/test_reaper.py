@@ -1,11 +1,13 @@
 import os
 import subprocess
+import time
 from pathlib import Path
 
 from meridian.lib.launch.process import active_primary_lock_path, primary_launch_lock
+from meridian.lib.state import reaper
 from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_state_paths
-from meridian.lib.state.reaper import reconcile_active_spawn
+from meridian.lib.state.reaper import _recent_spawn_activity, _spawn_is_stale, reconcile_active_spawn
 from meridian.lib.core.domain import SpawnStatus
 
 
@@ -32,6 +34,11 @@ def _start_background_spawn(
         started_at=started_at,
     )
     return state_root, str(spawn_id)
+
+
+def _set_file_age(path: Path, *, age_seconds: int) -> None:
+    old_time = time.time() - age_seconds
+    os.utime(path, (old_time, old_time))
 
 
 def test_reconcile_active_spawn_marks_missing_spawn_dir_failed_after_grace(tmp_path: Path) -> None:
@@ -230,3 +237,134 @@ def test_reconcile_foreground_primary_queued_stays_queued_while_primary_lock_hel
     assert latest is not None
     assert latest.status == "queued"
     assert latest.error is None
+
+
+def test_stale_background_spawn_with_live_wrapper_is_preserved(tmp_path: Path, monkeypatch) -> None:
+    state_root, spawn_id = _start_background_spawn(tmp_path, started_at=_OLD_STARTED_AT, status="running")
+    spawn_dir = state_root / "spawns" / spawn_id
+    spawn_dir.mkdir(parents=True, exist_ok=True)
+    wrapper_pid = 12345
+    (spawn_dir / "background.pid").write_text(f"{wrapper_pid}\n", encoding="utf-8")
+    (spawn_dir / "output.jsonl").write_text("", encoding="utf-8")
+    (spawn_dir / "stderr.log").write_text("", encoding="utf-8")
+    _set_file_age(spawn_dir / "background.pid", age_seconds=301)
+    _set_file_age(spawn_dir / "output.jsonl", age_seconds=301)
+    _set_file_age(spawn_dir / "stderr.log", age_seconds=301)
+    monkeypatch.setattr(reaper, "_pid_is_alive", lambda _pid, _pid_file: True)
+
+    row = spawn_store.get_spawn(state_root, spawn_id)
+    assert row is not None
+
+    reconciled = reconcile_active_spawn(state_root, row)
+
+    assert reconciled.status == "running"
+    assert reconciled.error is None
+    latest = spawn_store.get_spawn(state_root, spawn_id)
+    assert latest is not None
+    assert latest.status == "running"
+    assert latest.error is None
+
+
+def test_stale_foreground_spawn_with_live_harness_is_preserved(tmp_path: Path, monkeypatch) -> None:
+    state_root, spawn_id = _start_foreground_spawn(tmp_path, started_at=_OLD_STARTED_AT, status="running")
+    spawn_dir = state_root / "spawns" / spawn_id
+    spawn_dir.mkdir(parents=True, exist_ok=True)
+    harness_pid = 23456
+    (spawn_dir / "harness.pid").write_text(f"{harness_pid}\n", encoding="utf-8")
+    (spawn_dir / "output.jsonl").write_text("", encoding="utf-8")
+    (spawn_dir / "stderr.log").write_text("", encoding="utf-8")
+    _set_file_age(spawn_dir / "harness.pid", age_seconds=301)
+    _set_file_age(spawn_dir / "output.jsonl", age_seconds=301)
+    _set_file_age(spawn_dir / "stderr.log", age_seconds=301)
+    monkeypatch.setattr(reaper, "_pid_is_alive", lambda _pid, _pid_file: True)
+
+    row = spawn_store.get_spawn(state_root, spawn_id)
+    assert row is not None
+
+    reconciled = reconcile_active_spawn(state_root, row)
+
+    assert reconciled.status == "running"
+    assert reconciled.error is None
+    latest = spawn_store.get_spawn(state_root, spawn_id)
+    assert latest is not None
+    assert latest.status == "running"
+    assert latest.error is None
+
+
+def test_stale_dead_background_spawn_is_finalized(tmp_path: Path, monkeypatch) -> None:
+    state_root, spawn_id = _start_background_spawn(tmp_path, started_at=_OLD_STARTED_AT, status="running")
+    spawn_dir = state_root / "spawns" / spawn_id
+    spawn_dir.mkdir(parents=True, exist_ok=True)
+    (spawn_dir / "background.pid").write_text("12345\n", encoding="utf-8")
+    (spawn_dir / "harness.pid").write_text("23456\n", encoding="utf-8")
+    (spawn_dir / "output.jsonl").write_text("", encoding="utf-8")
+    (spawn_dir / "stderr.log").write_text("", encoding="utf-8")
+    _set_file_age(spawn_dir / "background.pid", age_seconds=301)
+    _set_file_age(spawn_dir / "harness.pid", age_seconds=301)
+    _set_file_age(spawn_dir / "output.jsonl", age_seconds=301)
+    _set_file_age(spawn_dir / "stderr.log", age_seconds=301)
+    monkeypatch.setattr(reaper, "_pid_is_alive", lambda _pid, _pid_file: False)
+
+    row = spawn_store.get_spawn(state_root, spawn_id)
+    assert row is not None
+
+    reconciled = reconcile_active_spawn(state_root, row)
+
+    assert reconciled.status == "failed"
+    assert reconciled.error == "orphan_run"
+    latest = spawn_store.get_spawn(state_root, spawn_id)
+    assert latest is not None
+    assert latest.status == "failed"
+    assert latest.error == "orphan_run"
+
+
+def test_stale_dead_foreground_spawn_is_finalized(tmp_path: Path, monkeypatch) -> None:
+    state_root, spawn_id = _start_foreground_spawn(tmp_path, started_at=_OLD_STARTED_AT, status="running")
+    spawn_dir = state_root / "spawns" / spawn_id
+    spawn_dir.mkdir(parents=True, exist_ok=True)
+    (spawn_dir / "harness.pid").write_text("34567\n", encoding="utf-8")
+    (spawn_dir / "output.jsonl").write_text("", encoding="utf-8")
+    (spawn_dir / "stderr.log").write_text("", encoding="utf-8")
+    _set_file_age(spawn_dir / "harness.pid", age_seconds=301)
+    _set_file_age(spawn_dir / "output.jsonl", age_seconds=301)
+    _set_file_age(spawn_dir / "stderr.log", age_seconds=301)
+    monkeypatch.setattr(reaper, "_pid_is_alive", lambda _pid, _pid_file: False)
+
+    row = spawn_store.get_spawn(state_root, spawn_id)
+    assert row is not None
+
+    reconciled = reconcile_active_spawn(state_root, row)
+
+    assert reconciled.status == "failed"
+    assert reconciled.error == "orphan_run"
+    latest = spawn_store.get_spawn(state_root, spawn_id)
+    assert latest is not None
+    assert latest.status == "failed"
+    assert latest.error == "orphan_run"
+
+
+def test_heartbeat_prevents_stale_detection(tmp_path: Path) -> None:
+    spawn_dir = tmp_path / "spawn"
+    spawn_dir.mkdir(parents=True, exist_ok=True)
+    pid_file = spawn_dir / "background.pid"
+    pid_file.write_text("12345\n", encoding="utf-8")
+    (spawn_dir / "output.jsonl").write_text("", encoding="utf-8")
+    (spawn_dir / "stderr.log").write_text("", encoding="utf-8")
+    heartbeat = spawn_dir / "heartbeat"
+    heartbeat.write_text("", encoding="utf-8")
+    _set_file_age(pid_file, age_seconds=301)
+    _set_file_age(spawn_dir / "output.jsonl", age_seconds=301)
+    _set_file_age(spawn_dir / "stderr.log", age_seconds=301)
+    os.utime(heartbeat, None)
+
+    assert _spawn_is_stale(spawn_dir, pid_file) is False
+
+
+def test_heartbeat_in_recent_spawn_activity(tmp_path: Path) -> None:
+    spawn_dir = tmp_path / "spawn"
+    spawn_dir.mkdir(parents=True, exist_ok=True)
+    heartbeat = spawn_dir / "heartbeat"
+    heartbeat.write_text("", encoding="utf-8")
+    now = time.time()
+
+    assert _recent_spawn_activity(spawn_dir, now=now) is True
