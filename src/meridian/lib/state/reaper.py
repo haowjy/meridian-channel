@@ -7,6 +7,7 @@ orphaned spawns are repaired transparently — no separate "gc" command needed.
 
 from __future__ import annotations
 
+import fcntl
 import os
 import signal as _signal
 import time
@@ -141,6 +142,22 @@ def _recent_spawn_activity(spawn_dir: Path, *, now: float) -> bool:
                 return True
         except OSError:
             continue
+    return False
+
+
+def _primary_launch_lock_is_held(state_root: Path) -> bool:
+    lock_path = state_root / "active-primary.lock"
+    if not lock_path.is_file():
+        return False
+    try:
+        with lock_path.open("a+", encoding="utf-8") as handle:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return True
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    except OSError:
+        return False
     return False
 
 
@@ -430,13 +447,22 @@ def _reconcile_background_spawn(state_root: Path, inspection: _SpawnInspection) 
 
 def _reconcile_foreground_spawn(state_root: Path, inspection: _SpawnInspection) -> SpawnRecord:
     record = inspection.record
+    primary_launch_lock_held = (
+        record.kind == "primary"
+        and record.status == "queued"
+        and _primary_launch_lock_is_held(state_root)
+    )
     if not inspection.spawn_dir_exists:
         if inspection.grace_elapsed:
+            if primary_launch_lock_held:
+                return record
             return _finalize_failed(state_root, record, "missing_spawn_dir")
         return record
 
     if inspection.harness_pid is None:
         if inspection.grace_elapsed:
+            if primary_launch_lock_held:
+                return record
             return _finalize_failed(state_root, record, "missing_worker_pid")
         return record
 
@@ -453,6 +479,8 @@ def _reconcile_foreground_spawn(state_root: Path, inspection: _SpawnInspection) 
         return _finalize_completed_report(state_root, record)
 
     if not inspection.harness_alive and inspection.grace_elapsed:
+        if primary_launch_lock_held:
+            return record
         return _finalize_failed(state_root, record, "orphan_run")
 
     if inspection.stale:
@@ -493,11 +521,6 @@ def reconcile_active_spawn(state_root: Path, record: SpawnRecord) -> SpawnRecord
     if inspection.launch_mode == FOREGROUND_LAUNCH_MODE:
         return _reconcile_foreground_spawn(state_root, inspection)
     return _reconcile_legacy_spawn(state_root, inspection)
-
-
-def reconcile_running_spawn(state_root: Path, record: SpawnRecord) -> SpawnRecord:
-    """Backward-compatible wrapper for active-spawn reconciliation."""
-    return reconcile_active_spawn(state_root, record)
 
 
 def reconcile_spawns(state_root: Path, spawns: list[SpawnRecord]) -> list[SpawnRecord]:

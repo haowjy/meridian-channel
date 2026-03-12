@@ -296,6 +296,7 @@ def build_launch_env(
         and harness_context.run_params is not None
         and harness_context.permission_config is not None
     ):
+        env_overrides["MERIDIAN_PERMISSION_TIER"] = harness_context.permission_config.tier.value
         return build_harness_child_env(
             base_env=os.environ,
             adapter=harness_context.adapter,

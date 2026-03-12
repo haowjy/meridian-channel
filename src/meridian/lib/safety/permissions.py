@@ -123,6 +123,29 @@ def warn_profile_tier_escalation(
     )
 
 
+def validate_child_permission_tier(
+    *,
+    requested_tier: str,
+    parent_tier: str | None,
+) -> str | None:
+    """Reject nested spawns that request more access than the current session."""
+
+    if parent_tier is None or not parent_tier.strip():
+        return None
+    try:
+        resolved_requested = parse_permission_tier(requested_tier)
+        resolved_parent = parse_permission_tier(parent_tier)
+    except ValueError:
+        return None
+    if _TIER_RANKS[resolved_requested.value] <= _TIER_RANKS[resolved_parent.value]:
+        return None
+    return (
+        f"Nested spawn requests {resolved_requested.value}, "
+        f"but parent session is {resolved_parent.value}. "
+        "Child spawns cannot escalate permissions."
+    )
+
+
 def build_permission_config(
     tier: str | PermissionTier | None,
     *,

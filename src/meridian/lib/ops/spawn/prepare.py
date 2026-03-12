@@ -10,6 +10,7 @@ from meridian.lib.catalog.models import load_discovered_models
 from meridian.lib.config.settings import MeridianConfig
 from meridian.lib.harness.adapter import PermissionResolver
 from meridian.lib.harness.registry import HarnessRegistry, get_default_harness_registry
+from meridian.lib.core.context import RuntimeContext
 from meridian.lib.launch.prompt import (
     compose_run_prompt_text,
     compose_skill_injections,
@@ -26,8 +27,8 @@ from meridian.lib.safety.permissions import (
     PermissionConfig,
     build_permission_config,
     build_permission_resolver,
+    validate_child_permission_tier,
     validate_permission_config_for_harness,
-    warn_profile_tier_escalation,
 )
 from meridian.lib.core.types import ModelId
 
@@ -173,7 +174,9 @@ def build_create_payload(
     *,
     runtime: OperationRuntime | None = None,
     preflight_warning: str | None = None,
+    ctx: RuntimeContext | None = None,
 ) -> _PreparedCreate:
+    runtime_context = ctx or RuntimeContext.from_environment()
     runtime_view: _CreateRuntimeView
     if runtime is not None:
         runtime_view = _CreateRuntimeView(
@@ -195,11 +198,6 @@ def build_create_payload(
             config=runtime_bundle.config,
             harness_registry=runtime_bundle.harness_registry,
         )
-
-    # Track whether the agent was explicitly requested via --agent flag.
-    # Used to suppress noisy permission-escalation warnings for the implicit
-    # default agent profile (which normally has sandbox > config default).
-    agent_explicitly_requested = bool(payload.agent)
 
     profile = load_agent_profile_with_fallback(
         repo_root=runtime_view.repo_root,
@@ -285,22 +283,17 @@ def build_create_payload(
         profile=profile,
         default_tier=runtime_view.config.default_permission_tier,
     )
-    # Only warn about tier escalation when the user explicitly chose an
-    # agent via --agent.  The implicit default agent profile often has
-    # sandbox > config default (e.g. workspace-write vs read-only), and
-    # warning every time is noise for normal configurations.
-    if payload.permission_tier is None and agent_explicitly_requested:
-        warn_profile_tier_escalation(
-            profile=profile,
-            inferred_tier=inferred_tier,
-            default_tier=runtime_view.config.default_permission_tier,
-            warning_logger=logger,
-        )
     permission_config = build_permission_config(
         payload.permission_tier or inferred_tier,
         approval="confirm",
         default_tier=runtime_view.config.default_permission_tier,
     )
+    permission_error = validate_child_permission_tier(
+        requested_tier=permission_config.tier.value,
+        parent_tier=runtime_context.permission_tier,
+    )
+    if permission_error is not None:
+        raise ValueError(permission_error)
     warning = merge_warnings(
         warning,
         validate_permission_config_for_harness(

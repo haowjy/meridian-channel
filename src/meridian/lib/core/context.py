@@ -19,6 +19,7 @@ class RuntimeContext(BaseModel):
     state_root: Path | None = None
     chat_id: str = ""
     work_id: str | None = None
+    permission_tier: str | None = None
 
     @classmethod
     def from_environment(cls) -> Self:
@@ -33,6 +34,7 @@ class RuntimeContext(BaseModel):
         state_root_raw = os.getenv("MERIDIAN_STATE_ROOT", "").strip()
         chat_id_raw = os.getenv("MERIDIAN_CHAT_ID", "").strip()
         work_id_raw = os.getenv("MERIDIAN_WORK_ID", "").strip()
+        permission_tier_raw = os.getenv("MERIDIAN_PERMISSION_TIER", "").strip()
 
         depth = 0
         try:
@@ -48,6 +50,7 @@ class RuntimeContext(BaseModel):
             state_root=Path(state_root_raw) if state_root_raw else None,
             chat_id=chat_id_raw,
             work_id=work_id_raw or None,
+            permission_tier=permission_tier_raw or None,
         )
 
     def child_context(self, *, spawn_id: SpawnId) -> "RuntimeContext":
@@ -61,6 +64,7 @@ class RuntimeContext(BaseModel):
             state_root=self.state_root,
             chat_id=self.chat_id,
             work_id=self.work_id,
+            permission_tier=self.permission_tier,
         )
 
     def to_env_overrides(self) -> dict[str, str]:
@@ -81,4 +85,6 @@ class RuntimeContext(BaseModel):
             overrides["MERIDIAN_WORK_ID"] = self.work_id
             if self.state_root is not None:
                 overrides["MERIDIAN_WORK_DIR"] = (self.state_root / "work" / self.work_id).as_posix()
+        if self.permission_tier:
+            overrides["MERIDIAN_PERMISSION_TIER"] = self.permission_tier
         return overrides

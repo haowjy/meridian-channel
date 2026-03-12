@@ -343,17 +343,6 @@ class SpawnWaitMultiOutput(BaseModel):
         return tabular(rows)
 
 
-class SpawnListFilters(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    """Type-safe run-list filters converted into parameterized SQL."""
-
-    model: str | None = None
-    status: SpawnStatus | None = None
-    failed: bool = False
-    limit: int = 20
-
-
 __all__ = [
     "SpawnActionOutput",
     "SpawnCancelInput",
@@ -363,7 +352,6 @@ __all__ = [
     "SpawnFilesInput",
     "SpawnFilesOutput",
     "SpawnListEntry",
-    "SpawnListFilters",
     "SpawnListInput",
     "SpawnListOutput",
     "SpawnShowInput",

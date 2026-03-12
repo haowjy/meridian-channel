@@ -13,6 +13,7 @@ def test_spawn_child_env_propagates_work_id_and_dir(tmp_path: Path) -> None:
         state_root=tmp_path / ".meridian",
         chat_id="c1",
         work_id="work-5",
+        permission_tier="workspace-write",
     )
 
     env = _spawn_child_env("p2", state_root=ctx.state_root, ctx=ctx)
@@ -21,6 +22,7 @@ def test_spawn_child_env_propagates_work_id_and_dir(tmp_path: Path) -> None:
     assert env["MERIDIAN_PARENT_SPAWN_ID"] == "p1"
     assert env["MERIDIAN_WORK_ID"] == "work-5"
     assert env["MERIDIAN_WORK_DIR"] == (ctx.state_root / "work" / "work-5").as_posix()
+    assert env["MERIDIAN_PERMISSION_TIER"] == "workspace-write"
 
 
 def test_spawn_child_env_can_override_work_id(tmp_path: Path) -> None:
@@ -36,3 +38,23 @@ def test_spawn_child_env_can_override_work_id(tmp_path: Path) -> None:
 
     assert env["MERIDIAN_WORK_ID"] == "work-2"
     assert env["MERIDIAN_WORK_DIR"] == (ctx.state_root / "work" / "work-2").as_posix()
+
+
+def test_spawn_child_env_can_override_permission_tier(tmp_path: Path) -> None:
+    ctx = RuntimeContext(
+        spawn_id=SpawnId("p1"),
+        depth=1,
+        repo_root=tmp_path,
+        state_root=tmp_path / ".meridian",
+        chat_id="c1",
+        permission_tier="workspace-write",
+    )
+
+    env = _spawn_child_env(
+        "p2",
+        state_root=ctx.state_root,
+        permission_tier="read-only",
+        ctx=ctx,
+    )
+
+    assert env["MERIDIAN_PERMISSION_TIER"] == "read-only"

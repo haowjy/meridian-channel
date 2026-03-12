@@ -82,7 +82,12 @@ def spawn_create_sync(
             return depth_exceeded_output(current_depth, max_depth)
         runtime = build_runtime_from_root_and_config(resolved_root, config, sink=sink)
 
-    prepared = build_create_payload(payload, runtime=runtime, preflight_warning=preflight_warning)
+    prepared = build_create_payload(
+        payload,
+        runtime=runtime,
+        preflight_warning=preflight_warning,
+        ctx=runtime_context,
+    )
     if payload.dry_run:
         return SpawnActionOutput(
             command="spawn.create",
@@ -617,7 +622,6 @@ def spawn_continue_sync(
     *,
     sink: OutputSink | None = None,
 ) -> SpawnActionOutput:
-    _ = ctx
     repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
     resolved_spawn_id, source_spawn = _source_spawn_for_follow_up(payload.spawn_id, repo_root)
     derived_prompt = _prompt_for_follow_up(source_spawn, resolved_spawn_id, payload.prompt)
@@ -635,7 +639,7 @@ def spawn_continue_sync(
         continue_harness=source_harness,
         continue_fork=payload.fork,
     )
-    return _with_command(spawn_create_sync(create_input, sink=sink), "spawn.continue")
+    return _with_command(spawn_create_sync(create_input, ctx=ctx, sink=sink), "spawn.continue")
 
 
 async def spawn_continue(

@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, Mapping, cast
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from meridian.lib.core.domain import SpawnStatus
 from meridian.lib.core.types import SpawnId
@@ -184,12 +184,15 @@ def _append_event(path: Path, payload: dict[str, Any]) -> None:
 
 def _parse_event(payload: dict[str, Any]) -> SpawnEvent | None:
     event_type = payload.get("event")
-    if event_type == "start":
-        return SpawnStartEvent.model_validate(payload)
-    if event_type == "update":
-        return SpawnUpdateEvent.model_validate(payload)
-    if event_type == "finalize":
-        return SpawnFinalizeEvent.model_validate(payload)
+    try:
+        if event_type == "start":
+            return SpawnStartEvent.model_validate(payload)
+        if event_type == "update":
+            return SpawnUpdateEvent.model_validate(payload)
+        if event_type == "finalize":
+            return SpawnFinalizeEvent.model_validate(payload)
+    except ValidationError:
+        return None
     return None
 
 

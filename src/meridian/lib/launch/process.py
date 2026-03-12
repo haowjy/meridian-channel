@@ -13,10 +13,11 @@ import termios
 import time
 import tty
 import struct
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TextIO, cast
 
 from pydantic import BaseModel, ConfigDict
 
@@ -83,33 +84,40 @@ class ProcessOutcome(BaseModel):
     resolved_harness_session_id: str
 
 
-def _write_lock(
+def _primary_launch_lock_payload(
     *,
-    path: Path,
     command: tuple[str, ...],
     child_pid: int | None,
-) -> None:
-    payload = {
+) -> dict[str, object]:
+    return {
         "parent_pid": os.getpid(),
         "child_pid": child_pid,
         "started_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "command": list(command),
     }
-    atomic_write_text(path, json.dumps(payload, sort_keys=True, indent=2) + "\n")
 
 
-def _pid_exists(pid: int) -> bool:
-    if pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError:
-        return False
-    return True
+def _rewrite_primary_launch_lock_payload(handle: TextIO, payload: dict[str, object]) -> None:
+    handle.seek(0)
+    handle.truncate()
+    handle.write(json.dumps(payload, sort_keys=True, indent=2) + "\n")
+    handle.flush()
+    os.fsync(handle.fileno())
+
+
+@contextmanager
+def primary_launch_lock(lock_path: Path, payload: dict[str, object]) -> Iterator[TextIO]:
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+", encoding="utf-8") as handle:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise ValueError("A primary launch is already active.") from exc
+        _rewrite_primary_launch_lock_payload(handle, payload)
+        try:
+            yield handle
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def cleanup_orphaned_locks(repo_root: Path) -> bool:
@@ -119,21 +127,19 @@ def cleanup_orphaned_locks(repo_root: Path) -> bool:
     if not lock_path.is_file():
         return False
 
-    child_pid = 0
     try:
-        parsed = json.loads(lock_path.read_text(encoding="utf-8"))
-        if isinstance(parsed, dict):
-            payload = cast("dict[str, object]", parsed)
-            raw_child_pid = payload.get("child_pid")
-            if isinstance(raw_child_pid, int):
-                child_pid = raw_child_pid
-    except (OSError, json.JSONDecodeError, TypeError):
-        logger.debug("Failed to parse lock file %s", lock_path, exc_info=True)
-
-    if child_pid > 0 and _pid_exists(child_pid):
+        with lock_path.open("a+", encoding="utf-8") as handle:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return False
+            try:
+                lock_path.unlink(missing_ok=True)
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    except OSError:
+        logger.debug("Failed to inspect lock file %s", lock_path, exc_info=True)
         return False
-
-    lock_path.unlink(missing_ok=True)
     return True
 
 
@@ -422,139 +428,144 @@ def run_harness_process(
     artifacts = LocalStore(root_dir=resolve_state_paths(repo_root).artifacts_dir)
 
     exit_code = 2
-    try:
-        _sweep_orphaned_materializations(
-            repo_root,
-            ctx.session_metadata.harness,
-            harness_registry=harness_registry,
-        )
-        chat_id = start_session(
-            ctx.state_root,
-            harness=ctx.session_metadata.harness,
-            harness_session_id=ctx.seed_harness_session_id,
-            model=ctx.session_metadata.model,
-            chat_id=request.continue_chat_id,
-            agent=ctx.session_metadata.agent,
-            agent_path=ctx.session_metadata.agent_path,
-            skills=ctx.session_metadata.skills,
-            skill_paths=ctx.session_metadata.skill_paths,
-        )
-        # Auto-create work item if session has none
-        existing_work_id = get_session_active_work_id(ctx.state_root, chat_id)
-        if not existing_work_id:
-            auto_item = work_store.create_auto_work_item(ctx.state_root)
-            update_session_work_id(ctx.state_root, chat_id, auto_item.name)
-        primary_spawn_id = spawn_store.start_spawn(
-            ctx.state_root,
-            chat_id=chat_id,
-            model=ctx.session_metadata.model,
-            agent=ctx.session_metadata.agent,
-            harness=ctx.session_metadata.harness,
-            kind="primary",
-            prompt=ctx.prompt,
-            launch_mode=FOREGROUND_LAUNCH_MODE,
-            status="queued",
-        )
-        primary_started = time.monotonic()
-        primary_started_epoch = time.time()
-        primary_started_local_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-        harness_context = build_harness_context(
-            repo_root=repo_root,
-            request=ctx.command_request,
-            prompt=ctx.prompt,
-            harness_registry=harness_registry,
-            chat_id=chat_id,
-            config=ctx.config,
-        )
-        command = harness_context.command
-        child_env = build_launch_env(
-            repo_root,
-            request,
-            chat_id=chat_id,
-            default_autocompact_pct=ctx.config.primary.autocompact_pct,
-            spawn_id=primary_spawn_id,
-            harness_context=harness_context,
-        )
-        _write_lock(path=ctx.lock_path, command=command, child_pid=None)
-        output_log_path = resolve_spawn_log_dir(repo_root, primary_spawn_id) / _PRIMARY_OUTPUT_FILENAME
-
-        def _record_primary_started(child_pid: int) -> None:
-            _write_lock(path=ctx.lock_path, command=command, child_pid=child_pid)
-            atomic_write_text(
-                resolve_spawn_log_dir(repo_root, primary_spawn_id) / "harness.pid",
-                f"{child_pid}\n",
-            )
-            spawn_store.mark_spawn_running(
-                ctx.state_root,
-                primary_spawn_id,
-                launch_mode=FOREGROUND_LAUNCH_MODE,
-                worker_pid=child_pid,
-            )
-
-        exit_code, _child_pid = _run_primary_process_with_capture(
-            command=command,
-            cwd=repo_root,
-            env=child_env,
-            output_log_path=output_log_path,
-            on_child_started=_record_primary_started,
-        )
-        if output_log_path.exists():
-            artifacts.put(
-                make_artifact_key(primary_spawn_id, _PRIMARY_OUTPUT_FILENAME),
-                output_log_path.read_bytes(),
-            )
-    except FileNotFoundError:
-        logger.debug("Harness command not found", exc_info=True)
-        exit_code = 2
-    finally:
-        status, exit_code, _failure_reason = resolve_execution_terminal_state(
-            exit_code=exit_code,
-            failure_reason=None,
-        )
-        if primary_spawn_id is not None:
-            duration = (
-                max(0.0, time.monotonic() - primary_started) if primary_started > 0.0 else None
-            )
-            spawn_store.finalize_spawn(
-                ctx.state_root,
-                primary_spawn_id,
-                status=status,
-                exit_code=exit_code,
-                duration_secs=duration,
-            )
-        if chat_id is not None:
-            try:
-                observed_harness_session_id = None
-                adapter = harness_registry.get(HarnessId(ctx.session_metadata.harness))
-                if primary_started_epoch > 0.0:
-                    observed_harness_session_id = extract_latest_session_id(
-                        adapter=adapter,
-                        current_session_id=resolved_harness_session_id,
-                        artifacts=artifacts,
-                        spawn_id=primary_spawn_id,
-                        repo_root=repo_root,
-                        started_at_epoch=primary_started_epoch,
-                        started_at_local_iso=primary_started_local_iso,
-                    )
-                if (
-                    observed_harness_session_id is not None
-                    and observed_harness_session_id.strip()
-                    and observed_harness_session_id.strip() != resolved_harness_session_id.strip()
-                ):
-                    resolved_harness_session_id = observed_harness_session_id.strip()
-                    update_session_harness_id(ctx.state_root, chat_id, resolved_harness_session_id)
-                stop_session(ctx.state_root, chat_id)
-            finally:
-                _cleanup_launch_materialized(
-                    repo_root=repo_root,
-                    harness_id=ctx.session_metadata.harness,
-                    harness_registry=harness_registry,
-                )
+    with primary_launch_lock(
+        ctx.lock_path,
+        _primary_launch_lock_payload(command=command, child_pid=None),
+    ) as lock_handle:
         try:
-            if ctx.lock_path.exists():
-                ctx.lock_path.unlink()
-        except OSError:
-            logger.debug("Failed to clean up lock file %s", ctx.lock_path, exc_info=True)
+            _sweep_orphaned_materializations(
+                repo_root,
+                ctx.session_metadata.harness,
+                harness_registry=harness_registry,
+            )
+            chat_id = start_session(
+                ctx.state_root,
+                harness=ctx.session_metadata.harness,
+                harness_session_id=ctx.seed_harness_session_id,
+                model=ctx.session_metadata.model,
+                chat_id=request.continue_chat_id,
+                agent=ctx.session_metadata.agent,
+                agent_path=ctx.session_metadata.agent_path,
+                skills=ctx.session_metadata.skills,
+                skill_paths=ctx.session_metadata.skill_paths,
+            )
+            # Auto-create work item if session has none
+            existing_work_id = get_session_active_work_id(ctx.state_root, chat_id)
+            if not existing_work_id:
+                auto_item = work_store.create_auto_work_item(ctx.state_root)
+                update_session_work_id(ctx.state_root, chat_id, auto_item.name)
+            primary_spawn_id = spawn_store.start_spawn(
+                ctx.state_root,
+                chat_id=chat_id,
+                model=ctx.session_metadata.model,
+                agent=ctx.session_metadata.agent,
+                harness=ctx.session_metadata.harness,
+                kind="primary",
+                prompt=ctx.prompt,
+                launch_mode=FOREGROUND_LAUNCH_MODE,
+                status="queued",
+            )
+            primary_started = time.monotonic()
+            primary_started_epoch = time.time()
+            primary_started_local_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+            harness_context = build_harness_context(
+                repo_root=repo_root,
+                request=ctx.command_request,
+                prompt=ctx.prompt,
+                harness_registry=harness_registry,
+                chat_id=chat_id,
+                config=ctx.config,
+            )
+            command = harness_context.command
+            _rewrite_primary_launch_lock_payload(
+                lock_handle,
+                _primary_launch_lock_payload(command=command, child_pid=None),
+            )
+            child_env = build_launch_env(
+                repo_root,
+                request,
+                chat_id=chat_id,
+                default_autocompact_pct=ctx.config.primary.autocompact_pct,
+                spawn_id=primary_spawn_id,
+                harness_context=harness_context,
+            )
+            output_log_path = resolve_spawn_log_dir(repo_root, primary_spawn_id) / _PRIMARY_OUTPUT_FILENAME
+
+            def _record_primary_started(child_pid: int) -> None:
+                _rewrite_primary_launch_lock_payload(
+                    lock_handle,
+                    _primary_launch_lock_payload(command=command, child_pid=child_pid),
+                )
+                atomic_write_text(
+                    resolve_spawn_log_dir(repo_root, primary_spawn_id) / "harness.pid",
+                    f"{child_pid}\n",
+                )
+                spawn_store.mark_spawn_running(
+                    ctx.state_root,
+                    primary_spawn_id,
+                    launch_mode=FOREGROUND_LAUNCH_MODE,
+                    worker_pid=child_pid,
+                )
+
+            exit_code, _child_pid = _run_primary_process_with_capture(
+                command=command,
+                cwd=repo_root,
+                env=child_env,
+                output_log_path=output_log_path,
+                on_child_started=_record_primary_started,
+            )
+            if output_log_path.exists():
+                artifacts.put(
+                    make_artifact_key(primary_spawn_id, _PRIMARY_OUTPUT_FILENAME),
+                    output_log_path.read_bytes(),
+                )
+        except FileNotFoundError:
+            logger.debug("Harness command not found", exc_info=True)
+            exit_code = 2
+        finally:
+            status, exit_code, _failure_reason = resolve_execution_terminal_state(
+                exit_code=exit_code,
+                failure_reason=None,
+            )
+            if primary_spawn_id is not None:
+                duration = (
+                    max(0.0, time.monotonic() - primary_started) if primary_started > 0.0 else None
+                )
+                spawn_store.finalize_spawn(
+                    ctx.state_root,
+                    primary_spawn_id,
+                    status=status,
+                    exit_code=exit_code,
+                    duration_secs=duration,
+                )
+            if chat_id is not None:
+                try:
+                    observed_harness_session_id = None
+                    adapter = harness_registry.get(HarnessId(ctx.session_metadata.harness))
+                    if primary_started_epoch > 0.0:
+                        observed_harness_session_id = extract_latest_session_id(
+                            adapter=adapter,
+                            current_session_id=resolved_harness_session_id,
+                            artifacts=artifacts,
+                            spawn_id=primary_spawn_id,
+                            repo_root=repo_root,
+                            started_at_epoch=primary_started_epoch,
+                            started_at_local_iso=primary_started_local_iso,
+                        )
+                    if (
+                        observed_harness_session_id is not None
+                        and observed_harness_session_id.strip()
+                        and observed_harness_session_id.strip() != resolved_harness_session_id.strip()
+                    ):
+                        resolved_harness_session_id = observed_harness_session_id.strip()
+                        update_session_harness_id(ctx.state_root, chat_id, resolved_harness_session_id)
+                    stop_session(ctx.state_root, chat_id)
+                finally:
+                    _cleanup_launch_materialized(
+                        repo_root=repo_root,
+                        harness_id=ctx.session_metadata.harness,
+                        harness_registry=harness_registry,
+                    )
 
     return ProcessOutcome(
         command=command,
@@ -574,5 +585,6 @@ __all__ = [
     "active_primary_lock_path",
     "cleanup_orphaned_locks",
     "prepare_launch_context",
+    "primary_launch_lock",
     "run_harness_process",
 ]

@@ -11,6 +11,78 @@ def _state_root(tmp_path: Path) -> Path:
     return state_dir
 
 
+def _write_mixed_valid_and_malformed_spawns_jsonl(state_root: Path) -> None:
+    spawns_jsonl = state_root / "spawns.jsonl"
+    with spawns_jsonl.open("w", encoding="utf-8") as handle:
+        # valid start row
+        handle.write(
+            json.dumps(
+                {
+                    "v": 1,
+                    "event": "start",
+                    "id": "p1",
+                    "chat_id": "c1",
+                    "model": "gpt-5.3-codex",
+                    "agent": "coder",
+                    "harness": "codex",
+                    "status": "running",
+                    "started_at": "2026-03-01T00:00:00Z",
+                    "prompt": "hello",
+                }
+            )
+            + "\n"
+        )
+        # invalid JSON
+        handle.write("{ this is not json }\n")
+        # valid JSON but invalid schema (status does not match SpawnStatus)
+        handle.write(
+            json.dumps(
+                {
+                    "v": 1,
+                    "event": "finalize",
+                    "id": "broken",
+                    "status": "definitely-not-a-status",
+                    "exit_code": 1,
+                }
+            )
+            + "\n"
+        )
+        # truncated JSON line
+        handle.write('{"v":1,"event":"update","id":"p1","status":"running"\n')
+        # valid finalize row for p1
+        handle.write(
+            json.dumps(
+                {
+                    "v": 1,
+                    "event": "finalize",
+                    "id": "p1",
+                    "status": "succeeded",
+                    "exit_code": 0,
+                    "finished_at": "2026-03-01T00:01:00Z",
+                }
+            )
+            + "\n"
+        )
+        # second valid start row
+        handle.write(
+            json.dumps(
+                {
+                    "v": 1,
+                    "event": "start",
+                    "id": "p2",
+                    "chat_id": "c2",
+                    "model": "gpt-5.4",
+                    "agent": "coder",
+                    "harness": "codex",
+                    "status": "running",
+                    "started_at": "2026-03-01T00:02:00Z",
+                    "prompt": "world",
+                }
+            )
+            + "\n"
+        )
+
+
 def test_list_runs_skips_truncated_trailing_json(tmp_path: Path) -> None:
     state_root = _state_root(tmp_path)
     spawns_jsonl = state_root / "spawns.jsonl"
@@ -38,6 +110,29 @@ def test_list_runs_skips_truncated_trailing_json(tmp_path: Path) -> None:
     assert len(spawns) == 1
     assert spawns[0].id == "r1"
     assert spawns[0].status == "running"
+
+
+def test_list_spawns_survives_mixed_malformed_rows(tmp_path: Path) -> None:
+    state_root = _state_root(tmp_path)
+    _write_mixed_valid_and_malformed_spawns_jsonl(state_root)
+
+    spawns = list_spawns(state_root)
+
+    assert [spawn.id for spawn in spawns] == ["p1", "p2"]
+    assert spawns[0].status == "succeeded"
+    assert spawns[1].status == "running"
+
+
+def test_get_spawn_survives_mixed_malformed_rows(tmp_path: Path) -> None:
+    state_root = _state_root(tmp_path)
+    _write_mixed_valid_and_malformed_spawns_jsonl(state_root)
+
+    row = get_spawn(state_root, "p2")
+
+    assert row is not None
+    assert row.id == "p2"
+    assert row.chat_id == "c2"
+    assert row.status == "running"
 
 
 def test_spawn_record_preserves_desc_and_work_id(tmp_path: Path) -> None:

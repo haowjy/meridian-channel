@@ -3,8 +3,10 @@ import json
 import pytest
 
 from meridian.lib.launch.env import build_harness_child_env, inherit_child_env, sanitize_child_env
+from meridian.lib.launch.command import PrimaryHarnessContext, build_launch_env
 from meridian.lib.harness.adapter import SpawnParams
 from meridian.lib.harness.claude import ClaudeAdapter
+from meridian.lib.launch.types import LaunchRequest
 from meridian.lib.safety.permissions import (
     PermissionConfig,
     PermissionTier,
@@ -148,3 +150,23 @@ def test_build_harness_child_env_uses_claude_specific_blocklist() -> None:
     assert child_env["MERIDIAN_DEPTH"] == "2"
     assert "CLAUDECODE" not in child_env
     assert "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE" not in child_env
+
+
+def test_build_launch_env_seeds_effective_permission_tier(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.delenv("MERIDIAN_PERMISSION_TIER", raising=False)
+
+    env = build_launch_env(
+        tmp_path,
+        LaunchRequest(model="gpt-5.3-codex"),
+        harness_context=PrimaryHarnessContext(
+            command=("codex",),
+            adapter=ClaudeAdapter(),
+            run_params=SpawnParams(prompt="test", model=ModelId("claude-sonnet-4-6")),
+            permission_config=PermissionConfig(tier=PermissionTier.WORKSPACE_WRITE),
+        ),
+    )
+
+    assert env["MERIDIAN_PERMISSION_TIER"] == "workspace-write"

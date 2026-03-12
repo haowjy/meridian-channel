@@ -195,6 +195,7 @@ def _spawn_child_env(
     *,
     work_id: str | None = None,
     state_root: Path | None = None,
+    permission_tier: str | None = None,
     ctx: RuntimeContext | None = None,
 ) -> dict[str, str]:
     runtime_context = _runtime_context(ctx)
@@ -215,13 +216,19 @@ def _spawn_child_env(
             work_id=runtime_context.work_id,
         )
     resolved_work_id = (work_id or "").strip() or child_context.work_id
+    resolved_permission_tier = (
+        permission_tier.strip()
+        if permission_tier is not None and permission_tier.strip()
+        else child_context.permission_tier
+    )
     if resolved_work_id != child_context.work_id or (
         state_root is not None and state_root != child_context.state_root
-    ):
+    ) or resolved_permission_tier != child_context.permission_tier:
         child_context = child_context.model_copy(
             update={
                 "state_root": state_root if state_root is not None else child_context.state_root,
                 "work_id": resolved_work_id,
+                "permission_tier": resolved_permission_tier,
             }
         )
     child_env.update(child_context.to_env_overrides())
@@ -587,6 +594,7 @@ async def _execute_existing_spawn(
                 str(spawn.spawn_id),
                 work_id=spawn_record.work_id,
                 state_root=state_root,
+                permission_tier=permission_config.tier.value,
                 ctx=runtime_context,
             ),
             max_retries=runtime.config.max_retries,
@@ -709,6 +717,7 @@ def execute_spawn_background(
             spawn_id=spawn_id_text,
             work_id=context.work_id,
             state_root=context.state_root,
+            permission_tier=prepared.permission_config.tier.value,
             ctx=runtime_context,
         )
     )
@@ -848,6 +857,7 @@ def execute_spawn_blocking(
                     str(spawn.spawn_id),
                     work_id=context.work_id,
                     state_root=context.state_root,
+                    permission_tier=prepared.permission_config.tier.value,
                     ctx=runtime_context,
                 ),
                 max_retries=runtime.config.max_retries,
