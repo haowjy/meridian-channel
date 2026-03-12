@@ -6,8 +6,8 @@ from typing import Annotated, Any
 
 from cyclopts import App, Parameter
 
+from meridian.cli.registration import register_manifest_cli_group
 from meridian.lib.core.context import RuntimeContext
-from meridian.lib.ops.manifest import get_operations_for_surface
 from meridian.lib.ops.work import (
     WorkClearInput,
     WorkDashboardInput,
@@ -163,21 +163,9 @@ def register_work_commands(app: App, emit: Emitter) -> tuple[set[str], dict[str,
         "work.rename": lambda: partial(_work_rename, emit),
         "work.clear": lambda: partial(_work_clear, emit),
     }
-
-    registered: set[str] = set()
-    descriptions: dict[str, str] = {}
-
-    for op in get_operations_for_surface("cli"):
-        if op.cli_group != "work":
-            continue
-        handler_factory = handlers.get(op.name)
-        if handler_factory is None:
-            raise ValueError(f"No CLI handler for '{op.name}'")
-        handler = handler_factory()
-        handler.__name__ = f"cmd_work_{op.cli_name}"
-        app.command(handler, name=op.cli_name, help=op.description)
-        registered.add(f"work.{op.cli_name}")
-        descriptions[op.name] = op.description
-
-    app.default(partial(_work_dashboard, emit))
-    return registered, descriptions
+    return register_manifest_cli_group(
+        app,
+        group="work",
+        handlers=handlers,
+        default_handler=partial(_work_dashboard, emit),
+    )

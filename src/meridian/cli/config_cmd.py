@@ -6,6 +6,7 @@ from functools import partial
 from typing import Any
 
 from cyclopts import App
+from meridian.cli.registration import register_manifest_cli_group
 from meridian.lib.ops.config import (
     ConfigGetInput,
     ConfigInitInput,
@@ -18,7 +19,6 @@ from meridian.lib.ops.config import (
     config_set_sync,
     config_show_sync,
 )
-from meridian.lib.ops.manifest import get_operations_for_surface
 
 Emitter = Callable[[Any], None]
 
@@ -51,20 +51,4 @@ def register_config_commands(app: App, emit: Emitter) -> tuple[set[str], dict[st
         "config.get": lambda: partial(_config_get, emit),
         "config.reset": lambda: partial(_config_reset, emit),
     }
-
-    registered: set[str] = set()
-    descriptions: dict[str, str] = {}
-
-    for op in get_operations_for_surface("cli"):
-        if op.cli_group != "config":
-            continue
-        handler_factory = handlers.get(op.name)
-        if handler_factory is None:
-            raise ValueError(f"No CLI handler registered for operation '{op.name}'")
-        handler = handler_factory()
-        handler.__name__ = f"cmd_{op.cli_group}_{op.cli_name}"
-        app.command(handler, name=op.cli_name, help=op.description)
-        registered.add(f"{op.cli_group}.{op.cli_name}")
-        descriptions[op.name] = op.description
-
-    return registered, descriptions
+    return register_manifest_cli_group(app, group="config", handlers=handlers)

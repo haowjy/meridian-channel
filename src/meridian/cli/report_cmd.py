@@ -8,7 +8,7 @@ from typing import Annotated, Any
 
 from cyclopts import Parameter
 
-from meridian.lib.ops.manifest import get_operations_for_surface
+from meridian.cli.registration import register_manifest_cli_group
 from meridian.lib.ops.report import (
     ReportCreateInput,
     ReportSearchInput,
@@ -95,21 +95,9 @@ def register_report_commands(app: Any, emit: Emitter) -> tuple[set[str], dict[st
         "report.show": lambda: partial(_report_show, emit),
         "report.search": lambda: partial(_report_search, emit),
     }
-
-    registered: set[str] = set()
-    descriptions: dict[str, str] = {}
-
-    for op in get_operations_for_surface("cli"):
-        if op.cli_group != "report":
-            continue
-        handler_factory = handlers.get(op.name)
-        if handler_factory is None:
-            raise ValueError(f"No CLI handler registered for operation '{op.name}'")
-        handler = handler_factory()
-        handler.__name__ = f"cmd_{op.cli_group}_{op.cli_name}"
-        app.command(handler, name=op.cli_name, help=op.description)
-        registered.add(f"{op.cli_group}.{op.cli_name}")
-        descriptions[op.name] = op.description
-
-    app.default(partial(_report_create, emit))
-    return registered, descriptions
+    return register_manifest_cli_group(
+        app,
+        group="report",
+        handlers=handlers,
+        default_handler=partial(_report_create, emit),
+    )

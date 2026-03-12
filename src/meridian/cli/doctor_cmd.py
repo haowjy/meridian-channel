@@ -2,11 +2,12 @@
 
 
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 from cyclopts import App
+from meridian.cli.registration import register_manifest_cli_group
 from meridian.lib.ops.diag import DoctorInput, doctor_sync
-from meridian.lib.ops.manifest import get_operations_for_surface
 
 Emitter = Callable[[Any], None]
 
@@ -16,18 +17,7 @@ def _doctor(emit: Emitter) -> None:
 
 
 def register_doctor_command(app: App, emit: Emitter) -> tuple[set[str], dict[str, str]]:
-    registered: set[str] = set()
-    descriptions: dict[str, str] = {}
-
-    for op in get_operations_for_surface("cli"):
-        if op.name != "doctor":
-            continue
-
-        def cmd_doctor() -> None:
-            _doctor(emit)
-
-        app.command(cmd_doctor, name="doctor", help=op.description)
-        registered.add(f"{op.cli_group}.{op.cli_name}")
-        descriptions[op.name] = op.description
-
-    return registered, descriptions
+    handlers: dict[str, Callable[[], Callable[..., None]]] = {
+        "doctor": lambda: partial(_doctor, emit),
+    }
+    return register_manifest_cli_group(app, group="doctor", handlers=handlers)
