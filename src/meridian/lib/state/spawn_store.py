@@ -530,33 +530,6 @@ def get_spawn(state_root: Path, spawn_id: SpawnId | str) -> SpawnRecord | None:
 def spawn_stats(state_root: Path) -> dict[str, Any]:
     """Aggregate high-level spawn stats from JSONL-derived records."""
 
-    spawns = list_spawns(state_root)
-    by_status: dict[str, int] = {}
-    by_model: dict[str, int] = {}
-    total_duration_secs = 0.0
-    total_cost_usd = 0.0
-    total_input_tokens = 0
-    total_output_tokens = 0
+    from meridian.lib.state.projections import spawn_stats as _projection_spawn_stats
 
-    for spawn in spawns:
-        by_status[spawn.status] = by_status.get(spawn.status, 0) + 1
-        if spawn.model is not None:
-            by_model[spawn.model] = by_model.get(spawn.model, 0) + 1
-        if spawn.duration_secs is not None:
-            total_duration_secs += spawn.duration_secs
-        if spawn.total_cost_usd is not None:
-            total_cost_usd += spawn.total_cost_usd
-        if spawn.input_tokens is not None:
-            total_input_tokens += spawn.input_tokens
-        if spawn.output_tokens is not None:
-            total_output_tokens += spawn.output_tokens
-
-    return {
-        "total_runs": len(spawns),
-        "by_status": by_status,
-        "by_model": by_model,
-        "total_duration_secs": total_duration_secs,
-        "total_cost_usd": total_cost_usd,
-        "total_input_tokens": total_input_tokens,
-        "total_output_tokens": total_output_tokens,
-    }
+    return _projection_spawn_stats(state_root).model_dump()
