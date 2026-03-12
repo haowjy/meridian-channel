@@ -1,10 +1,10 @@
 # Backlog
 
-Central backlog for cross-cutting work not tied to a single implementation plan. Last verified: 2026-03-08.
+ Central backlog for cross-cutting work not tied to a single implementation plan. Last verified: 2026-03-11.
 
 ## Current Status
 
-- Open tracked items: `0`
+- Open tracked items: `5`
 - Condensed follow-up notes from deleted plan docs: `backlog/plan-cleanup-notes.md`
 - Archived from 2026-03-04 cleanup batch: `8` (TD-7, TD-10–TD-16)
 - Archived from backlog-execution batch: `17`
@@ -54,6 +54,16 @@ Central backlog for cross-cutting work not tied to a single implementation plan.
 ## Active Plans (items tracked there, not here)
 
 - Test-suite rewrite + strictness cleanup -> `plans/test-suite-and-strictness-cleanup.md`
+
+## Priority Index (Open)
+
+| ID | Item | File | Priority | Status |
+|----|------|------|----------|--------|
+| TD-18 | Unify launch lifecycle across primary, foreground child, and background child | `tech-debt.md` | High | Open |
+| TD-19 | Split `spawn/execute.py` by responsibility | `tech-debt.md` | High | Open |
+| TD-20 | Separate runtime inspection from reconciliation policy in `state/reaper.py` | `tech-debt.md` | Medium | Open |
+| TD-21 | Move runner artifact handling to explicit streaming sinks | `tech-debt.md` | Medium | Open |
+| TD-22 | Tighten spawn event/state typing for lifecycle phases and failure categories | `tech-debt.md` | Medium | Open |
 
 ## Plan Cleanup Notes
 

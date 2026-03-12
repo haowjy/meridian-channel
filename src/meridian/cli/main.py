@@ -397,6 +397,7 @@ spawn_app = App(
 )
 report_app = App(name="report", help="Report management commands", help_formatter="plain")
 work_app = App(name="work", help="Work item coordination and dashboard", help_formatter="plain")
+agents_app = App(name="agents", help="Agent profile catalog commands", help_formatter="plain")
 skills_app = App(name="skills", help="Skills catalog commands", help_formatter="plain")
 models_app = App(name="models", help="Model catalog commands", help_formatter="plain")
 config_app = App(name="config", help="Repository config commands", help_formatter="plain")
@@ -411,6 +412,7 @@ completion_app = App(name="completion", help="Shell completion helpers", help_fo
 app.command(spawn_app, name="spawn")
 app.command(report_app, name="report")
 app.command(work_app, name="work")
+app.command(agents_app, name="agents")
 app.command(skills_app, name="skills")
 app.command(models_app, name="models")
 app.command(config_app, name="config")
@@ -623,6 +625,7 @@ _REGISTERED_CLI_DESCRIPTIONS: dict[str, str] = {}
 
 
 def _register_group_commands() -> None:
+    from meridian.cli.agents_cmd import register_agents_commands
     from meridian.cli.spawn import register_spawn_commands
     from meridian.cli.sync_cmd import register_sync_commands
     from meridian.cli.work_cmd import register_work_commands
@@ -631,6 +634,7 @@ def _register_group_commands() -> None:
         register_spawn_commands(spawn_app, emit),
         register_report_commands(report_app, emit),
         register_work_commands(work_app, emit),
+        register_agents_commands(agents_app, emit),
         register_skills_commands(skills_app, emit),
         register_models_commands(models_app, emit),
         register_config_commands(config_app, emit),

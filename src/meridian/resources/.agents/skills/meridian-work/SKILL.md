@@ -12,6 +12,24 @@ Work items track major efforts across spawns. Use them for tasks that involve mu
 - **Use for big efforts**: auth refactors, new features, multi-step migrations
 - **Skip for small tasks**: quick fixes, one-off spawns - just use `--desc`
 
+## Auto-generated work items
+
+Every session starts with a work item. If you don't have one, meridian creates
+one with a random name (e.g., `calm-brook-wren`). This ensures `$MERIDIAN_WORK_DIR`
+is always available.
+
+When you know what you're working on, name it:
+
+```bash
+meridian work start "auth refactor"
+```
+
+This renames the auto-generated item — all docs you've already written to
+`$MERIDIAN_WORK_DIR` are preserved under the new name.
+
+**Always use `$MERIDIAN_WORK_DIR` for design docs, plans, and notes.**
+Never write loose files to `.meridian/work/`.
+
 ## Commands
 
 ```bash

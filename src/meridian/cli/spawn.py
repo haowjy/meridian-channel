@@ -78,6 +78,14 @@ def _spawn_create(
         str | None,
         Parameter(name=["--agent", "-a"], help="Agent profile name to execute."),
     ] = None,
+    skills: Annotated[
+        tuple[str, ...],
+        Parameter(
+            name=["--skill", "-s"],
+            help="Ad-hoc skill to load (repeatable). Merged with agent profile skills.",
+            negative_iterable=(),
+        ),
+    ] = (),
     desc: Annotated[
         str,
         Parameter(name="--desc", help="Short description for the spawn."),
@@ -139,6 +147,7 @@ def _spawn_create(
                 prompt=prompt,
                 model=model,
                 agent=agent,
+                skills=skills,
                 fork=fork,
                 dry_run=dry_run,
                 timeout=timeout,
@@ -153,6 +162,7 @@ def _spawn_create(
                 files=references,
                 template_vars=template_vars,
                 agent=agent,
+                skills=skills,
                 desc=desc,
                 work=work,
                 dry_run=dry_run,

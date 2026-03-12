@@ -26,6 +26,7 @@ class SpawnCreateInput(BaseModel):
     files: tuple[str, ...] = ()
     template_vars: tuple[str, ...] = ()
     agent: str | None = None
+    skills: tuple[str, ...] = ()
     desc: str = ""
     work: str = ""
     dry_run: bool = False
@@ -289,6 +290,7 @@ class SpawnContinueInput(BaseModel):
     prompt: str
     model: str = ""
     agent: str | None = None
+    skills: tuple[str, ...] = ()
     fork: bool = False
     dry_run: bool = False
     timeout: float | None = None

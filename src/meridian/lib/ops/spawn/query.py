@@ -8,6 +8,7 @@ from typing import cast
 
 from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_state_paths
+from meridian.lib.state.spawn_store import is_active_spawn_status
 
 from .models import SpawnDetailOutput
 
@@ -64,9 +65,10 @@ def resolve_spawn_references(repo_root: Path, refs: tuple[str, ...]) -> tuple[st
 
 def read_spawn_row(repo_root: Path, spawn_id: str) -> spawn_store.SpawnRecord | None:
     record = spawn_store.get_spawn(_state_root(repo_root), spawn_id)
-    if record is not None and record.status == "running":
-        from meridian.lib.state.reaper import reconcile_running_spawn
-        record = reconcile_running_spawn(_state_root(repo_root), record)
+    if record is not None and is_active_spawn_status(record.status):
+        from meridian.lib.state.reaper import reconcile_active_spawn
+
+        record = reconcile_active_spawn(_state_root(repo_root), record)
     return record
 
 
@@ -201,7 +203,7 @@ def detail_from_row(
 
     last_message: str | None = None
     log_path: str | None = None
-    if row.status == "running":
+    if is_active_spawn_status(row.status):
         log_path, last_message = _read_running_log_details(repo_root, row.id)
 
     return SpawnDetailOutput(

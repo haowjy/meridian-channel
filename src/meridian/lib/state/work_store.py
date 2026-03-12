@@ -9,6 +9,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from coolname.impl import generate_slug
+
 from meridian.lib.state.atomic import atomic_write_text
 
 _MAX_SLUG_LENGTH = 64
@@ -24,6 +26,7 @@ class WorkItem(BaseModel):
     description: str
     status: str
     created_at: str
+    auto_generated: bool = False
 
 
 def _utc_now_iso() -> str:
@@ -53,6 +56,11 @@ def _resolve_slug(work_dir: Path, label: str) -> str:
         candidate = f"{base[: _MAX_SLUG_LENGTH - len(suffix)].rstrip('-')}{suffix}"
         counter += 1
     return candidate
+
+
+def generate_auto_name() -> str:
+    """Return a random three-word slug for auto-generated work items."""
+    return generate_slug(3)
 
 
 def _work_item_path(state_root: Path, work_id: str) -> Path:
@@ -87,6 +95,31 @@ def create_work_item(state_root: Path, label: str, description: str = "") -> Wor
         return item
 
 
+def create_auto_work_item(state_root: Path) -> WorkItem:
+    """Create an auto-generated work item with a random name."""
+    work_dir = state_root / "work"
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    while True:
+        name = generate_auto_name()
+        slug = _resolve_slug(work_dir, name)
+        item_dir = work_dir / slug
+        try:
+            item_dir.mkdir(parents=False, exist_ok=False)
+        except FileExistsError:
+            continue
+
+        item = WorkItem(
+            name=slug,
+            description="",
+            status="open",
+            created_at=_utc_now_iso(),
+            auto_generated=True,
+        )
+        atomic_write_text(item_dir / "work.json", _serialize_work_item(item))
+        return item
+
+
 def get_work_item(state_root: Path, work_id: str) -> WorkItem | None:
     """Load one work item from `.meridian/work/<id>/work.json`."""
 
@@ -116,12 +149,47 @@ def list_work_items(state_root: Path) -> list[WorkItem]:
     return sorted(items, key=lambda item: (item.created_at, item.name))
 
 
+def rename_work_item(state_root: Path, old_work_id: str, new_name: str) -> WorkItem:
+    """Rename a work item: move directory, update work.json, return updated item.
+
+    ``new_name`` must be a valid slug (the target folder name), not a
+    human-readable label.  Spaces and special characters are rejected.
+    """
+
+    work_dir = state_root / "work"
+    old_item = get_work_item(state_root, old_work_id)
+    if old_item is None:
+        raise ValueError(f"Work item '{old_work_id}' not found")
+
+    normalized = slugify(new_name)
+    if not normalized or normalized != new_name:
+        raise ValueError(
+            f"Invalid work item name '{new_name}'. "
+            f"Use a slug (lowercase, hyphens, no spaces) — e.g. '{normalized or 'my-feature'}'."
+        )
+
+    if normalized == old_work_id:
+        return old_item
+
+    new_dir = work_dir / normalized
+    if new_dir.exists():
+        raise ValueError(f"Work item '{normalized}' already exists.")
+
+    old_dir = work_dir / old_work_id
+    old_dir.rename(new_dir)
+
+    updated = old_item.model_copy(update={"name": normalized})
+    atomic_write_text(new_dir / "work.json", _serialize_work_item(updated))
+    return updated
+
+
 def update_work_item(
     state_root: Path,
     work_id: str,
     *,
     status: str | None = None,
     description: str | None = None,
+    auto_generated: bool | None = None,
 ) -> WorkItem:
     """Update mutable work-item fields and rewrite `work.json` atomically."""
 
@@ -133,6 +201,7 @@ def update_work_item(
         update={
             "status": current.status if status is None else status,
             "description": current.description if description is None else description,
+            "auto_generated": current.auto_generated if auto_generated is None else auto_generated,
         }
     )
     atomic_write_text(_work_item_path(state_root, work_id), _serialize_work_item(updated))

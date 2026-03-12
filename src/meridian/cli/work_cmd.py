@@ -13,6 +13,7 @@ from meridian.lib.ops.work import (
     WorkDashboardInput,
     WorkDoneInput,
     WorkListInput,
+    WorkRenameInput,
     WorkShowInput,
     WorkStartInput,
     WorkSwitchInput,
@@ -21,6 +22,7 @@ from meridian.lib.ops.work import (
     work_dashboard_sync,
     work_done_sync,
     work_list_sync,
+    work_rename_sync,
     work_show_sync,
     work_start_sync,
     work_switch_sync,
@@ -126,6 +128,24 @@ def _work_switch(
     emit(work_switch_sync(WorkSwitchInput(work_id=work_id, chat_id=_runtime_chat_id())))
 
 
+def _work_rename(
+    emit: Emitter,
+    work_id: Annotated[
+        str,
+        Parameter(help="Current work item id."),
+    ],
+    new_name: Annotated[
+        str,
+        Parameter(help="New name (slug) for the work item."),
+    ],
+) -> None:
+    emit(
+        work_rename_sync(
+            WorkRenameInput(work_id=work_id, new_name=new_name, chat_id=_runtime_chat_id())
+        )
+    )
+
+
 def _work_clear(emit: Emitter) -> None:
     emit(work_clear_sync(WorkClearInput(chat_id=_runtime_chat_id())))
 
@@ -140,6 +160,7 @@ def register_work_commands(app: App, emit: Emitter) -> tuple[set[str], dict[str,
         "work.update": lambda: partial(_work_update, emit),
         "work.done": lambda: partial(_work_done, emit),
         "work.switch": lambda: partial(_work_switch, emit),
+        "work.rename": lambda: partial(_work_rename, emit),
         "work.clear": lambda: partial(_work_clear, emit),
     }
 

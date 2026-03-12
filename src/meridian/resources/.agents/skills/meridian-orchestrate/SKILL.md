@@ -1,6 +1,6 @@
 ---
 name: meridian-orchestrate
-description: Supervisor workflow for multi-step tasks. Teaches planning, delegation, review cycles, and model selection.
+description: Supervisor workflow for multi-step tasks. Teaches planning, delegation, review cycles, and model selection. Use this whenever you need to break work into subtasks, delegate to specialist agents, coordinate parallel execution, or run review gates. Activate for any task that's too complex or multi-faceted to do in a single pass.
 ---
 
 # Orchestrate

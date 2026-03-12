@@ -1,10 +1,16 @@
 # Tech Debt
 
-Code and test cleanup. Last verified: 2026-03-08.
+Code and test cleanup. Last verified: 2026-03-11.
 
 ## Open
 
-No open tech-debt items are currently tracked in this file.
+| ID | Summary | Priority | Why it exists now | Desired endpoint |
+|----|---------|----------|-------------------|------------------|
+| TD-18 | Unify launch lifecycle across primary, foreground child, and background child | High | Launches now share the same durable-PID-first intent, but the transition logic is still split across `launch/process.py`, `launch/runner.py`, and `ops/spawn/execute.py`. That keeps lifecycle rules coherent only by convention. | One shared launch lifecycle module owns `queued -> running -> terminal`, PID persistence, and launch-mode semantics for every run type. |
+| TD-19 | Split `spawn/execute.py` by responsibility | High | `src/meridian/lib/ops/spawn/execute.py` is still carrying spawn initialization, session/materialization setup, background launcher construction, worker re-entry, and blocking execution flow in one file. | Separate modules for spawn initialization/state writes, session/materialization context, background launcher plumbing, and blocking/background execution entrypoints. |
+| TD-20 | Separate runtime inspection from reconciliation policy in `state/reaper.py` | Medium | The reaper is cleaner after the ghost-spawn refactor, but it still combines “inspect disk/process reality” and “decide repair action” in the same module path. | A typed runtime snapshot plus a typed reconciliation decision model, so inspection can be tested independently from policy. |
+| TD-21 | Move runner artifact handling to explicit streaming sinks | Medium | `launch/stream_capture.py` now isolates framing, but `launch/runner.py` still does post-run artifact mirroring and mixes process lifecycle with sink orchestration. | Explicit stream sinks for log-file persistence, artifact persistence, token extraction, and event parsing, with the runner coordinating them instead of owning their mechanics. |
+| TD-22 | Tighten spawn event/state typing for lifecycle phases and failure categories | Medium | Launch mode and active-status typing improved, but several fields still rely on free-form strings and implicit conventions that make future lifecycle work easier to regress. | Stronger typed lifecycle/failure categories across state/event models so invalid transitions and ambiguous repair reasons are harder to encode. |
 
 ## Archived (2026-03-05 harness cleanup batch)
 

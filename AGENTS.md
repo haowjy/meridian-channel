@@ -32,7 +32,7 @@ No real users, no real user data. No backwards compatibility needed — complete
 
 ## Dev Workflow
 
-Use `meridian spawn` to hand off tasks to subagents. Prefer gpt-5.4 as main implementer and reviewer. Use reviewers who focus on different aspects (implementation correctness, design quality, extensibility) to ensure plans are properly followed.
+Use `meridian spawn` to hand off tasks to subagents. Prefer gpt-5.3-codex as main implementer and gpt-5.4 as the main reviewer. Use reviewers who focus on different aspects (implementation correctness, design quality, extensibility) to ensure plans are properly followed.
 
 NEVER REVERT CHANGES — always assume it's someone else's work.
 
@@ -49,7 +49,12 @@ uv sync --extra dev      # Install from source
 uv run pytest-llm        # Unit tests (token-efficient output)
 uv run pyright            # Type check
 uv run meridian           # Smoke test the CLI directly
+uv add <package>          # Add a dependency (never use pip install)
 ```
+
+### Always Use `uv`
+
+This project uses `uv` exclusively for Python tooling. Never use `pip`, `pip install`, `python`, or `python -m` directly. Use `uv run`, `uv add`, and `uv sync` instead.
 
 ### Commit Checkpoints
 

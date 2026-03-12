@@ -403,12 +403,12 @@ def _reconcile_background_spawn(state_root: Path, inspection: _SpawnInspection) 
             worker_pid=inspection.harness_pid,
         )
 
-    if not inspection.wrapper_alive and not inspection.harness_alive:
-        return _finalize_failed(state_root, record, "orphan_run")
-
     if has_durable_report_completion(inspection.report_text):
         _terminate_observed_processes(inspection)
         return _finalize_completed_report(state_root, record)
+
+    if not inspection.wrapper_alive and not inspection.harness_alive:
+        return _finalize_failed(state_root, record, "orphan_run")
 
     if inspection.stale:
         _terminate_observed_processes(inspection)
@@ -448,12 +448,12 @@ def _reconcile_foreground_spawn(state_root: Path, inspection: _SpawnInspection) 
             worker_pid=inspection.harness_pid,
         )
 
-    if not inspection.harness_alive and inspection.grace_elapsed:
-        return _finalize_failed(state_root, record, "orphan_run")
-
     if has_durable_report_completion(inspection.report_text):
         _terminate_observed_processes(inspection)
         return _finalize_completed_report(state_root, record)
+
+    if not inspection.harness_alive and inspection.grace_elapsed:
+        return _finalize_failed(state_root, record, "orphan_run")
 
     if inspection.stale:
         _terminate_observed_processes(inspection)

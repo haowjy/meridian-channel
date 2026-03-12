@@ -13,6 +13,7 @@ from meridian.lib.harness.materialize import cleanup_materialized
 from meridian.lib.ops.runtime import build_runtime
 from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_state_paths
+from meridian.lib.state.spawn_store import is_active_spawn_status
 from meridian.lib.state.session_store import cleanup_stale_sessions
 
 
@@ -72,9 +73,9 @@ def _repair_orphan_runs(repo_root: Path) -> int:
 
     state_root = _state_root(repo_root)
     spawns = spawn_store.list_spawns(state_root)
-    running_before = sum(1 for s in spawns if s.status == "running")
+    running_before = sum(1 for s in spawns if is_active_spawn_status(s.status))
     reconciled = reconcile_spawns(state_root, spawns)
-    running_after = sum(1 for s in reconciled if s.status == "running")
+    running_after = sum(1 for s in reconciled if is_active_spawn_status(s.status))
     return running_before - running_after
 
 
@@ -109,9 +110,13 @@ def doctor_sync(payload: DoctorInput) -> DoctorOutput:
     if not agents_dirs:
         warnings.append("No configured agent profile directories were found.")
 
-    running = [row.id for row in spawn_store.list_spawns(_state_root(runtime.repo_root)) if row.status == "running"]
+    running = [
+        row.id
+        for row in spawn_store.list_spawns(_state_root(runtime.repo_root))
+        if is_active_spawn_status(row.status)
+    ]
     if running:
-        warnings.append("Running spawns still present: " + ", ".join(running))
+        warnings.append("Active spawns still present: " + ", ".join(running))
 
     agents_dir = agents_dirs[0] if agents_dirs else runtime.repo_root
     skills_dir = skills_dirs[0] if skills_dirs else runtime.repo_root

@@ -12,8 +12,6 @@ from meridian.lib.ops.runtime import resolve_runtime_root_and_config
 from meridian.lib.state import session_store, spawn_store, work_store
 from meridian.lib.state.paths import resolve_state_paths
 
-_ACTIVE_SPAWN_STATUSES = frozenset({"queued", "running"})
-
 
 def _runtime_context(ctx: RuntimeContext | None) -> RuntimeContext:
     if ctx is not None:
@@ -41,9 +39,11 @@ def _spawn_id_sort_key(spawn_id: str) -> tuple[int, str]:
 
 def _spawn_desc(spawn: spawn_store.SpawnRecord) -> str:
     desc = (spawn.desc or "").strip()
-    if not desc:
-        return ""
-    return " ".join(desc.split())
+    if desc:
+        return " ".join(desc.split())
+    if spawn.kind == "primary":
+        return "(primary)"
+    return ""
 
 
 def _dashboard_spawn(spawn: spawn_store.SpawnRecord) -> "WorkDashboardSpawn":
@@ -90,6 +90,16 @@ def _set_active_work_id(
         return False
     session_store.update_session_work_id(state_root, normalized, work_id)
     return True
+
+
+def _annotate_primary_spawn(state_root: Path, *, chat_id: str, work_id: str) -> None:
+    """Tag the active primary spawn for this session with the work item."""
+    for spawn in spawn_store.list_spawns(
+        state_root, filters={"kind": "primary", "chat_id": chat_id}
+    ):
+        if spawn_store.is_active_spawn_status(spawn.status):
+            spawn_store.update_spawn(state_root, spawn.id, work_id=work_id)
+            break
 
 
 def _require_work_item(state_root: Path, work_id: str) -> work_store.WorkItem:
@@ -300,6 +310,29 @@ class WorkSwitchOutput(BaseModel):
         return self.message
 
 
+class WorkRenameInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    work_id: str
+    new_name: str
+    chat_id: str = ""
+    repo_root: str | None = None
+
+
+class WorkRenameOutput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    old_name: str
+    new_name: str
+    changed: bool = True
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        _ = ctx
+        if not self.changed:
+            return f"Already named '{self.old_name}', nothing to rename."
+        return f"Renamed {self.old_name} -> {self.new_name}"
+
+
 class WorkClearInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -329,7 +362,7 @@ def work_dashboard_sync(
 
     from meridian.lib.state.reaper import reconcile_spawns
     for spawn in reconcile_spawns(state_root, spawn_store.list_spawns(state_root)):
-        if spawn.status not in _ACTIVE_SPAWN_STATUSES:
+        if not spawn_store.is_active_spawn_status(spawn.status):
             continue
         row = _dashboard_spawn(spawn)
         if spawn.work_id:
@@ -365,12 +398,41 @@ def work_start_sync(
     ctx: RuntimeContext | None = None,
 ) -> WorkStartOutput:
     repo_root, state_root = _resolve_roots(payload.repo_root)
+    chat_id = _resolve_chat_id(payload_chat_id=payload.chat_id, ctx=ctx)
+
+    # Check if current work item is auto-generated — rename instead of creating new
+    current_work_id = session_store.get_session_active_work_id(state_root, chat_id)
+    if current_work_id:
+        current_item = work_store.get_work_item(state_root, current_work_id)
+        if current_item is not None and current_item.auto_generated:
+            # Rename auto-generated item to user's chosen name
+            new_slug = work_store.slugify(payload.label)
+            renamed = work_store.rename_work_item(state_root, current_work_id, new_slug)
+            # Clear auto_generated flag
+            cleared = work_store.update_work_item(
+                state_root, renamed.name, auto_generated=False,
+                description=payload.description.strip() or renamed.description,
+            )
+            # Update spawn references
+            for spawn in spawn_store.list_spawns(
+                state_root, filters={"work_id": current_work_id}
+            ):
+                spawn_store.update_spawn(state_root, spawn.id, work_id=cleared.name)
+            # Update session
+            _set_active_work_id(state_root, chat_id=chat_id, work_id=cleared.name)
+            _annotate_primary_spawn(state_root, chat_id=chat_id, work_id=cleared.name)
+            return WorkStartOutput(
+                name=cleared.name,
+                status=cleared.status,
+                description=cleared.description,
+                created_at=cleared.created_at,
+                work_dir=_display_path(repo_root, state_root / "work" / cleared.name),
+            )
+
+    # Normal path: create new work item
     item = work_store.create_work_item(state_root, payload.label, payload.description.strip())
-    _set_active_work_id(
-        state_root,
-        chat_id=_resolve_chat_id(payload_chat_id=payload.chat_id, ctx=ctx),
-        work_id=item.name,
-    )
+    _set_active_work_id(state_root, chat_id=chat_id, work_id=item.name)
+    _annotate_primary_spawn(state_root, chat_id=chat_id, work_id=item.name)
     return WorkStartOutput(
         name=item.name,
         status=item.status,
@@ -456,17 +518,41 @@ def work_switch_sync(
 ) -> WorkSwitchOutput:
     _, state_root = _resolve_roots(payload.repo_root)
     item = _require_work_item(state_root, payload.work_id)
-    updated = _set_active_work_id(
-        state_root,
-        chat_id=_resolve_chat_id(payload_chat_id=payload.chat_id, ctx=ctx),
-        work_id=item.name,
-    )
+    chat_id = _resolve_chat_id(payload_chat_id=payload.chat_id, ctx=ctx)
+    updated = _set_active_work_id(state_root, chat_id=chat_id, work_id=item.name)
+    _annotate_primary_spawn(state_root, chat_id=chat_id, work_id=item.name)
     message = (
         f"Active work item: {item.name}"
         if updated
         else f"Work item ready: {item.name} (no active session to update)"
     )
     return WorkSwitchOutput(work_id=item.name, message=message)
+
+
+def work_rename_sync(
+    payload: WorkRenameInput,
+    ctx: RuntimeContext | None = None,
+) -> WorkRenameOutput:
+    _, state_root = _resolve_roots(payload.repo_root)
+    old_name = payload.work_id
+    _require_work_item(state_root, old_name)
+    item = work_store.rename_work_item(state_root, old_name, payload.new_name)
+
+    # Clear auto_generated flag if it was set — user has explicitly named it
+    if item.auto_generated:
+        item = work_store.update_work_item(state_root, item.name, auto_generated=False)
+
+    # Update all spawns that reference the old work_id
+    for spawn in spawn_store.list_spawns(state_root, filters={"work_id": old_name}):
+        spawn_store.update_spawn(state_root, spawn.id, work_id=item.name)
+
+    # Only update session active_work_id if it currently points to the old name
+    chat_id = _resolve_chat_id(payload_chat_id=payload.chat_id, ctx=ctx)
+    current_work_id = session_store.get_session_active_work_id(state_root, chat_id)
+    if current_work_id == old_name:
+        _set_active_work_id(state_root, chat_id=chat_id, work_id=item.name)
+
+    return WorkRenameOutput(old_name=old_name, new_name=item.name, changed=old_name != item.name)
 
 
 def work_clear_sync(
@@ -532,6 +618,13 @@ async def work_switch(
     return work_switch_sync(payload, ctx=ctx)
 
 
+async def work_rename(
+    payload: WorkRenameInput,
+    ctx: RuntimeContext | None = None,
+) -> WorkRenameOutput:
+    return work_rename_sync(payload, ctx=ctx)
+
+
 async def work_clear(
     payload: WorkClearInput,
     ctx: RuntimeContext | None = None,
@@ -556,6 +649,8 @@ __all__ = [
     "WorkStartOutput",
     "WorkSwitchInput",
     "WorkSwitchOutput",
+    "WorkRenameInput",
+    "WorkRenameOutput",
     "WorkUpdateInput",
     "WorkUpdateOutput",
     "work_clear",
@@ -566,6 +661,8 @@ __all__ = [
     "work_done_sync",
     "work_list",
     "work_list_sync",
+    "work_rename",
+    "work_rename_sync",
     "work_show",
     "work_show_sync",
     "work_start",

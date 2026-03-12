@@ -2,7 +2,13 @@
 
 ## Problem
 
-Operators (human or agent) have no way to see what's actively being worked on across a project. `meridian spawn list` shows spawn lifecycle (status, duration, cost) but not *intent* — what is this spawn doing, and what bigger effort is it part of?
+`meridian spawn list` shows spawn lifecycle (status, duration, cost) but not *intent* — what is this spawn doing, and what bigger effort is it part of?
+
+Without work items, operators have no way to:
+
+- **Group spawns by purpose.** Six running spawns are a flat list. Three might be part of an auth refactor, one is a bug fix, two are unrelated — but nothing connects them.
+- **See project-level activity.** Coming back to a terminal, you want "what efforts are in flight and who's working on what" — not a process table.
+- **Give spawns shared context.** Design docs, plans, and diagrams for an effort need a home. Without one, context lives nowhere or gets duplicated across spawn prompts.
 
 ## Design Decisions
 
@@ -10,7 +16,7 @@ Operators (human or agent) have no way to see what's actively being worked on ac
 - **Work items are git tracked.** Valuable working documents. Visible in PRs alongside code. Delete when done; git history preserves them.
 - **No locks, no claimed_files.** Coordination through visibility, not mechanisms. Agents infer boundaries from work item docs and their prompt — same way a human developer reads the plan and knows what's someone else's area. `files_touched` (already tracked per spawn) serves as after-the-fact diagnostic.
 - **Workspace-topology agnostic.** Shared-worktree and isolated-worktree workflows are both valid. Meridian records coordination state; skills and operator conventions decide how to collaborate.
-- **Storage abstraction.** Local files today, file-backed and git-tracked. Interface should support a managed service later, but work items are file-authoritative — don't over-promise a clean backend swap.
+- **Local files, full stop.** All state is files under `.meridian/`, git-tracked where valuable. No storage abstraction, no backend swappability. Read paths should be clean enough that a future UI layer (e.g. local web view) can render the same state without needing a separate data model.
 - **`work/` is task-scoped, `fs/` is shared project context.** Each work item directory (`work/auth-refactor/`) contains design docs, plans, and diagrams for one major task — created via `meridian work start`, lives and dies with that effort. `fs/` is shared reference material across the project state root: architecture notes, team conventions, reference docs. A work item might reference stuff in `fs/`, but `fs/` doesn't belong to any particular work item.
 - **Text output is the default.** Both humans and LLMs read text fine. Commands default to text unless the output is purely structured data meant for machine parsing (JSONL stores, piped output). `--format` is always available to override.
 - **Env vars use `_DIR` suffix for paths.** `MERIDIAN_FS_DIR` and `MERIDIAN_WORK_DIR` are path env vars. `MERIDIAN_WORK_ID` carries the active work item id itself.
@@ -78,7 +84,7 @@ Each work item is a directory with a `work.json` and freeform files:
 ```
 
 - `status` is the only lifecycle field and is free text — operators/LLMs set whatever makes sense
-- `done` is the only distinguished status value — it marks the work item complete, hides it from active dashboard views, and makes it eligible for cleanup
+- `done` is the only distinguished status value — matched case-insensitively after trimming whitespace. It marks the work item complete, hides it from active dashboard views, and makes it eligible for cleanup. All other status values are opaque free text
 - Can contain anything: markdown, mermaid diagrams, code snippets
 - Plans live inside as `plan/` subdirectory when needed
 - Work items are living documents — start rough, refine over time
@@ -110,7 +116,7 @@ Sets both `$MERIDIAN_WORK_DIR` and `$MERIDIAN_WORK_ID` for launched agents. Opti
 
 ### `work.json` concurrency
 
-`work.json` uses last-writer-wins semantics. The file is small, updates are infrequent, and conflicts are self-correcting because the next status update overwrites stale text. No file locking is needed beyond atomic tmp+rename writes.
+`work.json` uses last-writer-wins semantics. Concurrent writers may clobber each other's fields — this is accepted. The file is small, updates are infrequent, and any field can be re-set by the next writer. No file locking is needed beyond atomic tmp+rename writes.
 
 ## Spawn Changes
 
@@ -133,12 +139,12 @@ Optional short label on spawn create:
 meridian spawn -m opus --desc "Implement step 2" -p @prompt.md
 ```
 
-`desc` and `work_id` are both snapshotted at spawn creation and stored in two places:
+`desc` and `work_id` are both snapshotted at spawn creation and stored in two places — intentional write-time denormalization for different access patterns:
 
-- `spawns/<id>/params.json` for per-spawn materialized metadata
-- `spawns.jsonl` events for query-time reads and dashboard rendering
+- `spawns/<id>/params.json` — per-spawn artifact for `spawn show` and forensics
+- `spawns.jsonl` — append-only event log for dashboard queries and bulk reads
 
-The dashboard reads `spawns.jsonl` as its single source of truth. It should not join across `params.json` files to recover description or work linkage.
+Both are written atomically at spawn creation. The dashboard reads `spawns.jsonl` as its single source of truth and should not join across `params.json` files.
 
 `work_id` is snapshotted at creation time for both primary sessions and child spawns. Not derived from ambient session state at query time — the session/spawn owns its `work_id` permanently.
 
@@ -217,13 +223,15 @@ Report: /path/to/.meridian/spawns/p5/report.md
 ### `meridian spawn` (extended)
 
 - `--desc` flag (optional — description column shows last in `meridian work` output)
-- `--work` flag (explicit work attachment, overrides session active work item)
+- `--work` flag (explicit work attachment, overrides session active work item — intended for automation and orchestrators that spawn across multiple work items without switching session context)
 - `prompt.md` written alongside `params.json`
 - `desc` and `work_id` snapshotted in spawn events
 
 ### Deletion
 
 Work items are just directories. Delete them with `rm -rf .meridian/work/<id>` or `git rm -r .meridian/work/<id>`. No special `meridian work delete` command is needed.
+
+If a spawn's `work_id` references a deleted work item, the dashboard shows it ungrouped — same as a spawn with no work item. No error, no crash. Dangling references are harmless and self-evident.
 
 ## Boundary with `meridian-skills`
 
@@ -252,7 +260,7 @@ Five review spawns (p18–p22) evaluated the design. Key changes made:
 - **Dashboard-only `meridian work`** — use `spawn show` for detail (UX review)
 - **Dropped `claimed_files`** — agents infer boundaries from work item docs + prompt context, `files_touched` handles diagnostics (coordination review discussion)
 - **`prompt.md` is forensics** — separate file, not the coordination surface (agentic review)
-- **Storage abstraction is file-authoritative** — don't over-promise backend swappability (architecture review)
+- **Local files only** — dropped storage abstraction entirely; clean read paths support a future UI layer without needing a separate data model (architecture review)
 - **Folded `design` into `work`** — one CLI command instead of two. `work/` directory, `work.json` metadata. No separate `meridian design` namespace.
 
 ### Post-review changes

@@ -111,7 +111,7 @@ def parse_agent_profile(path: Path) -> AgentProfile:
     )
 
 
-def _builtin_profiles() -> dict[str, AgentProfile]:
+def builtin_profiles() -> dict[str, AgentProfile]:
     """Hard-coded fallback profiles used when no file exists on disk."""
     return {
         "meridian-agent": AgentProfile(
@@ -250,7 +250,7 @@ def load_agent_profile(
                 )
 
     # Fall back to hard-coded built-in profiles.
-    builtin = _builtin_profiles().get(normalized)
+    builtin = builtin_profiles().get(normalized)
     if builtin is not None:
         logger.info(
             "Using built-in profile '%s' (no user or bundled profile found).",

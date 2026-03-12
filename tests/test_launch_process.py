@@ -1,7 +1,11 @@
 from __future__ import annotations
+# pyright: reportPrivateUsage=false
 
 import signal
 from pathlib import Path
+from typing import Any
+
+import pytest
 
 from meridian.lib.launch import process
 from meridian.lib.launch.command import PrimaryHarnessContext
@@ -9,9 +13,10 @@ from meridian.lib.launch.process import LaunchContext
 from meridian.lib.launch.types import LaunchRequest, PrimarySessionMetadata
 from meridian.lib.config.settings import load_config
 from meridian.lib.harness.registry import get_default_harness_registry
+from meridian.lib.state import spawn_store
 
 
-def test_sync_pty_winsize_copies_source_size(monkeypatch) -> None:
+def test_sync_pty_winsize_copies_source_size(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[int, int, bytes]] = []
     packed = b"winsize-bytes"
 
@@ -31,22 +36,30 @@ def test_sync_pty_winsize_copies_source_size(monkeypatch) -> None:
     ]
 
 
-def test_install_winsize_forwarding_syncs_immediately_and_restores(monkeypatch) -> None:
+def test_install_winsize_forwarding_syncs_immediately_and_restores(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     sync_calls: list[tuple[int, int]] = []
     installed_handlers: list[tuple[int, object]] = []
     previous_handler = signal.SIG_IGN
 
+    def fake_sync_pty_winsize(*, source_fd: int, target_fd: int) -> None:
+        sync_calls.append((source_fd, target_fd))
+
+    def fake_getsignal(signum: int) -> object:
+        _ = signum
+        return previous_handler
+
+    def fake_signal(signum: int, handler: object) -> None:
+        installed_handlers.append((signum, handler))
+
     monkeypatch.setattr(
         process,
         "_sync_pty_winsize",
-        lambda *, source_fd, target_fd: sync_calls.append((source_fd, target_fd)),
+        fake_sync_pty_winsize,
     )
-    monkeypatch.setattr(process.signal, "getsignal", lambda signum: previous_handler)
-    monkeypatch.setattr(
-        process.signal,
-        "signal",
-        lambda signum, handler: installed_handlers.append((signum, handler)),
-    )
+    monkeypatch.setattr(process.signal, "getsignal", fake_getsignal)
+    monkeypatch.setattr(process.signal, "signal", fake_signal)
 
     restore = process._install_winsize_forwarding(source_fd=20, target_fd=21)
 
@@ -65,7 +78,7 @@ def test_install_winsize_forwarding_syncs_immediately_and_restores(monkeypatch) 
 
 
 def test_run_harness_process_reuses_tracked_chat_id_on_resume(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     repo_root = tmp_path
@@ -95,21 +108,60 @@ def test_run_harness_process_reuses_tracked_chat_id_on_resume(
         command_request=request,
     )
 
-    captured: dict[str, object] = {}
+    captured: dict[str, str | None] = {}
 
-    monkeypatch.setattr(process, "_sweep_orphaned_materializations", lambda *args, **kwargs: None)
+    def fake_sweep_orphaned_materializations(*args: object, **kwargs: object) -> None:
+        _ = (args, kwargs)
+
+    def fake_build_harness_context(**kwargs: object) -> PrimaryHarnessContext:
+        _ = kwargs
+        return PrimaryHarnessContext(command=("true",))
+
+    def fake_build_launch_env(*args: object, **kwargs: object) -> dict[str, str]:
+        _ = (args, kwargs)
+        return {}
+
+    def fake_run_primary_process_with_capture(**kwargs: object) -> tuple[int, int]:
+        started = kwargs.get("on_child_started")
+        assert callable(started)
+        started(123)
+        return (0, 123)
+
+    def fake_extract_latest_session_id(**kwargs: object) -> str:
+        _ = kwargs
+        return "session-2"
+
+    def fake_stop_session(*args: object, **kwargs: object) -> None:
+        _ = (args, kwargs)
+
+    def fake_update_session_harness_id(*args: object, **kwargs: object) -> None:
+        _ = (args, kwargs)
+
     monkeypatch.setattr(
         process,
-        "build_harness_context",
-        lambda **kwargs: PrimaryHarnessContext(command=("true",)),
+        "_sweep_orphaned_materializations",
+        fake_sweep_orphaned_materializations,
     )
-    monkeypatch.setattr(process, "build_launch_env", lambda *args, **kwargs: {})
-    monkeypatch.setattr(process, "_run_primary_process_with_capture", lambda **kwargs: (0, 123))
-    monkeypatch.setattr(process, "extract_latest_session_id", lambda **kwargs: "session-2")
-    monkeypatch.setattr(process, "stop_session", lambda *args, **kwargs: None)
-    monkeypatch.setattr(process, "update_session_harness_id", lambda *args, **kwargs: None)
+    monkeypatch.setattr(process, "build_harness_context", fake_build_harness_context)
+    monkeypatch.setattr(process, "build_launch_env", fake_build_launch_env)
+    monkeypatch.setattr(
+        process,
+        "_run_primary_process_with_capture",
+        fake_run_primary_process_with_capture,
+    )
+    monkeypatch.setattr(process, "extract_latest_session_id", fake_extract_latest_session_id)
+    monkeypatch.setattr(process, "stop_session", fake_stop_session)
+    monkeypatch.setattr(process, "update_session_harness_id", fake_update_session_harness_id)
 
-    def fake_start_session(state_root, harness, harness_session_id, model, chat_id=None, **kwargs):
+    def fake_start_session(
+        state_root: Path,
+        harness: str,
+        harness_session_id: str | None,
+        model: str,
+        chat_id: str | None = None,
+        **kwargs: Any,
+    ) -> str:
+        _ = (state_root, harness, harness_session_id, model, kwargs)
         captured["chat_id_arg"] = chat_id
         return chat_id or "c999"
 
@@ -119,3 +171,7 @@ def test_run_harness_process_reuses_tracked_chat_id_on_resume(
 
     assert captured["chat_id_arg"] == "c7"
     assert outcome.chat_id == "c7"
+    assert outcome.primary_spawn_id is not None
+    row = spawn_store.get_spawn(ctx.state_root, outcome.primary_spawn_id)
+    assert row is not None
+    assert row.worker_pid == 123

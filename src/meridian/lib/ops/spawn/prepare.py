@@ -13,6 +13,7 @@ from meridian.lib.harness.registry import HarnessRegistry, get_default_harness_r
 from meridian.lib.launch.prompt import (
     compose_run_prompt_text,
     compose_skill_injections,
+    dedupe_skill_names,
     resolve_run_defaults,
 )
 from meridian.lib.launch.reference import load_reference_files, parse_template_assignments
@@ -213,8 +214,11 @@ def build_create_payload(
         default_model=runtime_view.config.default_model,
     )
 
+    # Merge profile skills with ad-hoc CLI --skill flags, deduplicating.
+    merged_skill_names = dedupe_skill_names((*defaults.skills, *payload.skills))
+
     resolved_skills = resolve_skills_from_profile(
-        profile_skills=defaults.skills,
+        profile_skills=merged_skill_names,
         repo_root=runtime_view.repo_root,
         search_paths=runtime_view.config.search_paths,
         readonly=payload.dry_run,
@@ -232,8 +236,6 @@ def build_create_payload(
         include_content=not use_reference_paths,
     )
     parsed_template_vars = parse_template_assignments(payload.template_vars)
-
-    # With --skills removed, skills come exclusively from the agent profile.
     adhoc_agent_json = ""
     agent_for_params = defaults.agent_name
 
@@ -270,7 +272,7 @@ def build_create_payload(
                     )
 
     missing_skills_warning = (
-        f"Skipped unavailable implicit skills: {', '.join(resolved_skills.missing_skills)}."
+        f"Skipped unavailable skills: {', '.join(resolved_skills.missing_skills)}."
         if resolved_skills.missing_skills
         else None
     )

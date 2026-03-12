@@ -13,6 +13,7 @@ from typing import Any, Literal, Mapping, cast
 
 from pydantic import BaseModel, ConfigDict
 
+from meridian.lib.core.domain import SpawnStatus
 from meridian.lib.core.types import SpawnId
 from meridian.lib.state.atomic import append_text_line
 from meridian.lib.state.paths import StateRootPaths
@@ -64,6 +65,16 @@ def next_chat_id(state_root: Path) -> str:
     return f"c{starts + 1}"
 
 
+LaunchMode = Literal["background", "foreground"]
+ACTIVE_SPAWN_STATUSES = frozenset({"queued", "running"})
+BACKGROUND_LAUNCH_MODE: LaunchMode = "background"
+FOREGROUND_LAUNCH_MODE: LaunchMode = "foreground"
+
+
+def is_active_spawn_status(status: str) -> bool:
+    return status in ACTIVE_SPAWN_STATUSES
+
+
 # ---------------------------------------------------------------------------
 # Spawn event store
 # ---------------------------------------------------------------------------
@@ -82,7 +93,10 @@ class SpawnRecord(BaseModel):
     desc: str | None
     work_id: str | None
     harness_session_id: str | None
-    status: str
+    launch_mode: str | None
+    wrapper_pid: int | None
+    worker_pid: int | None
+    status: SpawnStatus | Literal["unknown"]
     prompt: str | None
     started_at: str | None
     finished_at: str | None
@@ -108,9 +122,26 @@ class SpawnStartEvent(BaseModel):
     desc: str | None = None
     work_id: str | None = None
     harness_session_id: str | None = None
-    status: str = "running"
+    launch_mode: str | None = None
+    worker_pid: int | None = None
+    status: SpawnStatus = "running"
     prompt: str | None = None
     started_at: str | None = None
+
+
+class SpawnUpdateEvent(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    v: int = 1
+    event: Literal["update"] = "update"
+    id: str = ""
+    status: SpawnStatus | None = None
+    launch_mode: LaunchMode | None = None
+    wrapper_pid: int | None = None
+    worker_pid: int | None = None
+    error: str | None = None
+    desc: str | None = None
+    work_id: str | None = None
 
 
 class SpawnFinalizeEvent(BaseModel):
@@ -119,7 +150,7 @@ class SpawnFinalizeEvent(BaseModel):
     v: int = 1
     event: Literal["finalize"] = "finalize"
     id: str = ""
-    status: str | None = None
+    status: SpawnStatus | None = None
     exit_code: int | None = None
     finished_at: str | None = None
     duration_secs: float | None = None
@@ -129,7 +160,7 @@ class SpawnFinalizeEvent(BaseModel):
     error: str | None = None
 
 
-type SpawnEvent = SpawnStartEvent | SpawnFinalizeEvent
+type SpawnEvent = SpawnStartEvent | SpawnUpdateEvent | SpawnFinalizeEvent
 
 
 def _utc_now_iso() -> str:
@@ -155,6 +186,8 @@ def _parse_event(payload: dict[str, Any]) -> SpawnEvent | None:
     event_type = payload.get("event")
     if event_type == "start":
         return SpawnStartEvent.model_validate(payload)
+    if event_type == "update":
+        return SpawnUpdateEvent.model_validate(payload)
     if event_type == "finalize":
         return SpawnFinalizeEvent.model_validate(payload)
     return None
@@ -200,6 +233,9 @@ def start_spawn(
     work_id: str | None = None,
     spawn_id: SpawnId | str | None = None,
     harness_session_id: str | None = None,
+    launch_mode: LaunchMode | None = None,
+    worker_pid: int | None = None,
+    status: SpawnStatus = "running",
     started_at: str | None = None,
 ) -> SpawnId:
     """Append a spawn start event under `spawns.lock` and return the spawn ID."""
@@ -221,7 +257,9 @@ def start_spawn(
             desc=desc,
             work_id=work_id,
             harness_session_id=harness_session_id,
-            status="running",
+            launch_mode=launch_mode,
+            worker_pid=worker_pid,
+            status=status,
             started_at=started,
             prompt=prompt,
         )
@@ -229,10 +267,39 @@ def start_spawn(
         return resolved_spawn_id
 
 
+def update_spawn(
+    state_root: Path,
+    spawn_id: SpawnId | str,
+    *,
+    status: SpawnStatus | None = None,
+    launch_mode: LaunchMode | None = None,
+    wrapper_pid: int | None = None,
+    worker_pid: int | None = None,
+    error: str | None = None,
+    desc: str | None = None,
+    work_id: str | None = None,
+) -> None:
+    """Append a non-terminal spawn update event under `spawns.lock`."""
+
+    paths = StateRootPaths.from_root_dir(state_root)
+    event = SpawnUpdateEvent(
+        id=str(spawn_id),
+        status=status,
+        launch_mode=launch_mode,
+        wrapper_pid=wrapper_pid,
+        worker_pid=worker_pid,
+        error=error,
+        desc=desc,
+        work_id=work_id,
+    )
+    with _lock_file(paths.spawns_lock):
+        _append_event(paths.spawns_jsonl, event.model_dump(exclude_none=True))
+
+
 def finalize_spawn(
     state_root: Path,
     spawn_id: SpawnId | str,
-    status: str,
+    status: SpawnStatus,
     exit_code: int,
     *,
     duration_secs: float | None = None,
@@ -264,7 +331,7 @@ def finalize_spawn(
 def finalize_spawn_if_running(
     state_root: Path,
     spawn_id: SpawnId | str,
-    status: str,
+    status: SpawnStatus,
     exit_code: int,
     *,
     error: str | None = None,
@@ -287,6 +354,51 @@ def finalize_spawn_if_running(
         return True
 
 
+def finalize_spawn_if_active(
+    state_root: Path,
+    spawn_id: SpawnId | str,
+    status: SpawnStatus,
+    exit_code: int,
+    *,
+    error: str | None = None,
+) -> bool:
+    """Append finalize event only if spawn is queued or running."""
+
+    paths = StateRootPaths.from_root_dir(state_root)
+    with _lock_file(paths.spawns_lock):
+        records = _record_from_events(_read_events(paths.spawns_jsonl))
+        record = records.get(str(spawn_id))
+        if record is None or not is_active_spawn_status(record.status):
+            return False
+        event = SpawnFinalizeEvent(
+            id=str(spawn_id),
+            status=status,
+            exit_code=exit_code,
+            finished_at=_utc_now_iso(),
+            error=error,
+        )
+        _append_event(paths.spawns_jsonl, event.model_dump(exclude_none=True))
+        return True
+
+
+def mark_spawn_running(
+    state_root: Path,
+    spawn_id: SpawnId | str,
+    *,
+    launch_mode: LaunchMode | None = None,
+    wrapper_pid: int | None = None,
+    worker_pid: int | None = None,
+) -> None:
+    update_spawn(
+        state_root,
+        spawn_id,
+        status="running",
+        launch_mode=launch_mode,
+        wrapper_pid=wrapper_pid,
+        worker_pid=worker_pid,
+    )
+
+
 def _empty_record(spawn_id: str) -> SpawnRecord:
     return SpawnRecord(
         id=spawn_id,
@@ -298,6 +410,9 @@ def _empty_record(spawn_id: str) -> SpawnRecord:
         desc=None,
         work_id=None,
         harness_session_id=None,
+        launch_mode=None,
+        wrapper_pid=None,
+        worker_pid=None,
         status="unknown",
         prompt=None,
         started_at=None,
@@ -335,9 +450,35 @@ def _record_from_events(events: list[SpawnEvent]) -> dict[str, SpawnRecord]:
                         if event.harness_session_id is not None
                         else current.harness_session_id
                     ),
+                    "launch_mode": (
+                        event.launch_mode if event.launch_mode is not None else current.launch_mode
+                    ),
+                    "worker_pid": (
+                        event.worker_pid if event.worker_pid is not None else current.worker_pid
+                    ),
                     "status": event.status,
                     "prompt": event.prompt if event.prompt is not None else current.prompt,
                     "started_at": event.started_at if event.started_at is not None else current.started_at,
+                }
+            )
+            continue
+
+        if isinstance(event, SpawnUpdateEvent):
+            records[spawn_id] = current.model_copy(
+                update={
+                    "status": event.status if event.status is not None else current.status,
+                    "launch_mode": (
+                        event.launch_mode if event.launch_mode is not None else current.launch_mode
+                    ),
+                    "wrapper_pid": (
+                        event.wrapper_pid if event.wrapper_pid is not None else current.wrapper_pid
+                    ),
+                    "worker_pid": (
+                        event.worker_pid if event.worker_pid is not None else current.worker_pid
+                    ),
+                    "error": event.error if event.error is not None else current.error,
+                    "desc": event.desc if event.desc is not None else current.desc,
+                    "work_id": event.work_id if event.work_id is not None else current.work_id,
                 }
             )
             continue
@@ -359,7 +500,11 @@ def _record_from_events(events: list[SpawnEvent]) -> dict[str, SpawnRecord]:
                 "output_tokens": (
                     event.output_tokens if event.output_tokens is not None else current.output_tokens
                 ),
-                "error": event.error if event.error is not None else current.error,
+                "error": (
+                    None if event.status == "succeeded"
+                    else event.error if event.error is not None
+                    else current.error
+                ),
             }
         )
 

@@ -1,16 +1,17 @@
 
 import json
+from pathlib import Path
 
-from meridian.lib.state.spawn_store import get_spawn, list_spawns, start_spawn
+from meridian.lib.state.spawn_store import finalize_spawn, get_spawn, list_spawns, start_spawn, update_spawn
 
 
-def _state_root(tmp_path):
+def _state_root(tmp_path: Path) -> Path:
     state_dir = tmp_path / ".meridian"
     state_dir.mkdir(parents=True, exist_ok=True)
     return state_dir
 
 
-def test_list_runs_skips_truncated_trailing_json(tmp_path):
+def test_list_runs_skips_truncated_trailing_json(tmp_path: Path) -> None:
     state_root = _state_root(tmp_path)
     spawns_jsonl = state_root / "spawns.jsonl"
     with spawns_jsonl.open("w", encoding="utf-8") as handle:
@@ -39,7 +40,7 @@ def test_list_runs_skips_truncated_trailing_json(tmp_path):
     assert spawns[0].status == "running"
 
 
-def test_spawn_record_preserves_desc_and_work_id(tmp_path):
+def test_spawn_record_preserves_desc_and_work_id(tmp_path: Path) -> None:
     state_root = _state_root(tmp_path)
 
     spawn_id = start_spawn(
@@ -57,3 +58,82 @@ def test_spawn_record_preserves_desc_and_work_id(tmp_path):
     assert row is not None
     assert row.desc == "investigate bug"
     assert row.work_id == "work-7"
+
+
+def test_spawn_record_tracks_launch_mode_and_process_pids(tmp_path: Path) -> None:
+    state_root = _state_root(tmp_path)
+
+    spawn_id = start_spawn(
+        state_root,
+        chat_id="c1",
+        model="gpt-5.4",
+        agent="coder",
+        harness="codex",
+        prompt="hello",
+        launch_mode="background",
+        status="queued",
+    )
+    update_spawn(state_root, spawn_id, status="running", wrapper_pid=4321, worker_pid=8765)
+
+    row = get_spawn(state_root, spawn_id)
+    assert row is not None
+    assert row.launch_mode == "background"
+    assert row.wrapper_pid == 4321
+    assert row.worker_pid == 8765
+    assert row.status == "running"
+
+
+def test_succeeded_finalize_clears_stale_error(tmp_path: Path) -> None:
+    """A succeeded finalize event must clear any stale error from a prior failed finalize."""
+    state_root = _state_root(tmp_path)
+
+    spawn_id = start_spawn(
+        state_root,
+        chat_id="c1",
+        model="gpt-5.4",
+        agent="coder",
+        harness="codex",
+        prompt="hello",
+    )
+
+    # First finalize: reaper synthesizes a failed status with orphan_run error
+    finalize_spawn(state_root, spawn_id, status="failed", exit_code=1, error="orphan_run")
+    row = get_spawn(state_root, spawn_id)
+    assert row is not None
+    assert row.status == "failed"
+    assert row.error == "orphan_run"
+
+    # Second finalize: runner writes the real succeeded status (error=None, dropped by exclude_none)
+    finalize_spawn(state_root, spawn_id, status="succeeded", exit_code=0)
+    row = get_spawn(state_root, spawn_id)
+    assert row is not None
+    assert row.status == "succeeded"
+    assert row.exit_code == 0
+    assert row.error is None, f"Expected error=None after succeeded finalize, got {row.error!r}"
+
+
+def test_update_spawn_backfills_work_id_and_desc(tmp_path: Path) -> None:
+    """Update events can backfill work_id and desc onto an existing spawn."""
+    state_root = _state_root(tmp_path)
+
+    spawn_id = start_spawn(
+        state_root,
+        chat_id="c1",
+        model="gpt-5.4",
+        agent="coder",
+        harness="codex",
+        prompt="hello",
+        kind="primary",
+    )
+
+    row = get_spawn(state_root, spawn_id)
+    assert row is not None
+    assert row.work_id is None
+    assert row.desc is None
+
+    update_spawn(state_root, spawn_id, work_id="my-feature", desc="orchestrator")
+
+    row = get_spawn(state_root, spawn_id)
+    assert row is not None
+    assert row.work_id == "my-feature"
+    assert row.desc == "orchestrator"

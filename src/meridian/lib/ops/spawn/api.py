@@ -12,6 +12,7 @@ from meridian.lib.core.sink import NullSink, OutputSink
 from meridian.lib.ops.runtime import build_runtime_from_root_and_config, resolve_runtime_root_and_config
 from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_state_paths
+from meridian.lib.state.spawn_store import ACTIVE_SPAWN_STATUSES, is_active_spawn_status
 
 from .execute import (
     depth_exceeded_output,
@@ -146,7 +147,7 @@ def spawn_list_sync(
     elif payload.status is not None:
         spawns = [row for row in spawns if row.status == payload.status]
     else:
-        spawns = [row for row in spawns if row.status in {"queued", "running"}]
+        spawns = [row for row in spawns if is_active_spawn_status(row.status)]
     if payload.failed:
         spawns = [row for row in spawns if row.status == "failed"]
     if payload.model is not None and payload.model.strip():
@@ -158,8 +159,8 @@ def spawn_list_sync(
 
     if show_all:
         # Always include all active spawns, fill remaining slots with recent non-active.
-        active = [row for row in spawns if row.status in {"queued", "running"}]
-        non_active = [row for row in spawns if row.status not in {"queued", "running"}]
+        active = [row for row in spawns if is_active_spawn_status(row.status)]
+        non_active = [row for row in spawns if not is_active_spawn_status(row.status)]
         effective_limit = max(len(active), limit)
         remaining = effective_limit - len(active)
         selected = active + non_active[:remaining]
@@ -338,12 +339,18 @@ def _read_harness_pid(state_root: Path, spawn_id: str) -> int | None:
 def _resolve_cancel_pid(state_root: Path, row: spawn_store.SpawnRecord) -> int | None:
     launch_mode = (row.launch_mode or "").strip().lower()
     if launch_mode == "background":
+        if row.worker_pid is not None and row.worker_pid > 0:
+            return row.worker_pid
         if row.wrapper_pid is not None and row.wrapper_pid > 0:
             return row.wrapper_pid
         return _read_background_pid(state_root, row.id)
     if launch_mode == "foreground":
+        if row.worker_pid is not None and row.worker_pid > 0:
+            return row.worker_pid
         return _read_harness_pid(state_root, row.id)
 
+    if row.worker_pid is not None and row.worker_pid > 0:
+        return row.worker_pid
     if row.wrapper_pid is not None and row.wrapper_pid > 0:
         return row.wrapper_pid
     background_pid = _read_background_pid(state_root, row.id)
@@ -422,7 +429,7 @@ async def spawn_cancel(
 
 
 def _spawn_is_terminal(status: str) -> bool:
-    return status not in {"queued", "running"}
+    return status not in ACTIVE_SPAWN_STATUSES
 
 
 def _normalize_wait_spawn_ids(payload: SpawnWaitInput) -> tuple[str, ...]:
@@ -620,6 +627,7 @@ def spawn_continue_sync(
         prompt=derived_prompt,
         model=_model_for_follow_up(source_spawn, payload.model),
         agent=payload.agent,
+        skills=payload.skills,
         repo_root=payload.repo_root,
         dry_run=payload.dry_run,
         timeout=payload.timeout,

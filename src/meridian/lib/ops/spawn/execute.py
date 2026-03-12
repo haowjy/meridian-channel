@@ -21,7 +21,7 @@ from meridian.lib.catalog.agent import (
     parse_agent_profile,
 )
 from meridian.lib.core.context import RuntimeContext
-from meridian.lib.core.domain import Spawn
+from meridian.lib.core.domain import Spawn, SpawnStatus
 from meridian.lib.launch.runner import execute_with_finalization
 from meridian.lib.harness.adapter import PermissionResolver
 from meridian.lib.harness.materialize import cleanup_materialized, materialize_for_harness
@@ -32,11 +32,20 @@ from meridian.lib.safety.permissions import (
 )
 from meridian.lib.core.sink import OutputSink
 from meridian.lib.state.session_store import (
+    get_session_active_work_id,
     start_session,
     stop_session,
     update_session_harness_id,
+    update_session_work_id,
 )
 from meridian.lib.state import spawn_store
+from meridian.lib.state import work_store
+from meridian.lib.state.spawn_store import (
+    BACKGROUND_LAUNCH_MODE,
+    FOREGROUND_LAUNCH_MODE,
+    LaunchMode,
+    mark_spawn_running,
+)
 from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.paths import resolve_spawn_log_dir, resolve_state_paths
 from meridian.lib.core.types import ModelId, SpawnId
@@ -359,6 +368,8 @@ def _init_spawn(
     runtime: OperationRuntime,
     desc: str | None = None,
     work_id: str | None = None,
+    status: SpawnStatus = "running",
+    launch_mode: LaunchMode | None = None,
     ctx: RuntimeContext | None = None,
 ) -> _SpawnContext:
     runtime_context = _runtime_context(ctx)
@@ -380,12 +391,14 @@ def _init_spawn(
         desc=resolved_desc,
         work_id=resolved_work_id,
         harness_session_id=prepared.continue_harness_session_id,
+        launch_mode=launch_mode,
+        status=status,
     )
     spawn = Spawn(
         spawn_id=SpawnId(spawn_id),
         prompt=prepared.composed_prompt,
         model=ModelId(prepared.model),
-        status="running",
+        status=status,
     )
     current_depth = runtime_context.depth
     run_start_event: dict[str, Any] = {
@@ -460,6 +473,11 @@ def _session_execution_context(
         skills=skills,
         skill_paths=session_skill_paths,
     )
+    # Auto-create work item if session has none
+    existing_work_id = get_session_active_work_id(state_root, chat_id)
+    if not existing_work_id:
+        auto_item = work_store.create_auto_work_item(state_root)
+        update_session_work_id(state_root, chat_id, auto_item.name)
     resolved_agent_name = run_agent_name
     try:
         materialized_agent_name = _materialize_session_agent_name(
@@ -520,11 +538,14 @@ async def _execute_existing_spawn(
     if spawn_record is None or spawn_record.model is None or spawn_record.prompt is None:
         logger.error("Spawn not found for background execution.", spawn_id=str(spawn_id))
         return 1
+    spawn_status: SpawnStatus = (
+        spawn_record.status if spawn_record.status != "unknown" else "queued"
+    )
     spawn = Spawn(
         spawn_id=SpawnId(spawn_record.id),
         prompt=spawn_record.prompt,
         model=ModelId(spawn_record.model),
-        status="running",
+        status=spawn_status,
     )
 
     resolver = build_permission_resolver(
@@ -645,6 +666,8 @@ def execute_spawn_background(
         runtime=runtime,
         desc=payload.desc,
         work_id=payload.work,
+        status="queued",
+        launch_mode=BACKGROUND_LAUNCH_MODE,
         ctx=runtime_context,
     )
     spawn_id_text = str(context.spawn.spawn_id)
@@ -733,6 +756,12 @@ def execute_spawn_background(
         )
 
     atomic_write_text(log_dir / _BACKGROUND_PID_FILENAME, f"{process.pid}\n")
+    mark_spawn_running(
+        context.state_root,
+        context.spawn.spawn_id,
+        launch_mode=BACKGROUND_LAUNCH_MODE,
+        wrapper_pid=process.pid,
+    )
     # The Popen object goes out of scope without wait(). This is intentional:
     # the child spawns in its own session (start_new_session=True) and is
     # re-parented to init/systemd. We only need the PID for diagnostics.
@@ -765,6 +794,8 @@ def execute_spawn_blocking(
         runtime=runtime,
         desc=payload.desc,
         work_id=payload.work,
+        status="queued",
+        launch_mode=FOREGROUND_LAUNCH_MODE,
         ctx=runtime_context,
     )
     spawn = context.spawn

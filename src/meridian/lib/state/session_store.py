@@ -351,6 +351,15 @@ def resolve_session_ref(state_root: Path, ref: str) -> SessionRecord | None:
     return max(matches, key=lambda item: (item.started_at, _session_sort_key(item.chat_id)))
 
 
+def get_session_active_work_id(state_root: Path, chat_id: str) -> str | None:
+    """Return the active work item ID for a session, or None."""
+
+    record = _records_by_session(state_root).get(chat_id)
+    if record is None:
+        return None
+    return record.active_work_id
+
+
 def get_session_harness_id(state_root: Path, chat_id: str) -> str | None:
     """Return harness session ID for a meridian chat/session ID."""
 

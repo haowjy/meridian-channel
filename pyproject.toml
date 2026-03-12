@@ -18,6 +18,7 @@ classifiers = [
   "Topic :: Utilities",
 ]
 dependencies = [
+  "coolname>=4.0.0",
   "cyclopts>=3.0",
   "mcp>=1.0",
   "pydantic>=2.12",

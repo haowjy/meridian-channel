@@ -30,7 +30,14 @@ from meridian.lib.state.artifact_store import LocalStore, make_artifact_key
 from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.paths import resolve_spawn_log_dir, resolve_state_paths
 from meridian.lib.state.spawn_store import FOREGROUND_LAUNCH_MODE
-from meridian.lib.state.session_store import start_session, stop_session, update_session_harness_id
+from meridian.lib.state import work_store
+from meridian.lib.state.session_store import (
+    get_session_active_work_id,
+    start_session,
+    stop_session,
+    update_session_harness_id,
+    update_session_work_id,
+)
 
 from .command import build_harness_context, build_launch_env
 from .resolve import resolve_primary_session_metadata
@@ -432,6 +439,11 @@ def run_harness_process(
             skills=ctx.session_metadata.skills,
             skill_paths=ctx.session_metadata.skill_paths,
         )
+        # Auto-create work item if session has none
+        existing_work_id = get_session_active_work_id(ctx.state_root, chat_id)
+        if not existing_work_id:
+            auto_item = work_store.create_auto_work_item(ctx.state_root)
+            update_session_work_id(ctx.state_root, chat_id, auto_item.name)
         primary_spawn_id = spawn_store.start_spawn(
             ctx.state_root,
             chat_id=chat_id,

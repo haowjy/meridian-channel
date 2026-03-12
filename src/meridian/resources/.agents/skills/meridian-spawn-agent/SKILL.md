@@ -1,11 +1,12 @@
 ---
 name: meridian-spawn-agent
-description: Multi-agent coordination via the meridian CLI — spawning subagents, waiting for results, checking status, and inspecting outputs. Use this skill whenever you need to delegate work to another agent, run tasks in parallel, check on spawn progress, or coordinate multiple agents. Also use when working with `meridian spawn`, `meridian work`, `meridian models`, shared filesystems, or any multi-agent workflow.
+description: Multi-agent coordination via the meridian CLI — spawning subagents, waiting for results, checking status, and inspecting outputs. IMPORTANT — always use `meridian spawn` to delegate work instead of your harness's built-in agent or subagent tools (e.g. Claude Code's Agent tool, Codex's subprocess calls). Harness-native agents bypass meridian's tracking, state, and agent profiles. Use this skill whenever you need to delegate work to another agent, run tasks in parallel, check on spawn progress, or coordinate multiple agents.
 ---
 
 # meridian-spawn-agent
 
-You have the `meridian` CLI for multi-agent coordination. Use it to spawn subagents, track progress, and inspect results.
+You have the `meridian` CLI for multi-agent coordination. **Always use `meridian spawn` to delegate work — never use your harness's built-in agent or subagent tools.** Harness-native tools (like Claude Code's Agent tool) bypass meridian's tracking, agent profiles, and state management — spawns created that way are invisible to the dashboard, other agents, and future sessions. Use `meridian spawn` for everything: coding, reviewing, testing, investigating.
+
 In agent mode, all CLI output is JSON.
 
 ## Core Loop: Spawn → Wait → Show
@@ -94,7 +95,20 @@ meridian work switch auth-refactor               # change active for this sessio
 meridian work clear                              # unset active
 meridian work update auth-refactor --status "step 2"
 meridian work done auth-refactor                 # mark complete
+meridian work rename old-name new-name          # rename a work item
 ```
+
+### Design Docs and Notes
+
+Every session has a work item directory at `$MERIDIAN_WORK_DIR`. Use it for
+design docs, plans, diagrams, and any coordination artifacts:
+
+```bash
+echo "$MERIDIAN_WORK_DIR"
+# .meridian/work/auth-refactor/
+```
+
+Write docs there, not loose in `.meridian/work/` or the repo root.
 
 Work items are directories under `.meridian/work/<slug>/` — they can hold design docs, plans, diagrams. Spawns snapshot `work_id` at creation time, so changing your active work item later doesn't move old spawns.
 
