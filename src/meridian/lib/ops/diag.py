@@ -11,9 +11,8 @@ from meridian.lib.config.settings import resolve_path_list
 from meridian.lib.core.spawn_lifecycle import is_active_spawn_status
 from meridian.lib.core.util import FormatContext
 from meridian.lib.harness.materialize import cleanup_materialized
-from meridian.lib.ops.runtime import build_runtime
+from meridian.lib.ops.runtime import build_runtime, resolve_state_root
 from meridian.lib.state import spawn_store
-from meridian.lib.state.paths import resolve_state_paths
 from meridian.lib.state.session_store import cleanup_stale_sessions
 
 
@@ -53,16 +52,12 @@ class DoctorOutput(BaseModel):
         return result
 
 
-def _state_root(repo_root: Path) -> Path:
-    return resolve_state_paths(repo_root).root_dir
-
-
 def _count_runs(repo_root: Path) -> int:
-    return len(spawn_store.list_spawns(_state_root(repo_root)))
+    return len(spawn_store.list_spawns(resolve_state_root(repo_root)))
 
 
 def _repair_stale_session_locks(repo_root: Path) -> int:
-    cleanup = cleanup_stale_sessions(_state_root(repo_root))
+    cleanup = cleanup_stale_sessions(resolve_state_root(repo_root))
     for harness_id in cleanup.materialized_scopes:
         cleanup_materialized(harness_id, repo_root)
     return len(cleanup.cleaned_ids)
@@ -71,7 +66,7 @@ def _repair_stale_session_locks(repo_root: Path) -> int:
 def _repair_orphan_runs(repo_root: Path) -> int:
     from meridian.lib.state.reaper import reconcile_spawns
 
-    state_root = _state_root(repo_root)
+    state_root = resolve_state_root(repo_root)
     spawns = spawn_store.list_spawns(state_root)
     running_before = sum(1 for s in spawns if is_active_spawn_status(s.status))
     reconciled = reconcile_spawns(state_root, spawns)
@@ -112,7 +107,7 @@ def doctor_sync(payload: DoctorInput) -> DoctorOutput:
 
     running = [
         row.id
-        for row in spawn_store.list_spawns(_state_root(runtime.repo_root))
+        for row in spawn_store.list_spawns(resolve_state_root(runtime.repo_root))
         if is_active_spawn_status(row.status)
     ]
     if running:

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import cast
 
 from meridian.lib.core.spawn_lifecycle import is_active_spawn_status
+from meridian.lib.ops.runtime import resolve_state_root
 from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_state_paths
 
@@ -22,17 +23,13 @@ _ASSISTANT_ROLE_MARKER_RE = re.compile(r"^(assistant|codex)$", re.IGNORECASE)
 _LOG_ROLE_MARKER_RE = re.compile(r"^(user|assistant|codex|exec)$", re.IGNORECASE)
 
 
-def _state_root(repo_root: Path) -> Path:
-    return resolve_state_paths(repo_root).root_dir
-
-
 def _select_latest_spawn_id(
     repo_root: Path,
     *,
     statuses: tuple[str, ...] | None,
 ) -> str | None:
     from meridian.lib.state.reaper import reconcile_spawns
-    spawns = reconcile_spawns(_state_root(repo_root), spawn_store.list_spawns(_state_root(repo_root)))
+    spawns = reconcile_spawns(resolve_state_root(repo_root), spawn_store.list_spawns(resolve_state_root(repo_root)))
     if statuses is not None:
         wanted = set(statuses)
         spawns = [item for item in spawns if item.status in wanted]
@@ -64,16 +61,16 @@ def resolve_spawn_references(repo_root: Path, refs: tuple[str, ...]) -> tuple[st
 
 
 def read_spawn_row(repo_root: Path, spawn_id: str) -> spawn_store.SpawnRecord | None:
-    record = spawn_store.get_spawn(_state_root(repo_root), spawn_id)
+    record = spawn_store.get_spawn(resolve_state_root(repo_root), spawn_id)
     if record is not None and is_active_spawn_status(record.status):
         from meridian.lib.state.reaper import reconcile_active_spawn
 
-        record = reconcile_active_spawn(_state_root(repo_root), record)
+        record = reconcile_active_spawn(resolve_state_root(repo_root), record)
     return record
 
 
 def read_report_text(repo_root: Path, spawn_id: str) -> tuple[str | None, str | None]:
-    report_path = _state_root(repo_root) / "spawns" / spawn_id / "report.md"
+    report_path = resolve_state_root(repo_root) / "spawns" / spawn_id / "report.md"
     if not report_path.is_file():
         return None, None
     text = report_path.read_text(encoding="utf-8", errors="ignore").strip() or None
@@ -171,7 +168,7 @@ def extract_last_assistant_message(stderr_text: str) -> str | None:
 
 
 def _read_running_log_details(repo_root: Path, spawn_id: str) -> tuple[str, str | None]:
-    stderr_path = _state_root(repo_root) / "spawns" / spawn_id / "stderr.log"
+    stderr_path = resolve_state_root(repo_root) / "spawns" / spawn_id / "stderr.log"
     if not stderr_path.is_file():
         return stderr_path.as_posix(), None
     stderr_text = stderr_path.read_text(encoding="utf-8", errors="ignore")

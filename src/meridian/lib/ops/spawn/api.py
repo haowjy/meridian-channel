@@ -10,6 +10,7 @@ from pathlib import Path
 from meridian.lib.core.context import RuntimeContext
 from meridian.lib.core.spawn_lifecycle import ACTIVE_SPAWN_STATUSES, is_active_spawn_status
 from meridian.lib.core.sink import NullSink, OutputSink
+from meridian.lib.utils.time import minutes_to_seconds
 from meridian.lib.ops.runtime import (
     build_runtime_from_root_and_config,
     resolve_runtime_root_and_config,
@@ -51,12 +52,6 @@ from .query import (
 )
 
 _WAIT_HEARTBEAT_INTERVAL_SECS = 5.0
-
-
-def minutes_to_seconds(timeout_minutes: float | None) -> float | None:
-    if timeout_minutes is None:
-        return None
-    return timeout_minutes * 60.0
 
 
 def spawn_create_sync(

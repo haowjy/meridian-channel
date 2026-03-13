@@ -42,6 +42,8 @@ from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.paths import resolve_spawn_log_dir, resolve_state_paths
 from meridian.lib.core.types import ModelId, SpawnId
 
+from meridian.lib.utils.time import minutes_to_seconds
+
 from ..session_policy import ensure_session_work_item
 from ..runtime import OperationRuntime, build_runtime, resolve_chat_id, runtime_context
 from .models import SpawnActionOutput, SpawnCreateInput
@@ -53,12 +55,6 @@ _BACKGROUND_SUBMIT_MESSAGE = "Background spawn submitted."
 _BACKGROUND_PID_FILENAME = "background.pid"
 _BACKGROUND_STDOUT_FILENAME = "background-launcher.stdout.log"
 _BACKGROUND_STDERR_FILENAME = "background-launcher.stderr.log"
-
-
-def minutes_to_seconds(timeout_minutes: float | None) -> float | None:
-    if timeout_minutes is None:
-        return None
-    return timeout_minutes * 60.0
 
 
 class _SpawnContext(BaseModel):

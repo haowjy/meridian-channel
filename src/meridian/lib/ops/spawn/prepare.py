@@ -30,18 +30,14 @@ from meridian.lib.safety.permissions import (
 )
 from meridian.lib.core.types import ModelId
 
+from meridian.lib.utils.time import minutes_to_seconds
+
 from ..runtime import OperationRuntime, build_runtime, resolve_runtime_root_and_config
 from .models import SpawnCreateInput
 from .plan import ExecutionPolicy, PreparedSpawnPlan, SessionContinuation
 
 logger = structlog.get_logger(__name__)
 _DISCOVERED_MODEL_CONTEXT_LIMIT = 12
-
-
-def _minutes_to_seconds(timeout_minutes: float | None) -> float | None:
-    if timeout_minutes is None:
-        return None
-    return timeout_minutes * 60.0
 
 
 def merge_warnings(*warnings: str | None) -> str | None:
@@ -338,8 +334,8 @@ def build_create_payload(
             continue_fork=resolved_continue_fork,
         ),
         execution=ExecutionPolicy(
-            timeout_secs=_minutes_to_seconds(payload.timeout),
-            kill_grace_secs=_minutes_to_seconds(runtime_view.config.kill_grace_minutes) or 0.0,
+            timeout_secs=minutes_to_seconds(payload.timeout),
+            kill_grace_secs=minutes_to_seconds(runtime_view.config.kill_grace_minutes) or 0.0,
             max_retries=runtime_view.config.max_retries,
             retry_backoff_secs=runtime_view.config.retry_backoff_seconds,
             permission_config=permission_config,
