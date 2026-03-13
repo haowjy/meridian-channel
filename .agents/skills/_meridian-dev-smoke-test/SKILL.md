@@ -158,7 +158,7 @@ Keep the main smoke-test pass generic. When a change targets one command area, r
 
 - For spawn lifecycle and harness testing, see [`resources/spawn-lifecycle.md`](resources/spawn-lifecycle.md).
 - For `meridian sync`, use `tests/smoke/sync/install-cycle.md` and [`resources/sync.md`](resources/sync.md).
-- For Codex-specific notes about sandboxed `uv run` usage, cache location, and scratch-repo hygiene, see [`resources/testing-with-codex.md`](resources/testing-with-codex.md).
+- For Codex-specific notes about sandboxed `uv run` usage, cache location, scratch-repo hygiene, and **permission tier testing** (including the sandbox nesting trap), see [`resources/testing-with-codex.md`](resources/testing-with-codex.md).
 
 ## Self-Healing This Skill
 
