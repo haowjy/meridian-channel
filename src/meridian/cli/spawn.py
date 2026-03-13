@@ -268,15 +268,15 @@ def _spawn_show(
         bool,
         Parameter(
             name="--report",
-            help="Include full spawn report in output (default: on). Use --no-report to omit.",
+            help="Include full spawn report body in output. By default only the report path is shown.",
         ),
-    ] = True,
+    ] = False,
 ) -> None:
     emit(
         spawn_show_sync(
             SpawnShowInput(
                 spawn_id=spawn_id,
-                report=report,
+                include_report_body=report,
             ),
             sink=current_output_sink(),
         )
@@ -340,9 +340,9 @@ def _spawn_wait(
         bool,
         Parameter(
             name="--report",
-            help="Include spawn report in output (default: on). Use --no-report to omit.",
+            help="Include full spawn report body in output. By default only the report path is shown.",
         ),
-    ] = True,
+    ] = False,
 ) -> None:
     result = spawn_wait_sync(
         SpawnWaitInput(
@@ -350,7 +350,7 @@ def _spawn_wait(
             timeout=timeout,
             verbose=verbose,
             quiet=quiet,
-            report=report,
+            include_report_body=report,
         ),
         sink=current_output_sink(),
     )

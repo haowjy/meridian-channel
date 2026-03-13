@@ -203,7 +203,7 @@ class SpawnShowInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     spawn_id: str
-    report: bool = False
+    include_report_body: bool = False
     repo_root: str | None = None
 
 
@@ -233,9 +233,30 @@ class SpawnDetailOutput(BaseModel):
     cost_usd: float | None
     report_path: str | None
     report_summary: str | None
-    report: str | None
+    report_body: str | None
     last_message: str | None = None
     log_path: str | None = None
+
+    def _normalized_report_body(self) -> str | None:
+        report_text = (self.report_body or "").strip()
+        if not report_text:
+            return None
+        return report_text
+
+    def _report_suffix(self) -> str:
+        report_text = self._normalized_report_body()
+        if report_text is None:
+            return ""
+        return f"\n\n{report_text}"
+
+    def report_table_value(self) -> str:
+        return self.report_path or "-"
+
+    def report_section(self) -> str | None:
+        report_text = self._normalized_report_body()
+        if report_text is None:
+            return None
+        return f"Report for {self.spawn_id}\n{report_text}"
 
     def format_text(self, ctx: FormatContext | None = None) -> str:
         """Key-value detail view for text output mode. Omits None/empty fields."""
@@ -278,7 +299,7 @@ class SpawnDetailOutput(BaseModel):
             ("Log", self.log_path),
             ("Hint", f"tail -f {self.log_path}" if self.log_path else None),
         ]
-        return kv_block(pairs)
+        return kv_block(pairs) + self._report_suffix()
 
 
 class SpawnWrittenFilesInput(BaseModel):
@@ -325,7 +346,7 @@ class SpawnWaitInput(BaseModel):
     poll_interval_secs: float | None = None
     verbose: bool = False
     quiet: bool = False
-    report: bool = False
+    include_report_body: bool = False
     repo_root: str | None = None
 
 
@@ -344,20 +365,33 @@ class SpawnWaitMultiOutput(BaseModel):
     exit_code: int | None = None
 
     def format_text(self, ctx: FormatContext | None = None) -> str:
-        """Summarize waited spawns as a fixed-column table."""
+        """Render waited spawns, expanding report content when available."""
+        if len(self.spawns) == 1:
+            return self.spawns[0].format_text(ctx)
+
         from meridian.cli.format_helpers import tabular
 
-        rows = [["spawn_id", "status", "duration", "exit"]]
+        rows = [["spawn_id", "status", "duration", "exit", "report"]]
         rows.extend(
             [
                 run.spawn_id,
                 run.status,
                 f"{run.duration_secs:.1f}s" if run.duration_secs is not None else "-",
                 str(run.exit_code) if run.exit_code is not None else "-",
+                run.report_table_value(),
             ]
             for run in self.spawns
         )
-        return tabular(rows)
+        table = tabular(rows)
+
+        report_sections: list[str] = []
+        for run in self.spawns:
+            section = run.report_section()
+            if section is not None:
+                report_sections.append(section)
+        if not report_sections:
+            return table
+        return f"{table}\n\n" + "\n\n".join(report_sections)
 
 
 __all__ = [

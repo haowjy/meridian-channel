@@ -456,7 +456,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
     ),
     _spec(
         name="spawn.show",
-        description="Show spawn status, duration, model, and report. Use --report to include report text.",
+        description="Show spawn status, duration, model, and report path. Use --report to include report text.",
         handler=spawn_show,
         sync_handler=spawn_show_sync,
         input_type=SpawnShowInput,
@@ -478,7 +478,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
     ),
     _spec(
         name="spawn.wait",
-        description="Block until spawn(s) complete. Returns status and report by default.",
+        description="Block until spawn(s) complete. Shows report paths by default and inlines report text with --report.",
         handler=spawn_wait,
         sync_handler=spawn_wait_sync,
         input_type=SpawnWaitInput,

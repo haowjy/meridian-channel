@@ -264,7 +264,7 @@ def spawn_show_sync(
     return detail_from_row(
         repo_root=repo_root,
         row=row,
-        report=payload.report,
+        include_report_body=payload.include_report_body,
     )
 
 
@@ -541,7 +541,7 @@ def spawn_wait_sync(
                 detail_from_row(
                     repo_root=repo_root,
                     row=completed_rows[spawn_id],
-                    report=payload.report,
+                    include_report_body=payload.include_report_body,
                 )
                 for spawn_id in spawn_ids
             )

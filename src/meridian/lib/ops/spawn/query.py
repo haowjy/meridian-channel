@@ -69,12 +69,23 @@ def read_spawn_row(repo_root: Path, spawn_id: str) -> spawn_store.SpawnRecord | 
     return record
 
 
-def read_report_text(repo_root: Path, spawn_id: str) -> tuple[str | None, str | None]:
+def read_report(
+    repo_root: Path,
+    spawn_id: str,
+    *,
+    include_body: bool,
+) -> tuple[str | None, str | None]:
     report_path = resolve_state_root(repo_root) / "spawns" / spawn_id / "report.md"
     if not report_path.is_file():
         return None, None
+    if not include_body:
+        return report_path.as_posix(), None
     text = report_path.read_text(encoding="utf-8", errors="ignore").strip() or None
     return report_path.as_posix(), text
+
+
+def read_report_text(repo_root: Path, spawn_id: str) -> tuple[str | None, str | None]:
+    return read_report(repo_root, spawn_id, include_body=True)
 
 
 def _truncate_log_message(value: str, *, max_chars: int = _RUNNING_LOG_MESSAGE_LIMIT) -> str:
@@ -188,10 +199,10 @@ def detail_from_row(
     *,
     repo_root: Path,
     row: spawn_store.SpawnRecord,
-    report: bool,
+    include_report_body: bool,
 ) -> SpawnDetailOutput:
-    report_path, report_text = read_report_text(repo_root, row.id)
-    report_summary = report_text[:500] if report_text else None
+    report_path, report_body = read_report(repo_root, row.id, include_body=include_report_body)
+    report_summary = report_body[:500] if report_body else None
 
     last_message: str | None = None
     log_path: str | None = None
@@ -215,7 +226,7 @@ def detail_from_row(
         cost_usd=row.total_cost_usd,
         report_path=report_path,
         report_summary=report_summary,
-        report=report_text if report else None,
+        report_body=report_body,
         last_message=last_message,
         log_path=log_path,
     )
@@ -224,6 +235,7 @@ def detail_from_row(
 __all__ = [
     "detail_from_row",
     "extract_last_assistant_message",
+    "read_report",
     "read_written_files",
     "read_report_text",
     "read_spawn_row",
