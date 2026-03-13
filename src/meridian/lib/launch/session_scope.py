@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import structlog
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+from meridian.lib.ops.session_policy import cleanup_empty_auto_work_item
 from meridian.lib.state.session_store import (
     start_session,
     stop_session,
     update_session_harness_id,
 )
+
+logger = structlog.get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -59,6 +63,10 @@ def session_scope(
             record_harness_session_id=_record_harness_session_id,
         )
     finally:
+        try:
+            cleanup_empty_auto_work_item(state_root, resolved_chat_id)
+        except Exception:
+            logger.debug("Auto work item cleanup failed; ignoring.", exc_info=True)
         _stop_session(state_root, resolved_chat_id)
 
 
