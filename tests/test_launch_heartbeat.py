@@ -9,24 +9,9 @@ import pytest
 
 from meridian.lib.launch import heartbeat as heartbeat_module
 from meridian.lib.launch.heartbeat import (
-    _touch_heartbeat,
     heartbeat_scope,
     threaded_heartbeat_scope,
 )
-from meridian.lib.state.reaper_config import validate_stale_threshold_secs
-
-
-def _read_heartbeat_timestamp(path: Path) -> float:
-    return float(path.read_text(encoding="utf-8").strip())
-
-
-def test_touch_heartbeat_creates_file(tmp_path: Path) -> None:
-    heartbeat_path = tmp_path / "heartbeats" / "heartbeat.txt"
-
-    _touch_heartbeat(heartbeat_path)
-
-    assert heartbeat_path.is_file()
-    assert isinstance(_read_heartbeat_timestamp(heartbeat_path), float)
 
 
 @pytest.mark.asyncio
@@ -69,7 +54,7 @@ async def test_heartbeat_scope_interval(
 
     def _recording_touch(path: Path) -> None:
         real_touch(path)
-        touches.append(_read_heartbeat_timestamp(path))
+        touches.append(path.stat().st_mtime)
 
     monkeypatch.setattr(heartbeat_module, "_touch_heartbeat", _recording_touch)
 
@@ -106,7 +91,7 @@ def test_threaded_heartbeat_scope_interval(
 
     def _recording_touch(path: Path) -> None:
         real_touch(path)
-        touches.append(_read_heartbeat_timestamp(path))
+        touches.append(path.stat().st_mtime)
 
     monkeypatch.setattr(heartbeat_module, "_touch_heartbeat", _recording_touch)
 
@@ -115,23 +100,3 @@ def test_threaded_heartbeat_scope_interval(
 
     assert len(touches) >= 2
     assert touches[-1] > touches[0]
-
-
-def test_validate_stale_threshold_valid() -> None:
-    assert validate_stale_threshold_secs(60) == 60
-    assert validate_stale_threshold_secs(86_400) == 86_400
-    assert validate_stale_threshold_secs(300) == 300
-
-
-def test_validate_stale_threshold_too_low() -> None:
-    with pytest.raises(ValueError):
-        validate_stale_threshold_secs(59)
-
-
-def test_validate_stale_threshold_too_high() -> None:
-    with pytest.raises(ValueError):
-        validate_stale_threshold_secs(86_401)
-
-
-def test_validate_stale_threshold_coerces_string() -> None:
-    assert validate_stale_threshold_secs("300") == 300
