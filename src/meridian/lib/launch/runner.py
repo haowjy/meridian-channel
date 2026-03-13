@@ -219,16 +219,6 @@ async def spawn_and_stream(
     if process.stdout is None or process.stderr is None:
         raise RuntimeError("Subprocess did not expose stdout/stderr pipes.")
 
-    # Write harness child PID for external cleanup
-    if log_dir is not None:
-        atomic_write_text(log_dir / "harness.pid", f"{process.pid}\n")
-    if on_process_started is not None:
-        try:
-            on_process_started(process.pid)
-        except Exception:
-            await terminate_process(process, grace_seconds=kill_grace_seconds)
-            raise
-
     budget_breach: BudgetBreach | None = None
     budget_termination_task: asyncio.Task[None] | None = None
     terminated_by_report_watchdog = False
@@ -251,63 +241,75 @@ async def spawn_and_stream(
             )
 
     watchdog_task: asyncio.Task[None] | None = None
-    if report_watchdog_path is not None:
-        async def _run_report_watchdog() -> None:
-            nonlocal terminated_by_report_watchdog
-            terminated_by_report_watchdog = await _report_watchdog(
-                report_path=report_watchdog_path,
-                process=process,
-            )
-
-        watchdog_task = asyncio.create_task(
-            _run_report_watchdog()
-        )
-
-    stdout_task = asyncio.create_task(
-        capture_stdout_stream(
-            process.stdout,
-            output_log_path,
-            secrets=secrets,
-            line_observer=_on_stdout_line,
-            parse_stream_event=parse_stream_event,
-            event_observer=event_observer,
-            stream_to_terminal=stream_stdout_to_terminal,
-        )
-    )
-    stderr_task = asyncio.create_task(
-        capture_stderr_stream(
-            process.stderr,
-            stderr_log_path,
-            secrets=secrets,
-            stream_to_terminal=stream_stderr_to_terminal,
-        )
-    )
+    stdout_task: asyncio.Task[bytes | None] | None = None
+    stderr_task: asyncio.Task[bytes] | None = None
     stdin_task: asyncio.Task[None] | None = None
-    if stdin_text is not None:
-        if process.stdin is None:
-            raise RuntimeError("Subprocess did not expose stdin pipe.")
-
-        async def _feed_stdin() -> None:
-            assert process.stdin is not None
-            try:
-                process.stdin.write(stdin_text.encode("utf-8"))
-                await process.stdin.drain()
-            except (BrokenPipeError, ConnectionResetError):
-                return
-            finally:
-                process.stdin.close()
-                try:
-                    await process.stdin.wait_closed()
-                except (BrokenPipeError, ConnectionResetError):
-                    pass
-
-        stdin_task = asyncio.create_task(_feed_stdin())
-
     received_signal: signal.Signals | None = None
     timed_out = False
     raw_return_code = DEFAULT_INFRA_EXIT_CODE
-    try:
-        with SignalForwarder(process) as forwarder:
+    with SignalForwarder(process) as forwarder:
+        try:
+            # Write harness child PID for external cleanup.
+            if log_dir is not None:
+                atomic_write_text(log_dir / "harness.pid", f"{process.pid}\n")
+            if on_process_started is not None:
+                try:
+                    on_process_started(process.pid)
+                except Exception:
+                    await terminate_process(process, grace_seconds=kill_grace_seconds)
+                    raise
+
+            if report_watchdog_path is not None:
+                async def _run_report_watchdog() -> None:
+                    nonlocal terminated_by_report_watchdog
+                    terminated_by_report_watchdog = await _report_watchdog(
+                        report_path=report_watchdog_path,
+                        process=process,
+                    )
+
+                watchdog_task = asyncio.create_task(
+                    _run_report_watchdog()
+                )
+
+            stdout_task = asyncio.create_task(
+                capture_stdout_stream(
+                    process.stdout,
+                    output_log_path,
+                    secrets=secrets,
+                    line_observer=_on_stdout_line,
+                    parse_stream_event=parse_stream_event,
+                    event_observer=event_observer,
+                    stream_to_terminal=stream_stdout_to_terminal,
+                )
+            )
+            stderr_task = asyncio.create_task(
+                capture_stderr_stream(
+                    process.stderr,
+                    stderr_log_path,
+                    secrets=secrets,
+                    stream_to_terminal=stream_stderr_to_terminal,
+                )
+            )
+            if stdin_text is not None:
+                if process.stdin is None:
+                    raise RuntimeError("Subprocess did not expose stdin pipe.")
+
+                async def _feed_stdin() -> None:
+                    assert process.stdin is not None
+                    try:
+                        process.stdin.write(stdin_text.encode("utf-8"))
+                        await process.stdin.drain()
+                    except (BrokenPipeError, ConnectionResetError):
+                        return
+                    finally:
+                        process.stdin.close()
+                        try:
+                            await process.stdin.wait_closed()
+                        except (BrokenPipeError, ConnectionResetError):
+                            pass
+
+                stdin_task = asyncio.create_task(_feed_stdin())
+
             try:
                 raw_return_code = await wait_for_process_exit(
                     process,
@@ -317,59 +319,60 @@ async def spawn_and_stream(
             except SpawnTimeoutError:
                 timed_out = True
                 raw_return_code = process.returncode if process.returncode is not None else 1
-            received_signal = forwarder.received_signal
-    except asyncio.CancelledError:
-        await _terminate_after_cancellation(process, kill_grace_seconds=kill_grace_seconds)
-        raise
-    finally:
-        if stdin_task is not None:
-            await stdin_task
-        if budget_termination_task is not None:
-            await budget_termination_task
-        if watchdog_task is not None:
-            if not watchdog_task.done():
-                watchdog_task.cancel()
-                try:
+        except asyncio.CancelledError:
+            await _terminate_after_cancellation(process, kill_grace_seconds=kill_grace_seconds)
+            raise
+        finally:
+            if stdin_task is not None:
+                await stdin_task
+            if budget_termination_task is not None:
+                await budget_termination_task
+            if watchdog_task is not None:
+                if not watchdog_task.done():
+                    watchdog_task.cancel()
+                    try:
+                        await watchdog_task
+                    except asyncio.CancelledError:
+                        pass
+                else:
                     await watchdog_task
-                except asyncio.CancelledError:
-                    pass
-            else:
-                await watchdog_task
-        tokens_payload: bytes | None = None
+            tokens_payload: bytes | None = None
 
-        drain_done, drain_pending = await asyncio.wait(
-            {stdout_task, stderr_task},
-            timeout=POST_EXIT_PIPE_DRAIN_TIMEOUT_SECONDS,
-        )
-        if stdout_task in drain_done:
-            tokens_payload = await stdout_task
-        else:
-            logger.warning(
-                "Timed out draining harness stdout after process exit; using captured file contents.",
-                spawn_id=str(spawn_id),
-                timeout_seconds=POST_EXIT_PIPE_DRAIN_TIMEOUT_SECONDS,
+            if stdout_task is not None and stderr_task is not None:
+                drain_done, drain_pending = await asyncio.wait(
+                    {stdout_task, stderr_task},
+                    timeout=POST_EXIT_PIPE_DRAIN_TIMEOUT_SECONDS,
+                )
+                if stdout_task in drain_done:
+                    tokens_payload = await stdout_task
+                else:
+                    logger.warning(
+                        "Timed out draining harness stdout after process exit; using captured file contents.",
+                        spawn_id=str(spawn_id),
+                        timeout_seconds=POST_EXIT_PIPE_DRAIN_TIMEOUT_SECONDS,
+                    )
+                    stdout_task.cancel()
+                if stderr_task in drain_done:
+                    await stderr_task
+                else:
+                    logger.warning(
+                        "Timed out draining harness stderr after process exit; using captured file contents.",
+                        spawn_id=str(spawn_id),
+                        timeout_seconds=POST_EXIT_PIPE_DRAIN_TIMEOUT_SECONDS,
+                    )
+                    stderr_task.cancel()
+
+                if drain_pending:
+                    await asyncio.wait(drain_pending)
+
+            _persist_captured_artifacts(
+                artifacts=artifacts,
+                spawn_id=spawn_id,
+                output_log_path=output_log_path,
+                stderr_log_path=stderr_log_path,
+                tokens_payload=tokens_payload,
             )
-            stdout_task.cancel()
-        if stderr_task in drain_done:
-            await stderr_task
-        else:
-            logger.warning(
-                "Timed out draining harness stderr after process exit; using captured file contents.",
-                spawn_id=str(spawn_id),
-                timeout_seconds=POST_EXIT_PIPE_DRAIN_TIMEOUT_SECONDS,
-            )
-            stderr_task.cancel()
-
-        if drain_pending:
-            await asyncio.wait(drain_pending)
-
-        _persist_captured_artifacts(
-            artifacts=artifacts,
-            spawn_id=spawn_id,
-            output_log_path=output_log_path,
-            stderr_log_path=stderr_log_path,
-            tokens_payload=tokens_payload,
-        )
+            received_signal = forwarder.received_signal
 
     if budget_breach is not None:
         mapped_exit_code = DEFAULT_INFRA_EXIT_CODE
