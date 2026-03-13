@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from meridian.lib.core.domain import SpawnStatus
 from meridian.lib.core.spawn_lifecycle import (
     ACTIVE_SPAWN_STATUSES as _ACTIVE_SPAWN_STATUSES,
+    TERMINAL_SPAWN_STATUSES as _TERMINAL_SPAWN_STATUSES,
     is_active_spawn_status as _is_active_spawn_status,
     validate_transition,
 )
@@ -465,11 +466,43 @@ def _record_from_events(events: list[SpawnEvent]) -> dict[str, SpawnRecord]:
             )
             continue
 
+        # Terminal state resolution: "succeeded" always wins over other
+        # terminal states (the work was completed). Among non-success
+        # terminal states, the first one wins (most relevant failure
+        # reason). Metadata (duration, cost, tokens) is always merged
+        # from all finalize events so no data is lost regardless of
+        # which writer wins the race.
+        already_terminal = current.status in _TERMINAL_SPAWN_STATUSES
+        event_status = event.status if event.status is not None else current.status
+        if already_terminal and event_status != "succeeded":
+            # Current state is terminal and new event is not an upgrade
+            # to succeeded — keep the existing terminal verdict locked.
+            resolved_status = current.status
+            resolved_exit_code = current.exit_code
+            resolved_error = current.error
+        elif already_terminal and event_status == "succeeded":
+            # Upgrade to succeeded — success always wins.
+            resolved_status = "succeeded"
+            resolved_exit_code = (
+                event.exit_code if event.exit_code is not None else 0
+            )
+            resolved_error = None
+        else:
+            # First terminal event.
+            resolved_status = event_status
+            resolved_exit_code = (
+                event.exit_code if event.exit_code is not None else current.exit_code
+            )
+            resolved_error = (
+                None if event_status == "succeeded"
+                else event.error if event.error is not None
+                else current.error
+            )
         records[spawn_id] = current.model_copy(
             update={
-                "status": event.status if event.status is not None else current.status,
+                "status": resolved_status,
                 "finished_at": event.finished_at if event.finished_at is not None else current.finished_at,
-                "exit_code": event.exit_code if event.exit_code is not None else current.exit_code,
+                "exit_code": resolved_exit_code,
                 "duration_secs": (
                     event.duration_secs if event.duration_secs is not None else current.duration_secs
                 ),
@@ -482,11 +515,7 @@ def _record_from_events(events: list[SpawnEvent]) -> dict[str, SpawnRecord]:
                 "output_tokens": (
                     event.output_tokens if event.output_tokens is not None else current.output_tokens
                 ),
-                "error": (
-                    None if event.status == "succeeded"
-                    else event.error if event.error is not None
-                    else current.error
-                ),
+                "error": resolved_error,
             }
         )
 

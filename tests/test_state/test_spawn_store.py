@@ -207,6 +207,69 @@ def test_succeeded_finalize_clears_stale_error(tmp_path: Path) -> None:
     assert row.error is None, f"Expected error=None after succeeded finalize, got {row.error!r}"
 
 
+def test_succeeded_cannot_be_overwritten_by_later_failed(tmp_path: Path) -> None:
+    """Once a spawn is succeeded, a racing failed finalize cannot downgrade it.
+
+    This is the core invariant that prevents the reaper/runner double-finalization
+    race: the projection treats 'succeeded' as dominant over 'failed' regardless
+    of event ordering, and merges metadata from all finalize events.
+    """
+    state_root = _state_root(tmp_path)
+
+    spawn_id = start_spawn(
+        state_root,
+        chat_id="c1",
+        model="gpt-5.4",
+        agent="coder",
+        harness="codex",
+        prompt="hello",
+    )
+
+    # First finalize: reaper correctly writes succeeded (no duration)
+    finalize_spawn(state_root, spawn_id, status="succeeded", exit_code=0)
+    row = get_spawn(state_root, spawn_id)
+    assert row is not None
+    assert row.status == "succeeded"
+    assert row.exit_code == 0
+
+    # Second finalize: runner races in with failed/143 (has duration)
+    finalize_spawn(
+        state_root, spawn_id, status="failed", exit_code=143,
+        duration_secs=312.5, error="signal",
+    )
+    row = get_spawn(state_root, spawn_id)
+    assert row is not None
+    # Status must remain succeeded — terminal immutability
+    assert row.status == "succeeded"
+    assert row.exit_code == 0
+    assert row.error is None
+    # But metadata from the second event IS merged
+    assert row.duration_secs == 312.5
+
+
+def test_failed_cannot_be_overwritten_by_another_failed(tmp_path: Path) -> None:
+    """Among non-success terminal states, the first one wins."""
+    state_root = _state_root(tmp_path)
+
+    spawn_id = start_spawn(
+        state_root,
+        chat_id="c1",
+        model="gpt-5.4",
+        agent="coder",
+        harness="codex",
+        prompt="hello",
+    )
+
+    finalize_spawn(state_root, spawn_id, status="failed", exit_code=1, error="timeout")
+    finalize_spawn(state_root, spawn_id, status="failed", exit_code=143, error="signal")
+
+    row = get_spawn(state_root, spawn_id)
+    assert row is not None
+    assert row.status == "failed"
+    assert row.exit_code == 1  # first failure's exit code
+    assert row.error == "timeout"  # first failure's error reason is locked
+
+
 def test_update_spawn_backfills_work_id_and_desc(tmp_path: Path) -> None:
     """Update events can backfill work_id and desc onto an existing spawn."""
     state_root = _state_root(tmp_path)
