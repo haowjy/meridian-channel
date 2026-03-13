@@ -63,6 +63,8 @@ def session_scope(
             record_harness_session_id=_record_harness_session_id,
         )
     finally:
+        # TODO: If more teardown hooks accumulate, extract a SessionTeardownHook
+        # protocol and run hooks from a registry instead of inline calls.
         try:
             cleanup_empty_auto_work_item(state_root, resolved_chat_id)
         except Exception:
