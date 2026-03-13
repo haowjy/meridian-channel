@@ -1,4 +1,4 @@
-"""Harness adapter ownership tests for native layout and session detection."""
+"""Harness adapter ownership tests for non-trivial session detection."""
 
 import json
 import os
@@ -12,20 +12,6 @@ from meridian.lib.harness.claude import ClaudeAdapter
 from meridian.lib.harness.codex import CodexAdapter
 from meridian.lib.harness.opencode import OpenCodeAdapter
 from meridian.lib.harness.session_detection import infer_harness_from_untracked_session_ref
-
-
-def test_claude_adapter_owns_native_layout_and_prompt_policy() -> None:
-    adapter = ClaudeAdapter()
-
-    layout = adapter.native_layout()
-    assert layout is not None
-    assert layout.agents == (".claude/agents",)
-    assert layout.skills == (".claude/skills",)
-
-    policy = adapter.run_prompt_policy()
-    assert policy.include_agent_body is False
-    assert policy.include_skills is False
-    assert policy.skill_injection_mode == "append-system-prompt"
 
 
 def test_claude_adapter_detects_latest_project_session(

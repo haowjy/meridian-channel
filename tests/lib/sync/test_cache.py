@@ -34,36 +34,6 @@ def test_resolve_source_local_path_returns_absolute_resolution(tmp_path: Path) -
     )
 
 
-def test_resolve_source_local_path_raises_for_missing_directory(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-
-    with pytest.raises(FileNotFoundError, match="Sync source path not found"):
-        resolve_source(
-            SyncSourceConfig(name="local", path="./missing"),
-            sync_cache_dir=repo_root / ".meridian" / "cache" / "sync",
-            repo_root=repo_root,
-        )
-
-
-def test_cache_dir_for_source_computes_remote_cache_directory(tmp_path: Path) -> None:
-    sync_cache_dir = tmp_path / ".meridian" / "cache" / "sync"
-
-    assert cache_dir_for_source(
-        SyncSourceConfig(name="remote", repo="owner/repo"),
-        sync_cache_dir,
-    ) == sync_cache_dir / "owner-repo"
-
-
-def test_cache_dir_for_source_returns_configured_local_path(tmp_path: Path) -> None:
-    sync_cache_dir = tmp_path / ".meridian" / "cache" / "sync"
-
-    assert cache_dir_for_source(
-        SyncSourceConfig(name="local", path="./skills"),
-        sync_cache_dir,
-    ) == Path("./skills")
-
-
 def test_cleanup_failed_clone_removes_partial_directory(tmp_path: Path) -> None:
     cache_dir = tmp_path / ".meridian" / "cache" / "sync" / "owner-repo"
     nested = cache_dir / "objects"

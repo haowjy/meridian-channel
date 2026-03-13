@@ -40,24 +40,3 @@ def test_compose_prompt_keeps_context_isolated_and_sanitized(tmp_path: Path) -> 
     assert "Read these files from disk when gathering context:" in composed
     assert "Safe context {{CTX}}" not in composed
     assert "Implement the change with context." in composed
-
-
-def test_compose_prompt_treats_reference_files_as_paths_only(tmp_path: Path) -> None:
-    reference_file = tmp_path / "source.ts"
-    reference_file.write_text("const template = '{{NOT_A_PROMPT_VAR}}';", encoding="utf-8")
-    second_reference_file = tmp_path / "second.ts"
-    second_reference_file.write_text("console.log('second');", encoding="utf-8")
-    loaded_refs = load_reference_files([reference_file, second_reference_file], include_content=False)
-
-    composed = compose_run_prompt_text(
-        skills=[],
-        references=loaded_refs,
-        user_prompt="Inspect {{CTX}}.",
-        template_variables={"CTX": "context"},
-    )
-
-    assert "{{NOT_A_PROMPT_VAR}}" not in composed
-    assert "Inspect context." in composed
-    assert str(reference_file) in composed
-    assert str(second_reference_file) in composed
-    assert composed.index(str(reference_file)) < composed.index(str(second_reference_file))

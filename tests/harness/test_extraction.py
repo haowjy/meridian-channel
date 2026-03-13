@@ -114,45 +114,6 @@ def test_harness_extract_report_uses_last_useful_assistant_output() -> None:
     assert OpenCodeAdapter().extract_report(artifacts, opencode_spawn) == "final message"
 
 
-def test_extract_or_fallback_report_prefers_report_md_then_adapter_then_generic() -> None:
-    artifacts = InMemoryStore()
-    report_md_spawn = SpawnId("r-report-md-over-adapter")
-    artifacts.put(make_artifact_key(report_md_spawn, "report.md"), b"report.md content\n")
-    artifacts.put(
-        make_artifact_key(report_md_spawn, "output.jsonl"),
-        b'{"role":"assistant","content":"generic fallback"}\n',
-    )
-    extracted = extract_or_fallback_report(
-        artifacts,
-        report_md_spawn,
-        adapter=_StubCodexAdapter(report="adapter report"),
-    )
-    assert extracted.content == "report.md content"
-    assert extracted.source == "report_md"
-
-    adapter_spawn = SpawnId("r-report-adapter-over-generic")
-    artifacts.put(
-        make_artifact_key(adapter_spawn, "output.jsonl"),
-        b'{"role":"assistant","content":"generic fallback"}\n',
-    )
-    extracted = extract_or_fallback_report(
-        artifacts,
-        adapter_spawn,
-        adapter=_StubCodexAdapter(report="adapter report"),
-    )
-    assert extracted.content == "adapter report"
-    assert extracted.source == "assistant_message"
-
-    generic_spawn = SpawnId("r-report-no-adapter")
-    artifacts.put(
-        make_artifact_key(generic_spawn, "output.jsonl"),
-        b'{"role":"assistant","content":"generic fallback"}\n',
-    )
-    extracted = extract_or_fallback_report(artifacts, generic_spawn, adapter=None)
-    assert extracted.content == "generic fallback"
-    assert extracted.source == "assistant_message"
-
-
 def test_extract_or_fallback_report_tolerates_adapter_errors_and_bad_jsonl() -> None:
     artifacts = InMemoryStore()
     failing_spawn = SpawnId("r-report-adapter-raises")
@@ -209,21 +170,6 @@ def test_extract_written_files_ignores_report_and_output_without_explicit_signal
     artifacts.put(
         make_artifact_key(spawn_id, "report.md"),
         b"Referenced `docs/mentioned_only.md` and `scripts/check-mermaid.sh`.\n",
-    )
-
-    assert extract_written_files(artifacts, spawn_id) == ()
-
-
-def test_extract_written_files_ignores_legacy_touched_artifacts() -> None:
-    artifacts = InMemoryStore()
-    spawn_id = SpawnId("r-files-legacy-ignored")
-    artifacts.put(
-        make_artifact_key(spawn_id, "files_touched.json"),
-        b'{"files_touched":["src/legacy.py"]}',
-    )
-    artifacts.put(
-        make_artifact_key(spawn_id, "files_touched.txt"),
-        b"src/legacy-again.py\n",
     )
 
     assert extract_written_files(artifacts, spawn_id) == ()

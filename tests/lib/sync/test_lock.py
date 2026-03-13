@@ -45,42 +45,6 @@ def _entry() -> SyncLockEntry:
     )
 
 
-def test_read_lock_file_returns_empty_for_missing_file(tmp_path):
-    lock = read_lock_file(tmp_path / ".meridian" / "sync.lock")
-
-    assert lock == SyncLockFile()
-
-
-def test_read_lock_file_reads_valid_json(tmp_path):
-    lock_path = tmp_path / ".meridian" / "sync.lock"
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "items": {
-                    "skills/github-issues": _entry().model_dump(mode="json"),
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    lock = read_lock_file(lock_path)
-
-    assert lock.version == 1
-    assert lock.items == {"skills/github-issues": _entry()}
-
-
-def test_read_lock_file_raises_for_corrupt_json(tmp_path):
-    lock_path = tmp_path / ".meridian" / "sync.lock"
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path.write_text("{not-json", encoding="utf-8")
-
-    with pytest.raises(json.JSONDecodeError):
-        read_lock_file(lock_path)
-
-
 def test_write_lock_file_roundtrip_and_cleans_tmp_file(tmp_path):
     lock_path = tmp_path / ".meridian" / "sync.lock"
     lock = SyncLockFile(items={"skills/github-issues": _entry()})

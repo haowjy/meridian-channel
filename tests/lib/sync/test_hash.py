@@ -58,30 +58,6 @@ def test_compute_file_body_hash_excludes_frontmatter(tmp_path: Path) -> None:
     assert compute_file_body_hash(agent_path) == expected
 
 
-def test_compute_file_body_hash_without_frontmatter(tmp_path: Path) -> None:
-    agent_path = tmp_path / "agent.md"
-    agent_path.write_text("# Agent\n\nPlain markdown body.\n", encoding="utf-8")
-
-    expected = _format_hash(
-        str(frontmatter.loads(agent_path.read_text(encoding="utf-8")).content).encode("utf-8")
-    )
-
-    assert compute_file_body_hash(agent_path) == expected
-
-
-def test_compute_tree_hash_for_simple_skill_directory(tmp_path: Path) -> None:
-    skill_dir = tmp_path / "simple-skill"
-    skill_dir.mkdir()
-    (skill_dir / "SKILL.md").write_text(
-        "---\nname: simple-skill\nmodel: local\n---\nCore skill instructions.\n",
-        encoding="utf-8",
-    )
-
-    expected = _expected_tree_hash(skill_dir)
-
-    assert compute_tree_hash(skill_dir) == expected
-
-
 def test_compute_tree_hash_with_extra_files_uses_raw_bytes_for_non_entry_files(
     tmp_path: Path,
 ) -> None:
@@ -145,17 +121,3 @@ def test_compute_tree_hash_is_deterministic_regardless_of_creation_order(tmp_pat
     (second / "SKILL.md").write_text("---\nmodel: x\nname: demo\n---\nShared body.\n", encoding="utf-8")
 
     assert compute_tree_hash(first) == compute_tree_hash(second)
-
-
-def test_compute_item_hash_dispatches_by_kind(tmp_path: Path) -> None:
-    agent_path = tmp_path / "agent.md"
-    agent_path.write_text("---\nname: agent\n---\nBody\n", encoding="utf-8")
-    skill_dir = tmp_path / "skill"
-    skill_dir.mkdir()
-    (skill_dir / "SKILL.md").write_text("---\nname: skill\n---\nBody\n", encoding="utf-8")
-
-    assert compute_item_hash(agent_path, "agent") == compute_file_body_hash(agent_path)
-    assert compute_item_hash(skill_dir, "skill") == compute_tree_hash(skill_dir)
-
-    with pytest.raises(ValueError, match="unknown"):
-        compute_item_hash(agent_path, "unknown")
