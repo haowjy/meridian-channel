@@ -25,7 +25,7 @@ def test_auto_approval_bypass_and_invalid_approval() -> None:
         "--dangerously-skip-permissions"
     ]
     assert permission_flags_for_harness(HarnessId("codex"), config) == [
-        "--dangerously-bypass-approvals-and-sandbox"
+        "--full-auto"
     ]
 
     with pytest.raises(ValueError, match="Unsupported approval mode"):
