@@ -73,9 +73,14 @@ class TextSink:
 
     def result(self, payload: Any) -> None:
         if isinstance(payload, str):
+            if payload == "":
+                return
             print(payload, file=self._stdout)
             return
-        print(_render_text(payload), file=self._stdout)
+        rendered = _render_text(payload)
+        if rendered == "":
+            return
+        print(rendered, file=self._stdout)
 
     def status(self, message: str) -> None:
         print(message, file=self._stderr)
@@ -140,9 +145,12 @@ class AgentSink:
     def _append_typed(self, message_type: str, payload: Any) -> None:
         # Prefer compact text rendering for agent mode — saves tokens.
         if isinstance(payload, TextFormattable):
+            rendered = payload.format_text(_DEFAULT_FORMAT_CTX)
+            if rendered == "":
+                return
             self._messages.append({
                 "type": message_type,
-                "text": payload.format_text(_DEFAULT_FORMAT_CTX),
+                "text": rendered,
             })
             return
 

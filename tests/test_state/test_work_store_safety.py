@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from functools import partial
 from pathlib import Path
 import threading
 
@@ -20,7 +21,11 @@ def _state_root(tmp_path: Path) -> Path:
     return state_dir
 
 
-def test_create_work_item_holds_lock_with_concurrent_creates(
+def _ensure_shared_task_name(_: int, *, state_root: Path) -> str:
+    return work_store.ensure_work_item_metadata(state_root, "shared-task").name
+
+
+def test_ensure_work_item_metadata_holds_lock_with_concurrent_calls(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     state_root = _state_root(tmp_path)
@@ -41,40 +46,20 @@ def test_create_work_item_holds_lock_with_concurrent_creates(
 
     total = 24
     with ThreadPoolExecutor(max_workers=8) as pool:
-        names = list(pool.map(lambda _: work_store.create_work_item(state_root, "Shared task").name, range(total)))
+        names = list(pool.map(partial(_ensure_shared_task_name, state_root=state_root), range(total)))
 
     assert len(names) == total
-    assert len(set(names)) == total
+    assert set(names) == {"shared-task"}
     assert lock_calls == total
 
 
-def test_create_auto_work_item_holds_lock_with_concurrent_creates(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_create_work_item_rejects_existing_slug(tmp_path: Path) -> None:
     state_root = _state_root(tmp_path)
 
-    original_lock_file = work_store.lock_file
-    lock_calls = 0
-    counter_lock = threading.Lock()
+    work_store.create_work_item(state_root, "Shared task")
 
-    @contextmanager
-    def counting_lock(lock_path: Path):
-        nonlocal lock_calls
-        with counter_lock:
-            lock_calls += 1
-        with original_lock_file(lock_path) as handle:
-            yield handle
-
-    monkeypatch.setattr(work_store, "lock_file", counting_lock)
-    monkeypatch.setattr(work_store, "generate_auto_name", lambda: "repeat-repeat-repeat")
-
-    total = 24
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        names = list(pool.map(lambda _: work_store.create_auto_work_item(state_root).name, range(total)))
-
-    assert len(names) == total
-    assert len(set(names)) == total
-    assert lock_calls == total
+    with pytest.raises(ValueError, match="already exists"):
+        work_store.create_work_item(state_root, "Shared task")
 
 
 def test_rename_work_item_writes_and_cleans_intent_journal(tmp_path: Path) -> None:
@@ -85,7 +70,25 @@ def test_rename_work_item_writes_and_cleans_intent_journal(tmp_path: Path) -> No
     renamed = work_store.rename_work_item(state_root, item.name, "new-name")
 
     assert renamed.name == "new-name"
-    assert not paths.work_rename_intent.exists()
+    assert not paths.work_items_rename_intent.exists()
+    assert (paths.work_items_dir / "new-name.json").exists()
+    assert not (paths.work_items_dir / "old-name.json").exists()
+
+
+def test_rename_work_item_moves_archived_scratch_dir(tmp_path: Path) -> None:
+    state_root = _state_root(tmp_path)
+    paths = StateRootPaths.from_root_dir(state_root)
+
+    item = work_store.create_work_item(state_root, "old-name")
+    archived_dir = paths.work_archive_dir / item.name
+    archived_dir.mkdir(parents=True, exist_ok=True)
+    (archived_dir / "notes.md").write_text("archived", encoding="utf-8")
+
+    renamed = work_store.rename_work_item(state_root, item.name, "new-name")
+
+    assert renamed.name == "new-name"
+    assert not archived_dir.exists()
+    assert (paths.work_archive_dir / "new-name" / "notes.md").read_text(encoding="utf-8") == "archived"
 
 
 def test_rename_work_item_crash_recovery_old_dir_exists_new_missing(tmp_path: Path) -> None:
@@ -93,16 +96,17 @@ def test_rename_work_item_crash_recovery_old_dir_exists_new_missing(tmp_path: Pa
     paths = StateRootPaths.from_root_dir(state_root)
 
     old_item = work_store.create_work_item(state_root, "old-name")
+    old_dir = paths.work_dir / old_item.name
+    old_dir.mkdir(parents=True, exist_ok=True)
     intent = WorkRenameIntent(
         old_work_id=old_item.name,
         new_work_id="new-name",
         started_at=utc_now_iso(),
     )
-    atomic_write_text(paths.work_rename_intent, intent.model_dump_json(indent=2) + "\n")
+    atomic_write_text(paths.work_items_rename_intent, intent.model_dump_json(indent=2) + "\n")
 
     work_store.reconcile_work_store(state_root)
 
-    old_dir = paths.work_dir / old_item.name
     new_dir = paths.work_dir / "new-name"
     recovered = work_store.get_work_item(state_root, "new-name")
 
@@ -110,7 +114,9 @@ def test_rename_work_item_crash_recovery_old_dir_exists_new_missing(tmp_path: Pa
     assert new_dir.exists()
     assert recovered is not None
     assert recovered.name == "new-name"
-    assert not paths.work_rename_intent.exists()
+    assert (paths.work_items_dir / "new-name.json").exists()
+    assert not (paths.work_items_dir / "old-name.json").exists()
+    assert not paths.work_items_rename_intent.exists()
 
 
 def test_rename_work_item_crash_recovery_new_dir_already_exists(tmp_path: Path) -> None:
@@ -118,6 +124,8 @@ def test_rename_work_item_crash_recovery_new_dir_already_exists(tmp_path: Path) 
     paths = StateRootPaths.from_root_dir(state_root)
 
     old_item = work_store.create_work_item(state_root, "old-name")
+    old_dir = paths.work_dir / old_item.name
+    old_dir.mkdir(parents=True, exist_ok=True)
     new_dir = paths.work_dir / "new-name"
     new_dir.mkdir(parents=True, exist_ok=True)
 
@@ -126,13 +134,15 @@ def test_rename_work_item_crash_recovery_new_dir_already_exists(tmp_path: Path) 
         new_work_id="new-name",
         started_at=utc_now_iso(),
     )
-    atomic_write_text(paths.work_rename_intent, intent.model_dump_json(indent=2) + "\n")
+    atomic_write_text(paths.work_items_rename_intent, intent.model_dump_json(indent=2) + "\n")
 
     work_store.reconcile_work_store(state_root)
 
-    assert not paths.work_rename_intent.exists()
-    assert (paths.work_dir / old_item.name).exists()
+    assert not paths.work_items_rename_intent.exists()
+    assert old_dir.exists()
     assert new_dir.exists()
+    assert (paths.work_items_dir / "new-name.json").exists()
+    assert not (paths.work_items_dir / "old-name.json").exists()
 
 
 def test_rename_work_item_crash_recovery_neither_dir_exists(tmp_path: Path) -> None:
@@ -144,11 +154,11 @@ def test_rename_work_item_crash_recovery_neither_dir_exists(tmp_path: Path) -> N
         new_work_id="new-missing",
         started_at=utc_now_iso(),
     )
-    atomic_write_text(paths.work_rename_intent, intent.model_dump_json(indent=2) + "\n")
+    atomic_write_text(paths.work_items_rename_intent, intent.model_dump_json(indent=2) + "\n")
 
     work_store.reconcile_work_store(state_root)
 
-    assert not paths.work_rename_intent.exists()
+    assert not paths.work_items_rename_intent.exists()
 
 
 def test_update_work_item_re_reads_after_lock(
@@ -193,19 +203,23 @@ def test_list_work_items_reconciles_before_listing(tmp_path: Path) -> None:
     paths = StateRootPaths.from_root_dir(state_root)
 
     old_item = work_store.create_work_item(state_root, "old-name")
+    old_dir = paths.work_dir / old_item.name
+    old_dir.mkdir(parents=True, exist_ok=True)
     intent = WorkRenameIntent(
         old_work_id=old_item.name,
         new_work_id="new-name",
         started_at=utc_now_iso(),
     )
-    atomic_write_text(paths.work_rename_intent, intent.model_dump_json(indent=2) + "\n")
+    atomic_write_text(paths.work_items_rename_intent, intent.model_dump_json(indent=2) + "\n")
 
     items = work_store.list_work_items(state_root)
 
     assert [item.name for item in items] == ["new-name"]
-    assert not (paths.work_dir / old_item.name).exists()
+    assert not old_dir.exists()
     assert (paths.work_dir / "new-name").exists()
-    assert not paths.work_rename_intent.exists()
+    assert (paths.work_items_dir / "new-name.json").exists()
+    assert not (paths.work_items_dir / "old-name.json").exists()
+    assert not paths.work_items_rename_intent.exists()
 
 
 def test_update_work_item_not_found_raises_value_error(tmp_path: Path) -> None:
@@ -232,11 +246,11 @@ def test_reconcile_work_store_tolerates_malformed_intent_file(tmp_path: Path) ->
     state_root = _state_root(tmp_path)
     paths = StateRootPaths.from_root_dir(state_root)
 
-    atomic_write_text(paths.work_rename_intent, "not json")
+    atomic_write_text(paths.work_items_rename_intent, "not json")
 
     work_store.reconcile_work_store(state_root)
 
-    assert not paths.work_rename_intent.exists()
+    assert not paths.work_items_rename_intent.exists()
 
 
 def test_get_work_item_remains_unlocked(
@@ -247,7 +261,7 @@ def test_get_work_item_remains_unlocked(
 
     @contextmanager
     def failing_lock(_lock_path: Path):
-        raise AssertionError("get_work_item should not acquire work.lock")
+        raise AssertionError("get_work_item should not acquire work-items.lock")
         yield
 
     monkeypatch.setattr(work_store, "lock_file", failing_lock)

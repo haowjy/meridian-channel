@@ -10,8 +10,9 @@ This split keeps Meridian focused on mechanism and lets users choose their own c
 
 Meridian core owns:
 
-- work items and freeform docs under `.meridian/work/`
-- shared reference docs under `.meridian/fs/`
+- work-item metadata under `.meridian/work-items/`
+- work-scoped scratch docs and notes under `.meridian/work/<id>/`
+- broader shared reference docs under `.meridian/fs/`
 - session and spawn metadata such as `active_work_id`, `work_id`, and `desc`
 - commands that surface coordination state, such as `meridian work` and `meridian spawn show`
 
@@ -45,8 +46,9 @@ Meridian should not declare one of these to be the only supported model.
 
 Coordination skills should read the existing Meridian surface area rather than inventing a parallel registry:
 
-- `.meridian/work/<id>/` for task docs, plans, and current status
-- `.meridian/fs/` for shared project context
+- `.meridian/work-items/<id>.json` for authoritative work-item metadata
+- `.meridian/work/<id>/` for work-scoped task docs, plans, and scratch notes
+- `.meridian/fs/` for broader shared project context and long-lived reference docs
 - session context for the active work item when present
 - spawn metadata for who is currently working on what
 

@@ -1,0 +1,387 @@
+"""Work item lifecycle and attachment mutations."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict
+
+from meridian.lib.core.context import RuntimeContext
+from meridian.lib.core.spawn_lifecycle import is_active_spawn_status
+from meridian.lib.core.util import FormatContext
+from meridian.lib.ops.runtime import async_from_sync, resolve_chat_id, resolve_roots, runtime_context
+from meridian.lib.ops.work_attachment import set_session_work_attachment
+from meridian.lib.ops.work_dashboard import work_dir_display
+from meridian.lib.state import session_store, spawn_store, work_store
+
+_NESTED_WORK_WARNING = (
+    "Work coordination is primary-owned; nested agents should usually ask the orchestrator "
+    "to run this command."
+)
+
+
+def _require_work_item(state_root: Path, work_id: str) -> work_store.WorkItem:
+    item = work_store.get_work_item(state_root, work_id)
+    if item is None:
+        raise ValueError(f"Work item '{work_id}' not found")
+    return item
+
+
+def _work_warning(ctx: RuntimeContext | None) -> str | None:
+    if runtime_context(ctx).depth > 0:
+        return _NESTED_WORK_WARNING
+    return None
+
+
+def _merge_warnings(*warnings: str | None) -> str | None:
+    parts = [warning.strip() for warning in warnings if warning and warning.strip()]
+    if not parts:
+        return None
+    return "\n".join(parts)
+
+
+def _active_work_attachment_warning(state_root: Path, work_id: str) -> str | None:
+    attached_session_ids = session_store.list_active_sessions_for_work_id(state_root, work_id)
+    active_spawn_ids = [
+        spawn.id
+        for spawn in spawn_store.list_spawns(state_root, filters={"work_id": work_id})
+        if spawn.kind != "primary" and is_active_spawn_status(spawn.status)
+    ]
+    warnings: list[str] = []
+    if attached_session_ids:
+        warnings.append(f"session(s): {', '.join(attached_session_ids)}")
+    if active_spawn_ids:
+        warnings.append(f"active spawn(s): {', '.join(active_spawn_ids)}")
+    if not warnings:
+        return None
+    return "Work item marked done while still referenced by " + "; ".join(warnings) + "."
+
+
+class WorkStartInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    label: str
+    description: str = ""
+    chat_id: str = ""
+    repo_root: str | None = None
+
+
+class WorkStartOutput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    status: str
+    description: str
+    created_at: str
+    work_dir: str
+    created: bool = True
+    warning: str | None = None
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        _ = ctx
+        return ""
+
+
+class WorkUpdateInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    work_id: str
+    status: str | None = None
+    description: str | None = None
+    repo_root: str | None = None
+
+
+class WorkUpdateOutput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    status: str
+    warning: str | None = None
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        _ = ctx
+        return ""
+
+
+class WorkDoneInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    work_id: str
+    repo_root: str | None = None
+
+
+class WorkSwitchInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    work_id: str
+    chat_id: str = ""
+    repo_root: str | None = None
+
+
+class WorkSwitchOutput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    work_id: str
+    message: str
+    warning: str | None = None
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        _ = ctx
+        return ""
+
+
+class WorkReopenInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    work_id: str
+    repo_root: str | None = None
+
+
+class WorkReopenOutput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    status: str
+    warning: str | None = None
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        _ = ctx
+        return ""
+
+
+class WorkRenameInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    work_id: str
+    new_name: str
+    chat_id: str = ""
+    repo_root: str | None = None
+
+
+class WorkRenameOutput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    old_name: str
+    new_name: str
+    changed: bool = True
+    warning: str | None = None
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        _ = ctx
+        return ""
+
+
+class WorkClearInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    chat_id: str = ""
+    repo_root: str | None = None
+
+
+class WorkClearOutput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    message: str
+    warning: str | None = None
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        _ = ctx
+        return ""
+
+
+def work_start_sync(
+    payload: WorkStartInput,
+    ctx: RuntimeContext | None = None,
+) -> WorkStartOutput:
+    warning = _work_warning(ctx)
+    roots = resolve_roots(payload.repo_root)
+    repo_root = roots.repo_root
+    state_root = roots.state_root
+    chat_id = resolve_chat_id(payload_chat_id=payload.chat_id, ctx=runtime_context(ctx))
+    requested_description = payload.description.strip()
+    normalized_work_id = work_store.slugify(payload.label)
+    if not normalized_work_id:
+        raise ValueError("Work item label must contain at least one letter or number.")
+
+    existing = work_store.get_work_item(state_root, normalized_work_id)
+    created = False
+    if existing is not None:
+        if existing.status == "done":
+            raise ValueError(
+                f"Work item '{existing.name}' is done. Use `meridian work reopen {existing.name}` first."
+            )
+        item = existing
+    else:
+        item = work_store.create_work_item(state_root, payload.label, requested_description)
+        created = True
+    set_session_work_attachment(state_root, chat_id=chat_id, work_id=item.name)
+    return WorkStartOutput(
+        name=item.name,
+        status=item.status,
+        description=item.description,
+        created_at=item.created_at,
+        work_dir=work_dir_display(repo_root, state_root, item.name),
+        created=created,
+        warning=warning,
+    )
+
+
+def work_update_sync(
+    payload: WorkUpdateInput,
+    ctx: RuntimeContext | None = None,
+) -> WorkUpdateOutput:
+    warning = _work_warning(ctx)
+    if payload.status is None and payload.description is None:
+        raise ValueError("Nothing to update. Pass --status and/or --description.")
+    state_root = resolve_roots(payload.repo_root).state_root
+    current = _require_work_item(state_root, payload.work_id)
+    if payload.status == "done":
+        attachment_warning = _active_work_attachment_warning(state_root, payload.work_id)
+        item = work_store.archive_work_item(state_root, payload.work_id)
+        if payload.description is not None:
+            item = work_store.update_work_item(
+                state_root,
+                payload.work_id,
+                description=payload.description,
+            )
+        return WorkUpdateOutput(
+            name=item.name,
+            status=item.status,
+            warning=_merge_warnings(warning, attachment_warning),
+        )
+    if current.status == "done" and payload.status is not None:
+        raise ValueError(
+            f"Work item '{payload.work_id}' is done. Use `meridian work reopen {payload.work_id}` first."
+        )
+    item = work_store.update_work_item(
+        state_root,
+        payload.work_id,
+        status=payload.status,
+        description=payload.description,
+    )
+    return WorkUpdateOutput(name=item.name, status=item.status, warning=warning)
+
+
+def work_done_sync(
+    payload: WorkDoneInput,
+    ctx: RuntimeContext | None = None,
+) -> WorkUpdateOutput:
+    nested_warning = _work_warning(ctx)
+    state_root = resolve_roots(payload.repo_root).state_root
+    attachment_warning = _active_work_attachment_warning(state_root, payload.work_id)
+    item = work_store.archive_work_item(state_root, payload.work_id)
+    return WorkUpdateOutput(
+        name=item.name,
+        status=item.status,
+        warning=_merge_warnings(nested_warning, attachment_warning),
+    )
+
+
+def work_reopen_sync(
+    payload: WorkReopenInput,
+    ctx: RuntimeContext | None = None,
+) -> WorkReopenOutput:
+    warning = _work_warning(ctx)
+    state_root = resolve_roots(payload.repo_root).state_root
+    item = work_store.reopen_work_item(state_root, payload.work_id)
+    return WorkReopenOutput(name=item.name, status=item.status, warning=warning)
+
+
+def work_switch_sync(
+    payload: WorkSwitchInput,
+    ctx: RuntimeContext | None = None,
+) -> WorkSwitchOutput:
+    warning = _work_warning(ctx)
+    state_root = resolve_roots(payload.repo_root).state_root
+    item = _require_work_item(state_root, payload.work_id)
+    chat_id = resolve_chat_id(payload_chat_id=payload.chat_id, ctx=runtime_context(ctx))
+    updated = set_session_work_attachment(state_root, chat_id=chat_id, work_id=item.name)
+    message = (
+        f"Active work item: {item.name}"
+        if updated
+        else f"Work item ready: {item.name} (no active session to update)"
+    )
+    return WorkSwitchOutput(work_id=item.name, message=message, warning=warning)
+
+
+def work_rename_sync(
+    payload: WorkRenameInput,
+    ctx: RuntimeContext | None = None,
+) -> WorkRenameOutput:
+    warning = _work_warning(ctx)
+    state_root = resolve_roots(payload.repo_root).state_root
+    old_name = payload.work_id
+    _require_work_item(state_root, old_name)
+    item = work_store.rename_work_item(state_root, old_name, payload.new_name)
+
+    for spawn in spawn_store.list_spawns(state_root, filters={"work_id": old_name}):
+        if spawn.kind == "child":
+            spawn_store.update_spawn(state_root, spawn.id, work_id=item.name)
+
+    chat_id = resolve_chat_id(payload_chat_id=payload.chat_id, ctx=runtime_context(ctx))
+    current_work_id = session_store.get_session_active_work_id(state_root, chat_id)
+    if current_work_id == old_name:
+        set_session_work_attachment(state_root, chat_id=chat_id, work_id=item.name)
+
+    return WorkRenameOutput(
+        old_name=old_name,
+        new_name=item.name,
+        changed=old_name != item.name,
+        warning=warning,
+    )
+
+
+def work_clear_sync(
+    payload: WorkClearInput,
+    ctx: RuntimeContext | None = None,
+) -> WorkClearOutput:
+    warning = _work_warning(ctx)
+    state_root = resolve_roots(payload.repo_root).state_root
+    chat_id = resolve_chat_id(payload_chat_id=payload.chat_id, ctx=runtime_context(ctx))
+    updated = set_session_work_attachment(
+        state_root,
+        chat_id=chat_id,
+        work_id=None,
+    )
+    message = "Cleared active work item." if updated else "No active session; nothing to clear."
+    return WorkClearOutput(message=message, warning=warning)
+
+
+work_start = async_from_sync(work_start_sync)
+work_update = async_from_sync(work_update_sync)
+work_done = async_from_sync(work_done_sync)
+work_reopen = async_from_sync(work_reopen_sync)
+work_switch = async_from_sync(work_switch_sync)
+work_rename = async_from_sync(work_rename_sync)
+work_clear = async_from_sync(work_clear_sync)
+
+
+__all__ = [
+    "WorkClearInput",
+    "WorkClearOutput",
+    "WorkDoneInput",
+    "WorkReopenInput",
+    "WorkReopenOutput",
+    "WorkRenameInput",
+    "WorkRenameOutput",
+    "WorkStartInput",
+    "WorkStartOutput",
+    "WorkSwitchInput",
+    "WorkSwitchOutput",
+    "WorkUpdateInput",
+    "WorkUpdateOutput",
+    "work_clear",
+    "work_clear_sync",
+    "work_done",
+    "work_done_sync",
+    "work_rename",
+    "work_rename_sync",
+    "work_reopen",
+    "work_reopen_sync",
+    "work_start",
+    "work_start_sync",
+    "work_switch",
+    "work_switch_sync",
+    "work_update",
+    "work_update_sync",
+]

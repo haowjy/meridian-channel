@@ -20,7 +20,7 @@ from meridian.lib.core.types import HarnessId, ModelId
 from meridian.lib.harness.adapter import SpawnParams
 from meridian.lib.harness.registry import get_default_harness_registry
 from meridian.lib.safety.permissions import PermissionConfig
-from meridian.lib.state import spawn_store
+from meridian.lib.state import spawn_store, work_store
 
 
 def _attempt_primary_launch_lock(lock_path_str: str, hold_secs: float, queue: Any) -> None:
@@ -143,7 +143,8 @@ def test_run_harness_process_reuses_tracked_chat_id_on_resume(
     captured: dict[str, str | None] = {}
 
     def fake_build_launch_env(*args: object, **kwargs: object) -> dict[str, str]:
-        _ = (args, kwargs)
+        _ = args
+        captured["work_id_arg"] = kwargs.get("work_id")
         return {}
 
     def fake_run_primary_process_with_capture(**kwargs: object) -> tuple[int, int]:
@@ -194,6 +195,83 @@ def test_run_harness_process_reuses_tracked_chat_id_on_resume(
     row = spawn_store.get_spawn(plan.state_root, outcome.primary_spawn_id)
     assert row is not None
     assert row.worker_pid == 123
+    assert row.work_id == captured["work_id_arg"]
+    assert row.work_id is None
+
+
+def test_run_harness_process_attaches_explicit_work_id(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path
+    harness_registry = get_default_harness_registry()
+    config = load_config(repo_root)
+    request = LaunchRequest(
+        model="gpt-5.4",
+        harness="codex",
+        work_id="named-work",
+    )
+    plan = ResolvedPrimaryLaunchPlan(
+        repo_root=repo_root,
+        state_root=tmp_path / ".meridian",
+        prompt="new prompt",
+        request=request,
+        config=config,
+        adapter=harness_registry.get_subprocess_harness(HarnessId("codex")),
+        session_metadata=PrimarySessionMetadata(
+            harness="codex",
+            model="gpt-5.4",
+            agent="",
+            agent_path="",
+            skills=(),
+            skill_paths=(),
+        ),
+        run_params=SpawnParams(prompt="new prompt", model=ModelId("gpt-5.4"), interactive=True),
+        permission_config=PermissionConfig(),
+        command=("true",),
+        lock_path=tmp_path / ".meridian" / "active-primary.lock",
+        seed_harness_session_id="session-3",
+        command_request=request,
+    )
+
+    captured: dict[str, str | None] = {}
+
+    def fake_build_launch_env(*args: object, **kwargs: object) -> dict[str, str]:
+        _ = args
+        captured["work_id_arg"] = kwargs.get("work_id")
+        return {}
+
+    def fake_run_primary_process_with_capture(**kwargs: object) -> tuple[int, int]:
+        started = kwargs.get("on_child_started")
+        assert callable(started)
+        started(456)
+        return (0, 456)
+
+    def fake_start_session(
+        state_root: Path,
+        harness: str,
+        harness_session_id: str | None,
+        model: str,
+        chat_id: str | None = None,
+        **kwargs: Any,
+    ) -> str:
+        _ = (state_root, harness, harness_session_id, model, kwargs)
+        return chat_id or "c1"
+
+    monkeypatch.setattr(process, "extract_latest_session_id", lambda **kwargs: "session-3")
+    monkeypatch.setattr(process, "stop_session", lambda *args, **kwargs: None)
+    monkeypatch.setattr(process, "update_session_harness_id", lambda *args, **kwargs: None)
+    monkeypatch.setattr(process, "build_launch_env", fake_build_launch_env)
+    monkeypatch.setattr(process, "_run_primary_process_with_capture", fake_run_primary_process_with_capture)
+    monkeypatch.setattr(process, "start_session", fake_start_session)
+
+    outcome = process.run_harness_process(plan, harness_registry)
+
+    row = spawn_store.get_spawn(plan.state_root, outcome.primary_spawn_id or "")
+    assert row is not None
+    assert row.work_id == "named-work"
+    assert captured["work_id_arg"] == "named-work"
+    assert work_store.get_work_item(plan.state_root, "named-work") is not None
 
 
 def test_primary_launch_lock_acquires_and_releases(tmp_path: Path) -> None:

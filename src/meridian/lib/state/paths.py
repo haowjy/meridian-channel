@@ -18,11 +18,15 @@ _GITIGNORE_CONTENT = (
     "# Track .gitignore itself\n"
     "!.gitignore\n"
     "\n"
-    "# Track fs/ and work/\n"
+    "# Track shared repo state\n"
     "!fs/\n"
     "!fs/**\n"
+    "!work-items/\n"
+    "!work-items/**\n"
     "!work/\n"
     "!work/**\n"
+    "!work-archive/\n"
+    "!work-archive/**\n"
 )
 
 
@@ -41,8 +45,10 @@ class StateRootPaths(BaseModel):
     sessions_dir: Path
     fs_dir: Path
     work_dir: Path
-    work_lock: Path
-    work_rename_intent: Path
+    work_archive_dir: Path
+    work_items_dir: Path
+    work_items_lock: Path
+    work_items_rename_intent: Path
     spawns_dir: Path
 
     @classmethod
@@ -60,8 +66,10 @@ class StateRootPaths(BaseModel):
             sessions_dir=root_dir / "sessions",
             fs_dir=root_dir / "fs",
             work_dir=root_dir / "work",
-            work_lock=root_dir / "work.lock",
-            work_rename_intent=root_dir / "work" / "work-rename.intent.json",
+            work_archive_dir=root_dir / "work-archive",
+            work_items_dir=root_dir / "work-items",
+            work_items_lock=root_dir / "work-items.lock",
+            work_items_rename_intent=root_dir / "work-items.rename.intent.json",
             spawns_dir=root_dir / "spawns",
         )
 
@@ -130,6 +138,30 @@ def resolve_work_dir(repo_root: Path) -> Path:
     """Return `.meridian/work/` for a repository root."""
 
     return resolve_state_paths(repo_root).root_dir / "work"
+
+
+def resolve_work_archive_dir(repo_root: Path) -> Path:
+    """Return `.meridian/work-archive/` for a repository root."""
+
+    return resolve_state_paths(repo_root).root_dir / "work-archive"
+
+
+def resolve_work_items_dir(repo_root: Path) -> Path:
+    """Return `.meridian/work-items/` for a repository root."""
+
+    return resolve_state_paths(repo_root).root_dir / "work-items"
+
+
+def resolve_work_scratch_dir(state_root: Path, work_id: str) -> Path:
+    """Return the work-scoped scratch directory for a work item."""
+
+    return StateRootPaths.from_root_dir(state_root).work_dir / work_id
+
+
+def resolve_work_archive_scratch_dir(state_root: Path, work_id: str) -> Path:
+    """Return the archived work-scoped scratch directory for a work item."""
+
+    return StateRootPaths.from_root_dir(state_root).work_archive_dir / work_id
 
 
 def spawn_log_subpath(spawn_id: SpawnId | str) -> Path:

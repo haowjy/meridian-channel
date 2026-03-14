@@ -129,6 +129,12 @@ class SpawnIndex:
         self._stats_cache = computed
         return computed
 
+    def _normalized_work_id(self, work_id: str | None) -> str | None:
+        if work_id is None:
+            return None
+        normalized = work_id.strip()
+        return normalized or None
+
     def _apply_event(self, event: SpawnEvent) -> None:
         spawn_id = event.id
         if not spawn_id:
@@ -146,7 +152,11 @@ class SpawnIndex:
                     "harness": event.harness if event.harness is not None else current.harness,
                     "kind": event.kind if event.kind is not None else current.kind,
                     "desc": event.desc if event.desc is not None else current.desc,
-                    "work_id": event.work_id if event.work_id is not None else current.work_id,
+                    "work_id": (
+                        self._normalized_work_id(event.work_id)
+                        if event.work_id is not None
+                        else current.work_id
+                    ),
                     "harness_session_id": (
                         event.harness_session_id
                         if event.harness_session_id is not None
@@ -178,7 +188,11 @@ class SpawnIndex:
                     ),
                     "error": event.error if event.error is not None else current.error,
                     "desc": event.desc if event.desc is not None else current.desc,
-                    "work_id": event.work_id if event.work_id is not None else current.work_id,
+                    "work_id": (
+                        self._normalized_work_id(event.work_id)
+                        if event.work_id is not None
+                        else current.work_id
+                    ),
                 }
             )
         else:
@@ -260,8 +274,12 @@ class SessionIndex:
                 model=event.model,
                 agent=event.agent,
                 agent_path=event.agent_path,
+                agent_source=event.agent_source,
                 skills=event.skills,
                 skill_paths=event.skill_paths,
+                skill_sources=event.skill_sources,
+                bootstrap_required_items=event.bootstrap_required_items,
+                bootstrap_missing_items=event.bootstrap_missing_items,
                 params=event.params,
                 started_at=event.started_at,
                 stopped_at=None,
@@ -350,6 +368,13 @@ def _empty_spawn_record(spawn_id: str) -> SpawnRecord:
         chat_id=None,
         model=None,
         agent=None,
+        agent_path=None,
+        agent_source=None,
+        skills=(),
+        skill_paths=(),
+        skill_sources={},
+        bootstrap_required_items=(),
+        bootstrap_missing_items=(),
         harness=None,
         kind="child",
         desc=None,

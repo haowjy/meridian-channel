@@ -3,7 +3,10 @@ from pathlib import Path
 import pytest
 
 from meridian.lib.state.work_store import (
+    archive_work_item,
     create_work_item,
+    get_work_item,
+    reopen_work_item,
     rename_work_item,
     slugify,
 )
@@ -47,3 +50,33 @@ def test_rename_work_item_missing_raises_value_error(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="not found"):
         rename_work_item(state_root, "nonexistent", "new-name")
+
+
+def test_create_work_item_writes_metadata_without_creating_scratch_dir(tmp_path: Path) -> None:
+    state_root = _state_root(tmp_path)
+
+    item = create_work_item(state_root, "My feature")
+
+    assert get_work_item(state_root, item.name) is not None
+    assert (state_root / "work-items" / f"{item.name}.json").exists()
+    assert not (state_root / "work" / item.name).exists()
+
+
+def test_archive_and_reopen_work_item_move_scratch_dir(tmp_path: Path) -> None:
+    state_root = _state_root(tmp_path)
+
+    item = create_work_item(state_root, "My feature")
+    active_dir = state_root / "work" / item.name
+    active_dir.mkdir(parents=True, exist_ok=True)
+    (active_dir / "notes.md").write_text("hello", encoding="utf-8")
+
+    archived = archive_work_item(state_root, item.name)
+    archived_dir = state_root / "work-archive" / item.name
+    assert archived.status == "done"
+    assert not active_dir.exists()
+    assert (archived_dir / "notes.md").read_text(encoding="utf-8") == "hello"
+
+    reopened = reopen_work_item(state_root, item.name)
+    assert reopened.status == "open"
+    assert not archived_dir.exists()
+    assert (active_dir / "notes.md").read_text(encoding="utf-8") == "hello"

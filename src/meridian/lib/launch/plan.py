@@ -22,6 +22,7 @@ from meridian.lib.install.bootstrap import (
     plan_bootstrap_assets,
     planned_bootstrap_agent_names,
 )
+from meridian.lib.install.provenance import resolve_runtime_asset_provenance
 
 from .prompt import compose_skill_injections, resolve_run_defaults
 from .resolve import (
@@ -90,18 +91,26 @@ def _build_session_metadata(
     *,
     profile_name: str,
     profile_path: str,
+    profile_source: str | None,
     harness_id: str,
     model_id: str,
     skills: tuple[str, ...],
     skill_paths: tuple[str, ...],
+    skill_sources: dict[str, str],
+    bootstrap_required_items: tuple[str, ...],
+    bootstrap_missing_items: tuple[str, ...],
 ) -> PrimarySessionMetadata:
     return PrimarySessionMetadata(
         harness=harness_id,
         model=model_id,
         agent=profile_name,
         agent_path=profile_path,
+        agent_source=profile_source,
         skills=skills,
         skill_paths=skill_paths,
+        skill_sources=skill_sources,
+        bootstrap_required_items=bootstrap_required_items,
+        bootstrap_missing_items=bootstrap_missing_items,
     )
 
 
@@ -199,13 +208,22 @@ def resolve_primary_launch_plan(
         Path(skill.path).expanduser().resolve().as_posix()
         for skill in resolved_skills.loaded_skills
     )
+    runtime_provenance = resolve_runtime_asset_provenance(
+        repo_root=resolved_root,
+        agent_path=profile_path,
+        skill_paths=skill_paths,
+    )
     session_metadata = _build_session_metadata(
         profile_name=profile_name,
         profile_path=profile_path,
+        profile_source=runtime_provenance.agent_source,
         harness_id=str(harness),
         model_id=str(model),
         skills=resolved_skills.skill_names,
         skill_paths=skill_paths,
+        skill_sources=runtime_provenance.skill_sources,
+        bootstrap_required_items=bootstrap_plan.required_items,
+        bootstrap_missing_items=bootstrap_plan.missing_items,
     )
 
     explicit_harness_session_id = (

@@ -2,20 +2,16 @@
 
 from __future__ import annotations
 
-import structlog
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from meridian.lib.ops.session_policy import cleanup_empty_auto_work_item
 from meridian.lib.state.session_store import (
     start_session,
     stop_session,
     update_session_harness_id,
 )
-
-logger = structlog.get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -35,8 +31,12 @@ def session_scope(
     params: tuple[str, ...] = (),
     agent: str = "",
     agent_path: str = "",
+    agent_source: str | None = None,
     skills: tuple[str, ...] = (),
     skill_paths: tuple[str, ...] = (),
+    skill_sources: dict[str, str] | None = None,
+    bootstrap_required_items: tuple[str, ...] = (),
+    bootstrap_missing_items: tuple[str, ...] = (),
     _start_session: Callable[..., str] = start_session,
     _stop_session: Callable[[Path, str], None] = stop_session,
     _update_session_harness_id: Callable[[Path, str, str], None] = update_session_harness_id,
@@ -50,8 +50,12 @@ def session_scope(
         params=params,
         agent=agent,
         agent_path=agent_path,
+        agent_source=agent_source,
         skills=skills,
         skill_paths=skill_paths,
+        skill_sources=skill_sources or {},
+        bootstrap_required_items=bootstrap_required_items,
+        bootstrap_missing_items=bootstrap_missing_items,
     )
 
     def _record_harness_session_id(session_id: str) -> None:
@@ -63,12 +67,6 @@ def session_scope(
             record_harness_session_id=_record_harness_session_id,
         )
     finally:
-        # TODO: If more teardown hooks accumulate, extract a SessionTeardownHook
-        # protocol and run hooks from a registry instead of inline calls.
-        try:
-            cleanup_empty_auto_work_item(state_root, resolved_chat_id)
-        except Exception:
-            logger.debug("Auto work item cleanup failed; ignoring.", exc_info=True)
         _stop_session(state_root, resolved_chat_id)
 
 

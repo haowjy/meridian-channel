@@ -177,7 +177,7 @@ def test_build_launch_env_never_exports_permission_tier(
     assert "MERIDIAN_PERMISSION_TIER" not in env
 
 
-def test_build_launch_env_sets_lazy_work_dir_without_creating_it(
+def test_build_launch_env_omits_work_env_by_default(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
@@ -187,20 +187,36 @@ def test_build_launch_env_sets_lazy_work_dir_without_creating_it(
     env = build_launch_env(
         tmp_path,
         LaunchRequest(model="gpt-5.3-codex"),
-        work_id="lazy-work-9",
     )
 
-    assert env["MERIDIAN_WORK_ID"] == "lazy-work-9"
-    assert env["MERIDIAN_WORK_DIR"] == (tmp_path / ".meridian" / "work" / "lazy-work-9").as_posix()
-    assert not (tmp_path / ".meridian" / "work" / "lazy-work-9").exists()
+    assert "MERIDIAN_WORK_ID" not in env
+    assert "MERIDIAN_WORK_DIR" not in env
+
+
+def test_build_launch_env_sets_explicit_work_dir_without_creating_it(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.delenv("MERIDIAN_WORK_ID", raising=False)
+    monkeypatch.delenv("MERIDIAN_WORK_DIR", raising=False)
+
+    env = build_launch_env(
+        tmp_path,
+        LaunchRequest(model="gpt-5.3-codex"),
+        work_id="named-work-9",
+    )
+
+    assert env["MERIDIAN_WORK_ID"] == "named-work-9"
+    assert env["MERIDIAN_WORK_DIR"] == (tmp_path / ".meridian" / "work" / "named-work-9").as_posix()
+    assert not (tmp_path / ".meridian" / "work" / "named-work-9").exists()
 
 
 def test_build_launch_env_uses_explicit_work_id(tmp_path) -> None:
     env = build_launch_env(
         tmp_path,
         LaunchRequest(model="gpt-5.3-codex"),
-        work_id="lazy-work",
+        work_id="named-work",
     )
 
-    assert env["MERIDIAN_WORK_ID"] == "lazy-work"
-    assert env["MERIDIAN_WORK_DIR"].endswith("/.meridian/work/lazy-work")
+    assert env["MERIDIAN_WORK_ID"] == "named-work"
+    assert env["MERIDIAN_WORK_DIR"].endswith("/.meridian/work/named-work")

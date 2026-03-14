@@ -118,7 +118,9 @@ These show up in `meridian work list` so any agent can see what phase every work
 | `implementation-log.md` | Append-only log during implementation: bugs, weird findings, backlog items |
 | `plan/` | Implementation plan with per-phase step files |
 
-**Local tracking is the default.** All tracking artifacts live in `$MERIDIAN_WORK_DIR/` as markdown files. The `dev-workflow` skill works standalone with no external dependencies.
+**Local tracking is the default.** All work-scoped tracking artifacts live in `$MERIDIAN_WORK_DIR/` as markdown files. The `dev-workflow` skill works standalone with no external dependencies.
+
+Use `.meridian/fs/` only for broader shared reference material that is not specific to one work item. Design notes, implementation logs, and phase plans stay attached to the work item in `$MERIDIAN_WORK_DIR/`.
 
 If `issue-tracking` is also attached to the profile, it upgrades tracking: bugs and backlog items additionally get created as GH issues. But the local files remain the source of truth — GH issues are a visibility enhancement, not a replacement.
 
@@ -341,7 +343,7 @@ An agent seeing this knows:
 
 ### Default (dev-workflow only, no external dependencies)
 
-All tracking lives in `$MERIDIAN_WORK_DIR/` as markdown files:
+All work-scoped tracking lives in `$MERIDIAN_WORK_DIR/` as markdown files:
 
 | Artifact | Format | Purpose |
 |----------|--------|---------|

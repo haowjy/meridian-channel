@@ -27,12 +27,18 @@ from meridian.lib.core.spawn_lifecycle import (
 )
 from meridian.lib.core.types import SpawnId
 from meridian.lib.harness.registry import HarnessRegistry
-from meridian.lib.ops.session_policy import ensure_session_work_item
+from meridian.lib.ops.work_attachment import ensure_explicit_work_item
 from meridian.lib.state import spawn_store
 from meridian.lib.state.artifact_store import LocalStore, make_artifact_key
 from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.paths import resolve_spawn_log_dir, resolve_state_paths
-from meridian.lib.state.session_store import start_session, stop_session, update_session_harness_id
+from meridian.lib.state.session_store import (
+    get_session_active_work_id,
+    start_session,
+    stop_session,
+    update_session_harness_id,
+    update_session_work_id,
+)
 from meridian.lib.state.spawn_store import FOREGROUND_LAUNCH_MODE
 
 from .command import build_launch_env
@@ -326,24 +332,49 @@ def run_harness_process(
                 chat_id=plan.request.continue_chat_id,
                 agent=plan.session_metadata.agent,
                 agent_path=plan.session_metadata.agent_path,
+                agent_source=plan.session_metadata.agent_source,
                 skills=plan.session_metadata.skills,
                 skill_paths=plan.session_metadata.skill_paths,
+                skill_sources=plan.session_metadata.skill_sources,
+                bootstrap_required_items=plan.session_metadata.bootstrap_required_items,
+                bootstrap_missing_items=plan.session_metadata.bootstrap_missing_items,
                 _start_session=start_session,
                 _stop_session=stop_session,
                 _update_session_harness_id=update_session_harness_id,
             ) as managed:
                 chat_id = managed.chat_id
-                ensure_session_work_item(plan.state_root, chat_id)
+                explicit_work_id = (plan.request.work_id or "").strip() or None
+                if explicit_work_id is not None:
+                    explicit_work_id = ensure_explicit_work_item(plan.state_root, explicit_work_id)
+                preserved_work_id = None
+                if explicit_work_id is None and plan.request.continue_chat_id is not None:
+                    preserved_work_id = get_session_active_work_id(
+                        plan.state_root,
+                        plan.request.continue_chat_id,
+                    )
+                attached_work_id = get_session_active_work_id(plan.state_root, chat_id)
+                if attached_work_id is None:
+                    attached_work_id = explicit_work_id or preserved_work_id
+                    if attached_work_id is not None:
+                        update_session_work_id(plan.state_root, chat_id, attached_work_id)
                 try:
                     primary_spawn_id = spawn_store.start_spawn(
                         plan.state_root,
                         chat_id=chat_id,
                         model=plan.session_metadata.model,
                         agent=plan.session_metadata.agent,
+                        agent_path=plan.session_metadata.agent_path or None,
+                        agent_source=plan.session_metadata.agent_source,
+                        skills=plan.session_metadata.skills,
+                        skill_paths=plan.session_metadata.skill_paths,
+                        skill_sources=plan.session_metadata.skill_sources,
+                        bootstrap_required_items=plan.session_metadata.bootstrap_required_items,
+                        bootstrap_missing_items=plan.session_metadata.bootstrap_missing_items,
                         harness=plan.session_metadata.harness,
                         kind="primary",
                         prompt=plan.prompt,
                         launch_mode=FOREGROUND_LAUNCH_MODE,
+                        work_id=attached_work_id,
                         status="queued",
                     )
                     log_dir = resolve_spawn_log_dir(repo_root, primary_spawn_id)
@@ -359,6 +390,7 @@ def run_harness_process(
                             repo_root,
                             plan.request,
                             chat_id=chat_id,
+                            work_id=attached_work_id,
                             default_autocompact_pct=plan.config.primary.autocompact_pct,
                             spawn_id=primary_spawn_id,
                             adapter=plan.adapter,

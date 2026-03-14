@@ -2,9 +2,9 @@
 
 Meridian works without config files, but you can override defaults in `.meridian/config.toml`.
 
-By default Meridian searches repo-local `.agents`, `.claude`, `.codex`,
-`.opencode`, `.cursor`, plus user-level `~/.claude`, `~/.codex`, and
-`~/.opencode` agent/skill directories.
+By default Meridian discovers agents and skills from repo-local `.agents/` only.
+Harness-specific compatibility paths such as `.claude/` are runtime concerns, not
+Meridian discovery roots.
 
 ## Quick Start
 
@@ -24,17 +24,22 @@ meridian config reset defaults.max_retries
     agents/
     skills/
   .meridian/
+    agents.toml
+    agents.lock
     config.toml
     models.toml
     fs/
+    work-items/
     work/
+    work-archive/
     spawns/
       <spawn-id>/
     spawns.jsonl
     sessions.jsonl
 ```
 
-File state under `.meridian/` is authoritative for spawns, sessions, and shared filesystem state.
+File state under `.meridian/` is authoritative for spawns, sessions, shared filesystem state, and work-item metadata.
+`work-items/` stores Meridian-owned coordination metadata. `work/` holds active work-scoped scratch files, and `work-archive/` holds scratch for completed work items.
 
 ## `config.toml` Keys
 
@@ -60,7 +65,6 @@ Canonical keys accepted by `meridian config set/get/reset`:
 Scaffolded but not exposed via `config set` shorthand keys:
 
 - `[primary] autocompact_pct`
-- `[search_paths] agents`, `skills`, `global_agents`, `global_skills`
 
 ## Example
 
@@ -82,12 +86,6 @@ verbosity = "verbose"
 
 [primary]
 autocompact_pct = 70
-
-[search_paths]
-agents = [".agents/agents", ".claude/agents", ".codex/agents", ".opencode/agents"]
-skills = [".agents/skills", ".claude/skills", ".codex/skills", ".opencode/skills"]
-global_agents = ["~/.claude/agents", "~/.codex/agents", "~/.opencode/agents"]
-global_skills = ["~/.claude/skills", "~/.codex/skills", "~/.opencode/skills"]
 ```
 
 ## Model Catalog Overrides
@@ -114,6 +112,8 @@ cost_tier = "$$"
 | `MERIDIAN_CONFIG` | User config overlay path |
 | `MERIDIAN_STATE_ROOT` | Override state root (default `.meridian`) |
 | `MERIDIAN_FS_DIR` | Resolved shared filesystem path for the current repo state root |
+| `MERIDIAN_WORK_ID` | Active attached work item slug, when one exists |
+| `MERIDIAN_WORK_DIR` | Scratch/docs directory for the active work item, when one exists |
 | `MERIDIAN_SPAWN_ID` | Current spawn ID in nested execution |
 | `MERIDIAN_CHAT_ID` | Current chat/session id in nested execution |
 | `MERIDIAN_DEPTH` | Current nesting depth |

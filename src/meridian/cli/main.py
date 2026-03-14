@@ -319,6 +319,10 @@ def root(
         str | None,
         Parameter(name=["--agent", "-a"], help="Agent profile name for the primary agent."),
     ] = None,
+    work: Annotated[
+        str,
+        Parameter(name="--work", help="Attach the primary session to a work item id."),
+    ] = "",
     yolo: Annotated[
         bool,
         Parameter(
@@ -353,6 +357,7 @@ def root(
         model=model,
         harness=harness,
         agent=agent,
+        work=work,
         yolo=yolo,
         autocompact=autocompact,
         dry_run=dry_run,
@@ -382,7 +387,11 @@ spawn_app = App(
     help_formatter="plain",
 )
 report_app = App(name="report", help="Report management commands", help_formatter="plain")
-work_app = App(name="work", help="Work item coordination and dashboard", help_formatter="plain")
+work_app = App(
+    name="work",
+    help="Active activity grouped by work, plus work item coordination commands. Unassigned spawns appear under '(no work)'.",
+    help_formatter="plain",
+)
 agents_app = App(name="agents", help="Agent profile catalog commands", help_formatter="plain")
 skills_app = App(name="skills", help="Skills catalog commands", help_formatter="plain")
 models_app = App(name="models", help="Model catalog commands", help_formatter="plain")
@@ -457,6 +466,7 @@ def _run_primary_launch(
     model: str,
     harness: str | None,
     agent: str | None,
+    work: str,
     yolo: bool,
     autocompact: int | None,
     dry_run: bool,
@@ -500,6 +510,7 @@ def _run_primary_launch(
             model=model,
             harness=continue_harness if resume_target is not None else harness,
             agent=agent,
+            work_id=work.strip() or None,
             autocompact=autocompact,
             passthrough_args=passthrough,
             fresh=fresh,

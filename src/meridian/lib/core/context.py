@@ -7,6 +7,7 @@ from typing import Self
 from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.core.types import SpawnId
+from meridian.lib.state.paths import resolve_work_scratch_dir
 
 
 class RuntimeContext(BaseModel):
@@ -80,5 +81,8 @@ class RuntimeContext(BaseModel):
         if self.work_id:
             overrides["MERIDIAN_WORK_ID"] = self.work_id
             if self.state_root is not None:
-                overrides["MERIDIAN_WORK_DIR"] = (self.state_root / "work" / self.work_id).as_posix()
+                overrides["MERIDIAN_WORK_DIR"] = resolve_work_scratch_dir(
+                    self.state_root,
+                    self.work_id,
+                ).as_posix()
         return overrides

@@ -248,6 +248,7 @@ graph TD
     Root --> FS["fs/ (shared workspace)"]
     Root --> WorkItems["work-items/ (work metadata)"]
     Root --> Work["work/ (scratch/docs)"]
+    Root --> WorkArchive["work-archive/ (completed scratch/docs)"]
     Root --> SpJ["spawns.jsonl"]
     Root --> SeJ["sessions.jsonl"]
     Root --> SpDir["spawns/"]
@@ -260,6 +261,7 @@ graph TD
 
 `work-items/` is the authoritative store for repo-scoped work coordination metadata.
 `work/` is optional scratch space for notes, plans, and design docs attached to a work item.
+`work-archive/` holds scratch/docs for completed work items.
 
 ### Event Sourcing
 

@@ -31,6 +31,7 @@ from meridian.lib.install.bootstrap import (
     plan_bootstrap_assets,
     planned_bootstrap_agent_names,
 )
+from meridian.lib.install.provenance import resolve_runtime_asset_provenance
 
 from meridian.lib.utils.time import minutes_to_seconds
 
@@ -320,6 +321,11 @@ def build_create_payload(
         Path(skill.path).expanduser().resolve().as_posix()
         for skill in resolved_skills.loaded_skills
     )
+    runtime_provenance = resolve_runtime_asset_provenance(
+        repo_root=runtime_view.repo_root,
+        agent_path=session_agent_path,
+        skill_paths=session_skill_paths,
+    )
 
     return PreparedSpawnPlan(
         model=defaults.model,
@@ -327,6 +333,11 @@ def build_create_payload(
         warning=warning,
         prompt=composed_prompt,
         skills=resolved_skills.skill_names,
+        agent_path=session_agent_path,
+        agent_source=runtime_provenance.agent_source,
+        skill_sources=runtime_provenance.skill_sources,
+        bootstrap_required_items=bootstrap_plan.required_items,
+        bootstrap_missing_items=bootstrap_plan.missing_items,
         reference_files=tuple(str(reference.path) for reference in loaded_references),
         template_vars=parsed_template_vars,
         mcp_tools=profile.mcp_tools if profile is not None else (),

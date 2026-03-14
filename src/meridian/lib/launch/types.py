@@ -3,7 +3,7 @@
 
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 _CONTINUATION_GUIDANCE = (
     "You are resuming an existing Meridian session. Continue from the current state, "
@@ -20,6 +20,7 @@ class LaunchRequest(BaseModel):
     model: str = ""
     harness: str | None = None
     agent: str | None = None
+    work_id: str | None = None
     fresh: bool = False
     autocompact: int | None = None
     passthrough_args: tuple[str, ...] = ()
@@ -48,8 +49,12 @@ class PrimarySessionMetadata(BaseModel):
     model: str
     agent: str
     agent_path: str
+    agent_source: str | None = None
     skills: tuple[str, ...]
     skill_paths: tuple[str, ...]
+    skill_sources: dict[str, str] = Field(default_factory=dict)
+    bootstrap_required_items: tuple[str, ...] = ()
+    bootstrap_missing_items: tuple[str, ...] = ()
 
 
 def build_primary_prompt(request: LaunchRequest) -> str:

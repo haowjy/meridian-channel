@@ -100,7 +100,7 @@ audience: developer, architect
 
 ## Agent Profiles
 
-All agents defined in `.claude/agents/`. Use with `meridian spawn -a <name>`.
+All agents are defined in repo-local `.agents/agents/`. Use with `meridian spawn -a <name>`.
 
 ### Builders
 

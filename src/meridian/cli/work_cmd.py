@@ -8,22 +8,26 @@ from cyclopts import App, Parameter
 
 from meridian.cli.registration import register_manifest_cli_group
 from meridian.lib.core.context import RuntimeContext
-from meridian.lib.ops.work import (
-    WorkClearInput,
+from meridian.lib.ops.work_dashboard import (
     WorkDashboardInput,
-    WorkDoneInput,
     WorkListInput,
-    WorkRenameInput,
     WorkShowInput,
+    work_dashboard_sync,
+    work_list_sync,
+    work_show_sync,
+)
+from meridian.lib.ops.work_lifecycle import (
+    WorkClearInput,
+    WorkDoneInput,
+    WorkRenameInput,
+    WorkReopenInput,
     WorkStartInput,
     WorkSwitchInput,
     WorkUpdateInput,
     work_clear_sync,
-    work_dashboard_sync,
     work_done_sync,
-    work_list_sync,
+    work_reopen_sync,
     work_rename_sync,
-    work_show_sync,
     work_start_sync,
     work_switch_sync,
     work_update_sync,
@@ -128,6 +132,16 @@ def _work_switch(
     emit(work_switch_sync(WorkSwitchInput(work_id=work_id, chat_id=_runtime_chat_id())))
 
 
+def _work_reopen(
+    emit: Emitter,
+    work_id: Annotated[
+        str,
+        Parameter(help="Work item id."),
+    ],
+) -> None:
+    emit(work_reopen_sync(WorkReopenInput(work_id=work_id)))
+
+
 def _work_rename(
     emit: Emitter,
     work_id: Annotated[
@@ -160,6 +174,7 @@ def register_work_commands(app: App, emit: Emitter) -> tuple[set[str], dict[str,
         "work.update": lambda: partial(_work_update, emit),
         "work.done": lambda: partial(_work_done, emit),
         "work.switch": lambda: partial(_work_switch, emit),
+        "work.reopen": lambda: partial(_work_reopen, emit),
         "work.rename": lambda: partial(_work_rename, emit),
         "work.clear": lambda: partial(_work_clear, emit),
     }

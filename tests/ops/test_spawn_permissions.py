@@ -1,7 +1,9 @@
 from pathlib import Path
 
 from meridian.lib.core.context import RuntimeContext
+from meridian.lib.install.lock import InstallLock, LockedInstalledItem, write_lock
 from meridian.lib.ops.spawn.api import SpawnCreateInput, spawn_create_sync
+from meridian.lib.state.paths import resolve_state_paths
 
 
 def _write_agent(path: Path, *, sandbox: str) -> None:
@@ -109,3 +111,48 @@ def test_spawn_dry_run_missing_default_agent_does_not_write_install_state(
     assert not (repo_root / ".meridian" / "agents.toml").exists()
     assert not (repo_root / ".meridian" / "agents.lock").exists()
     assert not (repo_root / ".agents").exists()
+
+
+def test_spawn_dry_run_includes_agent_and_skill_provenance(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_agent(repo_root / ".agents" / "agents" / "coder.md", sandbox="workspace-write")
+    skill_path = repo_root / ".agents" / "skills" / "reviewing" / "SKILL.md"
+    skill_path.parent.mkdir(parents=True, exist_ok=True)
+    skill_path.write_text("# Reviewing\n\nReview carefully.\n", encoding="utf-8")
+    write_lock(
+        resolve_state_paths(repo_root).agents_lock_path,
+        InstallLock(
+            items={
+                "agent:coder": LockedInstalledItem(
+                    source_name="dev-fixture",
+                    source_item_id="agent:coder",
+                    destination_path=".agents/agents/coder.md",
+                    content_hash="agent-hash",
+                ),
+                "skill:reviewing": LockedInstalledItem(
+                    source_name="dev-fixture",
+                    source_item_id="skill:reviewing",
+                    destination_path=".agents/skills/reviewing",
+                    content_hash="skill-hash",
+                ),
+            }
+        ),
+    )
+
+    result = spawn_create_sync(
+        SpawnCreateInput(
+            prompt="do work",
+            agent="coder",
+            skills=("reviewing",),
+            repo_root=repo_root.as_posix(),
+            dry_run=True,
+        ),
+    )
+
+    assert result.status == "dry-run"
+    assert result.agent_path == (repo_root / ".agents" / "agents" / "coder.md").as_posix()
+    assert result.agent_source == "dev-fixture"
+    assert result.skills == ("reviewing",)
+    assert result.skill_paths == (skill_path.as_posix(),)
+    assert result.skill_sources == {"reviewing": "dev-fixture"}
