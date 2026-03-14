@@ -7,10 +7,22 @@ Run these first. They cover the critical command surface in about five minutes a
 ```bash
 export REPO_ROOT=/abs/path/to/meridian-channel
 export SMOKE_REPO="$(mktemp -d /tmp/meridian-quick.XXXXXX)"
+export SMOKE_SOURCE="$(mktemp -d /tmp/meridian-quick-source.XXXXXX)"
 git -C "$SMOKE_REPO" init --quiet
 for var in $(env | awk -F= '/^MERIDIAN_/ {print $1}'); do unset "$var"; done
 export MERIDIAN_REPO_ROOT="$SMOKE_REPO"
 export MERIDIAN_STATE_ROOT="$SMOKE_REPO/.meridian"
+mkdir -p "$SMOKE_SOURCE/agents" "$SMOKE_SOURCE/skills/demo"
+cat > "$SMOKE_SOURCE/agents/reviewer.md" <<'EOF'
+# Reviewer
+
+Quick sanity reviewer.
+EOF
+cat > "$SMOKE_SOURCE/skills/demo/SKILL.md" <<'EOF'
+# Demo Skill
+
+Quick sanity skill.
+EOF
 cd "$REPO_ROOT"
 test -d "$SMOKE_REPO/.git" && echo "PASS: quick-sanity repo ready" || echo "FAIL: quick-sanity repo setup failed"
 ```
@@ -53,9 +65,10 @@ echo "PASS: models list returned catalog data" || echo "FAIL: models list output
 ### QS-5. Skills list [CRITICAL]
 
 ```bash
+uv run meridian install "$SMOKE_SOURCE" --name quick-sanity >/tmp/meridian-qs-install.txt 2>&1 && \
 uv run meridian --json skills list >/tmp/meridian-qs-skills.txt && \
-grep -Eq 'skill-|slides|spreadsheets|meridian-' /tmp/meridian-qs-skills.txt && \
-echo "PASS: skills list returned entries" || echo "FAIL: skills list output was unexpected"
+grep -q 'demo' /tmp/meridian-qs-skills.txt && \
+echo "PASS: managed install and skills list returned repo-local entries" || echo "FAIL: managed install or skills list output was unexpected"
 ```
 
 ### QS-6. Doctor [CRITICAL]
@@ -70,8 +83,8 @@ echo "PASS: doctor returned health data" || echo "FAIL: doctor output was unexpe
 ### QS-7. Spawn dry-run [CRITICAL]
 
 ```bash
-uv run meridian --json spawn -p "quick sanity prompt" --dry-run > /tmp/meridian-qs-dryrun.json && \
-python3 - <<'PY'
+uv run meridian --json spawn -a reviewer -p "quick sanity prompt" --dry-run > /tmp/meridian-qs-dryrun.json && \
+uv run python - <<'PY'
 import json
 doc = json.load(open("/tmp/meridian-qs-dryrun.json"))
 assert doc["status"] == "dry-run"
@@ -97,7 +110,7 @@ fi
 
 ```bash
 uv run meridian --json spawn list >/tmp/meridian-qs-spawn-list.txt && \
-(python - <<'PY'
+(uv run python - <<'PY'
 import json
 from pathlib import Path
 

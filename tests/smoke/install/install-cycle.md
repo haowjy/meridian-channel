@@ -6,8 +6,8 @@ This is the full scratch-repo round trip for managed installs: install a source,
 
 ```bash
 export REPO_ROOT=/abs/path/to/meridian-channel
-rm -rf /tmp/meridian-sync-src /tmp/meridian-sync-repo
-mkdir -p /tmp/meridian-sync-src/skills/demo /tmp/meridian-sync-src/agents /tmp/meridian-sync-repo
+rm -rf /tmp/meridian-sync-src /tmp/meridian-sync-empty /tmp/meridian-sync-repo
+mkdir -p /tmp/meridian-sync-src/skills/demo /tmp/meridian-sync-src/agents /tmp/meridian-sync-empty /tmp/meridian-sync-repo
 git -C /tmp/meridian-sync-repo init --quiet
 for var in $(env | awk -F= '/^MERIDIAN_/ {print $1}'); do unset "$var"; done
 export MERIDIAN_REPO_ROOT=/tmp/meridian-sync-repo
@@ -67,7 +67,47 @@ test ! -e /tmp/meridian-sync-repo/.agents/agents/helper.md && \
 echo "PASS: remove cleaned managed artifacts" || echo "FAIL: remove left managed artifacts behind"
 ```
 
-### INSTALL-5. Remote GitHub install works for a real repo [IMPORTANT]
+### INSTALL-5. Invalid or empty sources fail cleanly [CRITICAL]
+
+```bash
+if uv run meridian install /tmp/meridian-sync-missing --name missing >/tmp/meridian-sync-invalid.out 2>&1; then
+  echo "FAIL: missing source unexpectedly installed"
+elif test ! -e /tmp/meridian-sync-repo/.meridian/agents.toml && \
+     grep -qi 'does not exist' /tmp/meridian-sync-invalid.out; then
+  echo "PASS: missing source failed without writing manifest state"
+else
+  echo "FAIL: missing source failure was not clean"
+fi
+
+if uv run meridian install /tmp/meridian-sync-empty --name empty >/tmp/meridian-sync-empty.out 2>&1; then
+  echo "FAIL: empty source unexpectedly installed"
+elif test ! -e /tmp/meridian-sync-repo/.meridian/agents.toml && \
+     grep -qi 'No installable items found' /tmp/meridian-sync-empty.out; then
+  echo "PASS: empty source failed without writing manifest state"
+else
+  echo "FAIL: empty source failure was not clean"
+fi
+```
+
+### INSTALL-6. Rename updates remove the old managed path [IMPORTANT]
+
+```bash
+uv run meridian install /tmp/meridian-sync-src --name rename-source --agents helper --rename agent:helper=helper-one >/tmp/meridian-sync-rename-install.out 2>&1 && \
+uv run python - <<'PY'
+from pathlib import Path
+
+manifest = Path("/tmp/meridian-sync-repo/.meridian/agents.toml")
+text = manifest.read_text(encoding="utf-8")
+text = text.replace('rename = { "agent:helper" = "helper-one" }', 'rename = { "agent:helper" = "helper-two" }')
+manifest.write_text(text, encoding="utf-8")
+PY
+uv run meridian update >/tmp/meridian-sync-rename-update.out 2>&1 && \
+test ! -e /tmp/meridian-sync-repo/.agents/agents/helper-one.md && \
+test -f /tmp/meridian-sync-repo/.agents/agents/helper-two.md && \
+echo "PASS: rename update pruned the old managed path" || echo "FAIL: rename update left stale managed files"
+```
+
+### INSTALL-7. Remote GitHub install works for a real repo [IMPORTANT]
 
 Run this when you changed remote source resolution or lock semantics. This complements the local-path round trip above.
 

@@ -93,15 +93,14 @@ Add new state paths under `.meridian/`:
 
 The current `sync.lock` / `cache/sync/` pair should be treated as legacy.
 
-### Install metadata
+### Install discovery
 
-Each external source must expose:
+Each external source is discovered by conventional layout only:
 
-- `agents/`
-- `skills/`
-- `meridian-source.toml`
+- `agents/*.md`
+- `skills/*/SKILL.md`
 
-The installer resolves dependency closure from `meridian-source.toml`, not from parsing installed profile files.
+There is no required source-side Meridian manifest. By default, the installer brings in every discovered item from the source. Consumer-side selectors in `.meridian/agents.toml` may narrow or rename that installed set.
 
 ### Runtime ensure seam
 
@@ -143,7 +142,7 @@ The current `lib/sync` package is the closest starting point, but it should be r
 - [cache.py](/home/jimyao/gitrepos/meridian-channel/src/meridian/lib/sync/cache.py)
   turn into source adapters for `git` and `path`
 - [engine.py](/home/jimyao/gitrepos/meridian-channel/src/meridian/lib/sync/engine.py)
-  replace raw directory discovery with exported-source manifest handling, dependency closure, ownership by canonical item id, and no `.claude` writes
+  own layout-based source discovery, consumer-side item selection, ownership by canonical item id, and no `.claude` writes
 - [hash.py](/home/jimyao/gitrepos/meridian-channel/src/meridian/lib/sync/hash.py)
   keep tree hashing, but full normalized visible-content semantics
 - [lock.py](/home/jimyao/gitrepos/meridian-channel/src/meridian/lib/sync/lock.py)
@@ -172,8 +171,8 @@ Create the real shipped content in the `meridian-agents` submodule:
 
 - promote the draft agents/skills
 - rename to `__meridian-orchestrator`, `__meridian-subagent`, `dev-orchestrator`
-- add `meridian-source.toml`
-- encode `depends_on`, `bundle_requires`, and managed/system metadata
+- keep the source in conventional `agents/` and `skills/` layout
+- make sure the core bootstrap agents are present under the names Meridian expects
 
 This unblocks everything else. The installer should target the real source repo, not drafts.
 
@@ -192,12 +191,12 @@ Expected touched areas:
 - [settings.py](/home/jimyao/gitrepos/meridian-channel/src/meridian/lib/config/settings.py)
 - config docs and smoke tests
 
-### Step 3: Add exported-source manifest parsing and source adapters
+### Step 3: Add source adapters and layout discovery
 
 Before rewriting the CLI, make the new source model real:
 
 - `git` and `path` adapters
-- parse `meridian-source.toml`
+- discover installable items from `agents/*.md` and `skills/*/SKILL.md`
 - introduce canonical item ids: `agent:name` / `skill:name`
 - define resolved source records for `agents.lock`
 
@@ -216,7 +215,8 @@ Core behavior:
 
 - write `.meridian/agents.toml`
 - resolve sources
-- compute dependency closure from `meridian-source.toml`
+- discover source items by layout
+- install the full discovered source by default, then apply consumer-side include/exclude/rename policy
 - install into `.agents/`
 - write `.meridian/agents.lock`
 - no `.claude` writes
@@ -266,10 +266,11 @@ Primary launch and spawn should pass real installed profile names directly to th
 
 Now add the only remaining fallback behavior:
 
-- compute required runtime asset closure for `defaults.primary_agent` and `defaults.agent`
+- plan the required runtime root agents for `defaults.primary_agent` and `defaults.agent`
 - if missing, ensure from installed provenance or bootstrap `meridian-agents`
 - persist bootstrap installs into `.meridian/agents.toml` and `.meridian/agents.lock`
 - fail only the commands that actually require those assets
+- keep dry-run paths read-only; they may plan missing assets and fail clearly, but they must not mutate install state
 
 Call sites:
 
@@ -301,15 +302,15 @@ Land the new names and paths before changing behavior:
 
 This commit should not delete sync/discovery yet. It makes the new vocabulary real in code first.
 
-### Commit 2: New source-manifest and lock primitives
+### Commit 2: New source and lock primitives
 
 Make the new install model representable without rewriting the whole CLI yet:
 
 - add parser/models for `.meridian/agents.toml`
 - add parser/models for `.meridian/agents.lock`
 - define canonical item ids `agent:name` / `skill:name`
-- add exported-source manifest parsing for `meridian-source.toml`
 - add source-adapter seams for `git` and `path`
+- add layout-based source discovery helpers
 
 This commit should focus on data models and pure logic, not catalog/runtime call sites.
 
@@ -318,7 +319,7 @@ This commit should focus on data models and pure logic, not catalog/runtime call
 Replace the old sync engine behavior while keeping discovery/runtime mostly intact:
 
 - reconcile declared sources into `.agents/`
-- compute closure from exported-source manifests
+- discover items directly from source layout
 - write `.meridian/agents.lock`
 - stop writing `.claude/`
 - support `install`, `update`, `upgrade`, and `remove`
@@ -349,9 +350,10 @@ Delete the runtime copy/rewrite layer after direct discovery is stable:
 
 Add the final runtime bootstrap seam on top of the new install/discovery model:
 
-- compute required runtime assets for `defaults.primary_agent` and `defaults.agent`
+- compute required runtime root agents for `defaults.primary_agent` and `defaults.agent`
 - ensure missing core assets from installed provenance or bootstrap `meridian-agents`
 - persist bootstrap installs into `.meridian/agents.toml` and `.meridian/agents.lock`
+- keep dry-run planning read-only
 
 ### Commit 7: Cleanup and rename pass
 
@@ -363,7 +365,7 @@ After the new path is proven:
 
 ### Parallel prerequisite: shipped source content
 
-The `meridian-agents` repo still needs to publish the real source tree and `meridian-source.toml`. That work can happen in parallel, but Commit 3 and beyond should target the real exported source shape rather than draft files.
+The `meridian-agents` repo still needs to publish the real source tree in conventional `agents/` and `skills/` layout. That work can happen in parallel, but Commit 3 and beyond should target the real shipped source shape rather than draft files.
 
 ## 6. Areas That Should Basically Vanish
 
@@ -395,8 +397,7 @@ Add or update smoke flows for:
 
 Keep targeted unit tests only for:
 
-- source manifest parsing
-- dependency closure
+- layout discovery
 - hash/local-mod behavior
 - lock read/write
 - runtime ensure planner behavior

@@ -101,7 +101,7 @@ Python code should contain only:
 - the built-in alias/default for `meridian-agents`
 - bootstrap/install machinery
 - source adapter registration
-- manifest + lock parsing
+- manifest + lock parsing for `.meridian/agents.toml` and `.meridian/agents.lock`
 
 Python code should not contain:
 
@@ -240,7 +240,7 @@ Each source adapter should provide a small common interface:
 
 - `resolve(source)` -> resolved identity (`ref`/commit, stat info, etc.)
 - `fetch(source, resolved)` -> local source tree path
-- `describe(tree)` -> exported items, dependencies, and source metadata
+- `describe(tree)` -> discovered installable items from conventional layout
 
 This keeps GitHub details inside the `git` adapter instead of leaking them into the manifest schema or install reconciler.
 
@@ -264,7 +264,6 @@ expands to the canonical repo without the user having to type `haowjy/meridian-a
 - requested ref
 - resolved identity blob owned by the source adapter
 - exported item snapshot for that source
-- item dependency closure used during install
 - ownership records for each installed item, including source provenance and destination path
 - installed tree hash
 - last installed timestamp
@@ -282,71 +281,25 @@ This remains the mechanism for:
 
 ### Discovery format
 
-Installable source trees should have a small exported-source manifest plus the file layout:
+Installable source trees use conventional layout only:
 
 ```text
-meridian-source.toml
-skills/<skill-name>/SKILL.md
 agents/<agent-name>.md
+skills/<skill-name>/SKILL.md
 ```
 
-`meridian-source.toml` should describe:
+There is no required Meridian-specific source manifest. Any repo or local directory with that layout is installable.
 
-- exported items as generic records with `kind`, `name`, and destination metadata
-- dependency edges (for example, agent -> required skills)
-- managed/system markers
-- workflow or bundle dependencies when one exported item expects other exported items to be present
-- optional metadata used by catalog UX later
+The installer should discover:
 
-Example:
+- agents from `agents/*.md`
+- skills from `skills/*/SKILL.md`
 
-```toml
-[[items]]
-kind = "agent"
-name = "__meridian-orchestrator"
-path = "agents/__meridian-orchestrator.md"
-managed = true
-system = true
-depends_on = [
-  { kind = "skill", name = "__meridian-orchestrate" },
-  { kind = "skill", name = "__meridian-spawn-agent" },
-]
+Default behavior is to install every discovered item in the source. Consumer-side selectors in `.meridian/agents.toml` may narrow or exclude discovered items, and `rename` may change their installed destination names.
 
-[[items]]
-kind = "agent"
-name = "dev-orchestrator"
-path = "agents/dev-orchestrator.md"
-depends_on = [
-  { kind = "skill", name = "__meridian-orchestrate" },
-  { kind = "skill", name = "__meridian-spawn-agent" },
-  { kind = "skill", name = "dev-workflow" },
-]
-bundle_requires = [
-  { kind = "agent", name = "coder" },
-  { kind = "agent", name = "reviewer-solid" },
-  { kind = "agent", name = "reviewer-concurrency" },
-  { kind = "agent", name = "reviewer-security" },
-  { kind = "agent", name = "reviewer-planning" },
-  { kind = "agent", name = "unit-tester" },
-  { kind = "agent", name = "smoke-tester" },
-  { kind = "agent", name = "documenter" },
-]
+There is no source-authored dependency closure in the current model. If a profile expects certain skills or companion agents, that is content-level convention, not installer-enforced metadata.
 
-[[items]]
-kind = "skill"
-name = "dev-workflow"
-path = "skills/dev-workflow/SKILL.md"
-```
-
-The installer should rely on this export manifest for dependency closure and ownership, not on ad hoc runtime parsing of profile files. Raw directory scanning can remain only as a migration fallback. Manifest metadata is authoritative for install behavior; the `__` prefix is a naming convention that should match `managed/system` items, not a substitute for that metadata.
-
-`depends_on` is a hard functional dependency. It should be resolved transitively and included automatically. If a user selection or exclusion would make a required dependency unavailable, that is an error.
-
-`bundle_requires` is install-time companion closure, not advisory metadata. If a selected item declares bundle requirements, the installer should auto-include that closure, record the realized closure in `.meridian/agents.lock`, and only prune bundled items when no remaining selected item or source still requires them.
-
-Recompute desired closure from source manifests on every `install`, `update`, `upgrade`, and `remove`. Do not make the lock file into the dependency engine.
-
-Do not support shared ownership for the same destination item across sources. If two configured sources resolve to the same destination item in `.agents/`, that is a hard error even if both got there through dependency closure.
+Do not support shared ownership for the same destination item across sources. If two configured sources resolve to the same destination item in `.agents/`, that is a hard error.
 
 ### Collision rules
 
@@ -393,17 +346,18 @@ ensure_runtime_assets(repo_root, plan)
 Behavior:
 
 1. `plan_required_runtime_assets()` reads runtime config and determines the default primary agent and default subagent
-2. it resolves the required dependency closure from installed source metadata
-3. `ensure_runtime_assets()` checks whether those agent and skill assets exist in `.agents/`
+2. it plans the required root agent items that must exist in `.agents/`
+3. `ensure_runtime_assets()` checks whether those agent assets exist locally
 4. if any are missing, it first follows installed ownership/provenance when present; if a missing Meridian-owned default has never been installed, it falls back to the configured bootstrap source
 5. if bootstrap fallback is used for a source not yet declared, it writes that source declaration to `.meridian/agents.toml` and records the realized install in `.meridian/agents.lock`
-6. if that still fails, fail that command with a clear remediation message
+6. dry-run paths may plan and report missing assets, but they must not mutate install state
+7. if ensure still fails on a mutating command, fail that command with a clear remediation message
 
 Commands that do not require those assets should still work without any install step.
 
 The user-facing runtime config should expose these defaults as `defaults.primary_agent` for the default orchestrator and `defaults.agent` for the default subagent.
 
-Install/provenance decisions come from source manifests and lock state. Runtime profile files under `.agents/` are the content consumed by the harness at launch time, but they are not the source of truth for dependency resolution.
+Install/provenance decisions come from `.meridian/agents.toml`, `.meridian/agents.lock`, and the discovered source layout. Runtime profile files under `.agents/` are the content consumed by the harness at launch time, but they are not the source of truth for managed provenance.
 
 ### Claude-specific note
 
@@ -438,7 +392,7 @@ This redesign should deliberately delete:
 
 - Treat [drafts](/home/jimyao/gitrepos/meridian-channel/.meridian/work/meridian-agents/drafts) as the staging area, not the shipping source of truth
 - Copy the drafted agent profiles and skills into the checked-out [meridian-agents](/home/jimyao/gitrepos/meridian-channel/meridian-agents) submodule
-- Create `meridian-source.toml` in the submodule with exported items, dependency edges, bundle requirements, and managed/system markers
+- Keep the submodule in conventional `agents/` and `skills/` layout
 - Make sure the submodule contains the minimum bootstrap set needed by the configured default orchestrator and subagent
 - Normalize the draft content so the shipped profiles and skills match the current runtime/bootstrap policy
 - After promotion, future edits should land in the submodule first; drafts should either be removed or clearly treated as temporary scratch space
@@ -448,7 +402,7 @@ This redesign should deliberately delete:
 - Add `.meridian/agents.toml` models and I/O
 - Treat old sync config/lock state as legacy and start cleanly from `.meridian/agents.toml` + `.meridian/agents.lock`
 - Add `kind = "git" | "path"` source adapters
-- Add exported-source manifest support (`meridian-source.toml`)
+- Add layout-based source discovery for `agents/*.md` and `skills/*/SKILL.md`
 - Keep the core source-resolution, hashing, and lock concepts
 - Wire `meridian install`, `update`, `upgrade`, `remove`
 - Rename implementation types/functions to match the new install/source model where needed
@@ -478,9 +432,10 @@ This redesign should deliberately delete:
 
 - Add a runtime asset planner in the launch/spawn entrypoints that actually need default runtime agents
 - Add an install reconciler entrypoint that can ensure a planned asset set exists
-- Resolve the configured default primary agent and default subagent, plus their dependency closure
-- Auto-install/update from installed provenance or the configured bootstrap source when those required assets are missing
+- Resolve the configured default primary agent and default subagent as required root agent items
+- Auto-install/update from installed provenance or the configured bootstrap source when those required agents are missing
 - Persist bootstrap-source fallback into `.meridian/agents.toml` and `.meridian/agents.lock` using the same ownership/provenance model as explicit installs
+- Keep dry-run planning read-only
 - Fail those commands clearly if install/update fails
 - Leave non-agent-dependent CLI commands alone
 - Refactor existing launch/spawn wiring rather than scattering bootstrap checks across multiple call sites
@@ -499,11 +454,11 @@ The redesign is complete when all of the following are true:
 - the current repo's `.agents/` fully determines what Meridian discovers
 - the actual shipped `meridian-agents` content lives in the submodule, not only in local drafts
 - source kinds are adapter-based (`git`, `path`) rather than GitHub-specific special cases
-- source dependency closure is described in source metadata, not only re-derived at runtime
+- installable content is discovered directly from source layout without requiring a Meridian-specific source manifest
 - no home-directory agent/skill search paths affect behavior
 - no `.claude` writes happen during install/update/remove
 - no temp materialized agent/skill copies are needed
 - Python code contains bootstrap/install recipes, not live default profile definitions
 - the remaining interfaces and names match the new install/source model; dead sync/materialization vocabulary is gone
-- core Meridian orchestration commands can bootstrap the configured default primary/subagent and their skills when required
+- core Meridian orchestration commands can bootstrap the configured default primary/subagent when required
 - failures in that bootstrap affect only commands that need core agents, not the entire CLI
