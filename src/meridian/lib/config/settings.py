@@ -16,7 +16,6 @@ from meridian.lib.state.paths import resolve_state_paths
 logger = logging.getLogger(__name__)
 
 _OUTPUT_VERBOSITY_PRESETS = frozenset({"quiet", "normal", "verbose", "debug"})
-_PERMISSION_TIERS = ("read-only", "workspace-write", "full-access")
 _PRIMARY_AUTOCOMPACT_PCT_MIN = 1
 _PRIMARY_AUTOCOMPACT_PCT_MAX = 100
 USER_CONFIG_ENV_VAR = "MERIDIAN_CONFIG"
@@ -41,14 +40,6 @@ def _current_repo_root() -> Path | None:
     if context is None:
         return None
     return context.repo_root
-
-
-def _validate_permission_tier(raw: str) -> str:
-    normalized = raw.strip().lower()
-    if normalized in _PERMISSION_TIERS:
-        return normalized
-    allowed = ", ".join(_PERMISSION_TIERS)
-    raise ValueError(f"Unsupported permission tier '{raw}'. Expected: {allowed}.")
 
 
 def _normalize_required_string(raw: str, *, source: str) -> str:
@@ -323,15 +314,6 @@ def _normalize_primary_table(raw_value: object, *, source: str) -> dict[str, obj
             values[key] = value
             continue
 
-        if key == "permission_tier":
-            if not isinstance(value, str):
-                raise ValueError(
-                    f"Invalid value for '{source}.permission_tier': expected str, got "
-                    f"{type(value).__name__} ({value!r})."
-                )
-            values[key] = _validate_permission_tier(value)
-            continue
-
         if key in {"model", "harness", "agent"}:
             if not isinstance(value, str):
                 raise ValueError(
@@ -414,10 +396,6 @@ def _normalize_toml_payload(
             "wait_minutes": "wait_timeout_minutes",
             "wait_timeout_minutes": "wait_timeout_minutes",
         },
-        "permissions": {
-            "default_tier": "default_permission_tier",
-            "default_permission_tier": "default_permission_tier",
-        },
     }
     top_level_aliases: dict[str, str] = {
         "max_depth": "max_depth",
@@ -426,7 +404,6 @@ def _normalize_toml_payload(
         "kill_grace_minutes": "kill_grace_minutes",
         "guardrail_timeout_minutes": "guardrail_timeout_minutes",
         "wait_timeout_minutes": "wait_timeout_minutes",
-        "default_permission_tier": "default_permission_tier",
         "default_primary_agent": "default_primary_agent",
         "default_agent": "default_agent",
         "default_model": "default_model",
@@ -515,11 +492,6 @@ def _env_alias_overrides(repo_root: Path) -> dict[str, object]:
             "float",
         ),
         ("MERIDIAN_WAIT_TIMEOUT_MINUTES", ("wait_timeout_minutes",), "float"),
-        (
-            "MERIDIAN_DEFAULT_PERMISSION_TIER",
-            ("default_permission_tier",),
-            "str",
-        ),
         ("MERIDIAN_DEFAULT_PRIMARY_AGENT", ("default_primary_agent",), "str"),
         ("MERIDIAN_DEFAULT_AGENT", ("default_agent",), "str"),
         ("MERIDIAN_DEFAULT_MODEL", ("default_model",), "str"),
@@ -650,7 +622,6 @@ class PrimaryConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="ignore")
 
     autocompact_pct: int = 65
-    permission_tier: str = "full-access"
     model: str | None = None
     harness: str | None = None
     max_turns: int | None = None
@@ -669,11 +640,6 @@ class PrimaryConfig(BaseModel):
                 f"{_PRIMARY_AUTOCOMPACT_PCT_MAX}, got {value!r}."
             )
         return value
-
-    @field_validator("permission_tier")
-    @classmethod
-    def _validate_permission(cls, value: str) -> str:
-        return _validate_permission_tier(value)
 
     @field_validator("model")
     @classmethod
@@ -721,7 +687,6 @@ class MeridianConfig(BaseSettings):
     kill_grace_minutes: float = 2.0 / 60.0
     guardrail_timeout_minutes: float = 0.5
     wait_timeout_minutes: float = 30.0
-    default_permission_tier: str = "read-only"
     default_primary_agent: str = "meridian-primary"
     default_agent: str = "meridian-agent"
     default_model: str = "gpt-5.3-codex"
@@ -730,11 +695,6 @@ class MeridianConfig(BaseSettings):
     primary: PrimaryConfig = Field(default_factory=PrimaryConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
     search_paths: SearchPathConfig = Field(default_factory=SearchPathConfig)
-
-    @field_validator("default_permission_tier")
-    @classmethod
-    def _validate_default_permission_tier(cls, value: str) -> str:
-        return _validate_permission_tier(value)
 
     @field_validator("default_primary_agent", "default_agent")
     @classmethod

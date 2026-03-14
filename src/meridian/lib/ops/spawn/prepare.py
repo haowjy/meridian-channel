@@ -25,8 +25,6 @@ from meridian.lib.launch.resolve import (
 from meridian.lib.safety.permissions import (
     build_permission_config,
     build_permission_resolver,
-    validate_child_permission_tier,
-    validate_permission_config_for_harness,
 )
 from meridian.lib.core.types import ModelId
 
@@ -154,7 +152,7 @@ def build_create_payload(
     preflight_warning: str | None = None,
     ctx: RuntimeContext | None = None,
 ) -> PreparedSpawnPlan:
-    runtime_context = ctx or RuntimeContext.from_environment()
+    _ = ctx
     runtime_view: _CreateRuntimeView
     if runtime is not None:
         runtime_view = _CreateRuntimeView(
@@ -257,38 +255,17 @@ def build_create_payload(
     warning = merge_warnings(preflight_warning, warning)
     from meridian.lib.harness.adapter import SpawnParams
 
-    # Children inherit the parent's permission tier by default; only fall back
-    # to the config default when there is no parent (i.e. primary session).
-    effective_default_tier = (
-        runtime_context.permission_tier
-        or runtime_view.config.default_permission_tier
-    )
     inferred_tier = resolve_permission_tier_from_profile(
         profile=profile,
-        default_tier=effective_default_tier,
     )
     permission_config = build_permission_config(
-        payload.permission_tier or inferred_tier,
+        inferred_tier,
         approval=payload.approval or "confirm",
-        default_tier=effective_default_tier,
-    )
-    permission_error = validate_child_permission_tier(
-        requested_tier=permission_config.tier.value,
-        parent_tier=runtime_context.permission_tier,
-    )
-    if permission_error is not None:
-        raise ValueError(permission_error)
-    warning = merge_warnings(
-        warning,
-        validate_permission_config_for_harness(
-            harness_id=harness.id,
-            config=permission_config,
-        ),
     )
     resolver = build_permission_resolver(
         allowed_tools=profile.allowed_tools if profile is not None else (),
         permission_config=permission_config,
-        cli_permission_override=payload.permission_tier is not None,
+        cli_permission_override=False,
     )
 
     appended_system_prompt = None
@@ -308,6 +285,7 @@ def build_create_payload(
                 continue_harness_session_id=resolved_continue_harness_session_id,
                 continue_fork=resolved_continue_fork,
                 appended_system_prompt=appended_system_prompt,
+                extra_args=payload.passthrough_args,
             ),
             resolver,
         )

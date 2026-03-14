@@ -4,7 +4,6 @@ import logging
 import os
 import shlex
 from pathlib import Path
-from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict
 
@@ -17,7 +16,6 @@ from meridian.lib.safety.permissions import (
     PermissionConfig,
     build_permission_config,
     build_permission_resolver,
-    warn_profile_tier_escalation,
 )
 from meridian.lib.state.paths import resolve_state_paths
 
@@ -232,34 +230,18 @@ def resolve_primary_launch_plan(
     passthrough_args, passthrough_prompt_fragments = normalize_system_prompt_passthrough_args(
         command_request.passthrough_args
     )
-    primary_default_tier = resolved_config.primary.permission_tier
     inferred_tier = resolve_permission_tier_from_profile(
         profile=profile,
-        default_tier=primary_default_tier,
-        warning_logger=cast(Any, logger),
+        warning_logger=logger,
     )
-    permission_tier_override = (
-        request.permission_tier.strip()
-        if request.permission_tier is not None and request.permission_tier.strip()
-        else None
-    )
-    if permission_tier_override is None:
-        warn_profile_tier_escalation(
-            profile=profile,
-            inferred_tier=inferred_tier,
-            default_tier=primary_default_tier,
-            warning_logger=cast(Any, logger),
-        )
-    resolved_tier = permission_tier_override or inferred_tier
     permission_config = build_permission_config(
-        resolved_tier,
+        inferred_tier,
         approval=request.approval,
-        default_tier=primary_default_tier,
     )
     resolver = build_permission_resolver(
         allowed_tools=profile.allowed_tools if profile is not None else (),
         permission_config=permission_config,
-        cli_permission_override=permission_tier_override is not None,
+        cli_permission_override=False,
     )
 
     materialized = materialize_for_harness(

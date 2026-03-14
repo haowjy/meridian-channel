@@ -123,7 +123,6 @@ def _spawn_child_env(
     *,
     work_id: str | None = None,
     state_root: Path | None = None,
-    permission_tier: str | None = None,
     ctx: RuntimeContext | None = None,
 ) -> dict[str, str]:
     resolved_context = runtime_context(ctx)
@@ -144,22 +143,17 @@ def _spawn_child_env(
             work_id=resolved_context.work_id,
         )
     resolved_work_id = (work_id or "").strip() or child_context.work_id
-    resolved_permission_tier = (
-        permission_tier.strip()
-        if permission_tier is not None and permission_tier.strip()
-        else child_context.permission_tier
-    )
     if resolved_work_id != child_context.work_id or (
         state_root is not None and state_root != child_context.state_root
-    ) or resolved_permission_tier != child_context.permission_tier:
+    ):
         child_context = child_context.model_copy(
             update={
                 "state_root": state_root if state_root is not None else child_context.state_root,
                 "work_id": resolved_work_id,
-                "permission_tier": resolved_permission_tier,
             }
         )
     child_env.update(child_context.to_env_overrides())
+    child_env.pop("MERIDIAN_PERMISSION_TIER", None)
     if resolved_context.spawn_id is None:
         child_env.pop("MERIDIAN_PARENT_SPAWN_ID", None)
     if resolved_spawn_id is None:
@@ -368,7 +362,11 @@ def _write_params_json(
         "reference_files": list(prepared.reference_files),
         "template_vars": prepared.template_vars,
         "skills": list(prepared.skills),
-        "permission_tier": prepared.execution.permission_config.tier.value,
+        "permission_tier": (
+            prepared.execution.permission_config.tier.value
+            if prepared.execution.permission_config.tier is not None
+            else None
+        ),
         "continue_session": prepared.session.harness_session_id,
         "continue_fork": prepared.session.continue_fork,
     }
@@ -533,7 +531,6 @@ async def _execute_existing_spawn(
                 str(spawn.spawn_id),
                 work_id=spawn_record.work_id,
                 state_root=state_root,
-                permission_tier=resolved_plan.execution.permission_config.tier.value,
                 ctx=resolved_context,
             ),
             harness_session_id_observer=session_context.harness_session_id_observer,
@@ -566,9 +563,9 @@ def _build_background_worker_command(
         spawn_id,
         "--repo-root",
         repo_root.as_posix(),
-        "--permission-tier",
-        permission_config.tier.value,
     ]
+    if permission_config.tier is not None:
+        command.extend(["--permission-tier", permission_config.tier.value])
     if timeout is not None:
         command.extend(["--timeout", str(timeout)])
     if agent_name is not None:
@@ -637,7 +634,7 @@ def execute_spawn_background(
         mcp_tools=prepared.mcp_tools,
         permission_config=prepared.execution.permission_config,
         allowed_tools=prepared.execution.allowed_tools,
-        cli_permission_override=payload.permission_tier is not None,
+        cli_permission_override=False,
         continue_harness_session_id=prepared.session.harness_session_id,
         continue_fork=prepared.session.continue_fork,
         session_agent=prepared.session_agent,
@@ -656,7 +653,6 @@ def execute_spawn_background(
             spawn_id=spawn_id_text,
             work_id=context.work_id,
             state_root=context.state_root,
-            permission_tier=prepared.execution.permission_config.tier.value,
             ctx=resolved_context,
         )
     )
@@ -790,7 +786,6 @@ def execute_spawn_blocking(
                     str(spawn.spawn_id),
                     work_id=context.work_id,
                     state_root=context.state_root,
-                    permission_tier=resolved_plan.execution.permission_config.tier.value,
                     ctx=resolved_context,
                 ),
                 event_observer=event_observer,
@@ -854,7 +849,7 @@ def _build_background_worker_parser() -> argparse.ArgumentParser:
     parser.add_argument("--agent", default=None)
     parser.add_argument("--mcp-tool", action="append", default=[])
     parser.add_argument("--allowed-tool", action="append", default=[])
-    parser.add_argument("--permission-tier", required=True)
+    parser.add_argument("--permission-tier", required=False, default=None)
     parser.add_argument("--cli-permission-override", action="store_true")
     parser.add_argument("--continue-harness-session-id", default=None)
     parser.add_argument("--continue-fork", action="store_true")

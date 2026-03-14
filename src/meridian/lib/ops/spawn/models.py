@@ -36,8 +36,8 @@ class SpawnCreateInput(BaseModel):
     background: bool = False
     repo_root: str | None = None
     timeout: float | None = None
-    permission_tier: str | None = None
     approval: str | None = None
+    passthrough_args: tuple[str, ...] = ()
     continue_harness_session_id: str | None = None
     continue_harness: str | None = None
     continue_fork: bool = False

@@ -1,7 +1,5 @@
 from pathlib import Path
 
-import pytest
-
 from meridian.lib.core.context import RuntimeContext
 from meridian.lib.ops.spawn.api import spawn_continue_sync
 from meridian.lib.ops.spawn.models import SpawnContinueInput
@@ -29,7 +27,7 @@ def _write_agent(path: Path, *, sandbox: str) -> None:
     )
 
 
-def test_spawn_continue_honors_runtime_context_permission_tier(tmp_path: Path) -> None:
+def test_spawn_continue_ignores_runtime_context_permission_tier(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _write_agent(repo_root / ".agents" / "agents" / "coder.md", sandbox="workspace-write")
@@ -46,24 +44,18 @@ def test_spawn_continue_honors_runtime_context_permission_tier(tmp_path: Path) -
         harness_session_id="session-1",
     )
 
-    with pytest.raises(
-        ValueError,
-        match=(
-            "Nested spawn requests workspace-write, but parent session is read-only. "
-            "Child spawns cannot escalate permissions."
+    result = spawn_continue_sync(
+        SpawnContinueInput(
+            spawn_id=str(source_spawn_id),
+            prompt="follow up",
+            agent="coder",
+            dry_run=True,
+            repo_root=repo_root.as_posix(),
         ),
-    ):
-        spawn_continue_sync(
-            SpawnContinueInput(
-                spawn_id=str(source_spawn_id),
-                prompt="follow up",
-                agent="coder",
-                dry_run=True,
-                repo_root=repo_root.as_posix(),
-            ),
-            ctx=RuntimeContext(
-                chat_id="c-parent",
-                work_id="work-9",
-                permission_tier="read-only",
-            ),
-        )
+        ctx=RuntimeContext(
+            chat_id="c-parent",
+            work_id="work-9",
+        ),
+    )
+
+    assert result.status == "dry-run"

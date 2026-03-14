@@ -77,7 +77,8 @@ def build_launch_env(
         )
 
     if adapter is not None and run_params is not None and permission_config is not None:
-        env_overrides["MERIDIAN_PERMISSION_TIER"] = permission_config.tier.value
+        if permission_config.tier is not None:
+            env_overrides["MERIDIAN_PERMISSION_TIER"] = permission_config.tier.value
         return build_harness_child_env(
             base_env=os.environ,
             adapter=adapter,

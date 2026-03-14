@@ -75,7 +75,7 @@ fi
 ### ADV-4. Permission boundary probing [NICE-TO-HAVE]
 
 ```bash
-if uv run meridian --json spawn -p "touch /root/forbidden" --permission read-only --dry-run >/tmp/meridian-adv-permission.out 2>&1; then
+if uv run meridian --json spawn -p "touch /root/forbidden" --dry-run >/tmp/meridian-adv-permission.out 2>&1; then
   if grep -q 'Traceback' /tmp/meridian-adv-permission.out; then
     echo "FAIL: permission probe produced a traceback"
   else

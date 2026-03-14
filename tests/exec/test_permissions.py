@@ -32,6 +32,13 @@ def test_auto_approval_bypass_and_invalid_approval() -> None:
         build_permission_config("full-access", approval="sometimes")
 
 
+def test_none_tier_defaults_to_harness_choice() -> None:
+    config = build_permission_config(None)
+    assert config.tier is None
+    assert permission_flags_for_harness(HarnessId("claude"), config) == []
+    assert permission_flags_for_harness(HarnessId("codex"), config) == []
+
+
 @pytest.mark.parametrize(
     ("tier", "expected"),
     (
@@ -167,3 +174,20 @@ def test_build_launch_env_seeds_effective_permission_tier(
     )
 
     assert env["MERIDIAN_PERMISSION_TIER"] == "workspace-write"
+
+
+def test_build_launch_env_omits_permission_tier_when_unset(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.delenv("MERIDIAN_PERMISSION_TIER", raising=False)
+
+    env = build_launch_env(
+        tmp_path,
+        LaunchRequest(model="gpt-5.3-codex"),
+        adapter=ClaudeAdapter(),
+        run_params=SpawnParams(prompt="test", model=ModelId("claude-sonnet-4-6")),
+        permission_config=PermissionConfig(),
+    )
+
+    assert "MERIDIAN_PERMISSION_TIER" not in env

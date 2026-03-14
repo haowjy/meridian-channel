@@ -127,27 +127,21 @@ def _spawn_create(
             help="Maximum runtime in minutes before spawn timeout.",
         ),
     ] = None,
-    permission_tier: Annotated[
-        str | None,
-        Parameter(
-            name="--permission",
-            help="Tool access tier: read-only, workspace-write, or full-access.",
-        ),
-    ] = None,
-    approval: Annotated[
-        str | None,
-        Parameter(
-            name="--approval",
-            help="Approval mode: confirm (ask before acting) or auto (auto-approve all).",
-        ),
-    ] = None,
     yolo: Annotated[
         bool,
         Parameter(
             name="--yolo",
-            help="Shortcut for --permission full-access --approval auto.",
+            help="Shortcut for approval=auto.",
         ),
     ] = False,
+    harness_args: Annotated[
+        tuple[str, ...],
+        Parameter(
+            name="--harness-arg",
+            help="Additional harness arguments (repeatable).",
+            negative_iterable=(),
+        ),
+    ] = (),
     continue_from: Annotated[
         str | None,
         Parameter(name="--continue", help="Continue from a previous spawn ID."),
@@ -172,11 +166,6 @@ def _spawn_create(
             sink=current_output_sink(),
         )
     else:
-        resolved_permission_tier = permission_tier
-        resolved_approval = approval
-        if yolo:
-            resolved_permission_tier = "full-access"
-            resolved_approval = "auto"
         result = spawn_create_sync(
             SpawnCreateInput(
                 prompt=prompt,
@@ -193,8 +182,8 @@ def _spawn_create(
                 stream=stream,
                 background=not foreground,
                 timeout=timeout,
-                permission_tier=resolved_permission_tier,
-                approval=resolved_approval,
+                approval="auto" if yolo else None,
+                passthrough_args=harness_args,
             ),
             sink=current_output_sink(),
         )

@@ -313,13 +313,6 @@ def root(
         str | None,
         Parameter(name=["--agent", "-a"], help="Agent profile name for the primary agent."),
     ] = None,
-    permission_tier: Annotated[
-        str | None,
-        Parameter(
-            name="--permission",
-            help="Tool access tier: read-only, workspace-write, or full-access.",
-        ),
-    ] = None,
     approval: Annotated[
         Literal["confirm", "auto"],
         Parameter(
@@ -331,7 +324,7 @@ def root(
         bool,
         Parameter(
             name="--yolo",
-            help="Shortcut for --permission full-access --approval auto.",
+            help="Shortcut for --approval auto.",
         ),
     ] = False,
     autocompact: Annotated[
@@ -369,7 +362,6 @@ def root(
         model=model,
         harness=harness,
         agent=agent,
-        permission_tier=permission_tier,
         approval=approval,
         yolo=yolo,
         autocompact=autocompact,
@@ -481,7 +473,6 @@ def _run_primary_launch(
     model: str,
     harness: str | None,
     agent: str | None,
-    permission_tier: str | None,
     approval: str,
     yolo: bool,
     autocompact: int | None,
@@ -494,10 +485,8 @@ def _run_primary_launch(
     harness_registry = get_default_harness_registry()
     normalized_continue_ref = continue_ref.strip() if continue_ref is not None else ""
     resume_target = normalized_continue_ref if normalized_continue_ref else None
-    resolved_permission_tier = permission_tier
     resolved_approval = approval
     if yolo:
-        resolved_permission_tier = "full-access"
         resolved_approval = "auto"
 
     continue_harness_session_id: str | None = None
@@ -535,7 +524,6 @@ def _run_primary_launch(
             fresh=fresh,
             pinned_context="",
             dry_run=dry_run,
-            permission_tier=resolved_permission_tier,
             approval=resolved_approval,
             continue_harness_session_id=continue_harness_session_id,
             continue_chat_id=continue_chat_id,
@@ -692,7 +680,6 @@ _TOP_LEVEL_VALUE_FLAGS = frozenset(
         "--harness",
         "--agent",
         "-a",
-        "--permission",
         "--approval",
         "--autocompact",
         "--harness-arg",

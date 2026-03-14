@@ -3,19 +3,10 @@
 
 import json
 from enum import StrEnum
-from typing import Protocol
 
-import structlog
 from pydantic import BaseModel, ConfigDict
 
-from meridian.lib.catalog.agent import AgentProfile
 from meridian.lib.core.types import HarnessId
-
-logger = structlog.get_logger(__name__)
-
-
-class _WarningLogger(Protocol):
-    def warning(self, message: str) -> None: ...
 
 
 class PermissionTier(StrEnum):
@@ -26,11 +17,6 @@ class PermissionTier(StrEnum):
     FULL_ACCESS = "full-access"
 
 
-_TIER_RANKS = {
-    "read-only": 0,
-    "workspace-write": 1,
-    "full-access": 2,
-}
 _APPROVAL_MODES = frozenset({"confirm", "auto"})
 
 
@@ -39,18 +25,20 @@ class PermissionConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    tier: PermissionTier = PermissionTier.READ_ONLY
+    tier: PermissionTier | None = None
     approval: str = "confirm"
 
 
 def parse_permission_tier(
     raw: str | PermissionTier | None,
     *,
-    default_tier: str | PermissionTier = PermissionTier.READ_ONLY,
-) -> PermissionTier:
+    default_tier: str | PermissionTier | None = None,
+) -> PermissionTier | None:
     """Parse one permission tier string."""
 
-    resolved_default = _parse_permission_tier_value(default_tier)
+    resolved_default = (
+        _parse_permission_tier_value(default_tier) if default_tier is not None else None
+    )
     if raw is None:
         return resolved_default
     if isinstance(raw, PermissionTier):
@@ -100,57 +88,11 @@ def _parse_approval_value(raw: str) -> str:
     raise ValueError(f"Unsupported approval mode '{raw}'. Expected: {allowed}.")
 
 
-def warn_profile_tier_escalation(
-    *,
-    profile: AgentProfile | None,
-    inferred_tier: str | None,
-    default_tier: str,
-    warning_logger: _WarningLogger | None = None,
-) -> None:
-    if profile is None or inferred_tier is None:
-        return
-    try:
-        resolved_inferred = parse_permission_tier(inferred_tier)
-        resolved_default = parse_permission_tier(default_tier)
-    except ValueError:
-        return
-    if _TIER_RANKS[resolved_inferred.value] <= _TIER_RANKS[resolved_default.value]:
-        return
-    sink = warning_logger or logger
-    sink.warning(
-        f"Agent profile '{profile.name}' infers {resolved_inferred.value} "
-        f"(config default: {resolved_default.value}). Use --permission to override."
-    )
-
-
-def validate_child_permission_tier(
-    *,
-    requested_tier: str,
-    parent_tier: str | None,
-) -> str | None:
-    """Reject nested spawns that request more access than the current session."""
-
-    if parent_tier is None or not parent_tier.strip():
-        return None
-    try:
-        resolved_requested = parse_permission_tier(requested_tier)
-        resolved_parent = parse_permission_tier(parent_tier)
-    except ValueError:
-        return None
-    if _TIER_RANKS[resolved_requested.value] <= _TIER_RANKS[resolved_parent.value]:
-        return None
-    return (
-        f"Nested spawn requests {resolved_requested.value}, "
-        f"but parent session is {resolved_parent.value}. "
-        "Child spawns cannot escalate permissions."
-    )
-
-
 def build_permission_config(
     tier: str | PermissionTier | None,
     *,
     approval: str = "confirm",
-    default_tier: str | PermissionTier = PermissionTier.READ_ONLY,
+    default_tier: str | PermissionTier | None = None,
 ) -> PermissionConfig:
     """Build and validate a permission configuration."""
 
@@ -245,6 +187,8 @@ def permission_flags_for_harness(
         if harness_id == HarnessId("codex"):
             return ["--dangerously-bypass-approvals-and-sandbox"]
         # OpenCode currently has no equivalent global bypass flag.
+    if tier is None:
+        return []
 
     if harness_id == HarnessId("claude"):
         return ["--allowedTools", ",".join(_claude_allowed_tools(tier))]
@@ -308,8 +252,6 @@ def build_permission_resolver(
     cli_permission_override: bool,
 ) -> TieredPermissionResolver | ExplicitToolsResolver:
     """Pick the right resolver: explicit tools if specified, else tier-based.
-
-    CLI --permission override always wins (forces tier-based).
     """
     if allowed_tools and not cli_permission_override:
         return ExplicitToolsResolver(

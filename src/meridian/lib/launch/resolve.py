@@ -3,7 +3,6 @@
 
 import logging
 from pathlib import Path
-from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict
 
@@ -20,10 +19,6 @@ from meridian.lib.core.types import HarnessId, ModelId
 from .types import LaunchRequest, PrimarySessionMetadata
 
 logger = logging.getLogger(__name__)
-
-
-class _WarningLogger(Protocol):
-    def warning(self, message: str, *args: object) -> None: ...
 
 
 def load_agent_profile_with_fallback(
@@ -113,9 +108,8 @@ def resolve_skills_from_profile(
 def resolve_permission_tier_from_profile(
     *,
     profile: AgentProfile | None,
-    default_tier: str,
-    warning_logger: _WarningLogger | None = None,
-) -> str:
+    warning_logger: logging.Logger | None = None,
+) -> str | None:
     """Infer permission tier from agent profile sandbox field."""
 
     sandbox_value = profile.sandbox if profile is not None else None
@@ -126,13 +120,11 @@ def resolve_permission_tier_from_profile(
     if profile is not None and sandbox_value is not None and sandbox_value.strip():
         sink = warning_logger or logger
         sink.warning(
-            "Agent profile '%s' has unsupported sandbox '%s'; "
-            "falling back to default permission tier '%s'.",
+            "Agent profile '%s' has unsupported sandbox '%s'; harness defaults will apply.",
             profile.name,
             sandbox_value.strip(),
-            default_tier,
         )
-    return default_tier
+    return None
 
 
 def resolve_harness(

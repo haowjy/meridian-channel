@@ -216,6 +216,8 @@ class OpenCodeAdapter(BaseSubprocessHarness):
         return None
 
     def env_overrides(self, config: PermissionConfig) -> dict[str, str]:
+        if config.tier is None:
+            return {}
         return {"OPENCODE_PERMISSION": opencode_permission_json(config.tier)}
 
     def parse_stream_event(self, line: str) -> StreamEvent | None:

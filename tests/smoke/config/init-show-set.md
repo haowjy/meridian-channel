@@ -30,7 +30,7 @@ echo "PASS: config init created config.toml" || echo "FAIL: config init did not 
 uv run meridian config show >/tmp/meridian-config-show.txt && \
 grep -q '^defaults.model:' /tmp/meridian-config-show.txt && \
 grep -q '^timeouts.wait_minutes:' /tmp/meridian-config-show.txt && \
-grep -q '^permissions.default_tier:' /tmp/meridian-config-show.txt && \
+grep -q '^harness.codex:' /tmp/meridian-config-show.txt && \
 echo "PASS: config show includes the expected key families" || echo "FAIL: config show output was incomplete"
 ```
 

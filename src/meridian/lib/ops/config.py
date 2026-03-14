@@ -19,13 +19,12 @@ from meridian.lib.config.settings import (
     load_config,
 )
 from meridian.lib.core.util import FormatContext
-from meridian.lib.safety.permissions import parse_permission_tier
 from meridian.lib.core.util import to_jsonable
 from meridian.lib.ops.runtime import async_from_sync
 from meridian.lib.state.paths import ensure_gitignore, resolve_state_paths
 
 
-_SECTION_ORDER: tuple[str, ...] = ("defaults", "timeouts", "permissions", "harness", "output")
+_SECTION_ORDER: tuple[str, ...] = ("defaults", "timeouts", "harness", "output")
 _OUTPUT_VERBOSITY_PRESETS = frozenset({"quiet", "normal", "verbose", "debug"})
 
 
@@ -122,19 +121,6 @@ _CONFIG_KEY_SPECS: tuple[_ConfigKeySpec, ...] = (
         value_kind="float",
         env_var="MERIDIAN_WAIT_TIMEOUT_MINUTES",
         aliases=("timeouts.wait_timeout_minutes", "wait_timeout_minutes"),
-    ),
-    _ConfigKeySpec(
-        canonical_key="permissions.default_tier",
-        section="permissions",
-        file_key="default_tier",
-        field_path=("default_permission_tier",),
-        value_kind="str",
-        env_var="MERIDIAN_DEFAULT_PERMISSION_TIER",
-        aliases=(
-            "permissions.default_permission_tier",
-            "default_tier",
-            "default_permission_tier",
-        ),
     ),
     _ConfigKeySpec(
         canonical_key="harness.claude",
@@ -416,9 +402,6 @@ def _parse_toml_value(spec: _ConfigKeySpec, raw_value: object, source: str) -> o
             )
         return lowered
 
-    if spec.canonical_key == "permissions.default_tier":
-        parse_permission_tier(normalized)
-
     return normalized
 
 
@@ -481,9 +464,6 @@ def _parse_cli_value(spec: _ConfigKeySpec, raw_value: str) -> object:
                 f"{sorted(_OUTPUT_VERBOSITY_PRESETS)}, got {raw_value!r}."
             )
         return lowered
-
-    if spec.canonical_key == "permissions.default_tier":
-        parse_permission_tier(normalized)
 
     return normalized
 
@@ -645,12 +625,6 @@ def _scaffold_template() -> str:
         "# Max minutes to wait on run completion operations (float minutes).",
         f"# wait_minutes = {defaults['timeouts.wait_minutes']}",
         "",
-        "# -- Permission defaults ----------------------------------------------------",
-        "[permissions]",
-        "# Default permission tier for non-primary sessions (str; valid: read-only,",
-        "# workspace-write, full-access).",
-        f"# default_tier = {_toml_literal(cast('str', defaults['permissions.default_tier']))}",
-        "",
         "# -- Harness default models ------------------------------------------------",
         "[harness]",
         "# Default model for Claude harness (str model id).",
@@ -664,9 +638,6 @@ def _scaffold_template() -> str:
         "[primary]",
         "# Context compaction threshold for the primary agent (int 1-100).",
         f"# autocompact_pct = {primary_defaults.autocompact_pct}",
-        "# Permission tier for primary sessions (str; valid: read-only,",
-        "# workspace-write, full-access).",
-        f"# permission_tier = {_toml_literal(primary_defaults.permission_tier)}",
         "",
         "# -- Output streaming -------------------------------------------------------",
         "[output]",

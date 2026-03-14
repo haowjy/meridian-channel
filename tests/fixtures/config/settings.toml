@@ -11,9 +11,6 @@ kill_grace_minutes = 0.025
 guardrail_minutes = 0.75
 wait_minutes = 15.0
 
-[permissions]
-default_tier = "workspace-write"
-
 [harness]
 claude = "claude-sonnet-4-6"
 codex = "gpt-5.3-codex"
@@ -21,4 +18,3 @@ opencode = "gemini-3.1-pro"
 
 [primary]
 autocompact_pct = 61
-permission_tier = "workspace-write"
