@@ -1,6 +1,6 @@
 import pytest
 
-from meridian.lib.sync.install_types import ItemRef, format_item_id, parse_item_id, validate_source_name
+from meridian.lib.install.types import ItemRef, format_item_id, parse_item_id, validate_source_name
 
 
 def test_item_ref_roundtrip_from_item_id() -> None:

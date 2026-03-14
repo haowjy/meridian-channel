@@ -12,8 +12,8 @@ from typing import cast
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from meridian.lib.state.atomic import atomic_write_text
-from meridian.lib.sync.install_types import SourceKind, normalize_required_string, parse_item_id
-from meridian.lib.sync.install_types import validate_source_name
+from meridian.lib.install.types import SourceKind, normalize_required_string, parse_item_id
+from meridian.lib.install.types import validate_source_name
 
 
 class LockedSourceItem(BaseModel):
@@ -96,7 +96,7 @@ class LockedInstalledItem(BaseModel):
         return normalize_required_string(value, source="lock")
 
 
-class ManagedInstallLock(BaseModel):
+class InstallLock(BaseModel):
     """Serialized `.meridian/agents.lock` content."""
 
     model_config = ConfigDict(frozen=True)
@@ -106,7 +106,7 @@ class ManagedInstallLock(BaseModel):
     items: dict[str, LockedInstalledItem] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _validate_keys(self) -> "ManagedInstallLock":
+    def _validate_keys(self) -> "InstallLock":
         for source_name in self.sources:
             validate_source_name(source_name)
         for item_id in self.items:
@@ -114,20 +114,20 @@ class ManagedInstallLock(BaseModel):
         return self
 
 
-def read_install_lock(lock_path: Path) -> ManagedInstallLock:
+def read_lock(lock_path: Path) -> InstallLock:
     """Read `.meridian/agents.lock`."""
 
     try:
         raw = lock_path.read_text(encoding="utf-8")
     except FileNotFoundError:
-        return ManagedInstallLock()
+        return InstallLock()
 
     payload_obj = json.loads(raw)
     payload = cast("dict[str, object]", payload_obj)
-    return ManagedInstallLock.model_validate(payload)
+    return InstallLock.model_validate(payload)
 
 
-def write_install_lock(lock_path: Path, lock: ManagedInstallLock) -> None:
+def write_lock(lock_path: Path, lock: InstallLock) -> None:
     """Write `.meridian/agents.lock` atomically."""
 
     atomic_write_text(
@@ -141,7 +141,7 @@ def _flock_path(lock_path: Path) -> Path:
 
 
 @contextmanager
-def lock_file_guard(lock_path: Path) -> Iterator[None]:
+def state_lock(lock_path: Path) -> Iterator[None]:
     """Acquire an exclusive advisory lock for an install state file."""
 
     flock_path = _flock_path(lock_path)

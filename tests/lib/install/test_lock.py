@@ -1,12 +1,12 @@
 from pathlib import Path
 
-from meridian.lib.sync.install_lock import LockedInstalledItem, LockedSourceItem, LockedSourceRecord
-from meridian.lib.sync.install_lock import ManagedInstallLock, read_install_lock, write_install_lock
+from meridian.lib.install.lock import LockedInstalledItem, LockedSourceItem, LockedSourceRecord
+from meridian.lib.install.lock import InstallLock, read_lock, write_lock
 
 
-def test_write_install_lock_roundtrip(tmp_path: Path) -> None:
+def test_write_lock_roundtrip(tmp_path: Path) -> None:
     lock_path = tmp_path / ".meridian" / "agents.lock"
-    lock = ManagedInstallLock(
+    lock = InstallLock(
         sources={
             "meridian-agents": LockedSourceRecord(
                 kind="git",
@@ -33,6 +33,6 @@ def test_write_install_lock_roundtrip(tmp_path: Path) -> None:
         },
     )
 
-    write_install_lock(lock_path, lock)
+    write_lock(lock_path, lock)
 
-    assert read_install_lock(lock_path) == lock
+    assert read_lock(lock_path) == lock

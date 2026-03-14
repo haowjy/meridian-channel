@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import cast
 
-from meridian.lib.sync.install_config import ManagedSourceConfig
-from meridian.lib.sync.install_types import ItemRef
-from meridian.lib.sync.install_types import SourceKind
+from meridian.lib.install.config import SourceConfig
+from meridian.lib.install.types import ItemRef
+from meridian.lib.install.types import SourceKind
 
 _WELL_KNOWN_SOURCES: dict[str, dict[str, str]] = {
     "meridian-agents": {
@@ -17,17 +17,17 @@ _WELL_KNOWN_SOURCES: dict[str, dict[str, str]] = {
 }
 
 
-def is_well_known_source(name: str) -> bool:
+def is_well_known_alias(name: str) -> bool:
     """Return whether the given source name is a built-in alias."""
 
     return name.strip() in _WELL_KNOWN_SOURCES
 
 
-def well_known_source_config(
+def well_known_source(
     name: str,
     *,
     items: tuple[ItemRef, ...] | None = None,
-) -> ManagedSourceConfig:
+) -> SourceConfig:
     """Build one well-known managed source declaration."""
 
     normalized = name.strip()
@@ -35,7 +35,7 @@ def well_known_source_config(
     if payload is None:
         raise ValueError(f"Unknown well-known managed source '{name}'.")
 
-    return ManagedSourceConfig(
+    return SourceConfig(
         name=normalized,
         kind=cast("SourceKind", payload["kind"]),
         url=payload.get("url"),

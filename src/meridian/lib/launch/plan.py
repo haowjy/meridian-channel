@@ -17,10 +17,10 @@ from meridian.lib.safety.permissions import (
     resolve_permission_pipeline,
 )
 from meridian.lib.state.paths import resolve_state_paths
-from meridian.lib.sync.runtime_ensure import (
-    ensure_runtime_assets,
-    plan_required_runtime_assets,
-    planned_runtime_agent_names,
+from meridian.lib.install.bootstrap import (
+    ensure_bootstrap_assets,
+    plan_bootstrap_assets,
+    planned_bootstrap_agent_names,
 )
 
 from .prompt import compose_skill_injections, resolve_run_defaults
@@ -121,25 +121,25 @@ def resolve_primary_launch_plan(
     state_root = paths.root_dir
     lock_path = paths.active_primary_lock
     resolved_prompt = prompt if prompt is not None else build_primary_prompt(request)
-    runtime_agent_names = planned_runtime_agent_names(
+    bootstrap_agent_names = planned_bootstrap_agent_names(
         configured_default=resolved_config.primary_agent,
         requested_agent=request.agent,
     )
-    runtime_asset_plan = plan_required_runtime_assets(
+    bootstrap_plan = plan_bootstrap_assets(
         repo_root=resolved_root,
-        agent_names=runtime_agent_names,
+        agent_names=bootstrap_agent_names,
     )
-    if runtime_asset_plan.missing_items:
+    if bootstrap_plan.missing_items:
         if request.dry_run:
-            joined = ", ".join(sorted(runtime_asset_plan.missing_items))
+            joined = ", ".join(sorted(bootstrap_plan.missing_items))
             raise FileNotFoundError(
                 "Required runtime agents are missing locally for dry-run and will not be "
                 f"auto-installed: {joined}. Install their source first or rerun without "
                 "--dry-run."
             )
-        ensure_runtime_assets(
+        ensure_bootstrap_assets(
             repo_root=resolved_root,
-            plan=runtime_asset_plan,
+            plan=bootstrap_plan,
         )
 
     profile = load_agent_profile_with_fallback(

@@ -10,12 +10,12 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from meridian.lib.sync.install_config import ManagedSourceConfig
-from meridian.lib.sync.install_hash import compute_install_item_hash
-from meridian.lib.sync.install_lock import LockedInstalledItem, LockedSourceItem, LockedSourceRecord
-from meridian.lib.sync.install_lock import ManagedInstallLock
-from meridian.lib.sync.source_adapter import default_source_adapters
-from meridian.lib.sync.source_tree import ExportedSourceItem
+from meridian.lib.install.config import SourceConfig
+from meridian.lib.install.hash import compute_item_hash
+from meridian.lib.install.lock import LockedInstalledItem, LockedSourceItem, LockedSourceRecord
+from meridian.lib.install.lock import InstallLock
+from meridian.lib.install.adapters import default_adapters
+from meridian.lib.install.discovery import DiscoveredItem
 
 ItemKind = Literal["agent", "skill"]
 InstallAction = Literal[
@@ -57,7 +57,7 @@ class PlannedSourceItem(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     source_name: str
-    item: ExportedSourceItem
+    item: DiscoveredItem
     destination_name: str
     destination_path: Path
 
@@ -70,11 +70,11 @@ class PlannedSourceItem(BaseModel):
         return self.item.kind
 
 
-def reconcile_managed_sources(
+def reconcile_sources(
     *,
     repo_root: Path,
-    sources: tuple[ManagedSourceConfig, ...] | list[ManagedSourceConfig],
-    lock: ManagedInstallLock,
+    sources: tuple[SourceConfig, ...] | list[SourceConfig],
+    lock: InstallLock,
     agents_cache_dir: Path,
     upgrade: bool = False,
     force: bool = False,
@@ -83,7 +83,7 @@ def reconcile_managed_sources(
 ) -> InstallResult:
     """Resolve and reconcile managed sources into `.agents/`."""
 
-    adapters = default_source_adapters()
+    adapters = default_adapters()
     selected_sources = list(sources)
     if source_filter is not None:
         selected_sources = [source for source in selected_sources if source.name == source_filter]
@@ -191,8 +191,8 @@ def reconcile_managed_sources(
 def plan_source_items(
     *,
     repo_root: Path,
-    source: ManagedSourceConfig,
-    discovered_items: tuple[ExportedSourceItem, ...],
+    source: SourceConfig,
+    discovered_items: tuple[DiscoveredItem, ...],
 ) -> list[PlannedSourceItem]:
     """Resolve selected items for one source."""
 
@@ -231,10 +231,10 @@ def plan_source_items(
     return planned
 
 
-def remove_managed_source(
+def remove_source(
     *,
     repo_root: Path,
-    lock: ManagedInstallLock,
+    lock: InstallLock,
     source_name: str,
     force: bool = False,
     dry_run: bool = False,
@@ -255,7 +255,7 @@ def remove_managed_source(
         action_name = "removed"
         reason = "Removed managed item."
         if _path_exists(dest_path):
-            local_hash = compute_install_item_hash(dest_path, item_kind)
+            local_hash = compute_item_hash(dest_path, item_kind)
             if local_hash != entry.content_hash and not force:
                 action_name = "kept"
                 reason = "Kept locally modified item."
@@ -279,7 +279,7 @@ def remove_managed_source(
     return InstallResult(actions=tuple(actions), errors=())
 
 
-def install_status(repo_root: Path, lock: ManagedInstallLock) -> list[dict[str, object]]:
+def install_status(repo_root: Path, lock: InstallLock) -> list[dict[str, object]]:
     """Compare lockfile state against on-disk installed content."""
 
     payload: list[dict[str, object]] = []
@@ -293,7 +293,7 @@ def install_status(repo_root: Path, lock: ManagedInstallLock) -> list[dict[str, 
             status = "missing"
             reason = "Managed item is missing locally."
         else:
-            local_hash = compute_install_item_hash(dest_path, item_kind)
+            local_hash = compute_item_hash(dest_path, item_kind)
             if local_hash == entry.content_hash:
                 status = "in-sync"
                 reason = "Local content matches the lock file."
@@ -314,7 +314,7 @@ def install_status(repo_root: Path, lock: ManagedInstallLock) -> list[dict[str, 
 
 def _check_destination_collisions(
     *,
-    source: ManagedSourceConfig,
+    source: SourceConfig,
     planned_items: list[PlannedSourceItem],
     other_destinations: dict[str, str],
 ) -> None:
@@ -334,12 +334,12 @@ def _apply_planned_item(
     repo_root: Path,
     planned: PlannedSourceItem,
     tree_path: Path,
-    lock: ManagedInstallLock,
+    lock: InstallLock,
     force: bool,
     dry_run: bool,
 ) -> tuple[InstallItemAction, str]:
     source_path = _source_path(tree_path, planned.item)
-    source_hash = compute_install_item_hash(source_path, planned.item.kind)
+    source_hash = compute_item_hash(source_path, planned.item.kind)
     existing = lock.items.get(planned.item_key)
     destination_path = planned.destination_path.relative_to(repo_root).as_posix()
     if existing is not None and existing.destination_path != destination_path:
@@ -356,7 +356,7 @@ def _apply_planned_item(
 
     dest_exists = _path_exists(planned.destination_path)
     local_hash = (
-        compute_install_item_hash(planned.destination_path, planned.item.kind)
+        compute_item_hash(planned.destination_path, planned.item.kind)
         if dest_exists
         else None
     )
@@ -401,7 +401,7 @@ def _apply_renamed_item(
     source_path: Path,
     source_hash: str,
     existing: LockedInstalledItem,
-    lock: ManagedInstallLock,
+    lock: InstallLock,
     force: bool,
     dry_run: bool,
 ) -> tuple[InstallItemAction, str]:
@@ -410,7 +410,7 @@ def _apply_renamed_item(
     next_rel_path = next_path.relative_to(repo_root).as_posix()
 
     if _path_exists(previous_path):
-        previous_hash = compute_install_item_hash(previous_path, planned.item.kind)
+        previous_hash = compute_item_hash(previous_path, planned.item.kind)
         if previous_hash != existing.content_hash and not force:
             return (
                 InstallItemAction(
@@ -425,7 +425,7 @@ def _apply_renamed_item(
             )
 
     next_exists = _path_exists(next_path)
-    next_hash = compute_install_item_hash(next_path, planned.item.kind) if next_exists else None
+    next_hash = compute_item_hash(next_path, planned.item.kind) if next_exists else None
     if next_exists and next_hash != source_hash and not force:
         return (
             InstallItemAction(
@@ -485,7 +485,7 @@ def _apply_renamed_item(
 def _prune_stale_source_items(
     *,
     repo_root: Path,
-    lock: ManagedInstallLock,
+    lock: InstallLock,
     source_name: str,
     desired_item_keys: set[str],
     force: bool,
@@ -504,7 +504,7 @@ def _prune_stale_source_items(
         action_name = "removed"
         reason = "Removed item no longer selected from the source."
         if _path_exists(dest_path):
-            local_hash = compute_install_item_hash(dest_path, item_kind)
+            local_hash = compute_item_hash(dest_path, item_kind)
             if local_hash != entry.content_hash and not force:
                 action_name = "kept"
                 reason = "Kept locally modified item no longer selected from the source."
@@ -554,7 +554,7 @@ def _destination_path(repo_root: Path, item_kind: ItemKind, destination_name: st
     return repo_root / ".agents" / "skills" / destination_name
 
 
-def _source_path(tree_path: Path, item: ExportedSourceItem) -> Path:
+def _source_path(tree_path: Path, item: DiscoveredItem) -> Path:
     resolved = tree_path / item.path
     if item.kind == "skill":
         return resolved.parent

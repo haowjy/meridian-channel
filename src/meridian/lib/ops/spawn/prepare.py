@@ -26,10 +26,10 @@ from meridian.lib.safety.permissions import (
     resolve_permission_pipeline,
 )
 from meridian.lib.core.types import ModelId
-from meridian.lib.sync.runtime_ensure import (
-    ensure_runtime_assets,
-    plan_required_runtime_assets,
-    planned_runtime_agent_names,
+from meridian.lib.install.bootstrap import (
+    ensure_bootstrap_assets,
+    plan_bootstrap_assets,
+    planned_bootstrap_agent_names,
 )
 
 from meridian.lib.utils.time import minutes_to_seconds
@@ -178,25 +178,25 @@ def build_create_payload(
             config=runtime_bundle.config,
             harness_registry=runtime_bundle.harness_registry,
         )
-    runtime_agent_names = planned_runtime_agent_names(
+    bootstrap_agent_names = planned_bootstrap_agent_names(
         configured_default=runtime_view.config.default_agent,
         requested_agent=payload.agent,
     )
-    runtime_asset_plan = plan_required_runtime_assets(
+    bootstrap_plan = plan_bootstrap_assets(
         repo_root=runtime_view.repo_root,
-        agent_names=runtime_agent_names,
+        agent_names=bootstrap_agent_names,
     )
-    if runtime_asset_plan.missing_items:
+    if bootstrap_plan.missing_items:
         if payload.dry_run:
-            joined = ", ".join(sorted(runtime_asset_plan.missing_items))
+            joined = ", ".join(sorted(bootstrap_plan.missing_items))
             raise FileNotFoundError(
                 "Required runtime agents are missing locally for dry-run and will not be "
                 f"auto-installed: {joined}. Install their source first or rerun without "
                 "--dry-run."
             )
-        ensure_runtime_assets(
+        ensure_bootstrap_assets(
             repo_root=runtime_view.repo_root,
-            plan=runtime_asset_plan,
+            plan=bootstrap_plan,
         )
 
     profile = load_agent_profile_with_fallback(

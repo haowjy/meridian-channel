@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from meridian.lib.sync.install_config import ManagedSourceConfig
-from meridian.lib.sync.install_engine import reconcile_managed_sources
-from meridian.lib.sync.install_lock import ManagedInstallLock
+from meridian.lib.install.config import SourceConfig
+from meridian.lib.install.engine import reconcile_sources
+from meridian.lib.install.lock import InstallLock
 
 
 def _write_source_agent(source_dir: Path, name: str, body: str = "hello\n") -> None:
@@ -20,14 +20,14 @@ def test_reconcile_renamed_item_removes_previous_destination(tmp_path: Path) -> 
     source_dir = tmp_path / "source"
     _write_source_agent(source_dir, "a")
 
-    lock = ManagedInstallLock()
-    initial = ManagedSourceConfig(
+    lock = InstallLock()
+    initial = SourceConfig(
         name="demo",
         kind="path",
         path=source_dir.as_posix(),
         rename={"agent:a": "foo"},
     )
-    result = reconcile_managed_sources(
+    result = reconcile_sources(
         repo_root=repo_root,
         sources=(initial,),
         lock=lock,
@@ -36,13 +36,13 @@ def test_reconcile_renamed_item_removes_previous_destination(tmp_path: Path) -> 
     assert not result.errors
     assert (repo_root / ".agents" / "agents" / "foo.md").is_file()
 
-    renamed = ManagedSourceConfig(
+    renamed = SourceConfig(
         name="demo",
         kind="path",
         path=source_dir.as_posix(),
         rename={"agent:a": "bar"},
     )
-    result = reconcile_managed_sources(
+    result = reconcile_sources(
         repo_root=repo_root,
         sources=(renamed,),
         lock=lock,
@@ -61,14 +61,14 @@ def test_reconcile_renamed_item_keeps_previous_modified_destination(tmp_path: Pa
     source_dir = tmp_path / "source"
     _write_source_agent(source_dir, "a")
 
-    lock = ManagedInstallLock()
-    initial = ManagedSourceConfig(
+    lock = InstallLock()
+    initial = SourceConfig(
         name="demo",
         kind="path",
         path=source_dir.as_posix(),
         rename={"agent:a": "foo"},
     )
-    reconcile_managed_sources(
+    reconcile_sources(
         repo_root=repo_root,
         sources=(initial,),
         lock=lock,
@@ -81,13 +81,13 @@ def test_reconcile_renamed_item_keeps_previous_modified_destination(tmp_path: Pa
         encoding="utf-8",
     )
 
-    renamed = ManagedSourceConfig(
+    renamed = SourceConfig(
         name="demo",
         kind="path",
         path=source_dir.as_posix(),
         rename={"agent:a": "bar"},
     )
-    result = reconcile_managed_sources(
+    result = reconcile_sources(
         repo_root=repo_root,
         sources=(renamed,),
         lock=lock,
@@ -107,16 +107,16 @@ def test_reconcile_rejects_source_tree_without_installable_items(tmp_path: Path)
     source_dir = tmp_path / "empty-source"
     source_dir.mkdir()
 
-    result = reconcile_managed_sources(
+    result = reconcile_sources(
         repo_root=repo_root,
         sources=(
-            ManagedSourceConfig(
+            SourceConfig(
                 name="demo",
                 kind="path",
                 path=source_dir.as_posix(),
             ),
         ),
-        lock=ManagedInstallLock(),
+        lock=InstallLock(),
         agents_cache_dir=repo_root / ".meridian" / "cache" / "agents",
     )
 

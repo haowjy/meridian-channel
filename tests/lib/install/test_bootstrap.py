@@ -3,15 +3,15 @@ from pathlib import Path
 import pytest
 
 from meridian.lib.state.paths import resolve_state_paths
-from meridian.lib.sync.install_config import ManagedSourceConfig, ManagedSourcesConfig
-from meridian.lib.sync.install_config import load_install_config, write_install_config
-from meridian.lib.sync.install_engine import reconcile_managed_sources
-from meridian.lib.sync.install_lock import read_install_lock, write_install_lock
-from meridian.lib.sync.install_types import ItemRef
-from meridian.lib.sync.runtime_ensure import (
-    ensure_runtime_assets,
-    plan_required_runtime_assets,
-    planned_runtime_agent_names,
+from meridian.lib.install.config import SourceConfig, SourcesConfig
+from meridian.lib.install.config import load_sources_config, write_sources_config
+from meridian.lib.install.engine import reconcile_sources
+from meridian.lib.install.lock import read_lock, write_lock
+from meridian.lib.install.types import ItemRef
+from meridian.lib.install.bootstrap import (
+    ensure_bootstrap_assets,
+    plan_bootstrap_assets,
+    planned_bootstrap_agent_names,
 )
 
 
@@ -23,49 +23,49 @@ def _write_source_tree(source_root: Path, *, agent_name: str) -> None:
     )
 
 
-def test_ensure_runtime_assets_reinstalls_from_locked_source(tmp_path: Path) -> None:
+def test_ensure_bootstrap_assets_reinstalls_from_locked_source(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     source_root = tmp_path / "source"
     _write_source_tree(source_root, agent_name="__meridian-subagent")
 
     paths = resolve_state_paths(repo_root)
-    config = ManagedSourcesConfig(
+    config = SourcesConfig(
         sources=(
-            ManagedSourceConfig(
+            SourceConfig(
                 name="local",
                 kind="path",
                 path=source_root.as_posix(),
             ),
         )
     )
-    write_install_config(paths.agents_manifest_path, config)
+    write_sources_config(paths.agents_manifest_path, config)
 
-    lock = read_install_lock(paths.agents_lock_path)
-    reconcile_managed_sources(
+    lock = read_lock(paths.agents_lock_path)
+    reconcile_sources(
         repo_root=repo_root,
         sources=config.sources,
         lock=lock,
         agents_cache_dir=paths.agents_cache_dir,
     )
-    write_install_lock(paths.agents_lock_path, lock)
+    write_lock(paths.agents_lock_path, lock)
 
     installed_path = repo_root / ".agents" / "agents" / "__meridian-subagent.md"
     installed_path.unlink()
 
-    plan = plan_required_runtime_assets(
+    plan = plan_bootstrap_assets(
         repo_root=repo_root,
         agent_names=("__meridian-subagent",),
     )
-    ensure_runtime_assets(repo_root=repo_root, plan=plan)
+    ensure_bootstrap_assets(repo_root=repo_root, plan=plan)
 
     assert installed_path.is_file()
-    lock_after = read_install_lock(paths.agents_lock_path)
+    lock_after = read_lock(paths.agents_lock_path)
     assert "agent:__meridian-subagent" in lock_after.items
-    assert load_install_config(paths.agents_manifest_path).sources[0].name == "local"
+    assert load_sources_config(paths.agents_manifest_path).sources[0].name == "local"
 
 
-def test_ensure_runtime_assets_bootstraps_missing_default(
+def test_ensure_bootstrap_assets_bootstraps_missing_default(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -78,9 +78,9 @@ def test_ensure_runtime_assets_bootstraps_missing_default(
         name: str,
         *,
         items: tuple[ItemRef, ...] | None = None,
-    ) -> ManagedSourceConfig:
+    ) -> SourceConfig:
         assert name == "meridian-agents"
-        return ManagedSourceConfig(
+        return SourceConfig(
             name="meridian-agents",
             kind="path",
             path=source_root.as_posix(),
@@ -88,61 +88,61 @@ def test_ensure_runtime_assets_bootstraps_missing_default(
         )
 
     monkeypatch.setattr(
-        "meridian.lib.sync.runtime_ensure.well_known_source_config",
+        "meridian.lib.install.bootstrap.well_known_source",
         fake_bootstrap_source,
     )
 
-    plan = plan_required_runtime_assets(
+    plan = plan_bootstrap_assets(
         repo_root=repo_root,
         agent_names=("__meridian-subagent",),
     )
-    ensure_runtime_assets(repo_root=repo_root, plan=plan)
+    ensure_bootstrap_assets(repo_root=repo_root, plan=plan)
 
     installed_path = repo_root / ".agents" / "agents" / "__meridian-subagent.md"
     assert installed_path.is_file()
 
     state_paths = resolve_state_paths(repo_root)
-    config = load_install_config(state_paths.agents_manifest_path)
+    config = load_sources_config(state_paths.agents_manifest_path)
     assert [source.name for source in config.sources] == ["meridian-agents"]
     assert config.sources[0].kind == "path"
     assert config.sources[0].items is not None
     assert config.sources[0].items[0].item_id == "agent:__meridian-subagent"
 
-    lock = read_install_lock(state_paths.agents_lock_path)
+    lock = read_lock(state_paths.agents_lock_path)
     assert "meridian-agents" in lock.sources
     assert "agent:__meridian-subagent" in lock.items
 
 
-def test_ensure_runtime_assets_rejects_unknown_missing_default(tmp_path: Path) -> None:
+def test_ensure_bootstrap_assets_rejects_unknown_missing_default(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    plan = plan_required_runtime_assets(repo_root=repo_root, agent_names=("custom-agent",))
+    plan = plan_bootstrap_assets(repo_root=repo_root, agent_names=("custom-agent",))
 
     try:
-        ensure_runtime_assets(repo_root=repo_root, plan=plan)
+        ensure_bootstrap_assets(repo_root=repo_root, plan=plan)
     except FileNotFoundError as exc:
         assert "custom-agent" in str(exc)
     else:  # pragma: no cover - defensive assertion
         raise AssertionError("Expected missing custom runtime default to fail.")
 
 
-def test_planned_runtime_agent_names_uses_default_when_request_is_blank() -> None:
-    assert planned_runtime_agent_names(
+def test_planned_bootstrap_agent_names_uses_default_when_request_is_blank() -> None:
+    assert planned_bootstrap_agent_names(
         configured_default="__meridian-subagent",
         requested_agent="",
     ) == ("__meridian-subagent",)
 
 
-def test_planned_runtime_agent_names_bootstraps_explicit_builtin_agent() -> None:
-    assert planned_runtime_agent_names(
+def test_planned_bootstrap_agent_names_bootstraps_explicit_builtin_agent() -> None:
+    assert planned_bootstrap_agent_names(
         configured_default="__meridian-subagent",
         requested_agent="__meridian-orchestrator",
     ) == ("__meridian-orchestrator",)
 
 
-def test_planned_runtime_agent_names_skips_non_bootstrap_explicit_agent() -> None:
+def test_planned_bootstrap_agent_names_skips_non_bootstrap_explicit_agent() -> None:
     assert (
-        planned_runtime_agent_names(
+        planned_bootstrap_agent_names(
             configured_default="__meridian-subagent",
             requested_agent="coder",
         )

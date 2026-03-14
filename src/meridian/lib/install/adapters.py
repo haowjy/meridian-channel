@@ -13,9 +13,9 @@ from urllib import parse, request
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from meridian.lib.sync.install_config import ManagedSourceConfig
-from meridian.lib.sync.install_types import SourceKind
-from meridian.lib.sync.source_tree import ExportedSourceItem, discover_source_items
+from meridian.lib.install.config import SourceConfig
+from meridian.lib.install.types import SourceKind
+from meridian.lib.install.discovery import DiscoveredItem, discover_items
 
 
 class ResolvedSource(BaseModel):
@@ -38,7 +38,7 @@ class SourceAdapter(Protocol):
 
     def resolve(
         self,
-        source: ManagedSourceConfig,
+        source: SourceConfig,
         *,
         cache_dir: Path,
         repo_root: Path,
@@ -48,7 +48,7 @@ class SourceAdapter(Protocol):
 
     def fetch(self, resolved: ResolvedSource) -> Path: ...
 
-    def describe(self, tree_path: Path) -> tuple[ExportedSourceItem, ...]: ...
+    def describe(self, tree_path: Path) -> tuple[DiscoveredItem, ...]: ...
 
 
 class GitSourceAdapter:
@@ -58,7 +58,7 @@ class GitSourceAdapter:
 
     def resolve(
         self,
-        source: ManagedSourceConfig,
+        source: SourceConfig,
         *,
         cache_dir: Path,
         repo_root: Path,
@@ -102,8 +102,8 @@ class GitSourceAdapter:
     def fetch(self, resolved: ResolvedSource) -> Path:
         return resolved.tree_path
 
-    def describe(self, tree_path: Path) -> tuple[ExportedSourceItem, ...]:
-        return discover_source_items(tree_path)
+    def describe(self, tree_path: Path) -> tuple[DiscoveredItem, ...]:
+        return discover_items(tree_path)
 
 
 class PathSourceAdapter:
@@ -113,7 +113,7 @@ class PathSourceAdapter:
 
     def resolve(
         self,
-        source: ManagedSourceConfig,
+        source: SourceConfig,
         *,
         cache_dir: Path,
         repo_root: Path,
@@ -143,11 +143,11 @@ class PathSourceAdapter:
     def fetch(self, resolved: ResolvedSource) -> Path:
         return resolved.tree_path
 
-    def describe(self, tree_path: Path) -> tuple[ExportedSourceItem, ...]:
-        return discover_source_items(tree_path)
+    def describe(self, tree_path: Path) -> tuple[DiscoveredItem, ...]:
+        return discover_items(tree_path)
 
 
-def default_source_adapters() -> dict[SourceKind, SourceAdapter]:
+def default_adapters() -> dict[SourceKind, SourceAdapter]:
     """Return the default adapter registry."""
 
     return {
@@ -245,7 +245,7 @@ def _git_remote_url(cache_path: Path) -> str:
 
 def _resolve_git_source_without_cli(
     *,
-    source: ManagedSourceConfig,
+    source: SourceConfig,
     cache_dir: Path,
     locked_identity: dict[str, object] | None,
     upgrade: bool,

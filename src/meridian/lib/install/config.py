@@ -9,11 +9,11 @@ from typing import cast
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
 from meridian.lib.state.atomic import atomic_write_text
-from meridian.lib.sync.install_types import ItemRef, SourceKind, normalize_required_string, parse_item_id
-from meridian.lib.sync.install_types import validate_source_name
+from meridian.lib.install.types import ItemRef, SourceKind, normalize_required_string, parse_item_id
+from meridian.lib.install.types import validate_source_name
 
 
-class ManagedSourceConfig(BaseModel):
+class SourceConfig(BaseModel):
     """One declared managed source."""
 
     model_config = ConfigDict(frozen=True)
@@ -88,7 +88,7 @@ class ManagedSourceConfig(BaseModel):
         return normalized
 
     @model_validator(mode="after")
-    def _validate_kind_fields(self) -> "ManagedSourceConfig":
+    def _validate_kind_fields(self) -> "SourceConfig":
         if self.kind == "git":
             if self.url is None or self.path is not None:
                 raise ValueError("Git sources require 'url' and must not set 'path'.")
@@ -101,15 +101,15 @@ class ManagedSourceConfig(BaseModel):
         return self
 
 
-class ManagedSourcesConfig(BaseModel):
+class SourcesConfig(BaseModel):
     """Top-level `.meridian/agents.toml` content."""
 
     model_config = ConfigDict(frozen=True)
 
-    sources: tuple[ManagedSourceConfig, ...] = ()
+    sources: tuple[SourceConfig, ...] = ()
 
     @model_validator(mode="after")
-    def _validate_unique_names(self) -> "ManagedSourcesConfig":
+    def _validate_unique_names(self) -> "SourcesConfig":
         seen: set[str] = set()
         for source in self.sources:
             if source.name in seen:
@@ -118,32 +118,32 @@ class ManagedSourcesConfig(BaseModel):
         return self
 
 
-def load_install_config(config_path: Path) -> ManagedSourcesConfig:
+def load_sources_config(config_path: Path) -> SourcesConfig:
     """Load `.meridian/agents.toml`."""
 
     if not config_path.is_file():
-        return ManagedSourcesConfig()
+        return SourcesConfig()
 
     raw_text = config_path.read_text(encoding="utf-8")
     if not raw_text.strip():
-        return ManagedSourcesConfig()
+        return SourcesConfig()
 
     payload_obj = tomllib.loads(raw_text)
     payload = cast("dict[str, object]", payload_obj)
     raw_sources = payload.get("sources")
     if raw_sources is None:
-        return ManagedSourcesConfig()
+        return SourcesConfig()
     if not isinstance(raw_sources, list):
         raise ValueError("Invalid value for 'sources': expected array of tables.")
 
     sources = tuple(
-        ManagedSourceConfig.model_validate(cast("dict[str, object]", raw_source))
+        SourceConfig.model_validate(cast("dict[str, object]", raw_source))
         for raw_source in cast("list[object]", raw_sources)
     )
-    return ManagedSourcesConfig(sources=sources)
+    return SourcesConfig(sources=sources)
 
 
-def write_install_config(config_path: Path, config: ManagedSourcesConfig) -> None:
+def write_sources_config(config_path: Path, config: SourcesConfig) -> None:
     """Write `.meridian/agents.toml` atomically."""
 
     lines: list[str] = []
@@ -158,7 +158,7 @@ def write_install_config(config_path: Path, config: ManagedSourcesConfig) -> Non
     atomic_write_text(config_path, payload)
 
 
-def _render_source_block(source: ManagedSourceConfig) -> list[str]:
+def _render_source_block(source: SourceConfig) -> list[str]:
     lines = ["[[sources]]"]
     lines.append(f'name = {_toml_string(source.name)}')
     lines.append(f'kind = {_toml_string(source.kind)}')

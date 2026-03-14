@@ -2,12 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from meridian.lib.sync.install_config import ManagedSourceConfig
-from meridian.lib.sync.source_adapter import GitSourceAdapter, PathSourceAdapter, default_source_adapters
+from meridian.lib.install.config import SourceConfig
+from meridian.lib.install.adapters import GitSourceAdapter, PathSourceAdapter, default_adapters
 
 
-def test_default_source_adapters_expose_git_and_path() -> None:
-    adapters = default_source_adapters()
+def test_default_adapters_expose_git_and_path() -> None:
+    adapters = default_adapters()
 
     assert set(adapters) == {"git", "path"}
 
@@ -18,7 +18,7 @@ def test_path_source_adapter_resolves_repo_relative_tree(tmp_path: Path) -> None
     tree.mkdir(parents=True)
 
     resolved = PathSourceAdapter().resolve(
-        ManagedSourceConfig(name="local", kind="path", path="./tools/agents"),
+        SourceConfig(name="local", kind="path", path="./tools/agents"),
         cache_dir=repo_root / ".meridian" / "cache" / "agents",
         repo_root=repo_root,
     )
@@ -47,7 +47,7 @@ def test_path_source_adapter_rejects_missing_directory(tmp_path: Path) -> None:
 
     with pytest.raises(FileNotFoundError, match="does not exist"):
         PathSourceAdapter().resolve(
-            ManagedSourceConfig(name="local", kind="path", path="./missing"),
+            SourceConfig(name="local", kind="path", path="./missing"),
             cache_dir=repo_root / ".meridian" / "cache" / "agents",
             repo_root=repo_root,
         )
@@ -60,13 +60,13 @@ def test_git_source_adapter_falls_back_to_github_archive_without_git(
     cache_dir = tmp_path / ".meridian" / "cache" / "agents"
     installed_tree = cache_dir / "archive" / "github-source"
 
-    monkeypatch.setattr("meridian.lib.sync.source_adapter._git_cli_available", lambda: False)
+    monkeypatch.setattr("meridian.lib.install.adapters._git_cli_available", lambda: False)
     def fake_resolve_commit(owner: str, repo: str, ref: str | None) -> str:
         assert (owner, repo, ref) == ("haowjy", "orchestrate", "main")
         return "abc123"
 
     monkeypatch.setattr(
-        "meridian.lib.sync.source_adapter._resolve_github_commit",
+        "meridian.lib.install.adapters._resolve_github_commit",
         fake_resolve_commit,
     )
 
@@ -76,12 +76,12 @@ def test_git_source_adapter_falls_back_to_github_archive_without_git(
         (cache_path / "agents" / "helper.md").write_text("---\nname: helper\n---\n", encoding="utf-8")
 
     monkeypatch.setattr(
-        "meridian.lib.sync.source_adapter._populate_github_archive_cache",
+        "meridian.lib.install.adapters._populate_github_archive_cache",
         fake_populate,
     )
 
     resolved = GitSourceAdapter().resolve(
-        ManagedSourceConfig(
+        SourceConfig(
             name="github-source",
             kind="git",
             url="https://github.com/haowjy/orchestrate.git",
@@ -101,11 +101,11 @@ def test_git_source_adapter_requires_git_for_non_github_remote(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("meridian.lib.sync.source_adapter._git_cli_available", lambda: False)
+    monkeypatch.setattr("meridian.lib.install.adapters._git_cli_available", lambda: False)
 
     try:
         GitSourceAdapter().resolve(
-            ManagedSourceConfig(
+            SourceConfig(
                 name="remote",
                 kind="git",
                 url="https://example.com/team/repo.git",
@@ -128,13 +128,13 @@ def test_git_source_adapter_reclones_when_cached_remote_changes(
     cache_path = cache_dir / "git" / "remote"
     (cache_path / ".git").mkdir(parents=True)
 
-    monkeypatch.setattr("meridian.lib.sync.source_adapter._git_cli_available", lambda: True)
+    monkeypatch.setattr("meridian.lib.install.adapters._git_cli_available", lambda: True)
 
     def fake_remote_url(path: Path) -> str:
         _ = path
         return "https://github.com/haowjy/old.git"
 
-    monkeypatch.setattr("meridian.lib.sync.source_adapter._git_remote_url", fake_remote_url)
+    monkeypatch.setattr("meridian.lib.install.adapters._git_remote_url", fake_remote_url)
 
     calls: list[tuple[str, ...]] = []
 
@@ -156,14 +156,14 @@ def test_git_source_adapter_reclones_when_cached_remote_changes(
             return _Completed("abc123\n")
         raise AssertionError(f"unexpected git call: {args}")
 
-    monkeypatch.setattr("meridian.lib.sync.source_adapter._run_git", fake_run_git)
+    monkeypatch.setattr("meridian.lib.install.adapters._run_git", fake_run_git)
     def fake_checkout(cache_path: Path, ref: str | None) -> None:
         _ = (cache_path, ref)
 
-    monkeypatch.setattr("meridian.lib.sync.source_adapter._checkout_git_ref", fake_checkout)
+    monkeypatch.setattr("meridian.lib.install.adapters._checkout_git_ref", fake_checkout)
 
     resolved = GitSourceAdapter().resolve(
-        ManagedSourceConfig(
+        SourceConfig(
             name="remote",
             kind="git",
             url="https://github.com/haowjy/new.git",

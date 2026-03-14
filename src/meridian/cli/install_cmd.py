@@ -12,13 +12,13 @@ from cyclopts import Parameter
 
 from meridian.lib.config.settings import resolve_repo_root
 from meridian.lib.state.paths import resolve_state_paths
-from meridian.lib.sync.install_config import ManagedSourceConfig, ManagedSourcesConfig
-from meridian.lib.sync.install_config import load_install_config, write_install_config
-from meridian.lib.sync.install_engine import InstallItemAction, InstallResult, install_status
-from meridian.lib.sync.install_engine import reconcile_managed_sources, remove_managed_source
-from meridian.lib.sync.install_lock import lock_file_guard, read_install_lock, write_install_lock
-from meridian.lib.sync.install_types import ItemRef
-from meridian.lib.sync.source_catalog import is_well_known_source, well_known_source_config
+from meridian.lib.install.config import SourceConfig, SourcesConfig
+from meridian.lib.install.config import load_sources_config, write_sources_config
+from meridian.lib.install.engine import InstallItemAction, InstallResult, install_status
+from meridian.lib.install.engine import reconcile_sources, remove_source
+from meridian.lib.install.lock import state_lock, read_lock, write_lock
+from meridian.lib.install.types import ItemRef
+from meridian.lib.install.aliases import is_well_known_alias, well_known_source
 
 Emitter = Callable[[Any], None]
 SourceSelector = Literal["git", "path", "alias"]
@@ -28,7 +28,7 @@ def _install(
     source: str,
     name: Annotated[
         str | None,
-        Parameter(name="--name", help="Optional name for the configured managed source."),
+        Parameter(name="--name", help="Optional name for the configured source."),
     ] = None,
     ref: Annotated[
         str | None,
@@ -61,7 +61,7 @@ def _install(
 ) -> None:
     repo_root = resolve_repo_root()
     state_paths = resolve_state_paths(repo_root)
-    source_config = _build_managed_source_config(
+    source_config = _build_source_config(
         source=source,
         repo_root=repo_root,
         name=name,
@@ -71,14 +71,14 @@ def _install(
         rename=rename,
     )
 
-    existing = load_install_config(state_paths.agents_manifest_path)
+    existing = load_sources_config(state_paths.agents_manifest_path)
     if any(configured.name == source_config.name for configured in existing.sources):
         raise ValueError(f"Managed source '{source_config.name}' already exists.")
 
-    updated_config = ManagedSourcesConfig(sources=(*existing.sources, source_config))
-    with lock_file_guard(state_paths.agents_lock_path):
-        lock = read_install_lock(state_paths.agents_lock_path)
-        result = reconcile_managed_sources(
+    updated_config = SourcesConfig(sources=(*existing.sources, source_config))
+    with state_lock(state_paths.agents_lock_path):
+        lock = read_lock(state_paths.agents_lock_path)
+        result = reconcile_sources(
             repo_root=repo_root,
             sources=updated_config.sources,
             lock=lock,
@@ -89,8 +89,8 @@ def _install(
         )
         _raise_on_install_errors(result)
         if not dry_run:
-            write_install_config(state_paths.agents_manifest_path, updated_config)
-            write_install_lock(state_paths.agents_lock_path, lock)
+            write_sources_config(state_paths.agents_manifest_path, updated_config)
+            write_lock(state_paths.agents_lock_path, lock)
 
     emit(_install_result_payload(result))
 
@@ -109,15 +109,15 @@ def _remove(
 ) -> None:
     repo_root = resolve_repo_root()
     state_paths = resolve_state_paths(repo_root)
-    config = load_install_config(state_paths.agents_manifest_path)
+    config = load_sources_config(state_paths.agents_manifest_path)
     source = next((candidate for candidate in config.sources if candidate.name == name), None)
     if source is None:
         raise ValueError(f"Managed source '{name}' not found.")
 
-    with lock_file_guard(state_paths.agents_lock_path):
-        lock = read_install_lock(state_paths.agents_lock_path)
+    with state_lock(state_paths.agents_lock_path):
+        lock = read_lock(state_paths.agents_lock_path)
         if source.name in lock.sources:
-            result = remove_managed_source(
+            result = remove_source(
                 repo_root=repo_root,
                 lock=lock,
                 source_name=source.name,
@@ -130,11 +130,11 @@ def _remove(
             updated_sources = tuple(
                 candidate for candidate in config.sources if candidate.name != source.name
             )
-            write_install_config(
+            write_sources_config(
                 state_paths.agents_manifest_path,
-                ManagedSourcesConfig(sources=updated_sources),
+                SourcesConfig(sources=updated_sources),
             )
-            write_install_lock(state_paths.agents_lock_path, lock)
+            write_lock(state_paths.agents_lock_path, lock)
 
     emit(_install_result_payload(result))
 
@@ -178,7 +178,7 @@ def _upgrade(
 def _status(emit: Emitter) -> None:
     repo_root = resolve_repo_root()
     state_paths = resolve_state_paths(repo_root)
-    lock = read_install_lock(state_paths.agents_lock_path)
+    lock = read_lock(state_paths.agents_lock_path)
     emit(install_status(repo_root, lock))
 
 
@@ -202,11 +202,11 @@ def _run_install_reconcile(
 ) -> None:
     repo_root = resolve_repo_root()
     state_paths = resolve_state_paths(repo_root)
-    config = load_install_config(state_paths.agents_manifest_path)
+    config = load_sources_config(state_paths.agents_manifest_path)
 
-    with lock_file_guard(state_paths.agents_lock_path):
-        lock = read_install_lock(state_paths.agents_lock_path)
-        result = reconcile_managed_sources(
+    with state_lock(state_paths.agents_lock_path):
+        lock = read_lock(state_paths.agents_lock_path)
+        result = reconcile_sources(
             repo_root=repo_root,
             sources=config.sources,
             lock=lock,
@@ -218,7 +218,7 @@ def _run_install_reconcile(
         )
         _raise_on_install_errors(result)
         if not dry_run:
-            write_install_lock(state_paths.agents_lock_path, lock)
+            write_lock(state_paths.agents_lock_path, lock)
 
     emit(_install_result_payload(result))
 
@@ -257,7 +257,7 @@ def _action_payload(action: InstallItemAction) -> dict[str, object]:
 
 def _classify_source(source: str, *, repo_root: Path) -> SourceSelector:
     trimmed = source.strip()
-    if is_well_known_source(trimmed):
+    if is_well_known_alias(trimmed):
         return "alias"
     candidate = Path(trimmed).expanduser()
     if candidate.is_absolute() or trimmed.startswith((".", "~")):
@@ -309,7 +309,7 @@ def _parse_rename_args(rename_args: tuple[str, ...]) -> dict[str, str]:
     return rename_map
 
 
-def _build_managed_source_config(
+def _build_source_config(
     *,
     source: str,
     repo_root: Path,
@@ -318,19 +318,19 @@ def _build_managed_source_config(
     skills: str | None,
     agents: str | None,
     rename: tuple[str, ...],
-) -> ManagedSourceConfig:
+) -> SourceConfig:
     selector = _classify_source(source, repo_root=repo_root)
     source_name = name.strip() if name is not None else _derive_source_name(source, selector)
     rename_map = _normalize_rename_map(_parse_rename_args(rename))
     items = _build_item_refs(agents=agents, skills=skills)
 
     if selector == "alias":
-        configured = well_known_source_config(source.strip(), items=items)
+        configured = well_known_source(source.strip(), items=items)
         if ref is not None:
             configured = configured.model_copy(update={"ref": ref})
         return configured.model_copy(update={"name": source_name, "rename": rename_map})
     if selector == "path":
-        return ManagedSourceConfig(
+        return SourceConfig(
             name=source_name,
             kind="path",
             path=source,
@@ -343,7 +343,7 @@ def _build_managed_source_config(
         if "://" in source or source.strip().endswith(".git")
         else f"https://github.com/{source.strip()}.git"
     )
-    return ManagedSourceConfig(
+    return SourceConfig(
         name=source_name,
         kind="git",
         url=url,

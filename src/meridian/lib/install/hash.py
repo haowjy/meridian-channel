@@ -76,7 +76,7 @@ def compute_visible_tree_hash(directory: Path) -> str:
     return _format_hash("".join(manifest).encode("utf-8"))
 
 
-def compute_install_item_hash(path: Path, item_kind: str) -> str:
+def compute_item_hash(path: Path, item_kind: str) -> str:
     """Dispatch to the appropriate managed-install hash strategy."""
 
     if item_kind == "agent":

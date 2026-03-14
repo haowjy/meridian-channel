@@ -7,22 +7,22 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.state.paths import resolve_state_paths
-from meridian.lib.sync.install_config import ManagedSourcesConfig, load_install_config, write_install_config
-from meridian.lib.sync.install_engine import reconcile_managed_sources
-from meridian.lib.sync.install_lock import (
-    ManagedInstallLock,
-    lock_file_guard,
-    read_install_lock,
-    write_install_lock,
+from meridian.lib.install.config import SourcesConfig, load_sources_config, write_sources_config
+from meridian.lib.install.engine import reconcile_sources
+from meridian.lib.install.lock import (
+    InstallLock,
+    state_lock,
+    read_lock,
+    write_lock,
 )
-from meridian.lib.sync.install_types import ItemRef, format_item_id, parse_item_id
-from meridian.lib.sync.source_catalog import well_known_source_config
+from meridian.lib.install.types import ItemRef, format_item_id, parse_item_id
+from meridian.lib.install.aliases import well_known_source
 
 _BOOTSTRAP_SOURCE_NAME = "meridian-agents"
 _BOOTSTRAP_AGENT_NAMES = frozenset({"__meridian-orchestrator", "__meridian-subagent"})
 
 
-class RuntimeAssetPlan(BaseModel):
+class BootstrapPlan(BaseModel):
     """Required runtime asset roots for one command."""
 
     model_config = ConfigDict(frozen=True)
@@ -31,7 +31,7 @@ class RuntimeAssetPlan(BaseModel):
     missing_items: tuple[str, ...]
 
 
-def planned_runtime_agent_names(
+def planned_bootstrap_agent_names(
     *,
     configured_default: str,
     requested_agent: str | None,
@@ -47,11 +47,11 @@ def planned_runtime_agent_names(
     return ()
 
 
-def plan_required_runtime_assets(
+def plan_bootstrap_assets(
     *,
     repo_root: Path,
     agent_names: tuple[str, ...],
-) -> RuntimeAssetPlan:
+) -> BootstrapPlan:
     """Resolve required root agent items and detect which are missing locally."""
 
     required_items = tuple(
@@ -65,13 +65,13 @@ def plan_required_runtime_assets(
     missing_items = tuple(
         item_id for item_id in required_items if not _agent_profile_path(repo_root, item_id).is_file()
     )
-    return RuntimeAssetPlan(required_items=required_items, missing_items=missing_items)
+    return BootstrapPlan(required_items=required_items, missing_items=missing_items)
 
 
-def ensure_runtime_assets(
+def ensure_bootstrap_assets(
     *,
     repo_root: Path,
-    plan: RuntimeAssetPlan,
+    plan: BootstrapPlan,
 ) -> None:
     """Ensure required default agents are installed from provenance or bootstrap source."""
 
@@ -79,9 +79,9 @@ def ensure_runtime_assets(
         return
 
     state_paths = resolve_state_paths(repo_root)
-    with lock_file_guard(state_paths.agents_lock_path):
-        config = load_install_config(state_paths.agents_manifest_path)
-        lock = read_install_lock(state_paths.agents_lock_path)
+    with state_lock(state_paths.agents_lock_path):
+        config = load_sources_config(state_paths.agents_manifest_path)
+        lock = read_lock(state_paths.agents_lock_path)
         selected_sources, updated_config = _select_runtime_sources(
             missing_items=plan.missing_items,
             config=config,
@@ -90,7 +90,7 @@ def ensure_runtime_assets(
 
         errors: list[str] = []
         for source_name in selected_sources:
-            result = reconcile_managed_sources(
+            result = reconcile_sources(
                 repo_root=repo_root,
                 sources=updated_config.sources,
                 lock=lock,
@@ -102,8 +102,8 @@ def ensure_runtime_assets(
         if errors:
             raise RuntimeError("; ".join(errors))
         if updated_config != config:
-            write_install_config(state_paths.agents_manifest_path, updated_config)
-        write_install_lock(state_paths.agents_lock_path, lock)
+            write_sources_config(state_paths.agents_manifest_path, updated_config)
+        write_lock(state_paths.agents_lock_path, lock)
 
     remaining = tuple(
         item_id for item_id in plan.missing_items if not _agent_profile_path(repo_root, item_id).is_file()
@@ -116,9 +116,9 @@ def ensure_runtime_assets(
 def _select_runtime_sources(
     *,
     missing_items: tuple[str, ...],
-    config: ManagedSourcesConfig,
-    lock: ManagedInstallLock,
-) -> tuple[tuple[str, ...], ManagedSourcesConfig]:
+    config: SourcesConfig,
+    lock: InstallLock,
+) -> tuple[tuple[str, ...], SourcesConfig]:
     selected_sources: list[str] = []
     unresolved_bootstrap_items: list[str] = []
 
@@ -156,7 +156,7 @@ def _select_runtime_sources(
     return tuple(dict.fromkeys(selected_sources)), updated_config
 
 
-def _locked_source_owning_item(item_id: str, lock: ManagedInstallLock) -> str | None:
+def _locked_source_owning_item(item_id: str, lock: InstallLock) -> str | None:
     for source_name, source_record in lock.sources.items():
         if item_id in source_record.items:
             return source_name
@@ -170,15 +170,15 @@ def _is_bootstrap_item(item_id: str) -> bool:
 
 def _ensure_bootstrap_source(
     *,
-    config: ManagedSourcesConfig,
+    config: SourcesConfig,
     item_ids: tuple[str, ...],
-) -> ManagedSourcesConfig:
+) -> SourcesConfig:
     existing = next((source for source in config.sources if source.name == _BOOTSTRAP_SOURCE_NAME), None)
     required_refs = tuple(ItemRef.from_item_id(item_id) for item_id in item_ids)
 
     if existing is None:
-        bootstrap_source = well_known_source_config(_BOOTSTRAP_SOURCE_NAME, items=required_refs)
-        return ManagedSourcesConfig(sources=(*config.sources, bootstrap_source))
+        bootstrap_source = well_known_source(_BOOTSTRAP_SOURCE_NAME, items=required_refs)
+        return SourcesConfig(sources=(*config.sources, bootstrap_source))
 
     if existing.items is None:
         return config
@@ -194,7 +194,7 @@ def _ensure_bootstrap_source(
         return config
 
     updated_source = existing.model_copy(update={"items": tuple(merged_items)})
-    return ManagedSourcesConfig(
+    return SourcesConfig(
         sources=tuple(
             updated_source if source.name == _BOOTSTRAP_SOURCE_NAME else source
             for source in config.sources
