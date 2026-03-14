@@ -27,8 +27,7 @@ from meridian.lib.launch.session_scope import session_scope
 from meridian.lib.harness.materialize import cleanup_materialized, materialize_for_harness
 from meridian.lib.safety.permissions import (
     PermissionConfig,
-    build_permission_config,
-    build_permission_resolver,
+    resolve_permission_pipeline,
 )
 from meridian.lib.core.sink import OutputSink
 from meridian.lib.state import spawn_store
@@ -470,9 +469,10 @@ async def _execute_existing_spawn(
         status=spawn_status,
     )
 
-    resolver = build_permission_resolver(
+    resolved_permission_config, resolver = resolve_permission_pipeline(
+        sandbox=permission_config.tier.value if permission_config.tier is not None else None,
         allowed_tools=allowed_tools,
-        permission_config=permission_config,
+        approval=permission_config.approval,
     )
     plan = PreparedSpawnPlan(
         model=spawn_record.model,
@@ -496,7 +496,7 @@ async def _execute_existing_spawn(
             kill_grace_secs=minutes_to_seconds(runtime.config.kill_grace_minutes) or 0.0,
             max_retries=runtime.config.max_retries,
             retry_backoff_secs=runtime.config.retry_backoff_seconds,
-            permission_config=permission_config,
+            permission_config=resolved_permission_config,
             permission_resolver=resolver,
             allowed_tools=allowed_tools,
         ),
@@ -872,11 +872,12 @@ def _background_worker_main(
     parser = _build_background_worker_parser()
     parsed = parser.parse_args(list(argv) if argv is not None else None)
 
-    permission_config = build_permission_config(
-        parsed.permission_tier,
+    allowed_tools = tuple(str(item) for item in parsed.allowed_tool)
+    permission_config, _ = resolve_permission_pipeline(
+        sandbox=cast("str | None", parsed.permission_tier),
+        allowed_tools=allowed_tools,
         approval=str(parsed.approval),
     )
-    allowed_tools = tuple(str(item) for item in parsed.allowed_tool)
     return asyncio.run(
         _execute_existing_spawn(
             spawn_id=SpawnId(parsed.spawn_id),

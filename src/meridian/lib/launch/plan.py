@@ -14,8 +14,7 @@ from meridian.lib.harness.materialize import materialize_for_harness
 from meridian.lib.harness.registry import HarnessRegistry
 from meridian.lib.safety.permissions import (
     PermissionConfig,
-    build_permission_config,
-    build_permission_resolver,
+    resolve_permission_pipeline,
 )
 from meridian.lib.state.paths import resolve_state_paths
 
@@ -23,7 +22,6 @@ from .prompt import compose_skill_injections, resolve_run_defaults
 from .resolve import (
     load_agent_profile_with_fallback,
     resolve_harness,
-    resolve_permission_tier_from_profile,
     resolve_skills_from_profile,
 )
 from .types import LaunchRequest, PrimarySessionMetadata, build_primary_prompt
@@ -230,17 +228,10 @@ def resolve_primary_launch_plan(
     passthrough_args, passthrough_prompt_fragments = normalize_system_prompt_passthrough_args(
         command_request.passthrough_args
     )
-    inferred_tier = resolve_permission_tier_from_profile(
-        profile=profile,
-        warning_logger=logger,
-    )
-    permission_config = build_permission_config(
-        inferred_tier,
-        approval=request.approval,
-    )
-    resolver = build_permission_resolver(
+    permission_config, resolver = resolve_permission_pipeline(
+        sandbox=profile.sandbox if profile is not None else None,
         allowed_tools=profile.allowed_tools if profile is not None else (),
-        permission_config=permission_config,
+        approval=request.approval,
     )
 
     materialized = materialize_for_harness(

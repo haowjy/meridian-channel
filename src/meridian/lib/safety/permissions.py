@@ -240,3 +240,18 @@ def build_permission_resolver(
             fallback_config=permission_config,
         )
     return TieredPermissionResolver(config=permission_config)
+
+
+def resolve_permission_pipeline(
+    *,
+    sandbox: str | None,
+    allowed_tools: tuple[str, ...] = (),
+    approval: str = "confirm",
+) -> tuple[PermissionConfig, TieredPermissionResolver | ExplicitToolsResolver]:
+    inferred_tier = permission_tier_from_profile(sandbox)
+    config = build_permission_config(inferred_tier, approval=approval)
+    resolver = build_permission_resolver(
+        allowed_tools=allowed_tools,
+        permission_config=config,
+    )
+    return config, resolver

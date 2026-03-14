@@ -19,12 +19,10 @@ from meridian.lib.launch.prompt import (
 from meridian.lib.launch.reference import load_reference_files, parse_template_assignments
 from meridian.lib.launch.resolve import (
     load_agent_profile_with_fallback,
-    resolve_permission_tier_from_profile,
     resolve_skills_from_profile,
 )
 from meridian.lib.safety.permissions import (
-    build_permission_config,
-    build_permission_resolver,
+    resolve_permission_pipeline,
 )
 from meridian.lib.core.types import ModelId
 
@@ -255,16 +253,10 @@ def build_create_payload(
     warning = merge_warnings(preflight_warning, warning)
     from meridian.lib.harness.adapter import SpawnParams
 
-    inferred_tier = resolve_permission_tier_from_profile(
-        profile=profile,
-    )
-    permission_config = build_permission_config(
-        inferred_tier,
-        approval=payload.approval or "confirm",
-    )
-    resolver = build_permission_resolver(
+    permission_config, resolver = resolve_permission_pipeline(
+        sandbox=profile.sandbox if profile is not None else None,
         allowed_tools=profile.allowed_tools if profile is not None else (),
-        permission_config=permission_config,
+        approval=payload.approval or "confirm",
     )
 
     appended_system_prompt = None
