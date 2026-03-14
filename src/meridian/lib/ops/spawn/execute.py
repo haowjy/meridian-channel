@@ -52,6 +52,17 @@ _BACKGROUND_STDOUT_FILENAME = "background-launcher.stdout.log"
 _BACKGROUND_STDERR_FILENAME = "background-launcher.stderr.log"
 
 
+def _parse_csv_skills(raw: str) -> tuple[str, ...]:
+    trimmed = raw.strip()
+    if not trimmed:
+        return ()
+
+    parts = [part.strip() for part in trimmed.split(",")]
+    if any(not part for part in parts):
+        raise ValueError("Invalid value for '--skills': expected comma-separated non-empty names.")
+    return tuple(parts)
+
+
 class _SpawnContext(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -435,8 +446,8 @@ def _build_background_worker_command(
         command.extend(["--timeout", str(timeout)])
     if agent_name is not None:
         command.extend(["--agent", agent_name])
-    for skill in skills:
-        command.extend(["--skill", skill])
+    if skills:
+        command.extend(["--skills", ",".join(skills)])
     for tool in mcp_tools:
         command.extend(["--mcp-tool", tool])
     for tool in allowed_tools:
@@ -711,7 +722,7 @@ def _build_background_worker_parser() -> argparse.ArgumentParser:
     parser.add_argument("--spawn-id", required=True)
     parser.add_argument("--repo-root", required=True)
     parser.add_argument("--timeout", type=float, default=None)
-    parser.add_argument("--skill", action="append", default=[])
+    parser.add_argument("--skills", default="")
     parser.add_argument("--agent", default=None)
     parser.add_argument("--mcp-tool", action="append", default=[])
     parser.add_argument("--allowed-tool", action="append", default=[])
@@ -748,7 +759,7 @@ def _background_worker_main(
             spawn_id=SpawnId(parsed.spawn_id),
             repo_root=Path(parsed.repo_root).expanduser().resolve(),
             timeout=parsed.timeout,
-            skills=tuple(str(item) for item in parsed.skill),
+            skills=_parse_csv_skills(str(parsed.skills)),
             agent_name=cast("str | None", parsed.agent),
             mcp_tools=tuple(str(item) for item in parsed.mcp_tool),
             permission_config=permission_config,

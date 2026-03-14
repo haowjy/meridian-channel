@@ -41,7 +41,7 @@ test -d "$SMOKE_REPO/.git" && echo "PASS: skill-injection repo ready" || echo "F
 The default harness (Codex) inlines skill content directly into the prompt.
 
 ```bash
-uv run meridian --json spawn -a reviewer -p "do the task" --skill meridian-orchestrate --dry-run > /tmp/meridian-skill-inline.json && \
+uv run meridian --json spawn -a reviewer -p "do the task" --skills meridian-orchestrate --dry-run > /tmp/meridian-skill-inline.json && \
 uv run python - <<'PY'
 import json
 doc = json.load(open("/tmp/meridian-skill-inline.json"))
@@ -61,7 +61,7 @@ PY
 Claude harness uses `--append-system-prompt` to inject skills.
 
 ```bash
-uv run meridian --json spawn -a reviewer -p "do the task" --skill meridian-orchestrate -m sonnet --dry-run > /tmp/meridian-skill-append.json && \
+uv run meridian --json spawn -a reviewer -p "do the task" --skills meridian-orchestrate -m sonnet --dry-run > /tmp/meridian-skill-append.json && \
 uv run python - <<'PY'
 import json
 doc = json.load(open("/tmp/meridian-skill-append.json"))
@@ -88,8 +88,7 @@ When multiple skills are specified, all should appear in the output.
 uv run meridian --json spawn \
   -a reviewer \
   -p "do the task" \
-  --skill meridian-orchestrate \
-  --skill meridian-spawn-agent \
+  --skills meridian-orchestrate,meridian-spawn-agent \
   --dry-run > /tmp/meridian-skill-multi.json && \
 uv run python - <<'PY'
 import json
@@ -107,7 +106,7 @@ PY
 ### SKILL-4. Unknown skill fails cleanly [IMPORTANT]
 
 ```bash
-if uv run meridian --json spawn -a reviewer -p "test" --skill no-such-skill-exists --dry-run >/tmp/meridian-skill-unknown.out 2>&1; then
+if uv run meridian --json spawn -a reviewer -p "test" --skills no-such-skill-exists --dry-run >/tmp/meridian-skill-unknown.out 2>&1; then
   if grep -q "Traceback" /tmp/meridian-skill-unknown.out; then
     echo "FAIL: unknown skill produced a traceback"
   else

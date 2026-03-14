@@ -45,6 +45,21 @@ def _spawn_create_exit_code(result: SpawnActionOutput) -> int:
     return 1
 
 
+def _parse_csv_list(raw: str | None, *, field_name: str) -> tuple[str, ...]:
+    if raw is None:
+        return ()
+    trimmed = raw.strip()
+    if not trimmed:
+        return ()
+
+    parts = [part.strip() for part in trimmed.split(",")]
+    if any(not part for part in parts):
+        raise ValueError(
+            f"Invalid value for '{field_name}': expected comma-separated non-empty names."
+        )
+    return tuple(parts)
+
+
 def _spawn_create(
     emit: Any,
     prompt: Annotated[
@@ -91,13 +106,12 @@ def _spawn_create(
         Parameter(name=["--agent", "-a"], help="Agent profile name to execute."),
     ] = None,
     skills: Annotated[
-        tuple[str, ...],
+        str | None,
         Parameter(
-            name=["--skill", "-s"],
-            help="Ad-hoc skill to load (repeatable). Merged with agent profile skills.",
-            negative_iterable=(),
+            name=["--skills", "-s"],
+            help="Comma-separated ad-hoc skills to load. Merged with agent profile skills.",
         ),
-    ] = (),
+    ] = None,
     desc: Annotated[
         str,
         Parameter(name="--desc", help="Short description for the spawn."),
@@ -161,7 +175,7 @@ def _spawn_create(
                 prompt=prompt,
                 model=model,
                 agent=agent,
-                skills=skills,
+                skills=_parse_csv_list(skills, field_name="skills"),
                 fork=fork,
                 dry_run=dry_run,
                 timeout=timeout,
@@ -177,7 +191,7 @@ def _spawn_create(
                 files=references,
                 template_vars=template_vars,
                 agent=agent,
-                skills=skills,
+                skills=_parse_csv_list(skills, field_name="skills"),
                 desc=desc,
                 work=work,
                 dry_run=dry_run,

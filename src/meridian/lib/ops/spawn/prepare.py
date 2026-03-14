@@ -211,7 +211,7 @@ def build_create_payload(
         default_model=runtime_view.config.default_model,
     )
 
-    # Merge profile skills with ad-hoc CLI --skill flags, deduplicating.
+    # Merge profile skills with ad-hoc CLI --skills entries, deduplicating.
     merged_skill_names = dedupe_skill_names((*defaults.skills, *payload.skills))
 
     resolved_skills = resolve_skills_from_profile(
