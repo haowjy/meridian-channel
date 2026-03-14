@@ -7,7 +7,6 @@ from meridian.lib.install.config import SourceConfig, SourcesConfig
 from meridian.lib.install.config import load_sources_config, write_sources_config
 from meridian.lib.install.engine import reconcile_sources
 from meridian.lib.install.lock import read_lock, write_lock
-from meridian.lib.install.types import ItemRef
 from meridian.lib.install.bootstrap import (
     ensure_bootstrap_assets,
     plan_bootstrap_assets,
@@ -74,17 +73,12 @@ def test_ensure_bootstrap_assets_bootstraps_missing_default(
     source_root = tmp_path / "bootstrap-source"
     _write_source_tree(source_root, agent_name="__meridian-subagent")
 
-    def fake_bootstrap_source(
-        name: str,
-        *,
-        items: tuple[ItemRef, ...] | None = None,
-    ) -> SourceConfig:
+    def fake_bootstrap_source(name: str) -> SourceConfig:
         assert name == "meridian-agents"
         return SourceConfig(
             name="meridian-agents",
             kind="path",
             path=source_root.as_posix(),
-            items=items,
         )
 
     monkeypatch.setattr(
@@ -105,8 +99,10 @@ def test_ensure_bootstrap_assets_bootstraps_missing_default(
     config = load_sources_config(state_paths.agents_manifest_path)
     assert [source.name for source in config.sources] == ["meridian-agents"]
     assert config.sources[0].kind == "path"
-    assert config.sources[0].items is not None
-    assert config.sources[0].items[0].item_id == "agent:__meridian-subagent"
+    assert config.sources[0].agents is not None
+    assert "agent:__meridian-subagent" in [
+        ref.item_id for ref in (config.sources[0].effective_items or ())
+    ]
 
     lock = read_lock(state_paths.agents_lock_path)
     assert "meridian-agents" in lock.sources

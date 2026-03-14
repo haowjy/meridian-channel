@@ -15,7 +15,7 @@ from meridian.lib.install.lock import (
     read_lock,
     write_lock,
 )
-from meridian.lib.install.types import ItemRef, format_item_id, parse_item_id
+from meridian.lib.install.types import format_item_id, parse_item_id
 from meridian.lib.install.aliases import well_known_source
 
 _BOOTSTRAP_SOURCE_NAME = "meridian-agents"
@@ -174,26 +174,28 @@ def _ensure_bootstrap_source(
     item_ids: tuple[str, ...],
 ) -> SourcesConfig:
     existing = next((source for source in config.sources if source.name == _BOOTSTRAP_SOURCE_NAME), None)
-    required_refs = tuple(ItemRef.from_item_id(item_id) for item_id in item_ids)
+    # Extract agent names from item_ids (all bootstrap items are agents)
+    required_agent_names = tuple(parse_item_id(item_id)[1] for item_id in item_ids)
 
     if existing is None:
-        bootstrap_source = well_known_source(_BOOTSTRAP_SOURCE_NAME, items=required_refs)
+        bootstrap_source = well_known_source(_BOOTSTRAP_SOURCE_NAME)
+        bootstrap_source = bootstrap_source.model_copy(update={"agents": required_agent_names})
         return SourcesConfig(sources=(*config.sources, bootstrap_source))
 
-    if existing.items is None:
+    if existing.agents is None and existing.skills is None:
+        # No filter -- all items included, nothing to add
         return config
 
-    existing_item_ids = {item.item_id for item in existing.items}
-    merged_items = list(existing.items)
-    for item_ref in required_refs:
-        if item_ref.item_id in existing_item_ids:
-            continue
-        merged_items.append(item_ref)
+    existing_agent_names = set(existing.agents or ())
+    merged_agents = list(existing.agents or ())
+    for name in required_agent_names:
+        if name not in existing_agent_names:
+            merged_agents.append(name)
 
-    if len(merged_items) == len(existing.items):
+    if len(merged_agents) == len(existing.agents or ()):
         return config
 
-    updated_source = existing.model_copy(update={"items": tuple(merged_items)})
+    updated_source = existing.model_copy(update={"agents": tuple(merged_agents)})
     return SourcesConfig(
         sources=tuple(
             updated_source if source.name == _BOOTSTRAP_SOURCE_NAME else source

@@ -24,6 +24,8 @@ class SourceConfig(BaseModel):
     path: str | None = None
     ref: str | None = None
     items: tuple[ItemRef, ...] | None = None
+    agents: tuple[str, ...] | None = None
+    skills: tuple[str, ...] | None = None
     exclude_items: tuple[ItemRef, ...] = ()
     rename: dict[str, str] = Field(default_factory=dict)
 
@@ -68,6 +70,33 @@ class SourceConfig(BaseModel):
             refs.append(ItemRef.model_validate(cast("dict[str, object]", raw_item)))
         return tuple(refs)
 
+    @field_validator("agents", "skills", mode="before")
+    @classmethod
+    def _validate_string_lists(
+        cls,
+        value: object,
+        info: ValidationInfo,
+    ) -> tuple[str, ...] | None:
+        if value is None:
+            return None
+        if isinstance(value, (list, tuple)):
+            result: list[str] = []
+            for item in cast("list[object] | tuple[object, ...]", value):
+                if not isinstance(item, str):
+                    raise ValueError(
+                        f"Invalid value for '{info.field_name}': expected array of strings."
+                    )
+                normalized = item.strip()
+                if not normalized:
+                    raise ValueError(
+                        f"Invalid value for '{info.field_name}': empty string in list."
+                    )
+                result.append(normalized)
+            return tuple(result)
+        raise ValueError(
+            f"Invalid value for '{info.field_name}': expected array of strings."
+        )
+
     @field_validator("rename", mode="before")
     @classmethod
     def _validate_rename(cls, value: object) -> dict[str, str]:
@@ -99,6 +128,47 @@ class SourceConfig(BaseModel):
         if self.ref is not None:
             raise ValueError("Path sources must not set 'ref'.")
         return self
+
+    @model_validator(mode="after")
+    def _migrate_items_to_agents_skills(self) -> "SourceConfig":
+        has_new = self.agents is not None or self.skills is not None
+        has_old = self.items is not None
+
+        if has_old and has_new:
+            raise ValueError(
+                "Cannot specify both 'items' and 'agents'/'skills'. "
+                "Use 'agents' and 'skills' instead of 'items'."
+            )
+
+        if has_old and not has_new:
+            agent_names: list[str] = []
+            skill_names: list[str] = []
+            for item_ref in self.items or ():
+                if item_ref.kind == "agent":
+                    agent_names.append(item_ref.name)
+                else:
+                    skill_names.append(item_ref.name)
+            updates: dict[str, object] = {"items": None}
+            if agent_names:
+                updates["agents"] = tuple(agent_names)
+            if skill_names:
+                updates["skills"] = tuple(skill_names)
+            return self.model_copy(update=updates)
+
+        return self
+
+    @property
+    def effective_items(self) -> tuple[ItemRef, ...] | None:
+        """Return combined ItemRef tuples from agents/skills fields, or None if unfiltered."""
+
+        if self.agents is None and self.skills is None:
+            return None
+        refs: list[ItemRef] = []
+        for name in self.agents or ():
+            refs.append(ItemRef(kind="agent", name=name))
+        for name in self.skills or ():
+            refs.append(ItemRef(kind="skill", name=name))
+        return tuple(refs)
 
 
 class SourcesConfig(BaseModel):
@@ -168,8 +238,10 @@ def _render_source_block(source: SourceConfig) -> list[str]:
         lines.append(f'path = {_toml_string(source.path)}')
     if source.ref is not None:
         lines.append(f'ref = {_toml_string(source.ref)}')
-    if source.items is not None:
-        lines.append(f"items = {_render_item_ref_list(source.items)}")
+    if source.agents is not None:
+        lines.append(f"agents = {_render_string_list(source.agents)}")
+    if source.skills is not None:
+        lines.append(f"skills = {_render_string_list(source.skills)}")
     if source.exclude_items:
         lines.append(f"exclude_items = {_render_item_ref_list(source.exclude_items)}")
     if source.rename:
@@ -179,6 +251,11 @@ def _render_source_block(source: SourceConfig) -> list[str]:
         )
         lines.append(f"rename = {{ {mappings} }}")
     return lines
+
+
+def _render_string_list(names: tuple[str, ...]) -> str:
+    rendered = ", ".join(_toml_string(name) for name in names)
+    return f"[{rendered}]"
 
 
 def _render_item_ref_list(items: tuple[ItemRef, ...]) -> str:

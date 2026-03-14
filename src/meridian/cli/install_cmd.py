@@ -17,7 +17,6 @@ from meridian.lib.install.config import load_sources_config, write_sources_confi
 from meridian.lib.install.engine import InstallItemAction, InstallResult, install_status
 from meridian.lib.install.engine import reconcile_sources, remove_source
 from meridian.lib.install.lock import state_lock, read_lock, write_lock
-from meridian.lib.install.types import ItemRef
 from meridian.lib.install.aliases import is_well_known_alias, well_known_source
 
 Emitter = Callable[[Any], None]
@@ -322,19 +321,26 @@ def _build_source_config(
     selector = _classify_source(source, repo_root=repo_root)
     source_name = name.strip() if name is not None else _derive_source_name(source, selector)
     rename_map = _normalize_rename_map(_parse_rename_args(rename))
-    items = _build_item_refs(agents=agents, skills=skills)
+    agent_names = _parse_csv_list(agents, field_name="agents")
+    skill_names = _parse_csv_list(skills, field_name="skills")
 
     if selector == "alias":
-        configured = well_known_source(source.strip(), items=items)
+        configured = well_known_source(source.strip())
+        updates: dict[str, object] = {"name": source_name, "rename": rename_map}
+        if agent_names is not None:
+            updates["agents"] = agent_names
+        if skill_names is not None:
+            updates["skills"] = skill_names
         if ref is not None:
-            configured = configured.model_copy(update={"ref": ref})
-        return configured.model_copy(update={"name": source_name, "rename": rename_map})
+            updates["ref"] = ref
+        return configured.model_copy(update=updates)
     if selector == "path":
         return SourceConfig(
             name=source_name,
             kind="path",
             path=source,
-            items=items,
+            agents=agent_names,
+            skills=skill_names,
             rename=rename_map,
         )
 
@@ -348,20 +354,10 @@ def _build_source_config(
         kind="git",
         url=url,
         ref=ref,
-        items=items,
+        agents=agent_names,
+        skills=skill_names,
         rename=rename_map,
     )
-
-
-def _build_item_refs(*, agents: str | None, skills: str | None) -> tuple[ItemRef, ...] | None:
-    refs: list[ItemRef] = []
-    for item_name in _parse_csv_list(agents, field_name="agents") or ():
-        refs.append(ItemRef(kind="agent", name=item_name))
-    for item_name in _parse_csv_list(skills, field_name="skills") or ():
-        refs.append(ItemRef(kind="skill", name=item_name))
-    if not refs:
-        return None
-    return tuple(refs)
 
 
 def _normalize_rename_map(rename_map: dict[str, str]) -> dict[str, str]:

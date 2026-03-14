@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import cast
 
 from meridian.lib.install.config import SourceConfig
-from meridian.lib.install.types import ItemRef
 from meridian.lib.install.types import SourceKind
 
 _WELL_KNOWN_SOURCES: dict[str, dict[str, str]] = {
@@ -23,11 +22,7 @@ def is_well_known_alias(name: str) -> bool:
     return name.strip() in _WELL_KNOWN_SOURCES
 
 
-def well_known_source(
-    name: str,
-    *,
-    items: tuple[ItemRef, ...] | None = None,
-) -> SourceConfig:
+def well_known_source(name: str) -> SourceConfig:
     """Build one well-known managed source declaration."""
 
     normalized = name.strip()
@@ -41,5 +36,4 @@ def well_known_source(
         url=payload.get("url"),
         path=payload.get("path"),
         ref=payload.get("ref"),
-        items=items,
     )

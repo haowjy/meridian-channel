@@ -197,10 +197,10 @@ def plan_source_items(
     """Resolve selected items for one source."""
 
     items_by_id = {item.item_id: item for item in discovered_items}
-    if source.items is None:
+    if source.effective_items is None:
         root_ids = {item_id for item_id in items_by_id}
     else:
-        root_ids = {item.item_id for item in source.items}
+        root_ids = {item.item_id for item in source.effective_items}
     excluded_ids = {item.item_id for item in source.exclude_items}
 
     missing = sorted(item_id for item_id in root_ids | excluded_ids if item_id not in items_by_id)
