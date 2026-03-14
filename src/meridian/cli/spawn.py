@@ -153,8 +153,6 @@ def _spawn_create(
     ] = False,
 ) -> None:
     if continue_from is not None:
-        if passthrough:
-            raise ValueError("Cannot use passthrough arguments (--) with --continue")
         if yolo:
             raise ValueError("Cannot use --yolo with --continue")
         result = spawn_continue_sync(
@@ -167,6 +165,7 @@ def _spawn_create(
                 fork=fork,
                 dry_run=dry_run,
                 timeout=timeout,
+                passthrough_args=passthrough,
             ),
             sink=current_output_sink(),
         )

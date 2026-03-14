@@ -335,6 +335,7 @@ class SpawnContinueInput(BaseModel):
     dry_run: bool = False
     timeout: float | None = None
     repo_root: str | None = None
+    passthrough_args: tuple[str, ...] = ()
 
 
 class SpawnWaitInput(BaseModel):

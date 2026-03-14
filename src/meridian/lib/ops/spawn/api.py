@@ -627,6 +627,7 @@ def spawn_continue_sync(
         continue_harness_session_id=source_session_id,
         continue_harness=source_harness,
         continue_fork=payload.fork,
+        passthrough_args=payload.passthrough_args,
     )
     return _with_command(spawn_create_sync(create_input, ctx=ctx, sink=sink), "spawn.continue")
 
