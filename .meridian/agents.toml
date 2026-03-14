@@ -1,0 +1,18 @@
+[[sources]]
+name = "meridian-agents"
+kind = "git"
+url = "https://github.com/haowjy/meridian-agents.git"
+ref = "main"
+agents = ["__meridian-subagent", "__meridian-orchestrator"]
+skills = ["__meridian-orchestrate", "__meridian-spawn-agent"]
+
+[[sources]]
+name = "review-drafts"
+kind = "path"
+path = ".meridian/work/meridian-agents/drafts"
+
+[[sources]]
+name = "meridian-agents-dev"
+kind = "path"
+path = "./meridian-agents"
+skills = ["__meridian-managed-install"]
