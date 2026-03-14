@@ -2,43 +2,47 @@
 
 ## Summary
 
-Encode a reusable, language/framework-agnostic software development workflow as optional skills and agent profiles in the `meridian-agents` repo. The workflow covers design → adversarial review → implementation planning → phased implementation → tracking, with GitHub issue tracking replacing local markdown logs.
+Encode a reusable, language/framework-agnostic software development workflow as optional skills and agent profiles in the `meridian-agents` repo. The workflow covers design → adversarial review → implementation planning → phased implementation → tracking, with optional GitHub issue mirroring on top of local markdown logs.
 
 Reference implementation: `meridian-collab/_docs/plans/ws-transport-v2/` — a manually orchestrated Go/WebSocket refactor that this design generalizes into reusable skills.
+
+This document is authoritative for optional workflow content only: which extra skills and agent profiles should ship in `meridian-agents`, how they compose, and what workflow policy they teach. Core install/discovery/bootstrap semantics are owned by [meridian-sync.md](/home/jimyao/gitrepos/meridian-channel/.meridian/work/meridian-agents/meridian-sync.md). Core bootstrap content shape is owned by [design.md](/home/jimyao/gitrepos/meridian-channel/.meridian/work/meridian-agents/design.md).
 
 ## 1. Skill Composition Model
 
 Skills are always attached to agent profiles via the profile's `skills` field — never injected ad-hoc. If an orchestrator wants a subagent to use a skill, it picks an agent profile that has that skill. If the orchestrator itself needs a skill, the user configures their custom primary agent profile to include it.
 
-**Two levels of primary orchestrator:**
+**Two orchestrator profiles:**
 
-- `__meridian-primary` — core, auto-synced. Minimal: `__meridian-orchestrate` + `__meridian-spawn-agent`. Just enough to plan/delegate/evaluate.
-- `primary` — optional, opinionated. Includes core skills (`__meridian-orchestrate`, `__meridian-spawn-agent`) plus `dev-workflow`. The full software development lifecycle orchestrator, ready to use. Users on GitHub repos can also attach `issue-tracking` for GH issue integration.
+- `__meridian-orchestrator` — core, auto-installed when needed. Minimal: `__meridian-orchestrate` + `__meridian-spawn-agent`. Just enough to plan/delegate/evaluate.
+- `dev-orchestrator` — optional, opinionated. Includes core skills (`__meridian-orchestrate`, `__meridian-spawn-agent`) plus `dev-workflow`. This is the full software development lifecycle orchestrator, intended to be installed alongside its companion worker/reviewer/tester profiles. Users on GitHub repos can also attach `issue-tracking` for GH issue integration.
 
 **How users get started:**
 
 ```bash
-meridian sync install meridian-agents          # sync everything
-meridian config set default-agent primary      # use the opinionated orchestrator
+meridian install meridian-agents               # install everything
+meridian config set defaults.primary_agent dev-orchestrator
 ```
 
 Or compose their own:
 
 ```bash
-cp .agents/agents/primary.md .agents/agents/my-primary.md
+cp .agents/agents/dev-orchestrator.md .agents/agents/my-dev-orchestrator.md
 # edit skills list, model, etc.
-meridian config set default-agent my-primary
+meridian config set defaults.primary_agent my-dev-orchestrator
 ```
 
-The optional agent profiles (coder, reviewer-solid, etc.) come pre-configured with the right skills attached. The `primary` profile comes pre-configured with the dev workflow.
+The optional agent profiles (coder, reviewer-solid, etc.) come pre-configured with the right skills attached. The `dev-orchestrator` profile comes pre-configured with the dev workflow, and the source metadata should declare its expected companion profiles so selective installs auto-include that companion closure instead of producing a half-present workflow.
+
+The exact meaning of "install everything", selective install flags, dependency closure, and pruning is defined by the install plan in [meridian-sync.md](/home/jimyao/gitrepos/meridian-channel/.meridian/work/meridian-agents/meridian-sync.md). This document only specifies the optional workflow items that should exist and how they should compose.
 
 ## 2. Skill Catalog
 
 Four optional skills. Each lives in `meridian-agents/skills/` and is attached to agent profiles that need it:
 
-### `dev-workflow` (for primary orchestrator)
+### `dev-workflow` (for the optional dev orchestrator)
 
-The master playbook. Teaches the orchestrator the full development lifecycle and how to staff each phase. Users attach this to their custom primary agent profile.
+The master playbook. Teaches the orchestrator the full development lifecycle and how to staff each phase. Users attach this to their custom orchestrator profile.
 
 **What it teaches:**
 
@@ -274,13 +278,13 @@ Each reviewer variant loads the `reviewing` skill but has a different system pro
 |---------|--------------|--------|---------|---------|
 | `documenter` | opus | `documenting` | workspace-write | Keep docs in sync. Two-pass: discovery (haiku) then writing (opus). |
 
-### Primary Orchestrator (optional, ships in repo)
+### Dev Orchestrator (optional, ships in repo)
 
 | Profile | Default Model | Skills | Sandbox | Purpose |
 |---------|--------------|--------|---------|---------|
-| `primary` | claude-opus-4-6 | `__meridian-orchestrate`, `__meridian-spawn-agent`, `dev-workflow` | unrestricted | Full dev lifecycle orchestrator. Superset of `__meridian-primary` with structured dev workflow. Add `issue-tracking` for GH integration. |
+| `dev-orchestrator` | claude-opus-4-6 | `__meridian-orchestrate`, `__meridian-spawn-agent`, `dev-workflow` | unrestricted | Full dev lifecycle orchestrator. Superset of `__meridian-orchestrator` with structured dev workflow. Add `issue-tracking` for GH integration. |
 
-This is the ready-to-use orchestrator. Users install it with `meridian config set default-agent primary`. To customize further, copy to `my-primary.md` and edit.
+This is the ready-to-use workflow orchestrator when installed with its companion worker, reviewer, tester, and documentation profiles. Users enable it with `meridian config set defaults.primary_agent dev-orchestrator`. To customize further, copy to `my-dev-orchestrator.md` and edit.
 
 ## 3. What Changes in Core vs. What's Purely Skills
 
@@ -383,11 +387,11 @@ No special cron integration needed — `meridian spawn` is already a CLI command
 ```
 meridian-agents/
   agents/
-    # Core (auto-synced, __ prefix)
-    __meridian-primary.md
+    # Core (auto-installed when required, __ prefix)
+    __meridian-orchestrator.md
     __meridian-subagent.md
-    # Optional (user installs with meridian sync)
-    primary.md
+    # Optional (user installs with meridian install)
+    dev-orchestrator.md
     coder.md
     researcher.md
     reviewer.md
@@ -399,7 +403,7 @@ meridian-agents/
     smoke-tester.md
     documenter.md
   skills/
-    # Core (auto-synced, __ prefix)
+    # Core (auto-installed when required, __ prefix)
     __meridian-orchestrate/
       SKILL.md
     __meridian-spawn-agent/
@@ -424,13 +428,13 @@ meridian-agents/
 
 ```bash
 # Install everything
-meridian sync install meridian-agents
+meridian install meridian-agents
 
 # Install specific skills + agents
-meridian sync install meridian-agents --skills dev-workflow,reviewing,issue-tracking --agents coder,reviewer-solid,reviewer-concurrency
+meridian install meridian-agents --skills dev-workflow,reviewing,issue-tracking --agents coder,reviewer-solid,reviewer-concurrency
 
 # Install just the reviewer agents
-meridian sync install meridian-agents --agents reviewer,reviewer-solid,reviewer-concurrency,reviewer-security,reviewer-planning
+meridian install meridian-agents --agents reviewer,reviewer-solid,reviewer-concurrency,reviewer-security,reviewer-planning
 ```
 
 ## 8. README for `meridian-agents` Repo
@@ -445,36 +449,36 @@ Official agent profiles and skills for [meridian](https://github.com/haowjy/meri
 ## Quick Start
 
 # Install all agents and skills
-meridian sync install meridian-agents
+meridian install meridian-agents
 
 # Use the full dev workflow orchestrator
-meridian config set default-agent primary
+meridian config set defaults.primary_agent dev-orchestrator
 
 That's it. You now have access to specialized agents for coding, reviewing,
 testing, and documentation — plus a structured dev workflow with GitHub issue tracking.
 
 ## What's Included
 
-### Core (auto-synced on every `meridian` launch)
+### Core (auto-installed when required)
 
-These are required for meridian to function. You don't need to install them manually.
+These are required for meridian to function. Commands that need them ensure they are installed from the configured bootstrap source if they are missing.
 
 | Name | Type | Purpose |
 |------|------|---------|
-| `__meridian-primary` | agent | Minimal primary orchestrator |
+| `__meridian-orchestrator` | agent | Minimal orchestrator |
 | `__meridian-subagent` | agent | Default subagent |
 | `__meridian-orchestrate` | skill | Plan/delegate/evaluate loop |
 | `__meridian-spawn-agent` | skill | Spawn CLI coordination |
 
 ### Optional
 
-Install with `meridian sync install meridian-agents`.
+Install with `meridian install meridian-agents`.
 
-**Primary orchestrator:**
+**Dev orchestrator:**
 
 | Name | Type | Purpose |
 |------|------|---------|
-| `primary` | agent | Full dev lifecycle orchestrator (design → review → plan → implement → track) |
+| `dev-orchestrator` | agent | Full dev lifecycle orchestrator (design → review → plan → implement → track) |
 
 **Builder agents:**
 
@@ -510,7 +514,7 @@ Install with `meridian sync install meridian-agents`.
 
 | Name | Purpose |
 |------|---------|
-| `dev-workflow` | Structured dev lifecycle for the primary orchestrator |
+| `dev-workflow` | Structured dev lifecycle for the dev orchestrator |
 | `reviewing` | Structured code review with severity levels |
 | `issue-tracking` | GitHub issue creation for bugs, backlog, findings |
 | `documenting` | Two-pass doc maintenance (discovery then writing) |
@@ -531,21 +535,21 @@ meridian spawn -a smoke-tester -p "Test login flow end-to-end"
 ## Selective Install
 
 # Just the reviewer agents
-meridian sync install meridian-agents --agents reviewer,reviewer-solid,reviewer-security
+meridian install meridian-agents --agents reviewer,reviewer-solid,reviewer-security
 
 # Just the issue-tracking skill
-meridian sync install meridian-agents --skills issue-tracking
+meridian install meridian-agents --skills issue-tracking
 
 ## Customizing
 
-Core agents (prefixed with `__`) are managed by meridian and will be overwritten on sync.
+Core agents (prefixed with `__`) are managed by meridian and will be overwritten when their source is reinstalled, updated, or upgraded.
 Optional agents can be customized freely.
 
-To create your own primary orchestrator:
+To create your own dev orchestrator:
 
-cp .agents/agents/primary.md .agents/agents/my-primary.md
-# edit my-primary.md — change model, add/remove skills
-meridian config set default-agent my-primary
+cp .agents/agents/dev-orchestrator.md .agents/agents/my-dev-orchestrator.md
+# edit my-dev-orchestrator.md — change model, add/remove skills
+meridian config set defaults.primary_agent my-dev-orchestrator
 ```
 
 ## 9. Implementation Sequence
@@ -553,7 +557,7 @@ meridian config set default-agent my-primary
 1. **Write the skill files** — `dev-workflow/SKILL.md`, `reviewing/SKILL.md`, `issue-tracking/SKILL.md`, `documenting/SKILL.md`
 2. **Write the agent profiles** — all the `.md` files listed above
 3. **Add to `meridian-agents` repo** — commit to `haowjy/meridian-agents`
-4. **Test** — use `meridian sync install meridian-agents` to sync, then run a real work item using the workflow
+4. **Test** — use `meridian install meridian-agents` to install the content, then run a real work item using the workflow
 5. **Iterate** — refine skills based on actual usage
 
-No meridian core changes required for the skills and profiles themselves. However, this design depends on the broader `meridian-agents` infrastructure landing first (auto-sync, well-known sources, `meridian config set`, selective `--skills/--agents` sync). See `design.md` for that prerequisite work.
+No meridian core changes required for the skills and profiles themselves. However, this design depends on the broader `meridian-agents` infrastructure landing first (on-demand bootstrap install, well-known sources, `meridian config set`, and selective `--skills/--agents` install with bundle closure). See `design.md` for that prerequisite work.
