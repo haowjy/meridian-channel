@@ -51,10 +51,6 @@
 | TD-15 | Replace hardcoded primary harness allowlist | `tech-debt.md` | Medium | Closed (archived) |
 | TD-16 | Replace `_build_interactive_command` with adapter delegation | `tech-debt.md` | High | Closed (archived) |
 
-## Active Plans (items tracked there, not here)
-
-- Test-suite rewrite + strictness cleanup -> `plans/test-suite-and-strictness-cleanup.md`
-
 ## Priority Index (Open)
 
 | ID | Item | File | Priority | Status |
@@ -77,4 +73,3 @@
 - `archive/2026-03-03-backlog-execution.md` — closed 17-item execution batch
 - `archive/2026-03-07-bugs.md` — closed bug ledger + legacy closed bug entries
 - `archive/2026-03-07-improvements.md` — closed improvement ledger
-- `_reference/migration-gotchas.md` — Historical notes from `run` → `spawn` migration (not actionable)
