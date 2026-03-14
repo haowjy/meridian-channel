@@ -99,3 +99,29 @@ def test_reconcile_renamed_item_keeps_previous_modified_destination(tmp_path: Pa
     assert previous_path.is_file()
     assert not (repo_root / ".agents" / "agents" / "bar.md").exists()
     assert lock.items["agent:a"].destination_path == ".agents/agents/foo.md"
+
+
+def test_reconcile_rejects_source_tree_without_installable_items(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    source_dir = tmp_path / "empty-source"
+    source_dir.mkdir()
+
+    result = reconcile_managed_sources(
+        repo_root=repo_root,
+        sources=(
+            ManagedSourceConfig(
+                name="demo",
+                kind="path",
+                path=source_dir.as_posix(),
+            ),
+        ),
+        lock=ManagedInstallLock(),
+        agents_cache_dir=repo_root / ".meridian" / "cache" / "agents",
+    )
+
+    assert result.actions == ()
+    assert result.errors == (
+        "Source 'demo' could not be prepared: No installable items found in source tree. "
+        "Expected agents/*.md or skills/*/SKILL.md.",
+    )

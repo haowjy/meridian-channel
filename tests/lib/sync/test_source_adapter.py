@@ -41,12 +41,24 @@ def test_path_source_adapter_discovers_items_from_layout(tmp_path: Path) -> None
     assert [item.item_id for item in items] == ["agent:helper", "skill:demo"]
 
 
+def test_path_source_adapter_rejects_missing_directory(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    with pytest.raises(FileNotFoundError, match="does not exist"):
+        PathSourceAdapter().resolve(
+            ManagedSourceConfig(name="local", kind="path", path="./missing"),
+            cache_dir=repo_root / ".meridian" / "cache" / "agents",
+            repo_root=repo_root,
+        )
+
+
 def test_git_source_adapter_falls_back_to_github_archive_without_git(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cache_dir = tmp_path / ".meridian" / "cache" / "agents"
-    installed_tree = cache_dir / "github-source"
+    installed_tree = cache_dir / "archive" / "github-source"
 
     monkeypatch.setattr("meridian.lib.sync.source_adapter._git_cli_available", lambda: False)
     def fake_resolve_commit(owner: str, repo: str, ref: str | None) -> str:
@@ -106,3 +118,60 @@ def test_git_source_adapter_requires_git_for_non_github_remote(
         assert "public GitHub repo" in str(exc)
     else:  # pragma: no cover - defensive assertion
         raise AssertionError("Expected non-GitHub remote without git to fail.")
+
+
+def test_git_source_adapter_reclones_when_cached_remote_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache_dir = tmp_path / ".meridian" / "cache" / "agents"
+    cache_path = cache_dir / "git" / "remote"
+    (cache_path / ".git").mkdir(parents=True)
+
+    monkeypatch.setattr("meridian.lib.sync.source_adapter._git_cli_available", lambda: True)
+
+    def fake_remote_url(path: Path) -> str:
+        _ = path
+        return "https://github.com/haowjy/old.git"
+
+    monkeypatch.setattr("meridian.lib.sync.source_adapter._git_remote_url", fake_remote_url)
+
+    calls: list[tuple[str, ...]] = []
+
+    class _Completed:
+        def __init__(self, stdout: str = "") -> None:
+            self.stdout = stdout
+
+    def fake_run_git(args: list[str], *, cwd: Path | None = None) -> _Completed:
+        calls.append(tuple(args))
+        if args[:1] == ["clone"]:
+            target = Path(args[-1])
+            (target / ".git").mkdir(parents=True, exist_ok=True)
+            return _Completed()
+        if args[:2] == ["fetch", "--tags"]:
+            return _Completed()
+        if args[:2] == ["checkout", "--detach"]:
+            return _Completed()
+        if args == ["rev-parse", "HEAD"]:
+            return _Completed("abc123\n")
+        raise AssertionError(f"unexpected git call: {args}")
+
+    monkeypatch.setattr("meridian.lib.sync.source_adapter._run_git", fake_run_git)
+    def fake_checkout(cache_path: Path, ref: str | None) -> None:
+        _ = (cache_path, ref)
+
+    monkeypatch.setattr("meridian.lib.sync.source_adapter._checkout_git_ref", fake_checkout)
+
+    resolved = GitSourceAdapter().resolve(
+        ManagedSourceConfig(
+            name="remote",
+            kind="git",
+            url="https://github.com/haowjy/new.git",
+            ref="main",
+        ),
+        cache_dir=cache_dir,
+        repo_root=tmp_path,
+    )
+
+    assert resolved.tree_path == cache_path
+    assert ("clone", "https://github.com/haowjy/new.git", str(cache_path)) in calls

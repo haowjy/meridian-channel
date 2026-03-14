@@ -114,6 +114,11 @@ def reconcile_managed_sources(
             )
             tree_path = adapter.fetch(resolved)
             discovered_items = adapter.describe(tree_path)
+            if not discovered_items:
+                raise ValueError(
+                    "No installable items found in source tree. Expected agents/*.md "
+                    "or skills/*/SKILL.md."
+                )
             planned_items = plan_source_items(
                 repo_root=repo_root,
                 source=source,

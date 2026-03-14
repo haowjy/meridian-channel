@@ -77,14 +77,8 @@ class GitSourceAdapter:
                 upgrade=upgrade,
             )
 
-        cache_path = cache_dir / source.name
-        if not cache_path.exists():
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            try:
-                _run_git(["clone", source.url, str(cache_path)])
-            except Exception:
-                shutil.rmtree(cache_path, ignore_errors=True)
-                raise
+        cache_path = _git_clone_cache_path(cache_dir, source.name)
+        _ensure_git_clone_cache(cache_path, source.url)
 
         if not upgrade and locked_identity is not None:
             locked_commit = locked_identity.get("commit")
@@ -134,6 +128,10 @@ class PathSourceAdapter:
 
         configured = Path(source.path).expanduser()
         tree_path = configured if configured.is_absolute() else repo_root / configured
+        if not tree_path.exists():
+            raise FileNotFoundError(f"Managed path source does not exist: {tree_path}")
+        if not tree_path.is_dir():
+            raise ValueError(f"Managed path source is not a directory: {tree_path}")
         return ResolvedSource(
             source_name=source.name,
             kind="path",
@@ -156,6 +154,34 @@ def default_source_adapters() -> dict[SourceKind, SourceAdapter]:
         "git": GitSourceAdapter(),
         "path": PathSourceAdapter(),
     }
+
+
+def _git_clone_cache_path(cache_dir: Path, source_name: str) -> Path:
+    return cache_dir / "git" / source_name
+
+
+def _git_archive_cache_path(cache_dir: Path, source_name: str) -> Path:
+    return cache_dir / "archive" / source_name
+
+
+def _ensure_git_clone_cache(cache_path: Path, source_url: str) -> None:
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    if cache_path.exists():
+        if not (cache_path / ".git").is_dir():
+            shutil.rmtree(cache_path, ignore_errors=True)
+        else:
+            remote_url = _git_remote_url(cache_path)
+            if remote_url != source_url:
+                shutil.rmtree(cache_path, ignore_errors=True)
+
+    if cache_path.exists():
+        return
+
+    try:
+        _run_git(["clone", source_url, str(cache_path)])
+    except Exception:
+        shutil.rmtree(cache_path, ignore_errors=True)
+        raise
 
 
 def _checkout_git_ref(cache_path: Path, ref: str | None) -> None:
@@ -213,6 +239,10 @@ def _git_cli_available() -> bool:
     return shutil.which("git") is not None
 
 
+def _git_remote_url(cache_path: Path) -> str:
+    return _run_git(["config", "--get", "remote.origin.url"], cwd=cache_path).stdout.strip()
+
+
 def _resolve_git_source_without_cli(
     *,
     source: ManagedSourceConfig,
@@ -238,8 +268,8 @@ def _resolve_git_source_without_cli(
     else:
         commit = _resolve_github_commit(owner, repo, source.ref)
 
-    cache_path = cache_dir / source.name
-    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = _git_archive_cache_path(cache_dir, source.name)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
     _populate_github_archive_cache(owner, repo, commit, cache_path)
     return ResolvedSource(
         source_name=source.name,
