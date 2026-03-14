@@ -118,7 +118,7 @@ def test_sanitize_child_env_does_not_leak_primary_autocompact_override() -> None
     assert "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE" not in sanitized
 
 
-def test_inherit_child_env_keeps_parent_env_but_drops_internal_launch_overrides() -> None:
+def test_inherit_child_env_keeps_parent_env_and_drops_autocompact_override() -> None:
     inherited = inherit_child_env(
         base_env={
             "PATH": "/usr/bin",
@@ -134,8 +134,8 @@ def test_inherit_child_env_keeps_parent_env_but_drops_internal_launch_overrides(
     assert inherited["UNRELATED_TOKEN"] == "keep-me"
     assert inherited["MISC_VALUE"] == "keep-too"
     assert inherited["MERIDIAN_DEPTH"] == "2"
+    assert inherited["MERIDIAN_PRIMARY_PROMPT"] == "stale"
     assert "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE" not in inherited
-    assert "MERIDIAN_PRIMARY_PROMPT" not in inherited
 
 
 def test_build_harness_child_env_uses_claude_specific_blocklist() -> None:

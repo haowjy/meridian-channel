@@ -320,13 +320,6 @@ def root(
         str | None,
         Parameter(name=["--agent", "-a"], help="Agent profile name for the primary agent."),
     ] = None,
-    approval: Annotated[
-        Literal["confirm", "auto"],
-        Parameter(
-            name="--approval",
-            help="Approval mode: confirm (ask before acting) or auto (auto-approve all).",
-        ),
-    ] = "confirm",
     yolo: Annotated[
         bool,
         Parameter(
@@ -361,7 +354,6 @@ def root(
         model=model,
         harness=harness,
         agent=agent,
-        approval=approval,
         yolo=yolo,
         autocompact=autocompact,
         dry_run=dry_run,
@@ -472,7 +464,6 @@ def _run_primary_launch(
     model: str,
     harness: str | None,
     agent: str | None,
-    approval: str,
     yolo: bool,
     autocompact: int | None,
     dry_run: bool,
@@ -484,9 +475,7 @@ def _run_primary_launch(
     harness_registry = get_default_harness_registry()
     normalized_continue_ref = continue_ref.strip() if continue_ref is not None else ""
     resume_target = normalized_continue_ref if normalized_continue_ref else None
-    resolved_approval = approval
-    if yolo:
-        resolved_approval = "auto"
+    resolved_approval = "auto" if yolo else "confirm"
 
     continue_harness_session_id: str | None = None
     continue_chat_id: str | None = None
@@ -679,7 +668,6 @@ _TOP_LEVEL_VALUE_FLAGS = frozenset(
         "--harness",
         "--agent",
         "-a",
-        "--approval",
         "--autocompact",
     }
 )

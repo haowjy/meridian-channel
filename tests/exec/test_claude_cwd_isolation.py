@@ -30,7 +30,7 @@ from meridian.lib.harness.adapter import (
 )
 from meridian.lib.harness.registry import HarnessRegistry
 from meridian.lib.ops.spawn.plan import ExecutionPolicy, PreparedSpawnPlan, SessionContinuation
-from meridian.lib.safety.permissions import PermissionConfig
+from meridian.lib.safety.permissions import PermissionConfig, TieredPermissionResolver
 from meridian.lib.state.artifact_store import LocalStore
 from meridian.lib.state.paths import resolve_state_paths, resolve_spawn_log_dir
 from meridian.lib.core.types import HarnessId, ModelId, SpawnId
@@ -115,12 +115,6 @@ def _write_cwd_reporter_script(path: Path, output_path: Path) -> None:
     )
 
 
-class _NoopPermissionResolver:
-    def resolve_flags(self, harness_id: HarnessId) -> list[str]:
-        _ = harness_id
-        return []
-
-
 def _build_plan(run: Spawn, harness_id: HarnessId) -> PreparedSpawnPlan:
     return PreparedSpawnPlan(
         model=str(run.model),
@@ -137,7 +131,7 @@ def _build_plan(run: Spawn, harness_id: HarnessId) -> PreparedSpawnPlan:
         session=SessionContinuation(),
         execution=ExecutionPolicy(
             permission_config=PermissionConfig(),
-            permission_resolver=_NoopPermissionResolver(),
+            permission_resolver=TieredPermissionResolver(config=PermissionConfig()),
         ),
         cli_command=(),
     )

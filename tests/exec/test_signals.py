@@ -29,7 +29,7 @@ from meridian.lib.harness.adapter import (
 )
 from meridian.lib.harness.registry import HarnessRegistry
 from meridian.lib.ops.spawn.plan import ExecutionPolicy, PreparedSpawnPlan, SessionContinuation
-from meridian.lib.safety.permissions import PermissionConfig
+from meridian.lib.safety.permissions import PermissionConfig, TieredPermissionResolver
 from meridian.lib.state import spawn_store
 from meridian.lib.state.artifact_store import LocalStore
 from meridian.lib.state.paths import resolve_state_paths
@@ -92,12 +92,6 @@ def _create_run(repo_root: Path, *, prompt: str) -> tuple[Spawn, Path]:
     return run, resolve_state_paths(repo_root).root_dir
 
 
-class _NoopPermissionResolver:
-    def resolve_flags(self, harness_id: HarnessId) -> list[str]:
-        _ = harness_id
-        return []
-
-
 def _build_plan(
     run: Spawn,
     harness_id: HarnessId,
@@ -122,7 +116,7 @@ def _build_plan(
             timeout_secs=timeout_seconds,
             kill_grace_secs=kill_grace_seconds,
             permission_config=PermissionConfig(),
-            permission_resolver=_NoopPermissionResolver(),
+            permission_resolver=TieredPermissionResolver(config=PermissionConfig()),
             allowed_tools=(),
         ),
         cli_command=(),

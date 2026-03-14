@@ -24,7 +24,7 @@ from meridian.lib.harness.common import (
 )
 from meridian.lib.harness.registry import HarnessRegistry
 from meridian.lib.ops.spawn.plan import ExecutionPolicy, PreparedSpawnPlan, SessionContinuation
-from meridian.lib.safety.permissions import PermissionConfig
+from meridian.lib.safety.permissions import PermissionConfig, TieredPermissionResolver
 from meridian.lib.state import spawn_store
 from meridian.lib.state.artifact_store import LocalStore
 from meridian.lib.state.paths import resolve_state_paths
@@ -84,12 +84,6 @@ def _write_script(path: Path, source: str) -> None:
     path.write_text(textwrap.dedent(source), encoding="utf-8")
 
 
-class _NoopPermissionResolver:
-    def resolve_flags(self, harness_id: HarnessId) -> list[str]:
-        _ = harness_id
-        return []
-
-
 def _build_plan(
     run: Spawn,
     harness_id: HarnessId,
@@ -117,7 +111,7 @@ def _build_plan(
             max_retries=max_retries,
             retry_backoff_secs=0.0,
             permission_config=PermissionConfig(),
-            permission_resolver=_NoopPermissionResolver(),
+            permission_resolver=TieredPermissionResolver(config=PermissionConfig()),
             allowed_tools=(),
         ),
         cli_command=(),

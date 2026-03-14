@@ -25,7 +25,7 @@ from meridian.lib.harness.adapter import (
     StreamEvent,
 )
 from meridian.lib.harness.registry import HarnessRegistry
-from meridian.lib.safety.permissions import PermissionConfig
+from meridian.lib.safety.permissions import PermissionConfig, TieredPermissionResolver
 from meridian.lib.ops.spawn.plan import ExecutionPolicy, PreparedSpawnPlan, SessionContinuation
 from meridian.lib.state import spawn_store
 from meridian.lib.state.artifact_store import LocalStore, make_artifact_key
@@ -92,12 +92,6 @@ def _read_output_payload(artifacts: LocalStore, spawn_id: SpawnId) -> dict[str, 
     return json.loads(raw.strip())
 
 
-class _NoopPermissionResolver:
-    def resolve_flags(self, harness_id: HarnessId) -> list[str]:
-        _ = harness_id
-        return []
-
-
 def _build_plan(
     run: Spawn,
     harness_id: HarnessId,
@@ -126,7 +120,7 @@ def _build_plan(
             max_retries=max_retries,
             retry_backoff_secs=retry_backoff_seconds,
             permission_config=PermissionConfig(),
-            permission_resolver=_NoopPermissionResolver(),
+            permission_resolver=TieredPermissionResolver(config=PermissionConfig()),
             allowed_tools=(),
         ),
         cli_command=(),

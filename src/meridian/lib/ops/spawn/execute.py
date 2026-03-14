@@ -30,7 +30,7 @@ from meridian.lib.safety.permissions import (
     resolve_permission_pipeline,
 )
 from meridian.lib.core.sink import OutputSink
-from meridian.lib.state import spawn_store
+from meridian.lib.state import spawn_store, work_store
 from meridian.lib.state.spawn_store import (
     BACKGROUND_LAUNCH_MODE,
     FOREGROUND_LAUNCH_MODE,
@@ -69,6 +69,7 @@ class _SessionExecutionContext(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     chat_id: str
+    work_id: str | None = None
     resolved_agent_name: str | None
     harness_session_id_observer: Callable[[str], None]
 
@@ -152,7 +153,6 @@ def _spawn_child_env(
             }
         )
     child_env.update(child_context.to_env_overrides())
-    child_env.pop("MERIDIAN_PERMISSION_TIER", None)
     if resolved_context.spawn_id is None:
         child_env.pop("MERIDIAN_PARENT_SPAWN_ID", None)
     if resolved_spawn_id is None:
@@ -160,8 +160,6 @@ def _spawn_child_env(
     if not resolved_work_id:
         child_env.pop("MERIDIAN_WORK_ID", None)
         child_env.pop("MERIDIAN_WORK_DIR", None)
-    # Drop legacy name now that canonical spawn vars are used everywhere.
-    child_env.pop("MERIDIAN_PARENT_RUN_ID", None)
     return child_env
 
 
@@ -300,6 +298,8 @@ def _init_spawn(
         runtime_context=resolved_context,
         work_id=work_id,
     )
+    if resolved_work_id is None:
+        resolved_work_id = work_store.reserve_auto_work_id(state_root)
     resolved_desc = (desc if desc is not None else payload.desc).strip() or None
     spawn_id = spawn_store.start_spawn(
         state_root,
@@ -361,11 +361,6 @@ def _write_params_json(
         "reference_files": list(prepared.reference_files),
         "template_vars": prepared.template_vars,
         "skills": list(prepared.skills),
-        "permission_tier": (
-            prepared.execution.permission_config.tier.value
-            if prepared.execution.permission_config.tier is not None
-            else None
-        ),
         "continue_session": prepared.session.harness_session_id,
         "continue_fork": prepared.session.continue_fork,
     }
@@ -402,7 +397,7 @@ def _session_execution_context(
             skill_paths=session_skill_paths,
         ) as managed:
             entered_session_scope = True
-            ensure_session_work_item(
+            ensured_work_id = ensure_session_work_item(
                 state_root, managed.chat_id, inherited_work_id=inherited_work_id,
             )
             resolved_agent_name = run_agent_name
@@ -420,6 +415,7 @@ def _session_execution_context(
                 resolved_agent_name = materialized_agent_name
             yield _SessionExecutionContext(
                 chat_id=managed.chat_id,
+                work_id=ensured_work_id,
                 resolved_agent_name=resolved_agent_name,
                 harness_session_id_observer=managed.record_harness_session_id,
             )
@@ -518,6 +514,9 @@ async def _execute_existing_spawn(
         harness_registry=runtime.harness_registry,
         inherited_work_id=spawn_record.work_id,
     ) as session_context:
+        resolved_work_id = session_context.work_id or spawn_record.work_id
+        if resolved_work_id != spawn_record.work_id:
+            spawn_store.update_spawn(state_root, spawn.spawn_id, work_id=resolved_work_id)
         resolved_plan = plan.model_copy(update={"agent_name": session_context.resolved_agent_name})
         return await execute_with_finalization(
             spawn,
@@ -529,7 +528,7 @@ async def _execute_existing_spawn(
             cwd=runtime.repo_root,
             env_overrides=_spawn_child_env(
                 str(spawn.spawn_id),
-                work_id=spawn_record.work_id,
+                work_id=resolved_work_id,
                 state_root=state_root,
                 ctx=resolved_context,
             ),
@@ -657,7 +656,6 @@ def execute_spawn_background(
             ctx=resolved_context,
         )
     )
-    launch_env.pop("MERIDIAN_PERMISSION_TIER", None)
     try:
         with (
             stdout_path.open("ab") as stdout_handle,
@@ -774,6 +772,28 @@ def execute_spawn_blocking(
         harness_registry=runtime.harness_registry,
         inherited_work_id=context.work_id,
     ) as session_context:
+        resolved_work_id = session_context.work_id or context.work_id
+        if resolved_work_id != context.work_id:
+            context = context.model_copy(update={"work_id": resolved_work_id})
+            spawn_store.update_spawn(
+                context.state_root,
+                context.spawn.spawn_id,
+                work_id=resolved_work_id,
+            )
+            try:
+                _write_params_json(
+                    runtime.repo_root,
+                    context.spawn.spawn_id,
+                    prepared,
+                    desc=payload.desc,
+                    work_id=resolved_work_id,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to rewrite params.json with resolved work id",
+                    spawn_id=str(context.spawn.spawn_id),
+                    exc_info=True,
+                )
         resolved_plan = prepared.model_copy(update={"agent_name": session_context.resolved_agent_name})
         exit_code = asyncio.run(
             execute_with_finalization(
@@ -786,7 +806,7 @@ def execute_spawn_blocking(
                 cwd=runtime.repo_root,
                 env_overrides=_spawn_child_env(
                     str(spawn.spawn_id),
-                    work_id=context.work_id,
+                    work_id=resolved_work_id,
                     state_root=context.state_root,
                     ctx=resolved_context,
                 ),
