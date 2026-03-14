@@ -15,6 +15,7 @@ from meridian.lib.install.hash import compute_item_hash
 from meridian.lib.install.lock import LockedInstalledItem, LockedSourceItem, LockedSourceRecord
 from meridian.lib.install.lock import InstallLock
 from meridian.lib.install.adapters import default_adapters
+from meridian.lib.install.deps import resolve_skill_deps
 from meridian.lib.install.discovery import DiscoveredItem
 
 ItemKind = Literal["agent", "skill"]
@@ -123,6 +124,7 @@ def reconcile_sources(
                 repo_root=repo_root,
                 source=source,
                 discovered_items=discovered_items,
+                tree_path=tree_path,
             )
             _check_destination_collisions(
                 source=source,
@@ -193,6 +195,7 @@ def plan_source_items(
     repo_root: Path,
     source: SourceConfig,
     discovered_items: tuple[DiscoveredItem, ...],
+    tree_path: Path | None = None,
 ) -> list[PlannedSourceItem]:
     """Resolve selected items for one source."""
 
@@ -201,6 +204,19 @@ def plan_source_items(
         root_ids = {item_id for item_id in items_by_id}
     else:
         root_ids = {item.item_id for item in source.effective_items}
+
+    # Auto-resolve skill dependencies for explicitly selected agents
+    if source.agents is not None and tree_path is not None:
+        dep_skills = resolve_skill_deps(
+            tree_path=tree_path,
+            agent_names=set(source.agents),
+            discovered_items=discovered_items,
+        )
+        for skill_name in dep_skills:
+            skill_id = f"skill:{skill_name}"
+            if skill_id in items_by_id:
+                root_ids.add(skill_id)
+
     excluded_ids = {item.item_id for item in source.exclude_items}
 
     missing = sorted(item_id for item_id in root_ids | excluded_ids if item_id not in items_by_id)
