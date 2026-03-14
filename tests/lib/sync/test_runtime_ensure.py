@@ -8,7 +8,11 @@ from meridian.lib.sync.install_config import load_install_config, write_install_
 from meridian.lib.sync.install_engine import reconcile_managed_sources
 from meridian.lib.sync.install_lock import read_install_lock
 from meridian.lib.sync.install_types import ItemRef
-from meridian.lib.sync.runtime_ensure import ensure_runtime_assets, plan_required_runtime_assets
+from meridian.lib.sync.runtime_ensure import (
+    ensure_runtime_assets,
+    plan_required_runtime_assets,
+    planned_runtime_agent_names,
+)
 
 
 def _write_source_tree(source_root: Path, *, agent_name: str) -> None:
@@ -120,3 +124,27 @@ def test_ensure_runtime_assets_rejects_unknown_missing_default(tmp_path: Path) -
         assert "custom-agent" in str(exc)
     else:  # pragma: no cover - defensive assertion
         raise AssertionError("Expected missing custom runtime default to fail.")
+
+
+def test_planned_runtime_agent_names_uses_default_when_request_is_blank() -> None:
+    assert planned_runtime_agent_names(
+        configured_default="__meridian-subagent",
+        requested_agent="",
+    ) == ("__meridian-subagent",)
+
+
+def test_planned_runtime_agent_names_bootstraps_explicit_builtin_agent() -> None:
+    assert planned_runtime_agent_names(
+        configured_default="__meridian-subagent",
+        requested_agent="__meridian-orchestrator",
+    ) == ("__meridian-orchestrator",)
+
+
+def test_planned_runtime_agent_names_skips_non_bootstrap_explicit_agent() -> None:
+    assert (
+        planned_runtime_agent_names(
+            configured_default="__meridian-subagent",
+            requested_agent="coder",
+        )
+        == ()
+    )

@@ -26,6 +26,22 @@ class RuntimeAssetPlan(BaseModel):
     missing_items: tuple[str, ...]
 
 
+def planned_runtime_agent_names(
+    *,
+    configured_default: str,
+    requested_agent: str | None,
+) -> tuple[str, ...]:
+    """Return bootstrap-eligible runtime agents that should be present locally."""
+
+    requested = (requested_agent or "").strip()
+    if not requested:
+        configured = configured_default.strip()
+        return (configured,) if configured else ()
+    if requested in _BOOTSTRAP_AGENT_NAMES:
+        return (requested,)
+    return ()
+
+
 def plan_required_runtime_assets(
     *,
     repo_root: Path,

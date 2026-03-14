@@ -85,3 +85,27 @@ def test_spawn_dry_run_allows_nested_context_without_permission_inheritance(
 
     assert result.status == "dry-run"
     assert result.harness_id == "codex"
+
+
+def test_spawn_dry_run_missing_default_agent_does_not_write_install_state(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    try:
+        spawn_create_sync(
+            SpawnCreateInput(
+                prompt="do work",
+                repo_root=repo_root.as_posix(),
+                dry_run=True,
+            ),
+        )
+    except FileNotFoundError as exc:
+        assert "will not be auto-installed" in str(exc)
+    else:  # pragma: no cover - defensive assertion
+        raise AssertionError("Expected missing default agent dry-run to fail.")
+
+    assert not (repo_root / ".meridian" / "agents.toml").exists()
+    assert not (repo_root / ".meridian" / "agents.lock").exists()
+    assert not (repo_root / ".agents").exists()
