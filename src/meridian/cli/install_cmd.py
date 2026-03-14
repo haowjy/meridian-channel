@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from collections import Counter
 from collections.abc import Callable
 from functools import partial
@@ -16,13 +17,17 @@ from meridian.lib.install.config import SourceConfig, SourcesConfig
 from meridian.lib.install.config import load_sources_config, write_sources_config
 from meridian.lib.install.engine import InstallItemAction, InstallResult, install_status
 from meridian.lib.install.engine import reconcile_sources, remove_source
+from meridian.lib.install.hash import compute_item_hash
 from meridian.lib.install.lock import state_lock, read_lock, write_lock
 Emitter = Callable[[Any], None]
 SourceSelector = Literal["git", "path"]
 
 def _install(
     emit: Emitter,
-    source: str,
+    source: Annotated[
+        str,
+        Parameter(help="Source to install (path, @owner/repo, or URL). Omit to sync from lock."),
+    ] = "",
     name: Annotated[
         str | None,
         Parameter(name="--name", help="Optional name for the configured source."),
@@ -56,6 +61,11 @@ def _install(
         Parameter(name="--dry-run", help="Preview install changes without writing."),
     ] = False,
 ) -> None:
+    # No source arg → sync from lock (like old `update`)
+    if not source.strip():
+        _run_install_reconcile(emit, source=None, force=force, dry_run=dry_run, upgrade=False)
+        return
+
     repo_root = resolve_repo_root()
     state_paths = resolve_state_paths(repo_root)
     source_config = _build_source_config(
@@ -178,25 +188,154 @@ def _update(
         Parameter(name="--dry-run", help="Preview update changes without writing."),
     ] = False,
 ) -> None:
-    _run_install_reconcile(emit, source=source, force=force, dry_run=dry_run, upgrade=False)
+    _run_install_reconcile(emit, source=source, force=force, dry_run=dry_run, upgrade=True)
 
 
-def _upgrade(
+def _uninstall(
     emit: Emitter,
+    *names: Annotated[
+        str,
+        Parameter(help="Item names to uninstall (agents or skills)."),
+    ],
     source: Annotated[
         str | None,
-        Parameter(name="--source", help="Upgrade only the named source."),
+        Parameter(name="--source", help="Remove an entire source by name."),
     ] = None,
     force: Annotated[
         bool,
-        Parameter(name="--force", help="Overwrite local modifications and unmanaged files."),
+        Parameter(name="--force", help="Overwrite local modifications when removing."),
     ] = False,
     dry_run: Annotated[
         bool,
-        Parameter(name="--dry-run", help="Preview upgrade changes without writing."),
+        Parameter(name="--dry-run", help="Preview removals without writing."),
     ] = False,
 ) -> None:
-    _run_install_reconcile(emit, source=source, force=force, dry_run=dry_run, upgrade=True)
+    if source is not None:
+        # Remove entire source — delegate to existing remove logic
+        _remove(emit, name=source, force=force, dry_run=dry_run)
+        return
+
+    if not names:
+        raise ValueError("Provide item names to uninstall, or use --source to remove an entire source.")
+
+    repo_root = resolve_repo_root()
+    state_paths = resolve_state_paths(repo_root)
+    config = load_sources_config(state_paths.agents_manifest_path)
+
+    with state_lock(state_paths.agents_lock_path):
+        lock = read_lock(state_paths.agents_lock_path)
+        actions: list[InstallItemAction] = []
+        sources_to_update: dict[str, set[str]] = {}  # source_name → items to remove
+
+        for item_name in names:
+            # Try both agent: and skill: prefixes
+            matched_key: str | None = None
+            for prefix in ("agent:", "skill:"):
+                candidate = f"{prefix}{item_name}"
+                if candidate in lock.items:
+                    matched_key = candidate
+                    break
+
+            if matched_key is None:
+                raise ValueError(f"Item '{item_name}' is not installed.")
+
+            entry = lock.items[matched_key]
+            item_kind = "skill" if matched_key.startswith("skill:") else "agent"
+            dest_path = repo_root / entry.destination_path
+
+            action_name: str = "removed"
+            reason = "Removed managed item."
+            if dest_path.exists() or dest_path.is_symlink():
+                local_hash = compute_item_hash(dest_path, item_kind)
+                if local_hash != entry.content_hash and not force:
+                    action_name = "kept"
+                    reason = "Kept locally modified item."
+                elif not dry_run:
+                    if dest_path.is_dir() and not dest_path.is_symlink():
+                        shutil.rmtree(dest_path)
+                    else:
+                        dest_path.unlink(missing_ok=True)
+
+            actions.append(InstallItemAction(
+                item_key=matched_key,
+                item_kind=item_kind,
+                source_name=entry.source_name,
+                action=action_name,
+                reason=reason,
+                dest_path=entry.destination_path,
+            ))
+
+            if not dry_run and action_name == "removed":
+                del lock.items[matched_key]
+                sources_to_update.setdefault(entry.source_name, set()).add(item_name)
+
+        # Update config: remove items from source's agents/skills lists
+        if not dry_run and sources_to_update:
+            updated_sources: list[SourceConfig] = []
+            for src in config.sources:
+                if src.name not in sources_to_update:
+                    updated_sources.append(src)
+                    continue
+                removed_names = sources_to_update[src.name]
+                new_agents = (
+                    tuple(a for a in src.agents if a not in removed_names)
+                    if src.agents is not None else None
+                )
+                new_skills = (
+                    tuple(s for s in src.skills if s not in removed_names)
+                    if src.skills is not None else None
+                )
+                # Empty agents/skills but not None → set to empty tuple
+                # If both empty → auto-remove source
+                has_remaining = (
+                    (new_agents is None or len(new_agents) > 0)
+                    or (new_skills is None or len(new_skills) > 0)
+                )
+                if not has_remaining:
+                    # Auto-remove source with no remaining items
+                    if src.name in lock.sources:
+                        del lock.sources[src.name]
+                    continue
+                updated_sources.append(src.model_copy(update={
+                    "agents": new_agents if new_agents else None,
+                    "skills": new_skills if new_skills else None,
+                }))
+            write_sources_config(
+                state_paths.agents_manifest_path,
+                SourcesConfig(sources=tuple(updated_sources)),
+            )
+            write_lock(state_paths.agents_lock_path, lock)
+
+    emit(_install_result_payload(InstallResult(actions=tuple(actions), errors=())))
+
+
+def _list_cmd(emit: Emitter) -> None:
+    repo_root = resolve_repo_root()
+    state_paths = resolve_state_paths(repo_root)
+    config = load_sources_config(state_paths.agents_manifest_path)
+    lock = read_lock(state_paths.agents_lock_path)
+
+    sources_payload: list[dict[str, object]] = []
+    for source in config.sources:
+        locked_source = lock.sources.get(source.name)
+        agents: list[str] = []
+        skills: list[str] = []
+        if locked_source is not None:
+            for item_key in sorted(locked_source.realized_closure):
+                if item_key.startswith("agent:"):
+                    agents.append(item_key[6:])
+                elif item_key.startswith("skill:"):
+                    skills.append(item_key[6:])
+        sources_payload.append({
+            "name": source.name,
+            "kind": source.kind,
+            "url": source.url,
+            "path": source.path,
+            "ref": source.ref,
+            "agents": agents,
+            "skills": skills,
+        })
+    emit({"sources": sources_payload})
 
 
 def _status(emit: Emitter) -> None:
@@ -209,11 +348,13 @@ def _status(emit: Emitter) -> None:
 def register_install_commands(app: Any, emit: Emitter) -> None:
     """Register top-level managed install commands."""
 
-    app.command(partial(_install, emit), name="install", help="Add a source and install its items.")
-    app.command(partial(_remove, emit), name="remove", help="Remove a source and its managed items.")
-    app.command(partial(_update, emit), name="update", help="Install from the locked source state.")
-    app.command(partial(_upgrade, emit), name="upgrade", help="Re-resolve floating refs and install.")
-    app.command(partial(_status, emit), name="status", help="Compare managed install state vs local files.")
+    app.command(partial(_install, emit), name="install", help="Install sources and items.")
+    app.command(partial(_uninstall, emit), name="uninstall", help="Remove items or sources.")
+    app.command(partial(_update, emit), name="update", help="Re-resolve refs and install latest.")
+    app.command(partial(_list_cmd, emit), name="list", help="Show installed items by source.")
+    app.command(partial(_status, emit), name="status", help="Compare lock vs local files.")
+    # Backward-compat aliases (hidden — not shown in help)
+    app.command(partial(_remove, emit), name="remove", help="[deprecated] Use 'uninstall --source'.")
 
 
 def _run_install_reconcile(
