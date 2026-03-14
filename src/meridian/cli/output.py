@@ -168,7 +168,7 @@ class AgentSink:
         _ = message
 
     def error(self, message: str, exit_code: int = 1) -> None:
-        _ = (message, exit_code)
+        self._messages.append({"type": "error", "error": message, "exit_code": exit_code})
 
     def heartbeat(self, message: str) -> None:
         _ = message
