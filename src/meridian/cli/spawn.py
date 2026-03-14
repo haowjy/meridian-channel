@@ -54,7 +54,10 @@ def _spawn_create(
     *passthrough: Annotated[
         str,
         Parameter(
-            help="Extra arguments passed directly to the harness (place after --).",
+            help=(
+                "Extra arguments passed directly to the harness (place after --). "
+                "Known limitation: meridian still consumes --json/--format/--config/--yes/--no-input/--human even after --."
+            ),
         ),
     ],
     template_vars: Annotated[
