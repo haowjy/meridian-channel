@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
+import tarfile
+import tempfile
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
+from urllib import parse, request
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -64,6 +68,14 @@ class GitSourceAdapter:
         _ = repo_root
         if source.url is None:
             raise ValueError("Git source resolution requires 'url'.")
+
+        if not _git_cli_available():
+            return _resolve_git_source_without_cli(
+                source=source,
+                cache_dir=cache_dir,
+                locked_identity=locked_identity,
+                upgrade=upgrade,
+            )
 
         cache_path = cache_dir / source.name
         if not cache_path.exists():
@@ -195,3 +207,132 @@ def _run_git(args: list[str], *, cwd: Path | None = None) -> subprocess.Complete
         message = completed.stderr.strip() or completed.stdout.strip() or "git command failed"
         raise RuntimeError(f"git {' '.join(args)} failed: {message}")
     return completed
+
+
+def _git_cli_available() -> bool:
+    return shutil.which("git") is not None
+
+
+def _resolve_git_source_without_cli(
+    *,
+    source: ManagedSourceConfig,
+    cache_dir: Path,
+    locked_identity: dict[str, object] | None,
+    upgrade: bool,
+) -> ResolvedSource:
+    if source.url is None:
+        raise ValueError("Git source resolution requires 'url'.")
+
+    owner_repo = _parse_github_repo(source.url)
+    if owner_repo is None:
+        raise RuntimeError(
+            "Managed git sources require the 'git' binary unless the source is a public GitHub repo."
+        )
+
+    owner, repo = owner_repo
+    if not upgrade and locked_identity is not None:
+        locked_commit = locked_identity.get("commit")
+        if not isinstance(locked_commit, str) or not locked_commit.strip():
+            raise ValueError("Locked git sources require a string 'commit' identity.")
+        commit = locked_commit
+    else:
+        commit = _resolve_github_commit(owner, repo, source.ref)
+
+    cache_path = cache_dir / source.name
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    _populate_github_archive_cache(owner, repo, commit, cache_path)
+    return ResolvedSource(
+        source_name=source.name,
+        kind="git",
+        locator=source.url,
+        requested_ref=source.ref,
+        resolved_identity={"commit": commit},
+        tree_path=cache_path,
+    )
+
+
+def _parse_github_repo(url: str) -> tuple[str, str] | None:
+    parsed = parse.urlparse(url)
+    if parsed.scheme not in {"https", "http"}:
+        return None
+    if parsed.netloc.lower() != "github.com":
+        return None
+
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) < 2:
+        return None
+    owner = parts[0]
+    repo = parts[1]
+    if repo.endswith(".git"):
+        repo = repo[:-4]
+    if not owner or not repo:
+        return None
+    return owner, repo
+
+
+def _resolve_github_commit(owner: str, repo: str, ref: str | None) -> str:
+    selected_ref = ref or _github_default_branch(owner, repo)
+    payload = _read_github_json(f"https://api.github.com/repos/{owner}/{repo}/commits/{selected_ref}")
+    commit = payload.get("sha")
+    if not isinstance(commit, str) or not commit.strip():
+        raise RuntimeError(f"Could not resolve GitHub commit for {owner}/{repo}@{selected_ref}.")
+    return commit
+
+
+def _github_default_branch(owner: str, repo: str) -> str:
+    payload = _read_github_json(f"https://api.github.com/repos/{owner}/{repo}")
+    default_branch = payload.get("default_branch")
+    if not isinstance(default_branch, str) or not default_branch.strip():
+        raise RuntimeError(f"Could not resolve default branch for GitHub repo {owner}/{repo}.")
+    return default_branch
+
+
+def _read_github_json(url: str) -> dict[str, object]:
+    req = request.Request(
+        url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "meridian-channel",
+        },
+    )
+    with request.urlopen(req) as response:
+        payload = json.load(response)
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"Unexpected GitHub API payload from {url}.")
+    return cast("dict[str, object]", payload)
+
+
+def _populate_github_archive_cache(owner: str, repo: str, commit: str, cache_path: Path) -> None:
+    archive_url = f"https://api.github.com/repos/{owner}/{repo}/tarball/{commit}"
+    with tempfile.TemporaryDirectory(prefix="meridian-github-", dir=cache_path.parent) as tmp_dir:
+        tmp_root = Path(tmp_dir)
+        archive_path = tmp_root / "source.tar.gz"
+        extract_root = tmp_root / "extract"
+        extract_root.mkdir(parents=True, exist_ok=True)
+        _download_to_path(archive_url, archive_path)
+        with tarfile.open(archive_path, mode="r:gz") as archive:
+            _extract_tar_safely(archive, extract_root)
+        extracted_root = _single_extracted_root(extract_root)
+        shutil.rmtree(cache_path, ignore_errors=True)
+        shutil.move(str(extracted_root), str(cache_path))
+
+
+def _download_to_path(url: str, destination: Path) -> None:
+    req = request.Request(url, headers={"User-Agent": "meridian-channel"})
+    with request.urlopen(req) as response, destination.open("wb") as handle:
+        shutil.copyfileobj(response, handle)
+
+
+def _extract_tar_safely(archive: tarfile.TarFile, destination: Path) -> None:
+    for member in archive.getmembers():
+        member_path = Path(member.name)
+        if member_path.is_absolute() or ".." in member_path.parts:
+            raise RuntimeError(f"Refusing to extract unsafe archive path: {member.name}")
+    archive.extractall(destination)
+
+
+def _single_extracted_root(extract_root: Path) -> Path:
+    children = [child for child in extract_root.iterdir()]
+    if len(children) == 1 and children[0].is_dir():
+        return children[0]
+    return extract_root
