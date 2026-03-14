@@ -24,6 +24,7 @@ from meridian.lib.core.context import RuntimeContext
 from meridian.lib.core.domain import Spawn, SpawnStatus
 from meridian.lib.launch.runner import execute_with_finalization
 from meridian.lib.launch.session_scope import session_scope
+from meridian.lib.harness.adapter import PermissionResolver
 from meridian.lib.harness.materialize import cleanup_materialized, materialize_for_harness
 from meridian.lib.safety.permissions import (
     PermissionConfig,
@@ -39,11 +40,11 @@ from meridian.lib.state.spawn_store import (
 )
 from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.paths import resolve_spawn_log_dir, resolve_state_paths
+from meridian.lib.state.session_store import get_session_active_work_id, update_session_work_id
 from meridian.lib.core.types import ModelId, SpawnId
 
 from meridian.lib.utils.time import minutes_to_seconds
 
-from ..session_policy import ensure_session_work_item
 from ..runtime import OperationRuntime, build_runtime, resolve_chat_id, runtime_context
 from .models import SpawnActionOutput, SpawnCreateInput
 from .plan import ExecutionPolicy, PreparedSpawnPlan, SessionContinuation
@@ -298,8 +299,9 @@ def _init_spawn(
         runtime_context=resolved_context,
         work_id=work_id,
     )
-    if resolved_work_id is None:
-        resolved_work_id = work_store.reserve_auto_work_id(state_root)
+    if (payload.work or "").strip():
+        resolved_work_id = cast("str", resolved_work_id)
+        work_store.materialize_work_item(state_root, resolved_work_id)
     resolved_desc = (desc if desc is not None else payload.desc).strip() or None
     spawn_id = spawn_store.start_spawn(
         state_root,
@@ -397,9 +399,11 @@ def _session_execution_context(
             skill_paths=session_skill_paths,
         ) as managed:
             entered_session_scope = True
-            ensured_work_id = ensure_session_work_item(
-                state_root, managed.chat_id, inherited_work_id=inherited_work_id,
-            )
+            attached_work_id = get_session_active_work_id(state_root, managed.chat_id)
+            if attached_work_id is None:
+                attached_work_id = (inherited_work_id or "").strip() or None
+                if attached_work_id is not None:
+                    update_session_work_id(state_root, managed.chat_id, attached_work_id)
             resolved_agent_name = run_agent_name
             materialized_agent_name = _materialize_session_agent_name(
                 repo_root=repo_root,
@@ -415,7 +419,7 @@ def _session_execution_context(
                 resolved_agent_name = materialized_agent_name
             yield _SessionExecutionContext(
                 chat_id=managed.chat_id,
-                work_id=ensured_work_id,
+                work_id=attached_work_id,
                 resolved_agent_name=resolved_agent_name,
                 harness_session_id_observer=managed.record_harness_session_id,
             )
@@ -437,6 +441,7 @@ async def _execute_existing_spawn(
     agent_name: str | None,
     mcp_tools: tuple[str, ...],
     permission_config: PermissionConfig,
+    permission_resolver: PermissionResolver,
     allowed_tools: tuple[str, ...] = (),
     passthrough_args: tuple[str, ...] = (),
     continue_harness_session_id: str | None = None,
@@ -465,11 +470,6 @@ async def _execute_existing_spawn(
         status=spawn_status,
     )
 
-    resolved_permission_config, resolver = resolve_permission_pipeline(
-        sandbox=permission_config.tier.value if permission_config.tier is not None else None,
-        allowed_tools=allowed_tools,
-        approval=permission_config.approval,
-    )
     plan = PreparedSpawnPlan(
         model=spawn_record.model,
         harness_id=spawn_record.harness or "",
@@ -492,8 +492,8 @@ async def _execute_existing_spawn(
             kill_grace_secs=minutes_to_seconds(runtime.config.kill_grace_minutes) or 0.0,
             max_retries=runtime.config.max_retries,
             retry_backoff_secs=runtime.config.retry_backoff_seconds,
-            permission_config=resolved_permission_config,
-            permission_resolver=resolver,
+            permission_config=permission_config,
+            permission_resolver=permission_resolver,
             allowed_tools=allowed_tools,
         ),
         cli_command=(),
@@ -514,9 +514,6 @@ async def _execute_existing_spawn(
         harness_registry=runtime.harness_registry,
         inherited_work_id=spawn_record.work_id,
     ) as session_context:
-        resolved_work_id = session_context.work_id or spawn_record.work_id
-        if resolved_work_id != spawn_record.work_id:
-            spawn_store.update_spawn(state_root, spawn.spawn_id, work_id=resolved_work_id)
         resolved_plan = plan.model_copy(update={"agent_name": session_context.resolved_agent_name})
         return await execute_with_finalization(
             spawn,
@@ -528,7 +525,7 @@ async def _execute_existing_spawn(
             cwd=runtime.repo_root,
             env_overrides=_spawn_child_env(
                 str(spawn.spawn_id),
-                work_id=resolved_work_id,
+                work_id=session_context.work_id or spawn_record.work_id,
                 state_root=state_root,
                 ctx=resolved_context,
             ),
@@ -772,28 +769,6 @@ def execute_spawn_blocking(
         harness_registry=runtime.harness_registry,
         inherited_work_id=context.work_id,
     ) as session_context:
-        resolved_work_id = session_context.work_id or context.work_id
-        if resolved_work_id != context.work_id:
-            context = context.model_copy(update={"work_id": resolved_work_id})
-            spawn_store.update_spawn(
-                context.state_root,
-                context.spawn.spawn_id,
-                work_id=resolved_work_id,
-            )
-            try:
-                _write_params_json(
-                    runtime.repo_root,
-                    context.spawn.spawn_id,
-                    prepared,
-                    desc=payload.desc,
-                    work_id=resolved_work_id,
-                )
-            except Exception:
-                logger.warning(
-                    "Failed to rewrite params.json with resolved work id",
-                    spawn_id=str(context.spawn.spawn_id),
-                    exc_info=True,
-                )
         resolved_plan = prepared.model_copy(update={"agent_name": session_context.resolved_agent_name})
         exit_code = asyncio.run(
             execute_with_finalization(
@@ -806,7 +781,7 @@ def execute_spawn_blocking(
                 cwd=runtime.repo_root,
                 env_overrides=_spawn_child_env(
                     str(spawn.spawn_id),
-                    work_id=resolved_work_id,
+                    work_id=session_context.work_id or context.work_id,
                     state_root=context.state_root,
                     ctx=resolved_context,
                 ),
@@ -893,7 +868,7 @@ def _background_worker_main(
     parsed = parser.parse_args(list(argv) if argv is not None else None)
 
     allowed_tools = tuple(str(item) for item in parsed.allowed_tool)
-    permission_config, _ = resolve_permission_pipeline(
+    permission_config, permission_resolver = resolve_permission_pipeline(
         sandbox=cast("str | None", parsed.permission_tier),
         allowed_tools=allowed_tools,
         approval=str(parsed.approval),
@@ -907,6 +882,7 @@ def _background_worker_main(
             agent_name=cast("str | None", parsed.agent),
             mcp_tools=tuple(str(item) for item in parsed.mcp_tool),
             permission_config=permission_config,
+            permission_resolver=permission_resolver,
             allowed_tools=allowed_tools,
             passthrough_args=tuple(str(item) for item in parsed.harness_arg),
             continue_harness_session_id=cast("str | None", parsed.continue_harness_session_id),
