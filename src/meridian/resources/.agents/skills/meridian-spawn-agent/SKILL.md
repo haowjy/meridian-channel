@@ -26,10 +26,10 @@ meridian spawn show p107
 
 ## Spawning
 
-Use `-a` to spawn with an agent profile (encodes model, system prompt, permissions) or `-m` to target a model directly. Both are first-class:
+Use `-a` to spawn with an agent profile (encodes model, system prompt, and sandbox settings) or `-m` to target a model directly. Both are first-class:
 
 ```bash
-# Agent profile — uses the profile's model, prompt, and permissions
+# Agent profile — uses the profile's model, prompt, and sandbox settings
 meridian spawn -a reviewer -p "Review this change"
 
 # Direct model — when you want a specific model without a profile
@@ -53,7 +53,7 @@ To create your own agent profiles, see [`resources/creating-agents.md`](resource
 Work items group spawns by purpose and give project-level visibility. Use `--work` and `--desc` to connect spawns to an effort:
 
 ```bash
-# Set active work item for your session
+# Create and set the active work item for your session
 meridian work start "auth refactor"
 
 # Spawns automatically inherit the active work item
@@ -63,6 +63,8 @@ meridian spawn -a agent --desc "Implement step 2" -p "..."
 # Or attach explicitly (useful for automation)
 meridian spawn -a reviewer --work auth-refactor --desc "Review step 1" -p "..."
 ```
+
+Prefer explicit work items for meaningful repo work. If no shared work item is active yet, create one with `meridian work start ...` or attach to an existing one with `meridian work switch ...` before making substantial changes.
 
 ### Dashboard
 
@@ -100,17 +102,25 @@ meridian work rename old-name new-name          # rename a work item
 
 ### Design Docs and Notes
 
-Every session has a work item directory at `$MERIDIAN_WORK_DIR`. Use it for
-design docs, plans, diagrams, and any coordination artifacts:
+`$MERIDIAN_WORK_DIR` is only available when a real work item is attached. Use it
+for design docs, plans, diagrams, and other coordination artifacts:
 
 ```bash
 echo "$MERIDIAN_WORK_DIR"
 # .meridian/work/auth-refactor/
 ```
 
-Write docs there, not loose in `.meridian/work/` or the repo root.
+If the variable is empty, attach to a work item first:
 
-Work items are directories under `.meridian/work/<slug>/` — they can hold design docs, plans, diagrams. Spawns snapshot `work_id` at creation time, so changing your active work item later doesn't move old spawns.
+```bash
+meridian work start "auth refactor"
+# or
+meridian work switch auth-refactor
+```
+
+Write coordination docs there, not loose in `.meridian/work/` or the repo root.
+
+Work item metadata lives under `.meridian/work-items/<slug>.json`. The matching `.meridian/work/<slug>/` directory is optional scratch space for plans, diagrams, and notes. Spawns snapshot `work_id` at creation time, so changing your active work item later doesn't move old spawns.
 
 ## Parallel Spawns
 
@@ -166,7 +176,7 @@ meridian spawn files p107 -0 | xargs -0 git add   # paths with spaces
 
 ## Beyond the Basics
 
-For continue/fork, cancel, stats, permission tiers, template vars, and dry-run, see [`resources/advanced-commands.md`](resources/advanced-commands.md).
+For continue/fork, cancel, stats, template vars, and dry-run, see [`resources/advanced-commands.md`](resources/advanced-commands.md).
 For troubleshooting strange behavior, see [`resources/debugging.md`](resources/debugging.md).
 For writing your own agent profiles, see [`resources/creating-agents.md`](resources/creating-agents.md).
-For project defaults (model, agent, permissions, timeouts), see [`resources/configuration.md`](resources/configuration.md).
+For project defaults (model, agent, timeouts), see [`resources/configuration.md`](resources/configuration.md).

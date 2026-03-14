@@ -53,7 +53,7 @@ Codex's `workspace-write` sandbox uses Linux Landlock to restrict network access
 - This applies to ALL child process network access, not just meridian — `curl`, `pip install`, `npm install`, etc. will also fail.
 - The restriction is inherited at the kernel level and cannot be bypassed by the child process.
 
-### Testing Permission Tiers
+### Testing Profile Sandbox Mapping
 
 When smoke-testing spawn lifecycle, test profile sandbox values explicitly:
 

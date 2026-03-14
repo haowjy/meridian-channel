@@ -1,6 +1,6 @@
 # Configuration
 
-Meridian configuration controls defaults for models, agents, permissions, and timeouts. All config is project-local under `.meridian/config.toml`.
+Meridian configuration controls defaults for models, agents, and timeouts. All config is project-local under `.meridian/config.toml`.
 
 ## Quick Reference
 
@@ -30,14 +30,6 @@ meridian config reset defaults.model  # remove override, revert to builtin
 | `harness.codex` | Default model routed to Codex | `gpt-5.3-codex` |
 | `harness.opencode` | Default model routed to OpenCode | `gemini-3.1-pro` |
 
-### Permissions
-
-| Key | Description | Default |
-|-----|-------------|---------|
-| `permissions.default_tier` | Default permission tier for spawns | `read-only` |
-
-Tiers: `read-only`, `workspace-write`, `full-access`, `unrestricted`.
-
 ### Timeouts
 
 | Key | Description | Default |
@@ -62,9 +54,6 @@ Tiers: `read-only`, `workspace-write`, `full-access`, `unrestricted`.
 model = "gpt-5.4"
 agent = "my-custom-agent"
 
-[permissions]
-default_tier = "workspace-write"
-
 [timeouts]
 wait_minutes = 60
 ```
@@ -75,6 +64,6 @@ Config values resolve in this order (later wins):
 
 1. Builtin defaults (hardcoded)
 2. `.meridian/config.toml` (project-local overrides)
-3. CLI flags (`-m`, `--permission`, `--timeout`)
+3. CLI flags (`-m`, `--timeout`)
 
 Use `meridian config show` to see the resolved value and its source for every key.

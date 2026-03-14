@@ -44,12 +44,12 @@ Model -> harness routing:
 - Fork: `--fork`
 - `opencode-` prefix is stripped before passing model value.
 
-## Permissions And Approval
+## Sandbox Mapping
 
-Meridian owns a small cross-harness permission model and translates it to
-harness-specific controls at launch time.
+Meridian translates agent profile `sandbox:` values to harness-specific
+sandbox flags at launch time.
 
-`meridian spawn` does not expose a `--permission` flag. The spawn tier comes
+`meridian spawn` does not expose a `--permission` flag. The sandbox tier comes
 from the selected agent profile `sandbox:` value.
 
 ### Tier Mapping
@@ -73,22 +73,15 @@ profile-derived tier, for example:
 
 - `meridian spawn -m claude-opus-4-6 -p "test" -- --sandbox workspace-write`
 
-### Approval Semantics
+### Yolo Mode
 
-`meridian spawn` supports:
-
-- default approval mode `confirm`
-- `--yolo` as shorthand for `approval=auto`
-
-Important caveat: approval behavior is harness-defined after Meridian translates
-it. For Claude and Codex, `--approval auto` maps to the harness bypass flags
-rather than a separate Meridian-controlled approval channel:
+`--yolo` maps to harness-specific bypass flags:
 
 - Claude: `--dangerously-skip-permissions`
 - Codex: `--dangerously-bypass-approvals-and-sandbox`
 
-So for those harnesses, approval and sandboxing are not fully independent in
-practice.
+Note that for these harnesses, `--yolo` bypasses both approval prompts and
+sandbox restrictions — the two are not independent in practice.
 
 ### Explicit Tool Allowlists
 

@@ -1,6 +1,6 @@
 # Advanced Spawn Commands
 
-Read this when you need continue, cancel, stats, permissions, template vars, or dry-run — commands outside the core spawn → wait → show loop. For troubleshooting, read `debugging.md`.
+Read this when you need continue, cancel, stats, template vars, or dry-run — commands outside the core spawn → wait → show loop. For troubleshooting, read `debugging.md`.
 
 ## Continue & Fork
 
@@ -55,18 +55,5 @@ meridian spawn --dry-run -m MODEL -p "Plan the migration"
 ```
 
 Preview the assembled prompt and command without executing the harness.
-
-## Permission Tiers
-
-Override tool access with `--permission`:
-
-```bash
-meridian spawn -m MODEL -p "Read-only analysis" --permission read-only
-```
-
-Tiers:
-- `read-only` — can read files but not write or execute
-- `workspace-write` — can write within the project directory
-- `full-access` — unrestricted tool access
 
 For stuck spawns, logs, or low-level state inspection, see `debugging.md`.

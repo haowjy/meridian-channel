@@ -62,7 +62,7 @@ An AI backend adapter. The same `meridian spawn` command works across Claude, Co
 
 ### Agent Profile
 
-A YAML-frontmatter markdown file (`.agents/agents/NAME.md`) defining an agent's capabilities: model, skills, sandbox permissions, MCP tools, and system prompt body.
+A YAML-frontmatter markdown file (`.agents/agents/NAME.md`) defining an agent's capabilities: model, skills, sandbox settings, MCP tools, and system prompt body.
 
 ### Skill
 
@@ -126,7 +126,7 @@ src/meridian/
       artifact_store.py        # Artifact storage and retrieval
 
     safety/                    # Harness-facing safety translation (adapts + passes through)
-      permissions.py           # PermissionTier -> harness CLI flags translation
+      permissions.py           # Profile sandbox -> harness CLI flags translation
       budget.py                # Cost tracking from harness JSONL output
       guardrails.py            # Post-run script hooks
       redaction.py             # Secret env var injection + output redaction
@@ -246,7 +246,8 @@ graph TD
     Root --> Models["models.toml"]
     Root --> Cache["cache/"]
     Root --> FS["fs/ (shared workspace)"]
-    Root --> Work["work/"]
+    Root --> WorkItems["work-items/ (work metadata)"]
+    Root --> Work["work/ (scratch/docs)"]
     Root --> SpJ["spawns.jsonl"]
     Root --> SeJ["sessions.jsonl"]
     Root --> SpDir["spawns/"]
@@ -256,6 +257,9 @@ graph TD
     Sp1 --> Tok["tokens.json"]
     Sp1 --> Rep["report.md"]
 ```
+
+`work-items/` is the authoritative store for repo-scoped work coordination metadata.
+`work/` is optional scratch space for notes, plans, and design docs attached to a work item.
 
 ### Event Sourcing
 
@@ -357,7 +361,7 @@ Key env vars:
 
 Safety enforcement is delegated to the harnesses. Meridian's `safety/` package is harness adapter support code — it translates Meridian's abstractions into harness-native flags and passes them through.
 
-- **permissions.py** — Translates three permission tiers (`read-only`, `workspace-write`, `full-access`) into harness-specific CLI flags (`--allowedTools` for Claude, `--sandbox` for Codex). The harness does the actual enforcement.
+- **permissions.py** — Translates agent profile `sandbox:` values (`read-only`, `workspace-write`, `full-access`) into harness-specific CLI flags (`--allowedTools` for Claude, `--sandbox` for Codex). The harness does the actual enforcement.
 - **budget.py** — Parses cost fields from harness JSONL output during streaming. Terminates spawns that exceed configured USD limits. The only Meridian-side enforcement.
 - **redaction.py** — Injects `--secret KEY=VALUE` as `MERIDIAN_SECRET_*` env vars into the harness child process and redacts values from streamed output.
 - **guardrails.py** — Post-run script hooks (the one piece that isn't strictly harness adapter code).

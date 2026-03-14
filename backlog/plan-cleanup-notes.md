@@ -29,16 +29,6 @@ that were worth keeping after plan cleanup.
   - delta-only events vs delta plus completed-message records
   - how stderr-only failures/warnings should be persisted
 
-### Test suite and strict typing cleanup
-
-- Start with an invariant inventory, not file preservation.
-- Rebuild the remaining suite by subsystem (`config`, `state`, `spawn`,
-  `harness`, `prompt`, `exec`, `ops`).
-- Delete slice-era and other low-value historical tests once replacement
-  coverage exists.
-- Shrink smoke verification to a short operator workflow.
-- Finish with a `pyright`-clean tree.
-
 ### Remote workspace viewer
 
 - If this work restarts, preserve the requirements baseline:

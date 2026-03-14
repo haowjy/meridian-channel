@@ -1,6 +1,6 @@
 # Creating Agent Profiles
 
-Agent profiles define reusable spawn configurations — model, system prompt, skills, and permissions in one file. Use them when you find yourself repeating the same `-m MODEL` + prompt preamble across spawns.
+Agent profiles define reusable spawn configurations — model, system prompt, skills, and sandbox settings in one file. Use them when you find yourself repeating the same `-m MODEL` + prompt preamble across spawns.
 
 ## File Format
 
@@ -56,7 +56,7 @@ Run tests and type checks after making changes. Commit after each passing step.
 | `description` | string | yes | Short description of the agent's role |
 | `model` | string | no | Default model (can be overridden with `-m`) |
 | `skills` | string[] | no | Skills to load for this agent |
-| `sandbox` | string | no | Permission tier: `read-only`, `workspace-write`, `full-access`, `unrestricted` |
+| `sandbox` | string | no | Sandbox tier: `read-only`, `workspace-write`, `full-access`, `unrestricted` |
 | `allowed_tools` | string[] | no | Explicit tool allowlist |
 | `mcp_tools` | string[] | no | MCP tools to expose |
 
@@ -90,5 +90,5 @@ Repo-local profiles take precedence over bundled ones with the same name.
 
 - **One role per profile.** A reviewer shouldn't also be an implementer. Keep agents focused.
 - **Model choice matters.** Strong reasoning models (opus, gpt-5.4) for review and architecture. Fast models (codex, sonnet) for implementation and bulk work.
-- **Permissions scope risk.** Use `read-only` for analysis, `workspace-write` for implementation, `full-access` only when needed.
+- **Sandbox scopes risk.** Use `read-only` for analysis, `workspace-write` for implementation, `full-access` only when needed.
 - **Skills are optional.** Most task agents don't need skills — they get their instructions from the prompt. Skills are for agents that need to coordinate (orchestrators) or follow specific workflows.
