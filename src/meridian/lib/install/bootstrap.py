@@ -7,7 +7,8 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.state.paths import resolve_state_paths
-from meridian.lib.install.config import SourcesConfig, load_sources_config, write_sources_config
+from meridian.lib.install.config import SourceConfig, SourcesConfig
+from meridian.lib.install.config import load_sources_config, write_sources_config
 from meridian.lib.install.engine import reconcile_sources
 from meridian.lib.install.lock import (
     InstallLock,
@@ -15,12 +16,13 @@ from meridian.lib.install.lock import (
     read_lock,
     write_lock,
 )
-from meridian.lib.install.config import SourceConfig
 from meridian.lib.install.types import format_item_id, parse_item_id
 
 _BOOTSTRAP_SOURCE_NAME = "meridian-agents"
 _BOOTSTRAP_URL = "https://github.com/haowjy/meridian-agents.git"
 _BOOTSTRAP_AGENT_NAMES = frozenset({"__meridian-orchestrator", "__meridian-subagent"})
+# Known skill deps for bootstrap agents — auto-included when bootstrapping
+_BOOTSTRAP_SKILL_NAMES = frozenset({"__meridian-orchestrate", "__meridian-spawn-agent"})
 
 
 class BootstrapPlan(BaseModel):
@@ -185,6 +187,7 @@ def _ensure_bootstrap_source(
             url=_BOOTSTRAP_URL,
             ref="main",
             agents=required_agent_names,
+            skills=tuple(sorted(_BOOTSTRAP_SKILL_NAMES)),
         )
         return SourcesConfig(sources=(*config.sources, bootstrap_source))
 
@@ -198,10 +201,24 @@ def _ensure_bootstrap_source(
         if name not in existing_agent_names:
             merged_agents.append(name)
 
-    if len(merged_agents) == len(existing.agents or ()):
+    # Also ensure skill deps are included
+    existing_skill_names = set(existing.skills or ())
+    merged_skills = list(existing.skills or ())
+    for skill_name in sorted(_BOOTSTRAP_SKILL_NAMES):
+        if skill_name not in existing_skill_names:
+            merged_skills.append(skill_name)
+
+    agents_changed = len(merged_agents) != len(existing.agents or ())
+    skills_changed = len(merged_skills) != len(existing.skills or ())
+    if not agents_changed and not skills_changed:
         return config
 
-    updated_source = existing.model_copy(update={"agents": tuple(merged_agents)})
+    updates: dict[str, object] = {}
+    if agents_changed:
+        updates["agents"] = tuple(merged_agents)
+    if skills_changed:
+        updates["skills"] = tuple(merged_skills)
+    updated_source = existing.model_copy(update=updates)
     return SourcesConfig(
         sources=tuple(
             updated_source if source.name == _BOOTSTRAP_SOURCE_NAME else source
