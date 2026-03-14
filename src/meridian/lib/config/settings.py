@@ -717,22 +717,6 @@ def load_config(repo_root: Path, *, user_config: Path | None = None) -> Meridian
         _SETTINGS_CONTEXT.reset(token)
 
 
-# ===========================================================================
-# Path resolution helpers (absorbed from config/_paths.py)
-# ===========================================================================
-
-
-def bundled_agents_root() -> Path | None:
-    """Return the path to meridian's bundled .agents/ directory, when available."""
-
-    import importlib.resources
-
-    try:
-        return Path(str(importlib.resources.files("meridian.resources") / ".agents"))
-    except Exception:
-        return None
-
-
 def resolve_repo_root(explicit: Path | None = None) -> Path:
     """Resolve repository root that owns `.agents/skills/`.
 

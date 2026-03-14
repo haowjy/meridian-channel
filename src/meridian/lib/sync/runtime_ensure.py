@@ -9,9 +9,8 @@ from pydantic import BaseModel, ConfigDict
 from meridian.lib.state.paths import resolve_state_paths
 from meridian.lib.sync.install_config import ManagedSourcesConfig, load_install_config, write_install_config
 from meridian.lib.sync.install_engine import reconcile_managed_sources
-from meridian.lib.sync.install_lock import ManagedInstallLock, read_install_lock
+from meridian.lib.sync.install_lock import ManagedInstallLock, lock_file_guard, read_install_lock
 from meridian.lib.sync.install_types import ItemRef, format_item_id, parse_item_id
-from meridian.lib.sync.lock import lock_file_guard
 from meridian.lib.sync.source_catalog import well_known_source_config
 
 _BOOTSTRAP_SOURCE_NAME = "meridian-agents"

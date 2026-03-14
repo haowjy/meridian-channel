@@ -23,7 +23,7 @@ python3 - <<'PY'
 text = open("/tmp/meridian-agent-help.txt").read()
 for visible in ("spawn", "report", "skills", "models"):
     assert visible in text
-for hidden in ("config", "doctor", "sync", "completion", "serve"):
+for hidden in ("config", "doctor", "install", "update", "upgrade", "remove", "status", "completion", "serve"):
     assert hidden not in text
 print("PASS: agent-mode help is restricted")
 PY
@@ -35,7 +35,7 @@ PY
 MERIDIAN_DEPTH=1 uv run meridian --human --help > /tmp/meridian-agent-human-help.txt && \
 python3 - <<'PY'
 text = open("/tmp/meridian-agent-human-help.txt").read()
-for visible in ("config", "doctor", "sync"):
+for visible in ("config", "doctor", "install", "update", "upgrade", "remove", "status"):
     assert visible in text
 print("PASS: --human restored full help")
 PY

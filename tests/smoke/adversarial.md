@@ -97,6 +97,6 @@ Add at least three extra experiments that are not listed above. Good targets:
 - mixed `--json` and `--format` flags
 - long file paths and missing reference files
 - repeated `spawn wait` on the same id
-- rapid `sync install` and `sync remove` loops in a scratch repo
+- rapid `install` and `remove` loops in a scratch repo
 
 When you are done, summarize the extra experiments and end with either `PASS: extra adversarial ideas executed` or `FAIL: extra adversarial ideas found bugs`.

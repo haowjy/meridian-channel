@@ -76,13 +76,11 @@ class StatePaths(BaseModel):
     spawns_dir: Path
     active_primary_lock: Path
     cache_dir: Path
-    sync_lock_path: Path
-    sync_cache_dir: Path
-    config_path: Path
-    models_path: Path
     agents_manifest_path: Path
     agents_lock_path: Path
     agents_cache_dir: Path
+    config_path: Path
+    models_path: Path
 
 
 def _resolve_state_root(repo_root: Path) -> Path:
@@ -108,13 +106,11 @@ def resolve_state_paths(repo_root: Path) -> StatePaths:
         spawns_dir=root_dir / "spawns",
         active_primary_lock=root_dir / "active-primary.lock",
         cache_dir=root_dir / "cache",
-        sync_lock_path=root_dir / "sync.lock",
-        sync_cache_dir=root_dir / "cache" / "sync",
-        config_path=root_dir / "config.toml",
-        models_path=root_dir / "models.toml",
         agents_manifest_path=root_dir / "agents.toml",
         agents_lock_path=root_dir / "agents.lock",
         agents_cache_dir=root_dir / "cache" / "agents",
+        config_path=root_dir / "config.toml",
+        models_path=root_dir / "models.toml",
     )
 
 

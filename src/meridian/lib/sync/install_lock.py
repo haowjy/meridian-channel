@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import cast
 
@@ -142,3 +145,21 @@ def write_install_lock(lock_path: Path, lock: ManagedInstallLock) -> None:
         lock_path,
         json.dumps(lock.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
     )
+
+
+def _flock_path(lock_path: Path) -> Path:
+    return lock_path.with_name(f"{lock_path.name}.flock")
+
+
+@contextmanager
+def lock_file_guard(lock_path: Path) -> Iterator[None]:
+    """Acquire an exclusive advisory lock for an install state file."""
+
+    flock_path = _flock_path(lock_path)
+    flock_path.parent.mkdir(parents=True, exist_ok=True)
+    with flock_path.open("a+b") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)

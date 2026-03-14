@@ -1,16 +1,8 @@
-import json
 import subprocess
 import sys
+from pathlib import Path
 
-import pytest
-
-from meridian.lib.sync.lock import (
-    SyncLockEntry,
-    SyncLockFile,
-    lock_file_guard,
-    read_lock_file,
-    write_lock_file,
-)
+from meridian.lib.sync.install_lock import lock_file_guard
 
 
 _LOCK_PROBE = """
@@ -30,35 +22,9 @@ raise SystemExit(0)
 """
 
 
-def _entry() -> SyncLockEntry:
-    return SyncLockEntry(
-        source_name="personal",
-        source_type="repo",
-        source_value="haowjy/meridian-skills",
-        source_item_name="github-issues",
-        requested_ref="main",
-        locked_commit="abc123def456",
-        item_kind="skill",
-        dest_path=".agents/skills/github-issues",
-        tree_hash="sha256:0123456789abcdef",
-        synced_at="2026-03-08T12:34:56Z",
-    )
-
-
-def test_write_lock_file_roundtrip_and_cleans_tmp_file(tmp_path):
-    lock_path = tmp_path / ".meridian" / "sync.lock"
-    lock = SyncLockFile(items={"skills/github-issues": _entry()})
-
-    write_lock_file(lock_path, lock)
-
-    assert lock_path.exists()
-    assert not lock_path.with_name("sync.lock.tmp").exists()
-    assert read_lock_file(lock_path) == lock
-
-
-def test_lock_file_guard_acquires_and_releases_lock(tmp_path):
-    lock_path = tmp_path / ".meridian" / "sync.lock"
-    flock_path = lock_path.with_name("sync.lock.flock")
+def test_lock_file_guard_acquires_and_releases_lock(tmp_path: Path) -> None:
+    lock_path = tmp_path / ".meridian" / "agents.lock"
+    flock_path = lock_path.with_name("agents.lock.flock")
 
     with lock_file_guard(lock_path):
         assert flock_path.exists()

@@ -387,11 +387,6 @@ agents_app = App(name="agents", help="Agent profile catalog commands", help_form
 skills_app = App(name="skills", help="Skills catalog commands", help_formatter="plain")
 models_app = App(name="models", help="Model catalog commands", help_formatter="plain")
 config_app = App(name="config", help="Repository config commands", help_formatter="plain")
-sync_app = App(
-    name="sync",
-    help="Sync skills and agents from external sources",
-    help_formatter="plain",
-)
 completion_app = App(name="completion", help="Shell completion helpers", help_formatter="plain")
 
 
@@ -402,7 +397,6 @@ app.command(agents_app, name="agents")
 app.command(skills_app, name="skills")
 app.command(models_app, name="models")
 app.command(config_app, name="config")
-app.command(sync_app, name="sync")
 app.command(completion_app, name="completion")
 
 
@@ -605,8 +599,8 @@ _REGISTERED_CLI_DESCRIPTIONS: dict[str, str] = {}
 
 def _register_group_commands() -> None:
     from meridian.cli.agents_cmd import register_agents_commands
+    from meridian.cli.install_cmd import register_install_commands
     from meridian.cli.spawn import register_spawn_commands
-    from meridian.cli.sync_cmd import register_sync_commands
     from meridian.cli.work_cmd import register_work_commands
 
     modules = (
@@ -623,8 +617,7 @@ def _register_group_commands() -> None:
         _REGISTERED_CLI_COMMANDS.update(commands)
         _REGISTERED_CLI_DESCRIPTIONS.update(descriptions)
 
-    # Sync is CLI-only (not in ops manifest), registered separately.
-    register_sync_commands(sync_app, emit)
+    register_install_commands(app, emit)
 
 
 def get_registered_cli_commands() -> set[str]:
