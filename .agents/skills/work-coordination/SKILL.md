@@ -1,6 +1,6 @@
 ---
 name: work-coordination
-description: Meridian work lifecycle and artifact placement for orchestrators. Use this whenever you need to create, switch, update, or complete a work item, or decide where work-scoped notes versus broader shared docs belong.
+description: Meridian work item lifecycle for tracking multi-spawn efforts. Use when creating, switching, updating, or completing work items, managing work status, or deciding where work-scoped files vs shared project files belong.
 ---
 
 # Work Coordination
@@ -61,25 +61,17 @@ The key rule is:
 
 ## Status Management
 
-Keep the current phase visible with `meridian work update --status ...`.
-
-Recommended lifecycle:
-
-```text
-designing -> reviewing -> planning -> implementing -> done
-```
-
-Typical commands:
+Track progress with `meridian work update --status`:
 
 ```bash
 meridian work start "auth refactor"
-meridian work update auth-refactor --status designing
-meridian work update auth-refactor --status reviewing
-meridian work update auth-refactor --status planning
-meridian work update auth-refactor --status implementing
+meridian work update auth-refactor --status "in-progress"
+meridian work update auth-refactor --status "blocked"
 meridian work done auth-refactor
 meridian work reopen auth-refactor
 ```
+
+Status values are free-form strings. Use whatever names make sense for your workflow.
 
 Use `meridian work clear` only when you intentionally want no active work item for the current session.
 `work done` archives the scratch directory when present, and `work reopen` restores it.
@@ -93,13 +85,7 @@ echo "$MERIDIAN_WORK_DIR"
 # .meridian/work/auth-refactor/
 ```
 
-Use `$MERIDIAN_WORK_DIR` for work-specific coordination artifacts such as:
-
-- `overview.md`
-- `decision-log.md`
-- `implementation-log.md`
-- `plan/phase-N-slug.md`
-- ad hoc notes, diagrams, and phase-local scratch files
+Your workflow skills determine what files to create in `$MERIDIAN_WORK_DIR`. This skill defines where things go, not what they are.
 
 Use `.meridian/fs/` for broader shared reference material that is not specific to one work item, such as:
 
@@ -109,33 +95,3 @@ Use `.meridian/fs/` for broader shared reference material that is not specific t
 
 If a file mainly exists to help one work item move forward, keep it in `$MERIDIAN_WORK_DIR`.
 If it is shared project context across multiple work items, put it in `.meridian/fs/`.
-
-## Standard Work Artifacts
-
-Unless the task is trivial, the orchestrator should keep these artifacts under `$MERIDIAN_WORK_DIR`:
-
-- `overview.md`
-  - current design/approach
-- `decision-log.md`
-  - append-only design and planning decisions
-- `implementation-log.md`
-  - append-only findings, deferred issues, and coordination notes during execution
-- `plan/`
-  - per-phase specs when the work needs decomposition
-
-These are conventions, not mandatory ceremony. Scale the artifact set to the size of the task.
-
-## Handing Off To Other Skills
-
-This skill owns work policy. Other skills own their craft:
-
-- `design`
-  - how to collaborate with the user on architecture and write design artifacts
-- `plan-implementation`
-  - how to decompose the design into phases
-- `dev-workflow`
-  - how to run the phase loop and staff agents
-- `issue-tracking`
-  - how to mirror findings into GitHub Issues
-
-Those skills should assume the work item is already attached and should use the artifact placement rules from this skill rather than redefining them.

@@ -1,7 +1,6 @@
 """Process management for primary agent launch."""
 
 import fcntl
-import json
 import logging
 import os
 import pty
@@ -13,11 +12,10 @@ import termios
 import time
 import tty
 import struct
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
-from datetime import UTC, datetime
+from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
-from typing import Any, TextIO, cast
+from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict
 
@@ -51,12 +49,6 @@ logger = logging.getLogger(__name__)
 _PRIMARY_OUTPUT_FILENAME = "output.jsonl"
 
 
-def active_primary_lock_path(repo_root: Path) -> Path:
-    """Return the active primary-session lock path."""
-
-    return resolve_state_paths(repo_root).active_primary_lock
-
-
 class ProcessOutcome(BaseModel):
     """Result of running the harness subprocess."""
 
@@ -72,63 +64,6 @@ class ProcessOutcome(BaseModel):
     resolved_harness_session_id: str
 
 
-def _primary_launch_lock_payload(
-    *,
-    command: tuple[str, ...],
-    child_pid: int | None,
-) -> dict[str, object]:
-    return {
-        "parent_pid": os.getpid(),
-        "child_pid": child_pid,
-        "started_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "command": list(command),
-    }
-
-
-def _rewrite_primary_launch_lock_payload(handle: TextIO, payload: dict[str, object]) -> None:
-    handle.seek(0)
-    handle.truncate()
-    handle.write(json.dumps(payload, sort_keys=True, indent=2) + "\n")
-    handle.flush()
-    os.fsync(handle.fileno())
-
-
-@contextmanager
-def primary_launch_lock(lock_path: Path, payload: dict[str, object]) -> Iterator[TextIO]:
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a+", encoding="utf-8") as handle:
-        try:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise ValueError("A primary launch is already active.") from exc
-        _rewrite_primary_launch_lock_payload(handle, payload)
-        try:
-            yield handle
-        finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-
-
-def cleanup_orphaned_locks(repo_root: Path) -> bool:
-    """Remove a stale active-primary lock."""
-
-    lock_path = active_primary_lock_path(repo_root)
-    if not lock_path.is_file():
-        return False
-
-    try:
-        with lock_path.open("a+", encoding="utf-8") as handle:
-            try:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                return False
-            try:
-                lock_path.unlink(missing_ok=True)
-            finally:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-    except OSError:
-        logger.debug("Failed to inspect lock file %s", lock_path, exc_info=True)
-        return False
-    return True
 
 
 def _copy_primary_pty_output(
@@ -319,167 +254,155 @@ def run_harness_process(
     artifacts = LocalStore(root_dir=resolve_state_paths(plan.repo_root).artifacts_dir)
 
     exit_code = 2
-    with primary_launch_lock(
-        plan.lock_path,
-        _primary_launch_lock_payload(command=command, child_pid=None),
-    ) as lock_handle:
-        try:
-            with session_scope(
-                state_root=plan.state_root,
-                harness=plan.session_metadata.harness,
-                harness_session_id=plan.seed_harness_session_id,
-                model=plan.session_metadata.model,
-                chat_id=plan.request.continue_chat_id,
-                agent=plan.session_metadata.agent,
-                agent_path=plan.session_metadata.agent_path,
-                agent_source=plan.session_metadata.agent_source,
-                skills=plan.session_metadata.skills,
-                skill_paths=plan.session_metadata.skill_paths,
-                skill_sources=plan.session_metadata.skill_sources,
-                bootstrap_required_items=plan.session_metadata.bootstrap_required_items,
-                bootstrap_missing_items=plan.session_metadata.bootstrap_missing_items,
-                _start_session=start_session,
-                _stop_session=stop_session,
-                _update_session_harness_id=update_session_harness_id,
-            ) as managed:
-                chat_id = managed.chat_id
-                explicit_work_id = (plan.request.work_id or "").strip() or None
-                if explicit_work_id is not None:
-                    explicit_work_id = ensure_explicit_work_item(plan.state_root, explicit_work_id)
-                preserved_work_id = None
-                if explicit_work_id is None and plan.request.continue_chat_id is not None:
-                    preserved_work_id = get_session_active_work_id(
-                        plan.state_root,
-                        plan.request.continue_chat_id,
-                    )
-                attached_work_id = get_session_active_work_id(plan.state_root, chat_id)
-                if attached_work_id is None:
-                    attached_work_id = explicit_work_id or preserved_work_id
-                    if attached_work_id is not None:
-                        update_session_work_id(plan.state_root, chat_id, attached_work_id)
-                try:
-                    primary_spawn_id = spawn_store.start_spawn(
-                        plan.state_root,
+    try:
+        with session_scope(
+            state_root=plan.state_root,
+            harness=plan.session_metadata.harness,
+            harness_session_id=plan.seed_harness_session_id,
+            model=plan.session_metadata.model,
+            chat_id=plan.request.continue_chat_id,
+            agent=plan.session_metadata.agent,
+            agent_path=plan.session_metadata.agent_path,
+            agent_source=plan.session_metadata.agent_source,
+            skills=plan.session_metadata.skills,
+            skill_paths=plan.session_metadata.skill_paths,
+            skill_sources=plan.session_metadata.skill_sources,
+            bootstrap_required_items=plan.session_metadata.bootstrap_required_items,
+            bootstrap_missing_items=plan.session_metadata.bootstrap_missing_items,
+            _start_session=start_session,
+            _stop_session=stop_session,
+            _update_session_harness_id=update_session_harness_id,
+        ) as managed:
+            chat_id = managed.chat_id
+            explicit_work_id = (plan.request.work_id or "").strip() or None
+            if explicit_work_id is not None:
+                explicit_work_id = ensure_explicit_work_item(plan.state_root, explicit_work_id)
+            preserved_work_id = None
+            if explicit_work_id is None and plan.request.continue_chat_id is not None:
+                preserved_work_id = get_session_active_work_id(
+                    plan.state_root,
+                    plan.request.continue_chat_id,
+                )
+            attached_work_id = get_session_active_work_id(plan.state_root, chat_id)
+            if attached_work_id is None:
+                attached_work_id = explicit_work_id or preserved_work_id
+                if attached_work_id is not None:
+                    update_session_work_id(plan.state_root, chat_id, attached_work_id)
+            try:
+                primary_spawn_id = spawn_store.start_spawn(
+                    plan.state_root,
+                    chat_id=chat_id,
+                    model=plan.session_metadata.model,
+                    agent=plan.session_metadata.agent,
+                    agent_path=plan.session_metadata.agent_path or None,
+                    agent_source=plan.session_metadata.agent_source,
+                    skills=plan.session_metadata.skills,
+                    skill_paths=plan.session_metadata.skill_paths,
+                    skill_sources=plan.session_metadata.skill_sources,
+                    bootstrap_required_items=plan.session_metadata.bootstrap_required_items,
+                    bootstrap_missing_items=plan.session_metadata.bootstrap_missing_items,
+                    harness=plan.session_metadata.harness,
+                    kind="primary",
+                    prompt=plan.prompt,
+                    launch_mode=FOREGROUND_LAUNCH_MODE,
+                    work_id=attached_work_id,
+                    status="queued",
+                )
+                log_dir = resolve_spawn_log_dir(repo_root, primary_spawn_id)
+                with threaded_heartbeat_scope(log_dir / "heartbeat"):
+                    primary_started = time.monotonic()
+                    primary_started_epoch = time.time()
+                    primary_started_local_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+                    child_env = build_launch_env(
+                        repo_root,
+                        plan.request,
                         chat_id=chat_id,
-                        model=plan.session_metadata.model,
-                        agent=plan.session_metadata.agent,
-                        agent_path=plan.session_metadata.agent_path or None,
-                        agent_source=plan.session_metadata.agent_source,
-                        skills=plan.session_metadata.skills,
-                        skill_paths=plan.session_metadata.skill_paths,
-                        skill_sources=plan.session_metadata.skill_sources,
-                        bootstrap_required_items=plan.session_metadata.bootstrap_required_items,
-                        bootstrap_missing_items=plan.session_metadata.bootstrap_missing_items,
-                        harness=plan.session_metadata.harness,
-                        kind="primary",
-                        prompt=plan.prompt,
-                        launch_mode=FOREGROUND_LAUNCH_MODE,
                         work_id=attached_work_id,
-                        status="queued",
+                        default_autocompact_pct=plan.config.primary.autocompact_pct,
+                        spawn_id=primary_spawn_id,
+                        adapter=plan.adapter,
+                        run_params=plan.run_params,
+                        permission_config=plan.permission_config,
                     )
-                    log_dir = resolve_spawn_log_dir(repo_root, primary_spawn_id)
-                    with threaded_heartbeat_scope(log_dir / "heartbeat"):
-                        primary_started = time.monotonic()
-                        primary_started_epoch = time.time()
-                        primary_started_local_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-                        _rewrite_primary_launch_lock_payload(
-                            lock_handle,
-                            _primary_launch_lock_payload(command=command, child_pid=None),
-                        )
-                        child_env = build_launch_env(
-                            repo_root,
-                            plan.request,
-                            chat_id=chat_id,
-                            work_id=attached_work_id,
-                            default_autocompact_pct=plan.config.primary.autocompact_pct,
-                            spawn_id=primary_spawn_id,
-                            adapter=plan.adapter,
-                            run_params=plan.run_params,
-                            permission_config=plan.permission_config,
-                        )
-                        output_log_path = log_dir / _PRIMARY_OUTPUT_FILENAME
+                    output_log_path = log_dir / _PRIMARY_OUTPUT_FILENAME
 
-                        def _record_primary_started(child_pid: int) -> None:
-                            _rewrite_primary_launch_lock_payload(
-                                lock_handle,
-                                _primary_launch_lock_payload(command=command, child_pid=child_pid),
-                            )
-                            atomic_write_text(
-                                log_dir / "harness.pid",
-                                f"{child_pid}\n",
-                            )
-                            spawn_store.mark_spawn_running(
-                                plan.state_root,
-                                primary_spawn_id,
-                                launch_mode=FOREGROUND_LAUNCH_MODE,
-                                worker_pid=child_pid,
-                            )
-
-                        exit_code, _child_pid = _run_primary_process_with_capture(
-                            command=command,
-                            cwd=repo_root,
-                            env=child_env,
-                            output_log_path=output_log_path,
-                            on_child_started=_record_primary_started,
+                    def _record_primary_started(child_pid: int) -> None:
+                        atomic_write_text(
+                            log_dir / "harness.pid",
+                            f"{child_pid}\n",
                         )
-                        if output_log_path.exists():
-                            artifacts.put(
-                                make_artifact_key(primary_spawn_id, _PRIMARY_OUTPUT_FILENAME),
-                                output_log_path.read_bytes(),
-                            )
-                finally:
-                    durable_report = False
-                    terminated_after_completion = False
-                    if primary_spawn_id is not None:
-                        report_path = resolve_spawn_log_dir(repo_root, primary_spawn_id) / "report.md"
-                        try:
-                            report_text = report_path.read_text(encoding="utf-8") if report_path.is_file() else None
-                        except OSError:
-                            report_text = None
-                        durable_report = has_durable_report_completion(report_text)
-                        terminated_after_completion = (
-                            durable_report and exit_code in (143, -15)
-                        )
-                    status, exit_code, _failure_reason = resolve_execution_terminal_state(
-                        exit_code=exit_code,
-                        failure_reason=None,
-                        durable_report_completion=durable_report,
-                        terminated_after_completion=terminated_after_completion,
-                    )
-                    if primary_spawn_id is not None:
-                        duration = (
-                            max(0.0, time.monotonic() - primary_started)
-                            if primary_started > 0.0
-                            else None
-                        )
-                        spawn_store.finalize_spawn(
+                        spawn_store.mark_spawn_running(
                             plan.state_root,
                             primary_spawn_id,
-                            status=status,
-                            exit_code=exit_code,
-                            duration_secs=duration,
+                            launch_mode=FOREGROUND_LAUNCH_MODE,
+                            worker_pid=child_pid,
                         )
-                    observed_harness_session_id = None
-                    if primary_started_epoch > 0.0:
-                        observed_harness_session_id = extract_latest_session_id(
-                            adapter=plan.adapter,
-                            current_session_id=resolved_harness_session_id,
-                            artifacts=artifacts,
-                            spawn_id=primary_spawn_id,
-                            repo_root=repo_root,
-                            started_at_epoch=primary_started_epoch,
-                            started_at_local_iso=primary_started_local_iso,
+
+                    exit_code, _child_pid = _run_primary_process_with_capture(
+                        command=command,
+                        cwd=repo_root,
+                        env=child_env,
+                        output_log_path=output_log_path,
+                        on_child_started=_record_primary_started,
+                    )
+                    if output_log_path.exists():
+                        artifacts.put(
+                            make_artifact_key(primary_spawn_id, _PRIMARY_OUTPUT_FILENAME),
+                            output_log_path.read_bytes(),
                         )
-                    if (
-                        observed_harness_session_id is not None
-                        and observed_harness_session_id.strip()
-                        and observed_harness_session_id.strip() != resolved_harness_session_id.strip()
-                    ):
-                        resolved_harness_session_id = observed_harness_session_id.strip()
-                        managed.record_harness_session_id(resolved_harness_session_id)
-        except FileNotFoundError:
-            logger.debug("Harness command not found", exc_info=True)
-            exit_code = 2
+            finally:
+                durable_report = False
+                terminated_after_completion = False
+                if primary_spawn_id is not None:
+                    report_path = resolve_spawn_log_dir(repo_root, primary_spawn_id) / "report.md"
+                    try:
+                        report_text = report_path.read_text(encoding="utf-8") if report_path.is_file() else None
+                    except OSError:
+                        report_text = None
+                    durable_report = has_durable_report_completion(report_text)
+                    terminated_after_completion = (
+                        durable_report and exit_code in (143, -15)
+                    )
+                status, exit_code, _failure_reason = resolve_execution_terminal_state(
+                    exit_code=exit_code,
+                    failure_reason=None,
+                    durable_report_completion=durable_report,
+                    terminated_after_completion=terminated_after_completion,
+                )
+                if primary_spawn_id is not None:
+                    duration = (
+                        max(0.0, time.monotonic() - primary_started)
+                        if primary_started > 0.0
+                        else None
+                    )
+                    spawn_store.finalize_spawn(
+                        plan.state_root,
+                        primary_spawn_id,
+                        status=status,
+                        exit_code=exit_code,
+                        duration_secs=duration,
+                    )
+                observed_harness_session_id = None
+                if primary_started_epoch > 0.0:
+                    observed_harness_session_id = extract_latest_session_id(
+                        adapter=plan.adapter,
+                        current_session_id=resolved_harness_session_id,
+                        artifacts=artifacts,
+                        spawn_id=primary_spawn_id,
+                        repo_root=repo_root,
+                        started_at_epoch=primary_started_epoch,
+                        started_at_local_iso=primary_started_local_iso,
+                    )
+                if (
+                    observed_harness_session_id is not None
+                    and observed_harness_session_id.strip()
+                    and observed_harness_session_id.strip() != resolved_harness_session_id.strip()
+                ):
+                    resolved_harness_session_id = observed_harness_session_id.strip()
+                    managed.record_harness_session_id(resolved_harness_session_id)
+    except FileNotFoundError:
+        logger.debug("Harness command not found", exc_info=True)
+        exit_code = 2
 
     return ProcessOutcome(
         command=command,
@@ -495,8 +418,5 @@ def run_harness_process(
 
 __all__ = [
     "ProcessOutcome",
-    "active_primary_lock_path",
-    "cleanup_orphaned_locks",
-    "primary_launch_lock",
     "run_harness_process",
 ]

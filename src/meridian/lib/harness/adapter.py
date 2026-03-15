@@ -63,7 +63,7 @@ class SpawnParams(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     prompt: str
-    model: ModelId
+    model: ModelId | None = None
     skills: tuple[str, ...] = ()
     agent: str | None = None
     # Pre-built --agents JSON for Claude ad-hoc agent passthrough. Empty string when not used.

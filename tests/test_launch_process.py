@@ -1,12 +1,8 @@
 from __future__ import annotations
 # pyright: reportPrivateUsage=false
 
-import fcntl
-import multiprocessing as mp
 import os
 import signal
-import time
-import json
 from pathlib import Path
 from typing import Any
 
@@ -22,24 +18,6 @@ from meridian.lib.harness.registry import get_default_harness_registry
 from meridian.lib.safety.permissions import PermissionConfig
 from meridian.lib.state import spawn_store, work_store
 
-
-def _attempt_primary_launch_lock(lock_path_str: str, hold_secs: float, queue: Any) -> None:
-    start = time.monotonic()
-    payload = {
-        "parent_pid": os.getpid(),
-        "child_pid": None,
-        "started_at": "2000-01-01T00:00:00Z",
-        "command": ["sleep", "1"],
-    }
-    try:
-        with process.primary_launch_lock(Path(lock_path_str), payload):
-            queue.put(("acquired", time.monotonic() - start))
-            if hold_secs > 0:
-                time.sleep(hold_secs)
-    except ValueError:
-        queue.put(("contended", time.monotonic() - start))
-    except Exception as exc:  # pragma: no cover - defensive test helper guard
-        queue.put(("error", repr(exc)))
 
 
 def test_sync_pty_winsize_copies_source_size(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -135,7 +113,6 @@ def test_run_harness_process_reuses_tracked_chat_id_on_resume(
         run_params=SpawnParams(prompt="resume prompt", model=ModelId("gpt-5.4"), interactive=True),
         permission_config=PermissionConfig(),
         command=("true",),
-        lock_path=tmp_path / ".meridian" / "active-primary.lock",
         seed_harness_session_id="session-2",
         command_request=request,
     )
@@ -229,7 +206,6 @@ def test_run_harness_process_attaches_explicit_work_id(
         run_params=SpawnParams(prompt="new prompt", model=ModelId("gpt-5.4"), interactive=True),
         permission_config=PermissionConfig(),
         command=("true",),
-        lock_path=tmp_path / ".meridian" / "active-primary.lock",
         seed_harness_session_id="session-3",
         command_request=request,
     )
@@ -274,93 +250,3 @@ def test_run_harness_process_attaches_explicit_work_id(
     assert work_store.get_work_item(plan.state_root, "named-work") is not None
 
 
-def test_primary_launch_lock_acquires_and_releases(tmp_path: Path) -> None:
-    lock_path = process.active_primary_lock_path(tmp_path)
-    first_payload = {
-        "parent_pid": os.getpid(),
-        "child_pid": None,
-        "started_at": "2026-01-01T00:00:00Z",
-        "command": ["first"],
-    }
-    second_payload = {
-        "parent_pid": os.getpid(),
-        "child_pid": 999,
-        "started_at": "2026-01-01T00:00:01Z",
-        "command": ["second"],
-    }
-
-    with process.primary_launch_lock(lock_path, first_payload):
-        assert lock_path.is_file()
-        assert json.loads(lock_path.read_text(encoding="utf-8")) == first_payload
-
-    with process.primary_launch_lock(lock_path, second_payload):
-        assert json.loads(lock_path.read_text(encoding="utf-8")) == second_payload
-
-
-def test_primary_launch_lock_raises_value_error_on_contention(tmp_path: Path) -> None:
-    lock_path = process.active_primary_lock_path(tmp_path)
-    payload = {
-        "parent_pid": os.getpid(),
-        "child_pid": None,
-        "started_at": "2026-01-01T00:00:00Z",
-        "command": ["contention"],
-    }
-
-    with process.primary_launch_lock(lock_path, payload):
-        with pytest.raises(ValueError, match="already active"):
-            with process.primary_launch_lock(lock_path, payload):
-                pass
-
-
-def test_primary_launch_lock_contends_across_processes(tmp_path: Path) -> None:
-    start_method = "fork" if "fork" in mp.get_all_start_methods() else "spawn"
-    ctx = mp.get_context(start_method)
-    try:
-        queue = ctx.Queue()
-    except PermissionError as exc:
-        pytest.skip(f"multiprocessing semaphore unavailable in this environment: {exc}")
-    lock_path = process.active_primary_lock_path(tmp_path)
-
-    first = ctx.Process(target=_attempt_primary_launch_lock, args=(str(lock_path), 2.0, queue))
-    second = ctx.Process(target=_attempt_primary_launch_lock, args=(str(lock_path), 0.0, queue))
-    try:
-        first.start()
-    except PermissionError as exc:
-        pytest.skip(f"multiprocessing semaphore unavailable in this environment: {exc}")
-    first_status, _ = queue.get(timeout=5)
-    assert first_status == "acquired"
-
-    second.start()
-    second_status, second_elapsed = queue.get(timeout=5)
-    assert second_status == "contended"
-    assert second_elapsed < 1.0
-
-    second.join(timeout=10)
-    first.join(timeout=10)
-    assert second.exitcode == 0
-    assert first.exitcode == 0
-
-
-def test_cleanup_orphaned_locks_removes_unheld_lock_file(tmp_path: Path) -> None:
-    lock_path = process.active_primary_lock_path(tmp_path)
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path.write_text('{"stale": true}\n', encoding="utf-8")
-
-    assert process.cleanup_orphaned_locks(tmp_path) is True
-    assert not lock_path.exists()
-
-
-def test_cleanup_orphaned_locks_keeps_live_flock(tmp_path: Path) -> None:
-    lock_path = process.active_primary_lock_path(tmp_path)
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a+", encoding="utf-8") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        handle.seek(0)
-        handle.truncate()
-        handle.write('{"live": true}\n')
-        handle.flush()
-
-        assert process.cleanup_orphaned_locks(tmp_path) is False
-        assert lock_path.exists()
-
-        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)

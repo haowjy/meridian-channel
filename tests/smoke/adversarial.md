@@ -19,7 +19,7 @@ cat > "$SMOKE_SOURCE/agents/reviewer.md" <<'EOF'
 Adversarial smoke reviewer.
 EOF
 cd "$REPO_ROOT"
-uv run meridian install "$SMOKE_SOURCE" --name adversarial-smoke >/tmp/meridian-adversarial-install.txt 2>&1 && \
+uv run meridian sources install "$SMOKE_SOURCE" --name adversarial-smoke >/tmp/meridian-adversarial-install.txt 2>&1 && \
 test -d "$SMOKE_REPO/.git" && echo "PASS: adversarial repo ready" || echo "FAIL: adversarial repo setup failed"
 ```
 
@@ -105,7 +105,7 @@ Add at least three extra experiments that are not listed above. Good targets:
 - mixed `--json` and `--format` flags
 - long file paths and missing reference files
 - repeated `spawn wait` on the same id
-- rapid `install` and `remove` loops in a scratch repo
+- rapid `sources install` and `sources uninstall` loops in a scratch repo
 
 Reference implementation:
 
@@ -114,10 +114,10 @@ uv run meridian --json --format json models list >/tmp/meridian-adv-mixed-format
 if uv run meridian --json spawn -a reviewer -p "missing ref" -f /tmp/no-such-ref-file.md --dry-run >/tmp/meridian-adv-missing-ref.out 2>&1; then
   :
 fi
-uv run meridian install "$SMOKE_SOURCE" --name loop-source >/tmp/meridian-adv-loop-install1.txt 2>&1
-uv run meridian remove loop-source >/tmp/meridian-adv-loop-remove1.txt 2>&1
-uv run meridian install "$SMOKE_SOURCE" --name loop-source >/tmp/meridian-adv-loop-install2.txt 2>&1
-uv run meridian remove loop-source >/tmp/meridian-adv-loop-remove2.txt 2>&1
+uv run meridian sources install "$SMOKE_SOURCE" --name loop-source >/tmp/meridian-adv-loop-install1.txt 2>&1
+uv run meridian sources uninstall --source loop-source >/tmp/meridian-adv-loop-remove1.txt 2>&1
+uv run meridian sources install "$SMOKE_SOURCE" --name loop-source >/tmp/meridian-adv-loop-install2.txt 2>&1
+uv run meridian sources uninstall --source loop-source >/tmp/meridian-adv-loop-remove2.txt 2>&1
 
 uv run python - <<'PY'
 import json

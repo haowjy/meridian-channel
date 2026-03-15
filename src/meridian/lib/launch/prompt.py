@@ -7,9 +7,6 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
-
-from meridian.lib.catalog.agent import AgentProfile
 from meridian.lib.catalog.skill import SkillRegistry
 from meridian.lib.core.domain import SkillContent
 from meridian.lib.launch.reference import (
@@ -19,8 +16,6 @@ from meridian.lib.launch.reference import (
     resolve_template_variables,
     substitute_template_variables,
 )
-
-DEFAULT_MODEL = "claude-opus-4-6"
 
 _CANONICAL_REPORT_BLOCK_RE = re.compile(
     r"""(?ms)
@@ -90,48 +85,6 @@ def dedupe_skill_contents(skills: Sequence[SkillContent]) -> tuple[SkillContent,
         seen.add(skill.name)
         ordered.append(skill)
     return tuple(ordered)
-
-
-class SpawnPromptDefaults(BaseModel):
-    """Resolved model + agent body + skill names for prompt composition."""
-
-    model_config = ConfigDict(frozen=True)
-
-    model: str
-    skills: tuple[str, ...]
-    agent_body: str
-    agent_name: str | None
-
-
-def resolve_run_defaults(
-    requested_model: str,
-    *,
-    profile: AgentProfile | None,
-    default_model: str = DEFAULT_MODEL,
-) -> SpawnPromptDefaults:
-    """Merge explicit run options with agent-profile defaults."""
-
-    merged = list(dedupe_skill_names(profile.skills)) if profile is not None else []
-
-    resolved_model = requested_model.strip()
-    if not resolved_model and profile is not None and profile.model:
-        resolved_model = profile.model.strip()
-    if not resolved_model:
-        resolved_model = default_model
-    try:
-        from meridian.lib.catalog.models import resolve_model
-
-        catalog_entry = resolve_model(resolved_model)
-        resolved_model = str(catalog_entry.model_id)
-    except ValueError:
-        pass
-
-    return SpawnPromptDefaults(
-        model=resolved_model,
-        skills=dedupe_skill_names(merged),
-        agent_body=profile.body.strip() if profile is not None else "",
-        agent_name=profile.name if profile is not None else None,
-    )
 
 
 def load_skill_contents(
@@ -343,9 +296,7 @@ def render_file_template(
 
 
 __all__ = [
-    "DEFAULT_MODEL",
     "ReferenceFile",
-    "SpawnPromptDefaults",
     "build_report_instruction",
     "compose_run_prompt",
     "compose_run_prompt_text",
@@ -354,7 +305,6 @@ __all__ = [
     "dedupe_skill_names",
     "load_skill_contents",
     "render_file_template",
-    "resolve_run_defaults",
     "sanitize_prior_output",
     "strip_stale_report_paths",
 ]

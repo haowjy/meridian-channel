@@ -15,11 +15,10 @@ from meridian.lib.launch.prompt import (
     compose_run_prompt_text,
     compose_skill_injections,
     dedupe_skill_names,
-    resolve_run_defaults,
 )
 from meridian.lib.launch.reference import load_reference_files, parse_template_assignments
 from meridian.lib.launch.resolve import (
-    load_agent_profile_with_fallback,
+    resolve_policies,
     resolve_skills_from_profile,
 )
 from meridian.lib.safety.permissions import (
@@ -200,30 +199,31 @@ def build_create_payload(
             plan=bootstrap_plan,
         )
 
-    profile = load_agent_profile_with_fallback(
+    policies = resolve_policies(
         repo_root=runtime_view.repo_root,
+        requested_model=payload.model,
+        requested_harness=None,
         requested_agent=payload.agent,
-        configured_default=runtime_view.config.default_agent,
+        config=runtime_view.config,
+        harness_registry=runtime_view.harness_registry,
+        configured_default_agent=runtime_view.config.default_agent,
+        configured_default_harness=runtime_view.config.default_harness,
+        skills_readonly=payload.dry_run,
     )
-
-    defaults = resolve_run_defaults(
-        payload.model,
-        profile=profile,
-        default_model=runtime_view.config.default_model,
-    )
+    profile = policies.profile
 
     # Merge profile skills with ad-hoc CLI --skills entries, deduplicating.
-    merged_skill_names = dedupe_skill_names((*defaults.skills, *payload.skills))
-
-    resolved_skills = resolve_skills_from_profile(
-        profile_skills=merged_skill_names,
-        repo_root=runtime_view.repo_root,
-        readonly=payload.dry_run,
-    )
-    harness, route_warning = runtime_view.harness_registry.route(
-        defaults.model,
-        repo_root=runtime_view.repo_root,
-    )
+    merged_skill_names = dedupe_skill_names((*policies.resolved_skills.skill_names, *payload.skills))
+    if payload.skills:
+        resolved_skills = resolve_skills_from_profile(
+            profile_skills=merged_skill_names,
+            repo_root=runtime_view.repo_root,
+            readonly=payload.dry_run,
+        )
+    else:
+        resolved_skills = policies.resolved_skills
+    harness = policies.adapter
+    route_warning = None
     reference_mode = harness.capabilities.reference_input_mode
     prompt_policy = harness.run_prompt_policy()
     use_reference_paths = reference_mode == "paths"
@@ -242,13 +242,15 @@ def build_create_payload(
         if profile is not None and str(harness.id) == "claude"
         else ""
     )
-    agent_for_params = defaults.agent_name
+    agent_for_params = profile.name if profile is not None else None
 
     composed_prompt = compose_run_prompt_text(
         skills=resolved_skills.loaded_skills if prompt_policy.include_skills else (),
         references=loaded_references,
         user_prompt=payload.prompt,
-        agent_body=defaults.agent_body if prompt_policy.include_agent_body else "",
+        agent_body=(profile.body.strip() if profile is not None else "")
+        if prompt_policy.include_agent_body
+        else "",
         template_variables=parsed_template_vars,
         reference_mode=reference_mode,
     )
@@ -300,7 +302,7 @@ def build_create_payload(
         harness.build_command(
             SpawnParams(
                 prompt=composed_prompt,
-                model=ModelId(defaults.model),
+                model=ModelId(policies.model) if policies.model else None,
                 skills=resolved_skills.skill_names,
                 agent=agent_for_params,
                 adhoc_agent_json=adhoc_agent_json,
@@ -328,7 +330,7 @@ def build_create_payload(
     )
 
     return PreparedSpawnPlan(
-        model=defaults.model,
+        model=policies.model,
         harness_id=str(harness.id),
         warning=warning,
         prompt=composed_prompt,

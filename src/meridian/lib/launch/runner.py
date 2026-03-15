@@ -521,7 +521,7 @@ async def execute_with_finalization(
     retry_backoff_seconds = plan.execution.retry_backoff_secs
     run_params = SpawnParams(
         prompt=run.prompt,
-        model=run.model,
+        model=run.model if str(run.model).strip() else None,
         skills=plan.skills,
         agent=plan.agent_name,
         adhoc_agent_json=plan.adhoc_agent_json,

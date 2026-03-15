@@ -11,8 +11,6 @@ from .command import (
 )
 from .process import (
     ProcessOutcome,
-    active_primary_lock_path,
-    cleanup_orphaned_locks,
     run_harness_process,
 )
 from .plan import (
@@ -20,10 +18,11 @@ from .plan import (
     resolve_primary_launch_plan,
 )
 from .resolve import (
+    ResolvedPolicies,
     ResolvedSkills,
     load_agent_profile_with_fallback,
     resolve_harness,
-    resolve_primary_session_metadata,
+    resolve_policies,
     resolve_skills_from_profile,
 )
 from .types import LaunchRequest, LaunchResult, PrimarySessionMetadata, build_primary_prompt
@@ -47,7 +46,6 @@ def launch_primary(
         return LaunchResult(
             command=plan.command,
             exit_code=0,
-            lock_path=plan.lock_path,
             continue_ref=None,
         )
 
@@ -57,7 +55,6 @@ def launch_primary(
     return LaunchResult(
         command=outcome.command,
         exit_code=outcome.exit_code,
-        lock_path=plan.lock_path,
         continue_ref=continue_ref,
     )
 
@@ -68,18 +65,17 @@ __all__ = [
     "ResolvedPrimaryLaunchPlan",
     "PrimarySessionMetadata",
     "ProcessOutcome",
+    "ResolvedPolicies",
     "ResolvedSkills",
-    "active_primary_lock_path",
     "build_harness_command",
     "build_launch_env",
     "build_primary_prompt",
-    "cleanup_orphaned_locks",
     "launch_primary",
     "load_agent_profile_with_fallback",
     "normalize_system_prompt_passthrough_args",
     "resolve_harness",
+    "resolve_policies",
     "resolve_primary_launch_plan",
-    "resolve_primary_session_metadata",
     "resolve_skills_from_profile",
     "run_harness_process",
 ]

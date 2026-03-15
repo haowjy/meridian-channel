@@ -1,7 +1,7 @@
 """Shared launch-time resolution helpers for launch orchestration."""
 
 
-import logging
+from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
@@ -11,13 +11,10 @@ from meridian.lib.catalog.models import route_model
 from meridian.lib.config.settings import MeridianConfig
 from meridian.lib.catalog.skill import SkillRegistry
 from meridian.lib.core.domain import SkillContent
+from meridian.lib.harness.adapter import SubprocessHarness
 from meridian.lib.harness.registry import HarnessRegistry
-from .prompt import load_skill_contents, resolve_run_defaults
+from .prompt import dedupe_skill_names, load_skill_contents
 from meridian.lib.core.types import HarnessId, ModelId
-
-from .types import LaunchRequest, PrimarySessionMetadata
-
-logger = logging.getLogger(__name__)
 
 
 def load_agent_profile_with_fallback(
@@ -58,6 +55,15 @@ class ResolvedSkills(BaseModel):
     loaded_skills: tuple[SkillContent, ...]
     skill_sources: dict[str, Path]
     missing_skills: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ResolvedPolicies:
+    profile: AgentProfile | None
+    model: str
+    harness: HarnessId
+    adapter: SubprocessHarness
+    resolved_skills: ResolvedSkills
 
 
 def resolve_skills_from_profile(
@@ -142,75 +148,107 @@ def resolve_harness(
     return override_harness
 
 
-def resolve_primary_session_metadata(
+def resolve_policies(
     *,
     repo_root: Path,
-    request: LaunchRequest,
+    requested_model: str,
+    requested_harness: str | None,
+    requested_agent: str | None,
     config: MeridianConfig,
     harness_registry: HarnessRegistry,
-) -> PrimarySessionMetadata:
+    configured_default_agent: str | None = None,
+    configured_default_harness: str = "claude",
+    skills_readonly: bool = True,
+) -> ResolvedPolicies:
     profile = load_agent_profile_with_fallback(
         repo_root=repo_root,
-        requested_agent=request.agent,
-        configured_default=config.primary_agent,
+        requested_agent=requested_agent,
+        configured_default=configured_default_agent or "",
     )
 
-    default_model = config.harness.claude
-    requested_model = request.model
-    if request.harness is not None and request.harness.strip():
-        override_default = config.default_model_for_harness(request.harness)
-        if override_default:
-            default_model = override_default
-            if not requested_model.strip():
-                requested_model = override_default
+    resolved_model = requested_model.strip()
+    model_independently_specified = bool(resolved_model)
+    if not resolved_model and profile is not None and profile.model:
+        resolved_model = profile.model.strip()
+        model_independently_specified = bool(resolved_model)
 
-    defaults = resolve_run_defaults(
-        requested_model,
-        profile=profile,
-        default_model=default_model,
-    )
-    model = ModelId(defaults.model)
-    harness = resolve_harness(
-        model=model,
-        harness_override=request.harness,
-        harness_registry=harness_registry,
-        repo_root=repo_root,
-    )
+    explicit_harness = (requested_harness or "").strip()
+    profile_harness = ""
+    if profile is not None and profile.harness:
+        profile_harness = profile.harness.strip()
 
-    resolved_skills = resolve_skills_from_profile(
-        profile_skills=defaults.skills,
-        repo_root=repo_root,
-        readonly=True,
-    )
-    if resolved_skills.missing_skills:
-        logger.warning(
-            "Skipped unavailable skills for primary agent: %s",
-            ", ".join(resolved_skills.missing_skills),
+    if explicit_harness:
+        harness_id = HarnessId(explicit_harness)
+    elif profile_harness:
+        harness_id = HarnessId(profile_harness)
+    elif resolved_model:
+        harness_id = resolve_harness(
+            model=ModelId(resolved_model),
+            harness_override=None,
+            harness_registry=harness_registry,
+            repo_root=repo_root,
         )
-    skill_names = resolved_skills.skill_names
-    skill_paths = tuple(
-        Path(skill.path).expanduser().resolve().as_posix()
-        for skill in resolved_skills.loaded_skills
+    else:
+        harness_id = HarnessId(configured_default_harness or "claude")
+    harness_independently_specified = bool(explicit_harness or profile_harness)
+
+    try:
+        adapter = harness_registry.get_subprocess_harness(harness_id)
+    except (KeyError, TypeError) as exc:
+        supported = ", ".join(str(harness) for harness in harness_registry.ids())
+        raise ValueError(
+            f"Unknown or unsupported harness '{harness_id}'. "
+            f"Available harnesses: {supported}"
+        ) from exc
+
+    if not resolved_model:
+        harness_default = config.default_model_for_harness(str(harness_id))
+        if harness_default:
+            resolved_model = harness_default
+    if not resolved_model and config.default_model:
+        resolved_model = config.default_model
+        model_independently_specified = bool(resolved_model)
+
+    if resolved_model:
+        try:
+            from meridian.lib.catalog.models import resolve_model as resolve_model_entry
+
+            catalog_entry = resolve_model_entry(resolved_model, repo_root=repo_root)
+            resolved_model = str(catalog_entry.model_id)
+        except ValueError:
+            pass
+
+    if resolved_model and harness_independently_specified and model_independently_specified:
+        resolve_harness(
+            model=ModelId(resolved_model),
+            harness_override=str(harness_id),
+            harness_registry=harness_registry,
+            repo_root=repo_root,
+        )
+
+    profile_skills: tuple[str, ...] = ()
+    if profile is not None:
+        profile_skills = dedupe_skill_names(profile.skills)
+    resolved_skills = resolve_skills_from_profile(
+        profile_skills=profile_skills,
+        repo_root=repo_root,
+        readonly=skills_readonly,
     )
 
-    agent_path = ""
-    if profile is not None and profile.path.is_absolute() and profile.path.exists():
-        agent_path = profile.path.resolve().as_posix()
-
-    return PrimarySessionMetadata(
-        harness=str(harness),
-        model=str(model),
-        agent=profile.name if profile is not None else "",
-        agent_path=agent_path,
-        skills=skill_names,
-        skill_paths=skill_paths,
+    return ResolvedPolicies(
+        profile=profile,
+        model=resolved_model,
+        harness=harness_id,
+        adapter=adapter,
+        resolved_skills=resolved_skills,
     )
 
 
 __all__ = [
+    "ResolvedPolicies",
     "ResolvedSkills",
     "load_agent_profile_with_fallback",
     "resolve_harness",
-    "resolve_primary_session_metadata",
+    "resolve_policies",
     "resolve_skills_from_profile",
 ]

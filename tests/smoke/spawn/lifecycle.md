@@ -19,7 +19,7 @@ cat > "$SMOKE_SOURCE/agents/reviewer.md" <<'EOF'
 You are a tiny smoke-test reviewer. Reply with one short sentence.
 EOF
 cd "$REPO_ROOT"
-uv run meridian install "$SMOKE_SOURCE" --name lifecycle-smoke >/tmp/meridian-lifecycle-install.txt 2>&1 && \
+uv run meridian sources install "$SMOKE_SOURCE" --name lifecycle-smoke >/tmp/meridian-lifecycle-install.txt 2>&1 && \
 uv run meridian spawn -h >/dev/null 2>&1 && echo "PASS: lifecycle setup complete" || echo "FAIL: lifecycle setup failed"
 ```
 
@@ -74,8 +74,8 @@ print(doc.get("spawn_id") or doc.get("id"))
 PY
 )" && \
 printf '# Smoke Report\n\nLifecycle smoke test.\n' | \
-uv run meridian report create --spawn "$SPAWN_ID" --stdin >/tmp/meridian-lifecycle-report.txt && \
-uv run meridian report show --spawn "$SPAWN_ID" >/tmp/meridian-lifecycle-report-show.txt && \
+uv run meridian spawn report create --spawn "$SPAWN_ID" --stdin >/tmp/meridian-lifecycle-report.txt && \
+uv run meridian spawn report show --spawn "$SPAWN_ID" >/tmp/meridian-lifecycle-report-show.txt && \
 grep -q 'report.create' /tmp/meridian-lifecycle-report.txt && \
 grep -q 'Smoke Report' /tmp/meridian-lifecycle-report-show.txt && \
 echo "PASS: report create and show succeeded" || echo "FAIL: report create/show output was incomplete"

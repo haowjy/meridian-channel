@@ -94,8 +94,8 @@ def _install(
         if existing_source.url != source_config.url or existing_source.path != source_config.path:
             raise ValueError(
                 f"Managed source '{source_config.name}' already exists with a different locator. "
-                f"Use 'meridian update --ref <ref>' to change the ref, or "
-                f"'meridian uninstall --source {source_config.name}' to remove it first."
+                f"Use 'meridian sources update --ref <ref>' to change the ref, or "
+                f"'meridian sources uninstall --source {source_config.name}' to remove it first."
             )
         # Validate compatible ref
         if (
@@ -105,7 +105,7 @@ def _install(
         ):
             raise ValueError(
                 f"Managed source '{source_config.name}' already exists with ref "
-                f"'{existing_source.ref}'. Use 'meridian update --ref <ref>' to change it."
+                f"'{existing_source.ref}'. Use 'meridian sources update --ref <ref>' to change it."
             )
         # Merge agents/skills (union)
         merged_source = _merge_source_config(existing_source, source_config)
@@ -325,7 +325,7 @@ def _uninstall(
     emit(_install_result_payload(InstallResult(actions=tuple(actions), errors=())))
 
 
-def _list_cmd(emit: Emitter) -> None:
+def _list_sources(emit: Emitter) -> None:
     repo_root = resolve_repo_root()
     state_paths = resolve_state_paths(repo_root)
     manifest = load_source_manifest(
@@ -368,16 +368,15 @@ def _status(emit: Emitter) -> None:
     emit(install_status(repo_root, lock))
 
 
-def register_install_commands(app: Any, emit: Emitter) -> None:
-    """Register top-level managed install commands."""
+def register_sources_commands(app: Any, emit: Emitter) -> None:
+    """Register sources subcommand group."""
 
+    app.default(partial(_list_sources, emit))
+    app.command(partial(_list_sources, emit), name="list", help="Show installed sources and their items.")
     app.command(partial(_install, emit), name="install", help="Install sources and items.")
     app.command(partial(_uninstall, emit), name="uninstall", help="Remove items or sources.")
     app.command(partial(_update, emit), name="update", help="Re-resolve refs and install latest.")
-    app.command(partial(_list_cmd, emit), name="list", help="Show installed items by source.")
     app.command(partial(_status, emit), name="status", help="Compare lock vs local files.")
-    # Backward-compat aliases (hidden — not shown in help)
-    app.command(partial(_remove, emit), name="remove", help="[deprecated] Use 'uninstall --source'.")
 
 
 def _run_install_reconcile(

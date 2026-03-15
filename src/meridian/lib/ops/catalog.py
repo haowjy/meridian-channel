@@ -7,12 +7,9 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, model_serializer
 
-from meridian.lib.catalog.models import AliasEntry, load_merged_aliases, resolve_model
+from meridian.lib.catalog.models import AliasEntry, load_merged_aliases
 from meridian.lib.catalog.models import DiscoveredModel, load_discovered_models, refresh_models_cache
 from meridian.lib.catalog.models import route_model
-from meridian.lib.catalog.agent import scan_agent_profiles
-from meridian.lib.catalog.skill import SkillRegistry
-from meridian.lib.core.domain import SkillContent, SkillManifest
 from meridian.lib.core.util import FormatContext
 from meridian.lib.core.types import HarnessId, ModelId
 from meridian.lib.ops.runtime import async_from_sync
@@ -23,13 +20,6 @@ class ModelsListInput(BaseModel):
 
     repo_root: str | None = None
     all: bool = False
-
-
-class ModelsShowInput(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    model: str = ""
-    repo_root: str | None = None
 
 
 class ModelsRefreshInput(BaseModel):
@@ -162,50 +152,10 @@ class ModelsRefreshOutput(BaseModel):
         return f"Refreshed models.dev cache ({self.refreshed} models)."
 
 
-class SkillsListInput(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    repo_root: str | None = None
-
-
-class SkillsSearchInput(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    query: str = ""
-    repo_root: str | None = None
-
-
-class SkillsLoadInput(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    name: str = ""
-    repo_root: str | None = None
-
-
-class SkillsQueryOutput(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    skills: tuple[SkillManifest, ...]
-
-    def format_text(self, ctx: FormatContext | None = None) -> str:
-        """One skill per line: name + description for text output mode."""
-        if not self.skills:
-            return "(no skills)"
-        from meridian.cli.format_helpers import tabular
-
-        return tabular(
-            [[skill.name, _truncate(skill.description, max_len=60)] for skill in self.skills]
-        )
-
-
 def _repo_root(repo_root: str | None) -> Path | None:
     if repo_root is None:
         return None
     return Path(repo_root).expanduser().resolve()
-
-
-def _registry(repo_root: str | None, *, readonly: bool = False) -> SkillRegistry:
-    return SkillRegistry(repo_root=_repo_root(repo_root), readonly=readonly)
 
 
 def _format_float(value: float | None) -> str | None:
@@ -227,12 +177,6 @@ def _format_alias_detail(alias: AliasEntry) -> str:
     if alias.strengths:
         details.append(f"strengths={alias.strengths}")
     return " ".join(details)
-
-
-def _truncate(text: str, *, max_len: int) -> str:
-    if len(text) <= max_len:
-        return text
-    return f"{text[: max_len - 3].rstrip()}..."
 
 
 def _build_catalog_model(
@@ -377,137 +321,11 @@ def models_list_sync(payload: ModelsListInput) -> ModelsListOutput:
     return ModelsListOutput(models=tuple(merged_models))
 
 
-def models_show_sync(payload: ModelsShowInput) -> CatalogModel:
-    model_name = payload.model.strip()
-    if not model_name:
-        raise ValueError("Model identifier must not be empty.")
-
-    root = _repo_root(payload.repo_root)
-    aliases = load_merged_aliases(repo_root=root)
-    discovered = load_discovered_models()
-    discovered_by_model_id = {model.id: model for model in discovered}
-
-    by_alias = {entry.alias: entry for entry in aliases}
-    resolved_alias = by_alias.get(model_name)
-    if resolved_alias is not None:
-        target_model_id = str(resolved_alias.model_id)
-        model_aliases = [entry for entry in aliases if str(entry.model_id) == target_model_id]
-        return _build_catalog_model(
-            model_id=target_model_id,
-            discovered=discovered_by_model_id.get(target_model_id),
-            aliases=model_aliases,
-        )
-
-    discovered_match = discovered_by_model_id.get(model_name)
-    if discovered_match is not None:
-        model_aliases = [entry for entry in aliases if str(entry.model_id) == model_name]
-        return _build_catalog_model(
-            model_id=model_name,
-            discovered=discovered_match,
-            aliases=model_aliases,
-        )
-
-    resolved = resolve_model(model_name, repo_root=root)
-    target_model_id = str(resolved.model_id)
-    model_aliases = [entry for entry in aliases if str(entry.model_id) == target_model_id]
-    return _build_catalog_model(
-        model_id=target_model_id,
-        discovered=discovered_by_model_id.get(target_model_id),
-        aliases=model_aliases,
-    )
-
-
 def models_refresh_sync(payload: ModelsRefreshInput) -> ModelsRefreshOutput:
     _ = payload
     refreshed = refresh_models_cache()
     return ModelsRefreshOutput(refreshed=len(refreshed))
 
 
-def skills_list_sync(payload: SkillsListInput) -> SkillsQueryOutput:
-    registry = _registry(payload.repo_root, readonly=True)
-    return SkillsQueryOutput(skills=tuple(registry.list_skills()))
-
-
-def skills_search_sync(payload: SkillsSearchInput) -> SkillsQueryOutput:
-    registry = _registry(payload.repo_root, readonly=True)
-    return SkillsQueryOutput(skills=tuple(registry.search(payload.query)))
-
-
-def skills_load_sync(payload: SkillsLoadInput) -> SkillContent:
-    name = payload.name.strip()
-    if not name:
-        raise ValueError("Skill name must not be empty.")
-    registry = _registry(payload.repo_root, readonly=True)
-    return registry.show(name)
-
-
 models_list = async_from_sync(models_list_sync)
-models_show = async_from_sync(models_show_sync)
 models_refresh = async_from_sync(models_refresh_sync)
-skills_list = async_from_sync(skills_list_sync)
-skills_search = async_from_sync(skills_search_sync)
-skills_load = async_from_sync(skills_load_sync)
-
-
-# ---------------------------------------------------------------------------
-# Agents catalog
-# ---------------------------------------------------------------------------
-
-
-class AgentsListInput(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    repo_root: str | None = None
-
-
-class AgentListEntry(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    name: str
-    description: str
-    model: str | None
-    skills: tuple[str, ...]
-    sandbox: str | None
-
-
-class AgentsListOutput(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    agents: tuple[AgentListEntry, ...]
-
-    def format_text(self, ctx: FormatContext | None = None) -> str:
-        """One agent per line: name, model, description for text output mode."""
-        if not self.agents:
-            return "(no agents)"
-        from meridian.cli.format_helpers import tabular
-
-        return tabular(
-            [
-                [
-                    agent.name,
-                    agent.model or "-",
-                    agent.description,
-                ]
-                for agent in self.agents
-            ]
-        )
-
-
-def agents_list_sync(payload: AgentsListInput) -> AgentsListOutput:
-    root = _repo_root(payload.repo_root)
-    profiles = scan_agent_profiles(repo_root=root)
-
-    entries = tuple(
-        AgentListEntry(
-            name=profile.name,
-            description=profile.description,
-            model=profile.model,
-            skills=profile.skills,
-            sandbox=profile.sandbox,
-        )
-        for profile in sorted(profiles, key=lambda p: p.name)
-    )
-    return AgentsListOutput(agents=entries)
-
-
-agents_list = async_from_sync(agents_list_sync)

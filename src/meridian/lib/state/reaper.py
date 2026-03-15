@@ -7,7 +7,6 @@ orphaned spawns are repaired transparently — no separate "gc" command needed.
 
 from __future__ import annotations
 
-import fcntl
 import os
 import time
 from dataclasses import dataclass
@@ -143,20 +142,6 @@ def _recent_spawn_activity(spawn_dir: Path, *, now: float) -> bool:
     return False
 
 
-def _primary_launch_lock_is_held(state_root: Path) -> bool:
-    lock_path = state_root / "active-primary.lock"
-    if not lock_path.is_file():
-        return False
-    try:
-        with lock_path.open("a+", encoding="utf-8") as handle:
-            try:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                return True
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-    except OSError:
-        return False
-    return False
 
 
 def _startup_grace_elapsed(record: SpawnRecord, spawn_dir: Path, *, now: float) -> bool:
@@ -422,22 +407,13 @@ def _reconcile_background_spawn(state_root: Path, inspection: _SpawnInspection) 
 
 def _reconcile_foreground_spawn(state_root: Path, inspection: _SpawnInspection) -> SpawnRecord:
     record = inspection.record
-    primary_launch_lock_held = (
-        record.kind == "primary"
-        and record.status == "queued"
-        and _primary_launch_lock_is_held(state_root)
-    )
     if not inspection.spawn_dir_exists:
         if inspection.grace_elapsed:
-            if primary_launch_lock_held:
-                return record
             return _finalize_failed(state_root, record, "missing_spawn_dir")
         return record
 
     if inspection.harness_pid is None:
         if inspection.grace_elapsed:
-            if primary_launch_lock_held:
-                return record
             return _finalize_failed(state_root, record, "missing_worker_pid")
         return record
 
@@ -456,8 +432,6 @@ def _reconcile_foreground_spawn(state_root: Path, inspection: _SpawnInspection) 
         return record
 
     if not inspection.harness_alive and inspection.grace_elapsed:
-        if primary_launch_lock_held:
-            return record
         return _finalize_failed(state_root, record, "orphan_run")
 
     # Harness alive — runner will finalize. Just sync PID metadata.

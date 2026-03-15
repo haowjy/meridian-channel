@@ -19,7 +19,7 @@ cat > "$SMOKE_SOURCE/agents/reviewer.md" <<'EOF'
 Error-path smoke reviewer.
 EOF
 cd "$REPO_ROOT"
-uv run meridian install "$SMOKE_SOURCE" --name error-smoke >/tmp/meridian-spawn-errors-install.txt 2>&1 && \
+uv run meridian sources install "$SMOKE_SOURCE" --name error-smoke >/tmp/meridian-spawn-errors-install.txt 2>&1 && \
 test -d "$SMOKE_REPO/.git" && echo "PASS: spawn error-path repo ready" || echo "FAIL: spawn error-path repo setup failed"
 ```
 

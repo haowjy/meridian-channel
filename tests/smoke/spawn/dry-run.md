@@ -20,7 +20,7 @@ Dry-run smoke reviewer.
 EOF
 cd "$REPO_ROOT"
 printf '# smoke ref\n' > /tmp/meridian-dryrun-ref.md
-uv run meridian install "$SMOKE_SOURCE" --name dryrun-smoke >/tmp/meridian-dryrun-install.txt 2>&1 && \
+uv run meridian sources install "$SMOKE_SOURCE" --name dryrun-smoke >/tmp/meridian-dryrun-install.txt 2>&1 && \
 test -f /tmp/meridian-dryrun-ref.md && echo "PASS: dry-run setup complete" || echo "FAIL: dry-run setup failed"
 ```
 
@@ -33,7 +33,7 @@ import json
 doc = json.load(open("/tmp/meridian-dryrun-basic.json"))
 assert doc["status"] == "dry-run"
 assert "Write hello world" in doc["composed_prompt"]
-assert doc["model"]
+assert "model" in doc
 print("PASS: basic dry-run succeeded")
 PY
 ```

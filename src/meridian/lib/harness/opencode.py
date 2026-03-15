@@ -48,6 +48,8 @@ def _strip_opencode_prefix(model: str) -> str:
 
 
 def _opencode_model_transform(value: object, args: list[str]) -> None:
+    if value is None:
+        return
     args.extend(["--model", _strip_opencode_prefix(str(value))])
 
 

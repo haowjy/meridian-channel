@@ -6,7 +6,6 @@ from typing import Any, Generic, Literal, Self, TypeVar
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from meridian.lib.core.domain import SkillContent
 from meridian.lib.ops.config import (
     ConfigGetInput,
     ConfigGetOutput,
@@ -31,32 +30,14 @@ from meridian.lib.ops.config import (
 )
 from meridian.lib.ops.diag import DoctorInput, DoctorOutput, doctor, doctor_sync
 from meridian.lib.ops.catalog import (
-    AgentsListInput,
-    AgentsListOutput,
-    CatalogModel,
     ModelsListInput,
     ModelsListOutput,
     ModelsRefreshInput,
     ModelsRefreshOutput,
-    ModelsShowInput,
-    SkillsListInput,
-    SkillsLoadInput,
-    SkillsQueryOutput,
-    SkillsSearchInput,
-    agents_list,
-    agents_list_sync,
     models_list,
     models_list_sync,
     models_refresh,
     models_refresh_sync,
-    models_show,
-    models_show_sync,
-    skills_list,
-    skills_list_sync,
-    skills_load,
-    skills_load_sync,
-    skills_search,
-    skills_search_sync,
 )
 from meridian.lib.ops.report import (
     ReportCreateInput,
@@ -292,17 +273,6 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         mcp_name="doctor",
     ),
     _spec(
-        name="agents.list",
-        description="List available agent profiles.",
-        handler=agents_list,
-        sync_handler=agents_list_sync,
-        input_type=AgentsListInput,
-        output_type=AgentsListOutput,
-        cli_group="agents",
-        cli_name="list",
-        mcp_name="agents_list",
-    ),
-    _spec(
         name="models.list",
         description="List catalog models with routing guidance.",
         handler=models_list,
@@ -323,17 +293,6 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="models",
         cli_name="refresh",
         mcp_name="models_refresh",
-    ),
-    _spec(
-        name="models.show",
-        description="Show one model by id or alias.",
-        handler=models_show,
-        sync_handler=models_show_sync,
-        input_type=ModelsShowInput,
-        output_type=CatalogModel,
-        cli_group="models",
-        cli_name="show",
-        mcp_name="models_show",
     ),
     _spec(
         name="report.create",
@@ -367,40 +326,6 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="report",
         cli_name="show",
         mcp_name="report_show",
-    ),
-    _spec(
-        name="skills.list",
-        description="List all indexed skills.",
-        handler=skills_list,
-        sync_handler=skills_list_sync,
-        input_type=SkillsListInput,
-        output_type=SkillsQueryOutput,
-        cli_group="skills",
-        cli_name="list",
-        mcp_name="skills_list",
-    ),
-    _spec(
-        name="skills.search",
-        description="Search skills by keyword/tag.",
-        handler=skills_search,
-        sync_handler=skills_search_sync,
-        input_type=SkillsSearchInput,
-        output_type=SkillsQueryOutput,
-        cli_group="skills",
-        cli_name="search",
-        mcp_name="skills_search",
-        surfaces=frozenset({"cli"}),
-    ),
-    _spec(
-        name="skills.show",
-        description="Load full SKILL.md content for a skill.",
-        handler=skills_load,
-        sync_handler=skills_load_sync,
-        input_type=SkillsLoadInput,
-        output_type=SkillContent,
-        cli_group="skills",
-        cli_name="show",
-        mcp_name="skills_show",
     ),
     _spec(
         name="spawn.cancel",

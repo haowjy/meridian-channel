@@ -19,7 +19,7 @@ cat > "$SMOKE_SOURCE/agents/reviewer.md" <<'EOF'
 Format smoke reviewer.
 EOF
 cd "$REPO_ROOT"
-uv run meridian install "$SMOKE_SOURCE" --name format-smoke >/tmp/meridian-formats-install.txt 2>&1 && \
+uv run meridian sources install "$SMOKE_SOURCE" --name format-smoke >/tmp/meridian-formats-install.txt 2>&1 && \
 test -d "$SMOKE_REPO/.git" && echo "PASS: output-format repo ready" || echo "FAIL: output-format repo setup failed"
 ```
 

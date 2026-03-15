@@ -32,6 +32,7 @@ class AgentProfile(BaseModel):
     name: str
     description: str
     model: str | None
+    harness: str | None = None
     variant: str | None
     skills: tuple[str, ...]
     allowed_tools: tuple[str, ...]
@@ -80,6 +81,7 @@ def parse_agent_profile(path: Path) -> AgentProfile:
     name_value = frontmatter.get("name")
     description_value = frontmatter.get("description")
     model_value = frontmatter.get("model")
+    harness_value = frontmatter.get("harness")
     variant_value = frontmatter.get("variant")
     sandbox_value = frontmatter.get("sandbox")
 
@@ -96,6 +98,7 @@ def parse_agent_profile(path: Path) -> AgentProfile:
         name=profile_name,
         description=str(description_value).strip() if description_value is not None else "",
         model=str(model_value).strip() if model_value is not None else None,
+        harness=str(harness_value).strip() if harness_value is not None else None,
         variant=str(variant_value).strip() if variant_value is not None else None,
         skills=_normalize_string_list(frontmatter.get("skills")),
         allowed_tools=_normalize_string_list(frontmatter.get("allowed-tools")),

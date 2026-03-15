@@ -1,8 +1,6 @@
 """Shared types for the launch pipeline."""
 
 
-from pathlib import Path
-
 from pydantic import BaseModel, ConfigDict, Field
 
 _CONTINUATION_GUIDANCE = (
@@ -38,7 +36,6 @@ class LaunchResult(BaseModel):
 
     command: tuple[str, ...]
     exit_code: int
-    lock_path: Path
     continue_ref: str | None = None
 
 

@@ -32,9 +32,9 @@ test -d "$SMOKE_REPO/.git" && echo "PASS: quick-sanity repo ready" || echo "FAIL
 ```bash
 HELP_TEXT="$(uv run meridian --help 2>&1)" && \
 printf '%s\n' "$HELP_TEXT" | grep -q 'spawn' && \
-printf '%s\n' "$HELP_TEXT" | grep -q 'report' && \
+printf '%s\n' "$HELP_TEXT" | grep -q 'sources' && \
 printf '%s\n' "$HELP_TEXT" | grep -q 'models' && \
-printf '%s\n' "$HELP_TEXT" | grep -q 'skills' && \
+printf '%s\n' "$HELP_TEXT" | grep -q 'work' && \
 echo "PASS: help exposes core commands" || echo "FAIL: help is missing core commands"
 ```
 
@@ -62,13 +62,13 @@ grep -Eq 'MODEL|gpt-|claude-|gemini-' /tmp/meridian-qs-models.txt && \
 echo "PASS: models list returned catalog data" || echo "FAIL: models list output was unexpected"
 ```
 
-### QS-5. Skills list [CRITICAL]
+### QS-5. Sources list [CRITICAL]
 
 ```bash
-uv run meridian install "$SMOKE_SOURCE" --name quick-sanity >/tmp/meridian-qs-install.txt 2>&1 && \
-uv run meridian --json skills list >/tmp/meridian-qs-skills.txt && \
-grep -q 'demo' /tmp/meridian-qs-skills.txt && \
-echo "PASS: managed install and skills list returned repo-local entries" || echo "FAIL: managed install or skills list output was unexpected"
+uv run meridian sources install "$SMOKE_SOURCE" --name quick-sanity >/tmp/meridian-qs-install.txt 2>&1 && \
+uv run meridian --json sources list >/tmp/meridian-qs-sources.txt && \
+grep -q 'quick-sanity' /tmp/meridian-qs-sources.txt && \
+echo "PASS: managed install and sources list returned repo-local entries" || echo "FAIL: managed install or sources list output was unexpected"
 ```
 
 ### QS-6. Doctor [CRITICAL]

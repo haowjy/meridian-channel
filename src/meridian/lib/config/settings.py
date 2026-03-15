@@ -144,6 +144,8 @@ def _parse_file_scalar(*, field_name: str, raw_value: object, source: str) -> ob
             f"Invalid value for '{source}': expected str, got "
             f"{type(raw_value).__name__} ({raw_value!r})."
         )
+    if field_name == "default_model":
+        return raw_value.strip()
     return _normalize_required_string(raw_value, source=source)
 
 
@@ -342,7 +344,10 @@ def _normalize_harness_table(
                 f"Invalid value for '{source}.{key}': expected str, got "
                 f"{type(value).__name__} ({value!r})."
             )
-        normalized = _normalize_required_string(value, source=f"{source}.{key}")
+        normalized = value.strip()
+        if not normalized:
+            values[key] = normalized
+            continue
         values[key] = _normalize_model_identifier(normalized, repo_root=repo_root)
 
     return values
@@ -362,6 +367,7 @@ def _normalize_toml_payload(
             "primary_agent": "primary_agent",
             "agent": "default_agent",
             "model": "default_model",
+            "harness": "default_harness",
         },
         "timeouts": {
             "kill_grace_minutes": "kill_grace_minutes",
@@ -381,6 +387,7 @@ def _normalize_toml_payload(
         "primary_agent": "primary_agent",
         "agent": "default_agent",
         "model": "default_model",
+        "default_harness": "default_harness",
     }
 
     normalized: dict[str, object] = {}
@@ -463,6 +470,7 @@ def _env_alias_overrides(repo_root: Path) -> dict[str, object]:
         ("MERIDIAN_PRIMARY_AGENT", ("primary_agent",), "str"),
         ("MERIDIAN_DEFAULT_AGENT", ("default_agent",), "str"),
         ("MERIDIAN_DEFAULT_MODEL", ("default_model",), "str"),
+        ("MERIDIAN_DEFAULT_HARNESS", ("default_harness",), "str"),
         ("MERIDIAN_HARNESS_MODEL_CLAUDE", ("harness", "claude"), "str"),
         ("MERIDIAN_HARNESS_MODEL_CODEX", ("harness", "codex"), "str"),
         ("MERIDIAN_HARNESS_MODEL_OPENCODE", ("harness", "opencode"), "str"),
@@ -588,14 +596,16 @@ class HarnessConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="ignore")
 
-    claude: str = "claude-opus-4-6"
-    codex: str = "gpt-5.3-codex"
-    opencode: str = "gemini-3.1-pro"
+    claude: str = ""
+    codex: str = ""
+    opencode: str = ""
 
     @field_validator("claude", "codex", "opencode")
     @classmethod
     def _normalize_models(cls, value: str) -> str:
-        normalized = _normalize_required_string(value, source="harness")
+        normalized = value.strip()
+        if not normalized:
+            return normalized
         return _normalize_model_identifier(normalized, repo_root=_current_repo_root())
 
 
@@ -617,7 +627,8 @@ class MeridianConfig(BaseSettings):
     wait_timeout_minutes: float = 30.0
     primary_agent: str = "__meridian-orchestrator"
     default_agent: str = "__meridian-subagent"
-    default_model: str = "gpt-5.3-codex"
+    default_model: str = ""
+    default_harness: str = "codex"
 
     harness: HarnessConfig = Field(default_factory=HarnessConfig)
     primary: PrimaryConfig = Field(default_factory=PrimaryConfig)
@@ -631,8 +642,15 @@ class MeridianConfig(BaseSettings):
     @field_validator("default_model")
     @classmethod
     def _validate_default_model(cls, value: str) -> str:
-        normalized = _normalize_required_string(value, source="default_model")
+        normalized = value.strip()
+        if not normalized:
+            return normalized
         return _normalize_model_identifier(normalized, repo_root=_current_repo_root())
+
+    @field_validator("default_harness")
+    @classmethod
+    def _validate_default_harness(cls, value: str) -> str:
+        return _normalize_required_string(value, source="defaults")
 
     def default_model_for_harness(self, harness_id: str) -> str | None:
         """Return configured default model for one harness ID."""

@@ -32,16 +32,16 @@ cat > "$SMOKE_SOURCE/skills/meridian-spawn-agent/SKILL.md" <<'EOF'
 Spawn another agent when useful.
 EOF
 cd "$REPO_ROOT"
-uv run meridian install "$SMOKE_SOURCE" --name skill-smoke >/tmp/meridian-skill-install.txt 2>&1 && \
+uv run meridian sources install "$SMOKE_SOURCE" --name skill-smoke >/tmp/meridian-skill-install.txt 2>&1 && \
 test -d "$SMOKE_REPO/.git" && echo "PASS: skill-injection repo ready" || echo "FAIL: skill-injection repo setup failed"
 ```
 
 ### SKILL-1. Inline injection puts skill content in composed prompt [CRITICAL]
 
-The default harness (Codex) inlines skill content directly into the prompt.
+Codex-style inline injection should embed skill content directly into the prompt.
 
 ```bash
-uv run meridian --json spawn -a reviewer -p "do the task" --skills meridian-orchestrate --dry-run > /tmp/meridian-skill-inline.json && \
+uv run meridian --json spawn -a reviewer -p "do the task" --skills meridian-orchestrate -m gpt-5.3-codex --dry-run > /tmp/meridian-skill-inline.json && \
 uv run python - <<'PY'
 import json
 doc = json.load(open("/tmp/meridian-skill-inline.json"))

@@ -251,6 +251,7 @@ app = App(
     name="meridian",
     help=(
         "Multi-agent orchestration across Claude, Codex, and OpenCode.\n\n"
+        "Harness shortcuts: meridian claude, meridian codex, meridian opencode\n\n"
         'Run "meridian spawn -h" for subagent usage.'
     ),
     version=__version__,
@@ -531,6 +532,93 @@ def _run_primary_launch(
             warning=continue_warning,
         )
     )
+
+
+def _register_harness_shortcut_command(harness_name: str) -> None:
+    """Register a harness shortcut command on the main app."""
+
+    @app.command(name=harness_name)
+    def shortcut(
+        *passthrough: Annotated[
+            str,
+            Parameter(
+                help="Harness passthrough arguments (after --).",
+                show=False,
+            ),
+        ],
+        yes: Annotated[
+            bool,
+            Parameter(name="--yes", help="Auto-approve prompts when supported.", show=False),
+        ] = False,
+        no_input: Annotated[
+            bool,
+            Parameter(
+                name="--no-input",
+                help="Disable interactive prompts and fail if input is needed.",
+                show=False,
+            ),
+        ] = False,
+        continue_ref: Annotated[
+            str | None,
+            Parameter(name="--continue", help="Continue a previous session reference."),
+        ] = None,
+        model: Annotated[
+            str,
+            Parameter(name="--model", help="Model id or alias for primary harness."),
+        ] = "",
+        agent: Annotated[
+            str | None,
+            Parameter(name=["--agent", "-a"], help="Agent profile name for the primary agent."),
+        ] = None,
+        work: Annotated[
+            str,
+            Parameter(name="--work", help="Attach the primary session to a work item id."),
+        ] = "",
+        yolo: Annotated[
+            bool,
+            Parameter(
+                name="--yolo",
+                help="Skip all harness safety prompts and sandboxing.",
+            ),
+        ] = False,
+        autocompact: Annotated[
+            int | None,
+            Parameter(name="--autocompact", help="Auto-compact threshold in messages."),
+        ] = None,
+        dry_run: Annotated[
+            bool,
+            Parameter(name="--dry-run", help="Preview launch command without starting harness."),
+        ] = False,
+    ) -> None:
+        """Launch or resume the primary harness."""
+
+        if _GLOBAL_OPTIONS.get() is None:
+            _GLOBAL_OPTIONS.set(
+                GlobalOptions(
+                    output=OutputConfig(format="text"),
+                    config_file=None,
+                    yes=yes,
+                    no_input=no_input,
+                )
+            )
+
+        _run_primary_launch(
+            continue_ref=continue_ref,
+            model=model,
+            harness=harness_name,
+            agent=agent,
+            work=work,
+            yolo=yolo,
+            autocompact=autocompact,
+            dry_run=dry_run,
+            passthrough=passthrough,
+        )
+
+    shortcut.__doc__ = f"Launch the {harness_name} harness directly."
+
+
+for _harness_name in ("claude", "codex", "opencode"):
+    _register_harness_shortcut_command(_harness_name)
 
 
 def _resolve_continue_target(

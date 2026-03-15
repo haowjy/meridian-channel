@@ -3,7 +3,6 @@ import subprocess
 import time
 from pathlib import Path
 
-from meridian.lib.launch.process import active_primary_lock_path, primary_launch_lock
 from meridian.lib.state import reaper
 from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_state_paths
@@ -239,44 +238,6 @@ def test_reconcile_active_spawn_with_report_and_live_foreground_harness_stays_ru
             sleeper.terminate()
             sleeper.wait(timeout=5)
 
-
-def test_reconcile_foreground_primary_queued_stays_queued_while_primary_lock_held(
-    tmp_path: Path,
-) -> None:
-    state_root = resolve_state_paths(tmp_path).root_dir
-    spawn_id = spawn_store.start_spawn(
-        state_root,
-        chat_id="c1",
-        model="gpt-5.4",
-        agent="agent",
-        harness="codex",
-        kind="primary",
-        prompt="hello",
-        launch_mode="foreground",
-        status="queued",
-        started_at=_OLD_STARTED_AT,
-    )
-    spawn_dir = state_root / "spawns" / str(spawn_id)
-    spawn_dir.mkdir(parents=True, exist_ok=True)
-    row = spawn_store.get_spawn(state_root, spawn_id)
-    assert row is not None
-
-    lock_path = active_primary_lock_path(tmp_path)
-    lock_payload = {
-        "parent_pid": os.getpid(),
-        "child_pid": None,
-        "started_at": "2026-01-01T00:00:00Z",
-        "command": ["codex"],
-    }
-    with primary_launch_lock(lock_path, lock_payload):
-        reconciled = reconcile_active_spawn(state_root, row)
-
-    assert reconciled.status == "queued"
-    assert reconciled.error is None
-    latest = spawn_store.get_spawn(state_root, spawn_id)
-    assert latest is not None
-    assert latest.status == "queued"
-    assert latest.error is None
 
 
 def test_stale_background_spawn_with_live_wrapper_is_preserved(tmp_path: Path, monkeypatch) -> None:

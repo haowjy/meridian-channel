@@ -95,6 +95,15 @@ _CONFIG_KEY_SPECS: tuple[_ConfigKeySpec, ...] = (
         aliases=("defaults.default_model", "default_model"),
     ),
     _ConfigKeySpec(
+        canonical_key="defaults.harness",
+        section="defaults",
+        file_key="harness",
+        field_path=("default_harness",),
+        value_kind="str",
+        env_var="MERIDIAN_DEFAULT_HARNESS",
+        aliases=("defaults.default_harness", "default_harness"),
+    ),
+    _ConfigKeySpec(
         canonical_key="timeouts.kill_grace_minutes",
         section="timeouts",
         file_key="kill_grace_minutes",
@@ -613,6 +622,8 @@ def _scaffold_template() -> str:
         "# Default model for spawns when --model and profile model are both unset",
         "# (str model id).",
         f"# model = {_toml_literal(cast('str', defaults['defaults.model']))}",
+        "# Default harness for spawns when --harness and profile harness are both unset (str).",
+        f"# harness = {_toml_literal(cast('str', defaults['defaults.harness']))}",
         "",
         "# -- Timeout behavior -------------------------------------------------------",
         "[timeouts]",
@@ -626,11 +637,23 @@ def _scaffold_template() -> str:
         "# -- Harness default models ------------------------------------------------",
         "[harness]",
         "# Default model for Claude harness (str model id).",
-        f"# claude = {_toml_literal(cast('str', defaults['harness.claude']))}",
+        (
+            "# claude = "
+            f"{_toml_literal(cast('str', defaults['harness.claude']))}  "
+            "# empty = harness picks its own default model"
+        ),
         "# Default model for Codex harness (str model id).",
-        f"# codex = {_toml_literal(cast('str', defaults['harness.codex']))}",
+        (
+            "# codex = "
+            f"{_toml_literal(cast('str', defaults['harness.codex']))}  "
+            "# empty = harness picks its own default model"
+        ),
         "# Default model for OpenCode harness (str model id).",
-        f"# opencode = {_toml_literal(cast('str', defaults['harness.opencode']))}",
+        (
+            "# opencode = "
+            f"{_toml_literal(cast('str', defaults['harness.opencode']))}  "
+            "# empty = harness picks its own default model"
+        ),
         "",
         "# -- Primary agent defaults -------------------------------------------------",
         "[primary]",

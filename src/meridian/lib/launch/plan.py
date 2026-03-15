@@ -24,11 +24,10 @@ from meridian.lib.install.bootstrap import (
 )
 from meridian.lib.install.provenance import resolve_runtime_asset_provenance
 
-from .prompt import compose_skill_injections, resolve_run_defaults
+from .prompt import compose_skill_injections
 from .resolve import (
-    load_agent_profile_with_fallback,
-    resolve_harness,
-    resolve_skills_from_profile,
+    ResolvedPolicies,
+    resolve_policies,
 )
 from .types import LaunchRequest, PrimarySessionMetadata, build_primary_prompt
 
@@ -48,7 +47,6 @@ class ResolvedPrimaryLaunchPlan(BaseModel):
     run_params: SpawnParams
     permission_config: PermissionConfig
     command: tuple[str, ...]
-    lock_path: Path
     seed_harness_session_id: str
     command_request: LaunchRequest
 
@@ -126,9 +124,7 @@ def resolve_primary_launch_plan(
 
     resolved_root = resolve_repo_root(repo_root)
     resolved_config = config if config is not None else load_config(resolved_root)
-    paths = resolve_state_paths(resolved_root)
-    state_root = paths.root_dir
-    lock_path = paths.active_primary_lock
+    state_root = resolve_state_paths(resolved_root).root_dir
     resolved_prompt = prompt if prompt is not None else build_primary_prompt(request)
     bootstrap_agent_names = planned_bootstrap_agent_names(
         configured_default=resolved_config.primary_agent,
@@ -151,34 +147,22 @@ def resolve_primary_launch_plan(
             plan=bootstrap_plan,
         )
 
-    profile = load_agent_profile_with_fallback(
+    policies: ResolvedPolicies = resolve_policies(
         repo_root=resolved_root,
+        requested_model=request.model,
+        requested_harness=request.harness,
         requested_agent=request.agent,
-        configured_default=resolved_config.primary_agent,
-    )
-
-    default_model = resolved_config.harness.claude
-    requested_model = request.model
-    if request.harness is not None and request.harness.strip():
-        override_default = resolved_config.default_model_for_harness(request.harness)
-        if override_default:
-            default_model = override_default
-            if not requested_model.strip():
-                requested_model = override_default
-
-    defaults = resolve_run_defaults(
-        requested_model,
-        profile=profile,
-        default_model=default_model,
-    )
-    model = ModelId(defaults.model)
-    harness = resolve_harness(
-        model=model,
-        harness_override=request.harness,
+        config=resolved_config,
         harness_registry=harness_registry,
-        repo_root=resolved_root,
+        configured_default_agent=resolved_config.primary_agent,
+        configured_default_harness=resolved_config.primary.harness or "claude",
+        skills_readonly=True,
     )
-    adapter = harness_registry.get_subprocess_harness(harness)
+    profile = policies.profile
+    model = ModelId(policies.model) if policies.model else None
+    harness = policies.harness
+    adapter = policies.adapter
+    resolved_skills = policies.resolved_skills
     adhoc_agent_json = (
         build_claude_adhoc_agent_json(
             name=profile.name,
@@ -189,11 +173,6 @@ def resolve_primary_launch_plan(
         else ""
     )
 
-    resolved_skills = resolve_skills_from_profile(
-        profile_skills=defaults.skills,
-        repo_root=resolved_root,
-        readonly=True,
-    )
     if resolved_skills.missing_skills:
         logger.warning(
             "Skipped unavailable skills for primary agent: %s",
@@ -218,7 +197,7 @@ def resolve_primary_launch_plan(
         profile_path=profile_path,
         profile_source=runtime_provenance.agent_source,
         harness_id=str(harness),
-        model_id=str(model),
+        model_id=policies.model,
         skills=resolved_skills.skill_names,
         skill_paths=skill_paths,
         skill_sources=runtime_provenance.skill_sources,
@@ -271,7 +250,6 @@ def resolve_primary_launch_plan(
             run_params=run_params,
             permission_config=PermissionConfig(),
             command=command,
-            lock_path=lock_path,
             seed_harness_session_id=seed_harness_session_id,
             command_request=command_request,
         )
@@ -335,7 +313,6 @@ def resolve_primary_launch_plan(
         run_params=run_params,
         permission_config=permission_config,
         command=command,
-        lock_path=lock_path,
         seed_harness_session_id=seed_harness_session_id,
         command_request=command_request,
     )
