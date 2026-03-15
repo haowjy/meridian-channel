@@ -18,8 +18,8 @@ from meridian.lib.install.lock import (
 )
 from meridian.lib.install.types import format_item_id, parse_item_id
 
-_BOOTSTRAP_SOURCE_NAME = "meridian-agents"
-_BOOTSTRAP_URL = "https://github.com/haowjy/meridian-agents.git"
+_BOOTSTRAP_SOURCE_NAME = "meridian-base"
+_BOOTSTRAP_URL = "https://github.com/haowjy/meridian-base.git"
 _BOOTSTRAP_AGENT_NAMES = frozenset({"__meridian-orchestrator", "__meridian-subagent"})
 # Known skill deps for bootstrap agents — auto-included when bootstrapping
 _BOOTSTRAP_SKILL_NAMES = frozenset({"__meridian-orchestrate", "__meridian-spawn-agent"})

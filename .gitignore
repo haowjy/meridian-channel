@@ -17,12 +17,3 @@ tmp/
 
 err
 out
-
-.agents/agents/__meridian--*
-.codex/agents/__meridian--*
-.codex/skills/__meridian--*
-.agents/skills/__meridian--*
-.claude/agents/__meridian--*
-.claude/skills/__meridian--*
-.opencode/agents/__meridian--*
-.opencode/skills/__meridian--*

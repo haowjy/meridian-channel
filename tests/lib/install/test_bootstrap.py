@@ -80,13 +80,13 @@ def test_ensure_bootstrap_assets_bootstraps_missing_default(
     ) -> SourceManifest:
         from meridian.lib.install.types import parse_item_id
 
-        existing = manifest.find_source("meridian-agents")
+        existing = manifest.find_source("meridian-base")
         required_agent_names = tuple(
             parse_item_id(item_id)[1] for item_id in item_ids
         )
         if existing is None:
             bootstrap_source = SourceConfig(
-                name="meridian-agents",
+                name="meridian-base",
                 kind="path",
                 path=source_root.as_posix(),
                 agents=required_agent_names,
@@ -111,7 +111,7 @@ def test_ensure_bootstrap_assets_bootstraps_missing_default(
 
     state_paths = resolve_state_paths(repo_root)
     config = load_sources_config(state_paths.agents_manifest_path)
-    assert [source.name for source in config.sources] == ["meridian-agents"]
+    assert [source.name for source in config.sources] == ["meridian-base"]
     assert config.sources[0].kind == "path"
     assert config.sources[0].agents is not None
     assert "agent:__meridian-subagent" in [
@@ -119,7 +119,7 @@ def test_ensure_bootstrap_assets_bootstraps_missing_default(
     ]
 
     lock = read_lock(state_paths.agents_lock_path)
-    assert "meridian-agents" in lock.sources
+    assert "meridian-base" in lock.sources
     assert "agent:__meridian-subagent" in lock.items
 
 

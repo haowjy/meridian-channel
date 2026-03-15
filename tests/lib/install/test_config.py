@@ -31,9 +31,9 @@ def test_load_sources_config_roundtrips_multiple_sources(tmp_path: Path) -> None
     config = SourcesConfig(
         sources=(
             SourceConfig(
-                name="meridian-agents",
+                name="meridian-base",
                 kind="git",
-                url="https://github.com/haowjy/meridian-agents.git",
+                url="https://github.com/haowjy/meridian-base.git",
                 ref="main",
                 agents=("dev-orchestrator",),
                 skills=("dev-workflow",),
@@ -58,9 +58,9 @@ def test_new_format_agents_skills_roundtrip(tmp_path: Path) -> None:
     config = SourcesConfig(
         sources=(
             SourceConfig(
-                name="meridian-agents",
+                name="meridian-base",
                 kind="git",
-                url="https://github.com/haowjy/meridian-agents.git",
+                url="https://github.com/haowjy/meridian-base.git",
                 ref="main",
                 agents=("__meridian-orchestrator", "__meridian-subagent"),
                 skills=("__meridian-orchestrate",),

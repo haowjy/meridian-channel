@@ -1,3 +1,3 @@
-[submodule "meridian-agents"]
-	path = meridian-agents
-	url = git@github.com:haowjy/meridian-agents.git
+[submodule "meridian-base"]
+	path = meridian-base
+	url = git@github.com:haowjy/meridian-base.git

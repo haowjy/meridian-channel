@@ -1,18 +1,24 @@
 [[sources]]
-name = "meridian-agents"
+name = "meridian-base"
 kind = "git"
-url = "https://github.com/haowjy/meridian-agents.git"
+url = "https://github.com/haowjy/meridian-base.git"
 ref = "main"
 agents = ["__meridian-subagent", "__meridian-orchestrator"]
 skills = ["__meridian-orchestrate", "__meridian-spawn-agent"]
 
 [[sources]]
-name = "review-drafts"
-kind = "path"
-path = ".meridian/work/meridian-agents/drafts"
+name = "meridian-dev-workflow"
+kind = "git"
+url = "https://github.com/haowjy/meridian-dev-workflow.git"
+ref = "main"
 
 [[sources]]
-name = "meridian-agents-dev"
+name = "meridian-base-dev"
 kind = "path"
-path = "./meridian-agents"
-skills = ["__meridian-managed-install"]
+path = "./meridian-base"
+skills = ["__meridian-install"]
+
+[[sources]]
+name = "meridian-dev-smoke-test"
+kind = "path"
+path = "./skills/_meridian-dev-smoke-test"

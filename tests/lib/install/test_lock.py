@@ -8,9 +8,9 @@ def test_write_lock_roundtrip(tmp_path: Path) -> None:
     lock_path = tmp_path / ".meridian" / "agents.lock"
     lock = InstallLock(
         sources={
-            "meridian-agents": LockedSourceRecord(
+            "meridian-base": LockedSourceRecord(
                 kind="git",
-                locator="https://github.com/haowjy/meridian-agents.git",
+                locator="https://github.com/haowjy/meridian-base.git",
                 requested_ref="main",
                 resolved_identity={"commit": "abc123"},
                 items={
