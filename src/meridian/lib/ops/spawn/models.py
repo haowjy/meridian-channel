@@ -1,6 +1,5 @@
 """Spawn operation input/output models and shared lightweight helpers."""
 
-
 from pydantic import BaseModel, ConfigDict, Field, model_serializer
 
 from meridian.lib.core.domain import SpawnStatus
@@ -217,7 +216,9 @@ class SpawnListOutput(BaseModel):
         rows.extend(entry.as_row() for entry in self.spawns)
         result = tabular(rows)
         if self.truncated and self.total_count is not None:
-            result += f"\n({len(self.spawns)} of {self.total_count} shown — use --limit to see more)"
+            result += (
+                f"\n({len(self.spawns)} of {self.total_count} shown — use --limit to see more)"
+            )
         return result
 
 
@@ -256,6 +257,7 @@ class SpawnDetailOutput(BaseModel):
     report_path: str | None
     report_summary: str | None
     report_body: str | None
+    harness_session_id: str | None = None
     last_message: str | None = None
     log_path: str | None = None
 
@@ -288,17 +290,11 @@ class SpawnDetailOutput(BaseModel):
         if self.exit_code is not None:
             status_str += f" (exit {self.exit_code})"
 
-        duration_value: str | None
-        if self.duration_secs is None:
-            duration_value = None
-        else:
-            duration_value = f"{self.duration_secs:.1f}s"
+        duration_value: str | None = (
+            None if self.duration_secs is None else f"{self.duration_secs:.1f}s"
+        )
 
-        cost_value: str | None
-        if self.cost_usd is None:
-            cost_value = None
-        else:
-            cost_value = f"${self.cost_usd:.4f}"
+        cost_value: str | None = None if self.cost_usd is None else f"${self.cost_usd:.4f}"
 
         failure_label: str | None = None
         if self.failure_reason is not None:
@@ -423,8 +419,6 @@ __all__ = [
     "SpawnContinueInput",
     "SpawnCreateInput",
     "SpawnDetailOutput",
-    "SpawnWrittenFilesInput",
-    "SpawnWrittenFilesOutput",
     "SpawnListEntry",
     "SpawnListInput",
     "SpawnListOutput",
@@ -433,4 +427,6 @@ __all__ = [
     "SpawnStatsOutput",
     "SpawnWaitInput",
     "SpawnWaitMultiOutput",
+    "SpawnWrittenFilesInput",
+    "SpawnWrittenFilesOutput",
 ]

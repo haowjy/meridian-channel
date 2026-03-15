@@ -1,6 +1,5 @@
 """Spawn state query and shaping helpers backed by `spawns.jsonl`."""
 
-
 import json
 import re
 from pathlib import Path
@@ -29,7 +28,10 @@ def _select_latest_spawn_id(
     statuses: tuple[str, ...] | None,
 ) -> str | None:
     from meridian.lib.state.reaper import reconcile_spawns
-    spawns = reconcile_spawns(resolve_state_root(repo_root), spawn_store.list_spawns(resolve_state_root(repo_root)))
+
+    spawns = reconcile_spawns(
+        resolve_state_root(repo_root), spawn_store.list_spawns(resolve_state_root(repo_root))
+    )
     if statuses is not None:
         wanted = set(statuses)
         spawns = [item for item in spawns if item.status in wanted]
@@ -48,7 +50,9 @@ def resolve_spawn_reference(repo_root: Path, ref: str) -> str:
     status_filter = _SPAWN_REFERENCE_STATUS_FILTERS.get(normalized)
     if normalized not in _SPAWN_REFERENCE_STATUS_FILTERS:
         supported = ", ".join(sorted(_SPAWN_REFERENCE_STATUS_FILTERS))
-        raise ValueError(f"Unknown spawn reference '{normalized}'. Supported references: {supported}")
+        raise ValueError(
+            f"Unknown spawn reference '{normalized}'. Supported references: {supported}"
+        )
 
     resolved = _select_latest_spawn_id(repo_root, statuses=status_filter)
     if resolved is None:
@@ -227,6 +231,7 @@ def detail_from_row(
         report_path=report_path,
         report_summary=report_summary,
         report_body=report_body,
+        harness_session_id=row.harness_session_id,
         last_message=last_message,
         log_path=log_path,
     )
@@ -236,9 +241,9 @@ __all__ = [
     "detail_from_row",
     "extract_last_assistant_message",
     "read_report",
-    "read_written_files",
     "read_report_text",
     "read_spawn_row",
+    "read_written_files",
     "resolve_spawn_reference",
     "resolve_spawn_references",
 ]

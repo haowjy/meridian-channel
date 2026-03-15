@@ -1,17 +1,17 @@
 """Async subprocess execution and finalization guarantees."""
 
-
 import asyncio
 import json
 import os
 import signal
 import time
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict
 import structlog
+from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.config.settings import MeridianConfig
 from meridian.lib.core.domain import Spawn
@@ -19,18 +19,7 @@ from meridian.lib.core.spawn_lifecycle import (
     has_durable_report_completion,
     resolve_execution_terminal_state,
 )
-from .extract import (
-    FinalizeExtraction,
-    enrich_finalize,
-    reset_finalize_attempt_artifacts,
-)
-from .heartbeat import heartbeat_scope
-from .session_ids import extract_latest_session_id
-from .stream_capture import (
-    capture_stderr_stream,
-    capture_stdout_stream,
-    extract_latest_tokens_payload,
-)
+from meridian.lib.core.types import HarnessId, SpawnId
 from meridian.lib.harness.adapter import (
     SpawnParams,
     StreamEvent,
@@ -44,11 +33,27 @@ from meridian.lib.state.artifact_store import ArtifactStore, make_artifact_key
 from meridian.lib.state.atomic import atomic_write_bytes, atomic_write_text
 from meridian.lib.state.paths import resolve_spawn_log_dir, resolve_state_paths
 from meridian.lib.state.spawn_store import FOREGROUND_LAUNCH_MODE
-from meridian.lib.core.types import HarnessId, SpawnId
 
 from .env import build_harness_child_env
 from .errors import ErrorCategory, classify_error, should_retry
-from .signals import SignalForwarder, map_process_exit_code, signal_coordinator, signal_process_group
+from .extract import (
+    FinalizeExtraction,
+    enrich_finalize,
+    reset_finalize_attempt_artifacts,
+)
+from .heartbeat import heartbeat_scope
+from .session_ids import extract_latest_session_id
+from .signals import (
+    SignalForwarder,
+    map_process_exit_code,
+    signal_coordinator,
+    signal_process_group,
+)
+from .stream_capture import (
+    capture_stderr_stream,
+    capture_stdout_stream,
+    extract_latest_tokens_payload,
+)
 from .timeout import (
     DEFAULT_KILL_GRACE_SECONDS,
     SpawnTimeoutError,
@@ -56,6 +61,7 @@ from .timeout import (
     wait_for_process_exit,
     wait_for_process_returncode,
 )
+
 if TYPE_CHECKING:
     from meridian.lib.ops.spawn.plan import PreparedSpawnPlan
 
@@ -172,7 +178,8 @@ async def _report_watchdog(
     # Still alive after grace — terminate
     if process.returncode is None:
         logger.info(
-            "Report watchdog: harness wrote report but process still alive after %.0fs grace. Terminating.",
+            "Report watchdog: harness wrote report but process still alive "
+            "after %.0fs grace. Terminating.",
             grace_secs,
         )
         await terminate_process(process, grace_seconds=10.0)
@@ -260,6 +267,7 @@ async def spawn_and_stream(
                     raise
 
             if report_watchdog_path is not None:
+
                 async def _run_report_watchdog() -> None:
                     nonlocal terminated_by_report_watchdog
                     terminated_by_report_watchdog = await _report_watchdog(
@@ -267,9 +275,7 @@ async def spawn_and_stream(
                         process=process,
                     )
 
-                watchdog_task = asyncio.create_task(
-                    _run_report_watchdog()
-                )
+                watchdog_task = asyncio.create_task(_run_report_watchdog())
 
             stdout_task = asyncio.create_task(
                 capture_stdout_stream(
@@ -303,10 +309,8 @@ async def spawn_and_stream(
                         return
                     finally:
                         process.stdin.close()
-                        try:
+                        with suppress(BrokenPipeError, ConnectionResetError):
                             await process.stdin.wait_closed()
-                        except (BrokenPipeError, ConnectionResetError):
-                            pass
 
                 stdin_task = asyncio.create_task(_feed_stdin())
 
@@ -330,10 +334,8 @@ async def spawn_and_stream(
             if watchdog_task is not None:
                 if not watchdog_task.done():
                     watchdog_task.cancel()
-                    try:
+                    with suppress(asyncio.CancelledError):
                         await watchdog_task
-                    except asyncio.CancelledError:
-                        pass
                 else:
                     await watchdog_task
             tokens_payload: bytes | None = None
@@ -347,7 +349,8 @@ async def spawn_and_stream(
                     tokens_payload = await stdout_task
                 else:
                     logger.warning(
-                        "Timed out draining harness stdout after process exit; using captured file contents.",
+                        "Timed out draining harness stdout after process exit; "
+                        "using captured file contents.",
                         spawn_id=str(spawn_id),
                         timeout_seconds=POST_EXIT_PIPE_DRAIN_TIMEOUT_SECONDS,
                     )
@@ -356,7 +359,8 @@ async def spawn_and_stream(
                     await stderr_task
                 else:
                     logger.warning(
-                        "Timed out draining harness stderr after process exit; using captured file contents.",
+                        "Timed out draining harness stderr after process exit; "
+                        "using captured file contents.",
                         spawn_id=str(spawn_id),
                         timeout_seconds=POST_EXIT_PIPE_DRAIN_TIMEOUT_SECONDS,
                     )
@@ -461,7 +465,7 @@ def _write_structured_failure_artifact(
         "exit_code": exit_code,
         "timed_out": timed_out,
     }
-    encoded = f"{json.dumps(payload, sort_keys=True)}\n".encode("utf-8")
+    encoded = f"{json.dumps(payload, sort_keys=True)}\n".encode()
     artifacts.put(make_artifact_key(spawn_id, OUTPUT_FILENAME), encoded)
     atomic_write_bytes(output_log_path, encoded)
 
@@ -599,6 +603,7 @@ async def execute_with_finalization(
     preflight_breach = budget_tracker.check() if budget_tracker is not None else None
 
     started_at = time.monotonic()
+    started_at_epoch = time.time()
     exit_code = DEFAULT_INFRA_EXIT_CODE
     extracted: FinalizeExtraction | None = None
     failure_reason: str | None = None
@@ -687,6 +692,8 @@ async def execute_with_finalization(
                         current_session_id=observed_harness_session_id,
                         artifacts=artifacts,
                         spawn_id=run.spawn_id,
+                        repo_root=repo_root,
+                        started_at_epoch=started_at_epoch,
                     )
                     or ""
                 )
@@ -731,14 +738,18 @@ async def execute_with_finalization(
                     exit_code = DEFAULT_INFRA_EXIT_CODE
                     break
 
-                if exit_code == 0 and _spawn_kind(state_root, run.spawn_id) == "child":
-                    if extracted.report.content is None:
-                        # Child spawns must produce a report directly or via fallback extraction.
-                        failure_reason = "missing_report"
+                if (
+                    exit_code == 0
+                    and _spawn_kind(state_root, run.spawn_id) == "child"
+                    and extracted.report.content is None
+                ):
+                    # Child spawns must produce a report directly or via fallback extraction.
+                    failure_reason = "missing_report"
 
                 if extracted.output_is_empty:
                     if exit_code == 0:
-                        # Successful exit with no content is unusable; fail fast so primary agents can react.
+                        # Successful exit with no content is unusable; fail fast
+                        # so primary agents can react.
                         exit_code = 1
                         failure_reason = "empty_output"
                         break
@@ -853,8 +864,8 @@ async def execute_with_finalization(
         finally:
             duration_seconds = time.monotonic() - started_at
             finalized_usage = extracted.usage if extracted is not None else None
-            durable_report_completion = (
-                extracted is not None and has_durable_report_completion(extracted.report.content)
+            durable_report_completion = extracted is not None and has_durable_report_completion(
+                extracted.report.content
             )
             terminated_after_completion = terminated_after_completion or (
                 durable_report_completion
@@ -880,7 +891,9 @@ async def execute_with_finalization(
                     total_cost_usd=(
                         finalized_usage.total_cost_usd if finalized_usage is not None else None
                     ),
-                    input_tokens=finalized_usage.input_tokens if finalized_usage is not None else None,
+                    input_tokens=finalized_usage.input_tokens
+                    if finalized_usage is not None
+                    else None,
                     output_tokens=(
                         finalized_usage.output_tokens if finalized_usage is not None else None
                     ),
