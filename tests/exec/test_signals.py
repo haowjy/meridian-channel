@@ -58,6 +58,10 @@ class MockHarnessAdapter:
     def mcp_config(self, run: SpawnParams) -> None:
         return None
 
+    def build_adhoc_agent_payload(self, *, name: str, description: str, prompt: str) -> str:
+        _ = name, description, prompt
+        return ""
+
     def build_command(self, run: SpawnParams, perms: PermissionResolver) -> list[str]:
         if self._command_override is not None:
             command = [*self._command_override]

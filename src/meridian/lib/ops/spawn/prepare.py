@@ -8,7 +8,6 @@ from pydantic import BaseModel, ConfigDict
 from meridian.lib.catalog.models import load_merged_aliases, resolve_model
 from meridian.lib.catalog.models import load_discovered_models
 from meridian.lib.config.settings import MeridianConfig
-from meridian.lib.harness.claude import build_claude_adhoc_agent_json
 from meridian.lib.harness.registry import HarnessRegistry, get_default_harness_registry
 from meridian.lib.core.context import RuntimeContext
 from meridian.lib.launch.prompt import (
@@ -24,7 +23,7 @@ from meridian.lib.launch.resolve import (
 from meridian.lib.safety.permissions import (
     resolve_permission_pipeline,
 )
-from meridian.lib.core.types import HarnessId, ModelId
+from meridian.lib.core.types import ModelId
 from meridian.lib.install.bootstrap import (
     ensure_bootstrap_assets,
     plan_bootstrap_assets,
@@ -234,12 +233,12 @@ def build_create_payload(
     )
     parsed_template_vars = parse_template_assignments(payload.template_vars)
     adhoc_agent_json = (
-        build_claude_adhoc_agent_json(
+        harness.build_adhoc_agent_payload(
             name=profile.name,
             description=profile.description,
             prompt=profile.body,
         )
-        if profile is not None and harness.id == HarnessId.CLAUDE
+        if profile is not None
         else ""
     )
     agent_for_params = profile.name if profile is not None else None

@@ -8,9 +8,8 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.config.settings import MeridianConfig, load_config, resolve_repo_root
-from meridian.lib.core.types import HarnessId, ModelId
+from meridian.lib.core.types import ModelId
 from meridian.lib.harness.adapter import SpawnParams, SubprocessHarness
-from meridian.lib.harness.claude import build_claude_adhoc_agent_json
 from meridian.lib.harness.registry import HarnessRegistry
 from meridian.lib.safety.permissions import (
     PermissionConfig,
@@ -164,12 +163,12 @@ def resolve_primary_launch_plan(
     adapter = policies.adapter
     resolved_skills = policies.resolved_skills
     adhoc_agent_json = (
-        build_claude_adhoc_agent_json(
+        adapter.build_adhoc_agent_payload(
             name=profile.name,
             description=profile.description,
             prompt=profile.body,
         )
-        if profile is not None and harness == HarnessId.CLAUDE
+        if profile is not None
         else ""
     )
 

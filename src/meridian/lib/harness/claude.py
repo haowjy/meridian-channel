@@ -204,6 +204,9 @@ class ClaudeAdapter(BaseSubprocessHarness):
             skill_injection_mode="append-system-prompt",
         )
 
+    def build_adhoc_agent_payload(self, *, name: str, description: str, prompt: str) -> str:
+        return build_claude_adhoc_agent_json(name=name, description=description, prompt=prompt)
+
     def build_command(self, run: SpawnParams, perms: PermissionResolver) -> list[str]:
         if run.interactive:
             base_command = self.PRIMARY_BASE_COMMAND
@@ -346,4 +349,3 @@ class ClaudeAdapter(BaseSubprocessHarness):
     def owns_untracked_session(self, *, repo_root: Path, session_ref: str) -> bool:
         session_file = _claude_project_dir(repo_root) / f"{session_ref}.jsonl"
         return session_file.is_file()
-

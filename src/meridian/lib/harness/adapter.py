@@ -129,6 +129,10 @@ class SubprocessHarness(Protocol):
 
     def run_prompt_policy(self) -> RunPromptPolicy: ...
 
+    def build_adhoc_agent_payload(
+        self, *, name: str, description: str, prompt: str
+    ) -> str: ...
+
     def build_command(self, run: SpawnParams, perms: PermissionResolver) -> list[str]: ...
 
     def mcp_config(self, run: SpawnParams) -> McpConfig | None: ...
@@ -201,6 +205,12 @@ class BaseSubprocessHarness:
 
     def run_prompt_policy(self) -> RunPromptPolicy:
         return RunPromptPolicy()
+
+    def build_adhoc_agent_payload(
+        self, *, name: str, description: str, prompt: str
+    ) -> str:
+        _ = name, description, prompt
+        return ""
 
     def owns_untracked_session(self, *, repo_root: Path, session_ref: str) -> bool:
         _ = repo_root, session_ref
