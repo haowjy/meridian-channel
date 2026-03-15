@@ -25,11 +25,10 @@ from meridian.cli.output import (
 )
 from meridian.cli.output import emit as emit_output
 from meridian.cli.report_cmd import register_report_commands
-from meridian.cli.skills_cmd import register_skills_commands
 from meridian.lib.core.sink import OutputSink
 from meridian.lib.harness.registry import get_default_harness_registry
 from meridian.lib.harness.session_detection import infer_harness_from_untracked_session_ref
-from meridian.lib.launch import LaunchRequest, cleanup_orphaned_locks, launch_primary
+from meridian.lib.launch import LaunchRequest, launch_primary
 from meridian.lib.core.util import FormatContext
 from meridian.lib.ops.spawn.api import SpawnActionOutput
 from meridian.lib.state.paths import resolve_state_paths
@@ -38,6 +37,8 @@ from meridian.server.main import run_server
 
 logger = logging.getLogger(__name__)
 
+# Curated help for agent mode: only commands useful for subagent callers.
+# Not auto-generated — update when adding agent-facing commands.
 _AGENT_ROOT_HELP = """Usage: meridian COMMAND [ARGS]
 
 Multi-agent orchestration across Claude, Codex, and OpenCode.
@@ -50,11 +51,10 @@ Quick start:
 Run 'meridian spawn -h' for full usage.
 
 Commands:
-  spawn   Create and manage subagent runs
-  report  Manage spawn reports
-  work    Work item dashboard and coordination
-  models  Model catalog
-  skills  Skills catalog
+  spawn    Create and manage subagent runs (includes report subgroup)
+  work     Work item dashboard and coordination
+  sources  Manage installed agent sources
+  models   Model catalog
 
 Output:
   Agent mode defaults to JSON. All commands emit structured JSON.
@@ -72,6 +72,7 @@ class GlobalOptions(BaseModel):
     yes: bool = False
     no_input: bool = False
     output_explicit: bool = False
+    force_human: bool = False
     sink: OutputSink | None = None
 
 
@@ -84,7 +85,6 @@ class PrimaryLaunchOutput(BaseModel):
     message: str
     exit_code: int
     command: tuple[str, ...] = ()
-    lock_path: str
     continue_ref: str | None = None
     resume_command: str | None = None
     warning: str | None = None
@@ -159,6 +159,7 @@ def _extract_global_options(argv: Sequence[str]) -> tuple[list[str], GlobalOptio
     yes = False
     no_input = False
     output_explicit = False
+    force_human = False
     cleaned: list[str] = []
 
     i = 0
@@ -213,6 +214,10 @@ def _extract_global_options(argv: Sequence[str]) -> tuple[list[str], GlobalOptio
         if arg == "--no-no-input":
             i += 1
             continue
+        if arg == "--human":
+            force_human = True
+            i += 1
+            continue
 
         cleaned.append(arg)
         i += 1
@@ -224,18 +229,8 @@ def _extract_global_options(argv: Sequence[str]) -> tuple[list[str], GlobalOptio
         yes=yes,
         no_input=no_input,
         output_explicit=output_explicit,
+        force_human=force_human,
     )
-
-
-def _extract_human_flag(argv: Sequence[str]) -> tuple[list[str], bool]:
-    force_human = False
-    cleaned: list[str] = []
-    for arg in argv:
-        if arg == "--human":
-            force_human = True
-            continue
-        cleaned.append(arg)
-    return cleaned, force_human
 
 
 def agent_mode_enabled() -> bool:
@@ -249,13 +244,7 @@ def _interactive_terminal_attached() -> bool:
 def _agent_sink_enabled(*, output_explicit: bool) -> bool:
     if output_explicit or not agent_mode_enabled() or _interactive_terminal_attached():
         return False
-    raw_depth = os.getenv("MERIDIAN_DEPTH", "").strip()
-    if not raw_depth:
-        return False
-    try:
-        return int(raw_depth) > 0
-    except ValueError:
-        return False
+    return True
 
 
 app = App(
@@ -267,7 +256,6 @@ app = App(
     version=__version__,
     help_formatter="plain",
 )
-_COMMAND_TREE_APP = app
 
 
 @app.default
@@ -375,8 +363,8 @@ def serve() -> None:
 spawn_app = App(
     name="spawn",
     help=(
-        "Run subagents with a model and prompt. Returns immediately with a spawn_id.\n"
-        "Spawns run in background by default."
+        "Run subagents with a model and prompt.\n"
+        "Runs in foreground by default. Use --background for async."
     ),
     help_epilogue=(
         "Examples:\n\n"
@@ -392,18 +380,16 @@ work_app = App(
     help="Active activity grouped by work, plus work item coordination commands. Unassigned spawns appear under '(no work)'.",
     help_formatter="plain",
 )
-agents_app = App(name="agents", help="Agent profile catalog commands", help_formatter="plain")
-skills_app = App(name="skills", help="Skills catalog commands", help_formatter="plain")
+sources_app = App(name="sources", help="Manage installed agent sources.", help_formatter="plain")
 models_app = App(name="models", help="Model catalog commands", help_formatter="plain")
 config_app = App(name="config", help="Repository config commands", help_formatter="plain")
 completion_app = App(name="completion", help="Shell completion helpers", help_formatter="plain")
 
 
 app.command(spawn_app, name="spawn")
-app.command(report_app, name="report")
+spawn_app.command(report_app, name="report")
 app.command(work_app, name="work")
-app.command(agents_app, name="agents")
-app.command(skills_app, name="skills")
+app.command(sources_app, name="sources")
 app.command(models_app, name="models")
 app.command(config_app, name="config")
 app.command(completion_app, name="completion")
@@ -536,7 +522,6 @@ def _run_primary_launch(
             ),
             exit_code=launch_result.exit_code,
             command=launch_result.command if dry_run else (),
-            lock_path=launch_result.lock_path.as_posix(),
             continue_ref=launch_result.continue_ref,
             resume_command=(
                 f"meridian --continue {launch_result.continue_ref}"
@@ -604,43 +589,18 @@ def init_alias() -> None:
     config_app(["init"])
 
 
-_REGISTERED_CLI_COMMANDS: set[str] = set()
-_REGISTERED_CLI_DESCRIPTIONS: dict[str, str] = {}
-
-
 def _register_group_commands() -> None:
-    from meridian.cli.agents_cmd import register_agents_commands
-    from meridian.cli.install_cmd import register_install_commands
+    from meridian.cli.install_cmd import register_sources_commands
     from meridian.cli.spawn import register_spawn_commands
     from meridian.cli.work_cmd import register_work_commands
 
-    modules = (
-        register_spawn_commands(spawn_app, emit),
-        register_report_commands(report_app, emit),
-        register_work_commands(work_app, emit),
-        register_agents_commands(agents_app, emit),
-        register_skills_commands(skills_app, emit),
-        register_models_commands(models_app, emit),
-        register_config_commands(config_app, emit),
-        register_doctor_command(app, emit),
-    )
-    for commands, descriptions in modules:
-        _REGISTERED_CLI_COMMANDS.update(commands)
-        _REGISTERED_CLI_DESCRIPTIONS.update(descriptions)
-
-    register_install_commands(app, emit)
-
-
-def get_registered_cli_commands() -> set[str]:
-    """Expose CLI operation command names for parity tests."""
-
-    return set(_REGISTERED_CLI_COMMANDS)
-
-
-def get_registered_cli_descriptions() -> dict[str, str]:
-    """Expose CLI descriptions for parity tests."""
-
-    return dict(_REGISTERED_CLI_DESCRIPTIONS)
+    register_spawn_commands(spawn_app, emit)
+    register_report_commands(report_app, emit)
+    register_work_commands(work_app, emit)
+    register_models_commands(models_app, emit)
+    register_config_commands(config_app, emit)
+    register_doctor_command(app, emit)
+    register_sources_commands(sources_app, emit)
 
 
 def _operation_error_message(exc: Exception) -> str:
@@ -671,6 +631,7 @@ _TOP_LEVEL_VALUE_FLAGS = frozenset(
         "--harness",
         "--agent",
         "-a",
+        "--work",
         "--autocompact",
     }
 )
@@ -719,7 +680,7 @@ def _first_positional_token(argv: Sequence[str]) -> str | None:
 
 
 def _top_level_command_names() -> set[str]:
-    return {name for name in _COMMAND_TREE_APP.resolved_commands() if not name.startswith("-")}
+    return {name for name in app.resolved_commands() if not name.startswith("-")}
 
 
 def _validate_top_level_command(argv: Sequence[str]) -> None:
@@ -763,16 +724,14 @@ def main(argv: Sequence[str] | None = None) -> None:
     if not agent_mode_enabled():
         try:
             repo_root = Path.cwd().resolve()
-            cleanup_orphaned_locks(repo_root)
             state_root = resolve_state_paths(repo_root).root_dir
             cleanup_stale_sessions(state_root)
         except Exception:
-            logger.debug("orphaned lock cleanup failed", exc_info=True)
+            logger.debug("stale session cleanup failed", exc_info=True)
 
-    args, force_human = _extract_human_flag(args)
     cleaned_args, options = _extract_global_options(args)
 
-    agent_mode = agent_mode_enabled() and not force_human and not _interactive_terminal_attached()
+    agent_mode = agent_mode_enabled() and not options.force_human and not _interactive_terminal_attached()
     if agent_mode and not options.output_explicit:
         options = options.model_copy(update={"output": OutputConfig(format="json")})
 
