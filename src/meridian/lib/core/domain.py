@@ -100,7 +100,6 @@ class SkillManifest(BaseModel):
 
     name: str
     description: str
-    tags: tuple[str, ...] = ()
     path: str = ""
 
 
@@ -111,7 +110,6 @@ class SkillContent(BaseModel):
 
     name: str
     description: str
-    tags: tuple[str, ...]
     content: str
     path: str
 

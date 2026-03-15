@@ -3,7 +3,6 @@
 
 import logging
 from pathlib import Path
-from typing import cast
 
 from pydantic import BaseModel, ConfigDict
 
@@ -26,7 +25,6 @@ class SkillDocument(BaseModel):
 
     name: str
     description: str
-    tags: tuple[str, ...]
     path: Path
     content: str
     body: str
@@ -51,27 +49,6 @@ def split_markdown_frontmatter(markdown: str) -> tuple[dict[str, object], str]:
     return dict(post.metadata), post.content
 
 
-def _coerce_string_list(value: object) -> tuple[str, ...]:
-    if value is None:
-        return ()
-    if isinstance(value, str):
-        candidate = value.strip()
-        return (candidate,) if candidate else ()
-    if isinstance(value, list):
-        normalized = [
-            str(item).strip()
-            for item in cast("list[object]", value)
-            if str(item).strip()
-        ]
-        return tuple(normalized)
-    return ()
-
-
-# ---------------------------------------------------------------------------
-# Skill file parsing and discovery
-# ---------------------------------------------------------------------------
-
-
 def parse_skill_file(path: Path) -> SkillDocument:
     """Parse one SKILL.md file."""
 
@@ -80,16 +57,12 @@ def parse_skill_file(path: Path) -> SkillDocument:
 
     name_value = frontmatter.get("name")
     description_value = frontmatter.get("description")
-    tags_value = frontmatter.get("tags")
-
     name = str(name_value).strip() if name_value is not None else path.parent.name
     description = str(description_value).strip() if description_value is not None else ""
-    tags = _coerce_string_list(tags_value)
 
     return SkillDocument(
         name=name or path.parent.name,
         description=description,
-        tags=tags,
         path=path.resolve(),
         content=content,
         body=body,
@@ -225,34 +198,9 @@ class SkillRegistry:
                 SkillManifest(
                     name=document.name,
                     description=document.description,
-                    tags=document.tags,
                     path=str(document.path),
                 )
                 for document in self._scan_documents()
-            ],
-            key=lambda item: item.name,
-        )
-
-    def search(self, query: str) -> list[SkillManifest]:
-        """Keyword search against name/description/tags/content."""
-
-        normalized = query.strip().lower()
-        if not normalized:
-            return self.list_skills()
-
-        return sorted(
-            [
-                SkillManifest(
-                    name=document.name,
-                    description=document.description,
-                    tags=document.tags,
-                    path=str(document.path),
-                )
-                for document in self._scan_documents()
-                if normalized in document.name.lower()
-                or normalized in document.description.lower()
-                or normalized in " ".join(document.tags).lower()
-                or normalized in document.content.lower()
             ],
             key=lambda item: item.name,
         )
@@ -273,7 +221,6 @@ class SkillRegistry:
             SkillContent(
                 name=docs_by_name[name].name,
                 description=docs_by_name[name].description,
-                tags=docs_by_name[name].tags,
                 content=docs_by_name[name].content,
                 path=str(docs_by_name[name].path),
             )

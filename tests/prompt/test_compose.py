@@ -17,7 +17,6 @@ def test_compose_prompt_keeps_context_isolated_and_sanitized(tmp_path: Path) -> 
     skill = SkillContent(
         name="worker",
         description="",
-        tags=(),
         content="Skill content",
         path=str(tmp_path / "worker.md"),
     )
