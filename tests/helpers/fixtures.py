@@ -41,7 +41,7 @@ def write_agent(
     skills: list[str] | tuple[str, ...] = (),
     sandbox: str | None = None,
     mcp_tools: list[str] | tuple[str, ...] | None = None,
-    allowed_tools: list[str] | tuple[str, ...] | None = None,
+    tools: list[str] | tuple[str, ...] | None = None,
     body: str | None = None,
 ) -> Path:
     """Write one agent profile under `.agents/agents/<name>.md`."""
@@ -56,8 +56,8 @@ def write_agent(
         lines.append(f"sandbox: {sandbox}")
     if mcp_tools is not None:
         lines.append(f"mcp-tools: [{', '.join(mcp_tools)}]")
-    if allowed_tools is not None:
-        lines.append(f"allowed-tools: [{', '.join(allowed_tools)}]")
+    if tools is not None:
+        lines.append(f"tools: [{', '.join(tools)}]")
     lines.append("---")
     lines.extend(["", body if body is not None else f"# {name}"])
     return _write(repo_root / ".agents" / "agents" / f"{name}.md", "\n".join(lines) + "\n")

@@ -237,7 +237,7 @@ def resolve_primary_launch_plan(
     )
     permission_config, resolver = resolve_permission_pipeline(
         sandbox=profile.sandbox if profile is not None else None,
-        allowed_tools=profile.allowed_tools if profile is not None else (),
+        allowed_tools=profile.tools if profile is not None else (),
         approval=request.approval,
     )
 

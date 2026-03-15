@@ -273,7 +273,7 @@ def build_create_payload(
 
     permission_config, resolver = resolve_permission_pipeline(
         sandbox=profile.sandbox if profile is not None else None,
-        allowed_tools=profile.allowed_tools if profile is not None else (),
+        allowed_tools=profile.tools if profile is not None else (),
         approval=payload.approval or "confirm",
     )
 
@@ -340,7 +340,7 @@ def build_create_payload(
             retry_backoff_secs=runtime_view.config.retry_backoff_seconds,
             permission_config=permission_config,
             permission_resolver=resolver,
-            allowed_tools=profile.allowed_tools if profile is not None else (),
+            allowed_tools=profile.tools if profile is not None else (),
         ),
     )
 
