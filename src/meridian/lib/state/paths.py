@@ -86,7 +86,6 @@ class StatePaths(BaseModel):
     root_dir: Path
     artifacts_dir: Path
     spawns_dir: Path
-    active_primary_lock: Path
     cache_dir: Path
     agents_manifest_path: Path
     agents_local_manifest_path: Path
@@ -117,7 +116,6 @@ def resolve_state_paths(repo_root: Path) -> StatePaths:
         root_dir=root_dir,
         artifacts_dir=root_dir / "artifacts",
         spawns_dir=root_dir / "spawns",
-        active_primary_lock=root_dir / "active-primary.lock",
         cache_dir=root_dir / "cache",
         agents_manifest_path=root_dir / "agents.toml",
         agents_local_manifest_path=root_dir / "agents.local.toml",

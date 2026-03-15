@@ -279,46 +279,56 @@ ManifestFile = Literal["shared", "local"]
 
 
 class SourceManifest(BaseModel):
-    """Combined view of agents.toml (shared) and agents.local.toml (local)."""
+    """Combined view of agents.toml (shared) and agents.local.toml (local).
+
+    Local entries **override** shared entries with the same name.  This lets
+    a developer customise a team-wide source (different ref, extra agents,
+    local path swap) without editing the committed manifest.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     shared: SourcesConfig = SourcesConfig()
     local: SourcesConfig = SourcesConfig()
 
-    @model_validator(mode="after")
-    def _validate_no_cross_file_duplicates(self) -> "SourceManifest":
-        shared_names = {s.name for s in self.shared.sources}
-        for source in self.local.sources:
-            if source.name in shared_names:
-                raise ValueError(
-                    f"Duplicate managed source name '{source.name}' across "
-                    f"agents.toml and agents.local.toml."
-                )
-        return self
-
     @property
     def all_sources(self) -> tuple[SourceConfig, ...]:
-        """All sources from both files."""
-        return (*self.shared.sources, *self.local.sources)
+        """Merged sources — local overrides shared on name collision."""
+        local_names = {s.name for s in self.local.sources}
+        merged: list[SourceConfig] = []
+        for s in self.shared.sources:
+            if s.name not in local_names:
+                merged.append(s)
+        merged.extend(self.local.sources)
+        return tuple(merged)
 
     def find_source(self, source_name: str) -> SourceConfig | None:
-        """Find a source by name across both files."""
-        for s in self.shared.sources:
+        """Find a source by name.  Local takes priority over shared."""
+        for s in self.local.sources:
             if s.name == source_name:
                 return s
-        for s in self.local.sources:
+        for s in self.shared.sources:
             if s.name == source_name:
                 return s
         return None
 
     def file_for_source(self, source_name: str) -> ManifestFile | None:
-        """Return which file a source lives in, or None if not found."""
+        """Return which file a source lives in, or None if not found.
+
+        When a source appears in both files (local override), returns
+        ``"local"`` because that is the effective entry.
+        """
         if any(s.name == source_name for s in self.local.sources):
             return "local"
         if any(s.name == source_name for s in self.shared.sources):
             return "shared"
         return None
+
+    def is_overridden(self, source_name: str) -> bool:
+        """Return whether a shared source is overridden by a local entry."""
+        has_shared = any(s.name == source_name for s in self.shared.sources)
+        has_local = any(s.name == source_name for s in self.local.sources)
+        return has_shared and has_local
 
     def with_source(
         self,
@@ -326,7 +336,11 @@ class SourceManifest(BaseModel):
         *,
         target: ManifestFile,
     ) -> "SourceManifest":
-        """Return a new manifest with the source added or replaced in the target file."""
+        """Return a new manifest with the source added or replaced in the target file.
+
+        When writing to local, the shared entry (if any) is left intact — the
+        local entry simply overrides it at merge time.
+        """
         if target == "local":
             existing = [s for s in self.local.sources if s.name != source.name]
             existing.append(source)
@@ -340,7 +354,11 @@ class SourceManifest(BaseModel):
         )
 
     def without_source(self, source_name: str) -> "SourceManifest":
-        """Return a new manifest with the named source removed from whichever file."""
+        """Return a new manifest with the named source removed.
+
+        Removes from whichever file(s) contain it.  If only the local
+        override is removed, the shared base becomes visible again.
+        """
         return SourceManifest(
             shared=SourcesConfig(
                 sources=tuple(s for s in self.shared.sources if s.name != source_name)

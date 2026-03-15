@@ -345,7 +345,7 @@ def _list_cmd(emit: Emitter) -> None:
                     source_agents.append(item_key[6:])
                 elif item_key.startswith("skill:"):
                     source_skills.append(item_key[6:])
-        sources_payload.append({
+        entry: dict[str, object] = {
             "name": source.name,
             "kind": source.kind,
             "url": source.url,
@@ -354,7 +354,10 @@ def _list_cmd(emit: Emitter) -> None:
             "local": manifest.file_for_source(source.name) == "local",
             "agents": source_agents,
             "skills": source_skills,
-        })
+        }
+        if manifest.is_overridden(source.name):
+            entry["overridden"] = True
+        sources_payload.append(entry)
     emit({"sources": sources_payload})
 
 
