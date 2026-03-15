@@ -409,7 +409,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
     ),
     _spec(
         name="spawn.wait",
-        description="Block until spawn(s) complete. Shows report paths by default and inlines report text with --report.",
+        description="Block until spawn(s) complete. Inlines report text by default; use --no-report to omit report body.",
         handler=spawn_wait,
         sync_handler=spawn_wait_sync,
         input_type=SpawnWaitInput,

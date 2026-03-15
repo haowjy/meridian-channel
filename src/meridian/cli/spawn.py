@@ -367,9 +367,9 @@ def _spawn_wait(
         bool,
         Parameter(
             name="--report",
-            help="Include full spawn report body in output. By default only the report path is shown.",
+            help="Include full spawn report body in output (default: enabled). Use --no-report to omit.",
         ),
-    ] = False,
+    ] = True,
 ) -> None:
     result = spawn_wait_sync(
         SpawnWaitInput(
