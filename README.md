@@ -12,6 +12,14 @@ Multi-model agent orchestration CLI and MCP server.
 One interface across Claude, Codex, and OpenCode, with `uv` as the recommended
 install path.
 
+## Installation
+
+Tell your LLM agent:
+
+> Fetch and follow instructions from `https://raw.githubusercontent.com/haowjy/meridian-channel/refs/heads/main/INSTALL.md`
+
+This works with any agent that can fetch URLs. The install guide walks the agent through setup interactively.
+
 ## Why Meridian?
 
 AI agent CLIs are useful, but each harness comes with its own command surface,
