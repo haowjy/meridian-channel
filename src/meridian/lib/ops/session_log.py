@@ -57,6 +57,9 @@ class SessionLogOutput(BaseModel):
     segment_messages: int
     showing: str
     messages: tuple[SessionLogMessage, ...]
+    has_newer: bool = False
+    has_older: bool = False
+    has_earlier_segments: bool = False
 
     def format_text(self, ctx: FormatContext | None = None) -> str:
         _ = ctx
@@ -69,6 +72,16 @@ class SessionLogOutput(BaseModel):
             lines.append("")
             lines.append(f"--- {message.index} [{message.role}] ---")
             lines.append(message.content)
+        hints: list[str] = []
+        if self.has_older:
+            hints.append("Use --last N to show more messages.")
+        if self.has_newer:
+            hints.append("Use --offset N to page forward.")
+        if self.has_earlier_segments:
+            hints.append("Use -c N for earlier compaction segments.")
+        if hints:
+            lines.append("")
+            lines.extend(hints)
         return "\n".join(lines)
 
 
@@ -288,7 +301,7 @@ def _extract_from_event(payload: dict[str, object]) -> tuple[list[TranscriptMess
     return ([], is_boundary)
 
 
-def _parse_session_file(path: Path) -> tuple[list[list[TranscriptMessage]], int]:
+def parse_session_file(path: Path) -> tuple[list[list[TranscriptMessage]], int]:
     segments: list[list[TranscriptMessage]] = [[]]
     total_compactions = 0
 
@@ -480,7 +493,7 @@ def _resolve_from_session_ref(
     )
 
 
-def _resolve_target(
+def resolve_target(
     payload: SessionLogInput, *, repo_root: Path, state_root: Path
 ) -> _ResolvedTarget:
     if payload.file_path is not None and payload.file_path.strip():
@@ -550,8 +563,8 @@ def session_log_sync(
     repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
     state_root = resolve_state_root(repo_root)
 
-    target = _resolve_target(payload, repo_root=repo_root, state_root=state_root)
-    segments, total_compactions = _parse_session_file(target.file_path)
+    target = resolve_target(payload, repo_root=repo_root, state_root=state_root)
+    segments, total_compactions = parse_session_file(target.file_path)
     segment_messages = _select_segment(segments, compaction=payload.compaction)
 
     selected, start_index = _paginate_messages(
@@ -572,6 +585,9 @@ def session_log_sync(
         segment_messages=len(segment_messages),
         showing=_showing_window(output_messages),
         messages=output_messages,
+        has_newer=payload.offset > 0,
+        has_older=start_index > 0,
+        has_earlier_segments=total_compactions > payload.compaction,
     )
 
 
@@ -582,6 +598,8 @@ __all__ = [
     "SessionLogInput",
     "SessionLogMessage",
     "SessionLogOutput",
+    "parse_session_file",
+    "resolve_target",
     "session_log",
     "session_log_sync",
 ]

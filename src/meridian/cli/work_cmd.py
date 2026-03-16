@@ -11,9 +11,11 @@ from meridian.lib.core.context import RuntimeContext
 from meridian.lib.ops.work_dashboard import (
     WorkDashboardInput,
     WorkListInput,
+    WorkSessionsInput,
     WorkShowInput,
     work_dashboard_sync,
     work_list_sync,
+    work_sessions_sync,
     work_show_sync,
 )
 from meridian.lib.ops.work_lifecycle import (
@@ -84,6 +86,25 @@ def _work_show(
     ],
 ) -> None:
     emit(work_show_sync(WorkShowInput(work_id=work_id)))
+
+
+def _work_sessions(
+    emit: Emitter,
+    work_id: Annotated[
+        str,
+        Parameter(
+            help=(
+                "Work item id. Defaults to MERIDIAN_WORK_ID, "
+                "then the active work item attached to this session."
+            )
+        ),
+    ] = "",
+    all: Annotated[
+        bool,
+        Parameter(name="--all", help="Include historical sessions."),
+    ] = False,
+) -> None:
+    emit(work_sessions_sync(WorkSessionsInput(work_id=work_id, all=all)))
 
 
 def _work_update(
@@ -171,6 +192,7 @@ def register_work_commands(app: App, emit: Emitter) -> tuple[set[str], dict[str,
         "work.start": lambda: partial(_work_start, emit),
         "work.list": lambda: partial(_work_list, emit),
         "work.show": lambda: partial(_work_show, emit),
+        "work.sessions": lambda: partial(_work_sessions, emit),
         "work.update": lambda: partial(_work_update, emit),
         "work.done": lambda: partial(_work_done, emit),
         "work.switch": lambda: partial(_work_switch, emit),

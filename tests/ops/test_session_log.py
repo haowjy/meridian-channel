@@ -2,7 +2,7 @@
 
 import json
 
-from meridian.lib.ops.session_log import _extract_from_event, _parse_session_file
+from meridian.lib.ops.session_log import _extract_from_event, parse_session_file
 
 
 def test_parse_session_file_splits_segments_on_compaction_boundary(tmp_path) -> None:
@@ -24,7 +24,7 @@ def test_parse_session_file_splits_segments_on_compaction_boundary(tmp_path) -> 
     ]
     session_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    segments, total_compactions = _parse_session_file(session_file)
+    segments, total_compactions = parse_session_file(session_file)
 
     assert total_compactions == 1
     assert len(segments) == 2

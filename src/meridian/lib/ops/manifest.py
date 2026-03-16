@@ -58,6 +58,12 @@ from meridian.lib.ops.session_log import (
     session_log,
     session_log_sync,
 )
+from meridian.lib.ops.session_search import (
+    SessionSearchInput,
+    SessionSearchOutput,
+    session_search,
+    session_search_sync,
+)
 from meridian.lib.ops.spawn.api import (
     SpawnActionOutput,
     SpawnCancelInput,
@@ -99,10 +105,14 @@ from meridian.lib.ops.spawn.log import (
 from meridian.lib.ops.work_dashboard import (
     WorkListInput,
     WorkListOutput,
+    WorkSessionsInput,
+    WorkSessionsOutput,
     WorkShowInput,
     WorkShowOutput,
     work_list,
     work_list_sync,
+    work_sessions,
+    work_sessions_sync,
     work_show,
     work_show_sync,
 )
@@ -353,6 +363,21 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         surfaces=frozenset({"cli"}),
     ),
     _spec(
+        name="session.search",
+        description=(
+            "Search a session transcript across all compaction segments "
+            "for case-insensitive text matches."
+        ),
+        handler=session_search,
+        sync_handler=session_search_sync,
+        input_type=SessionSearchInput,
+        output_type=SessionSearchOutput,
+        cli_group="session",
+        cli_name="search",
+        mcp_name="session_search",
+        surfaces=frozenset({"cli"}),
+    ),
+    _spec(
         name="spawn.cancel",
         description="Cancel a running spawn.",
         handler=spawn_cancel,
@@ -533,6 +558,21 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="work",
         cli_name="show",
         mcp_name="work_show",
+        surfaces=frozenset({"cli"}),
+    ),
+    _spec(
+        name="work.sessions",
+        description=(
+            "List sessions associated with a work item. "
+            "Default shows active sessions; use --all for historical."
+        ),
+        handler=work_sessions,
+        sync_handler=work_sessions_sync,
+        input_type=WorkSessionsInput,
+        output_type=WorkSessionsOutput,
+        cli_group="work",
+        cli_name="sessions",
+        mcp_name="work_sessions",
         surfaces=frozenset({"cli"}),
     ),
     _spec(

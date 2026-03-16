@@ -478,6 +478,48 @@ def list_active_sessions_for_work_id(state_root: Path, work_id: str) -> list[str
     ]
 
 
+def chat_ids_ever_attached_to_work(state_root: Path, work_id: str) -> set[str]:
+    """Return session IDs ever attached to a work item in raw session events."""
+
+    normalized_work_id = work_id.strip()
+    if not normalized_work_id:
+        return set()
+
+    paths = StateRootPaths.from_root_dir(state_root)
+
+    def _parse_work_attachment(payload: dict[str, Any]) -> str | None:
+        event_type = payload.get("event")
+        if event_type not in {"start", "update"}:
+            return None
+        chat_id = payload.get("chat_id")
+        if not isinstance(chat_id, str) or not chat_id.strip():
+            return None
+        active_work_id = payload.get("active_work_id")
+        if not isinstance(active_work_id, str):
+            return None
+        if active_work_id.strip() != normalized_work_id:
+            return None
+        return chat_id.strip()
+
+    return set(read_events(paths.sessions_jsonl, _parse_work_attachment))
+
+
+def get_session_records(state_root: Path, chat_ids: set[str]) -> list[SessionRecord]:
+    """Return materialized records for a set of Meridian chat/session IDs."""
+
+    if not chat_ids:
+        return []
+    records = _records_by_session(state_root)
+    return [
+        records[chat_id]
+        for chat_id in sorted(
+            {chat_id.strip() for chat_id in chat_ids if chat_id.strip()},
+            key=_session_sort_key,
+        )
+        if chat_id in records
+    ]
+
+
 def get_last_session(state_root: Path) -> SessionRecord | None:
     """Return the most recently started session record in a state root."""
 

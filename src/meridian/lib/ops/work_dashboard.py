@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict
 from meridian.lib.core.context import RuntimeContext
 from meridian.lib.core.spawn_lifecycle import is_active_spawn_status
 from meridian.lib.core.util import FormatContext
-from meridian.lib.ops.runtime import async_from_sync, resolve_roots
+from meridian.lib.ops.runtime import async_from_sync, resolve_roots, runtime_context
 from meridian.lib.state import session_store, spawn_store, work_store
 
 
@@ -61,6 +61,39 @@ def _format_spawn_rows(spawns: tuple[WorkDashboardSpawn, ...], *, indent: str) -
 
     table = tabular([[spawn.id, spawn.model, spawn.status, spawn.desc] for spawn in spawns])
     return [f"{indent}{line}" for line in table.splitlines()]
+
+
+class WorkSessionItem(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    chat_id: str
+    harness: str
+    harness_session_id: str
+    status: str
+    model: str
+    agent: str
+
+
+def _format_session_rows(sessions: tuple[WorkSessionItem, ...], *, indent: str) -> list[str]:
+    if not sessions:
+        return [f"{indent}(no sessions)"]
+
+    from meridian.cli.format_helpers import tabular
+
+    rows = [["chat_id", "harness", "status", "model", "harness_session_id"]]
+    rows.extend(
+        [
+            [
+                session.chat_id,
+                session.harness,
+                session.status,
+                session.model,
+                session.harness_session_id,
+            ]
+            for session in sessions
+        ]
+    )
+    return [f"{indent}{line}" for line in tabular(rows).splitlines()]
 
 
 def _active_session_work_ids(state_root: Path) -> dict[str, str]:
@@ -205,6 +238,7 @@ class WorkShowOutput(BaseModel):
     created_at: str
     work_dir: str
     spawns: tuple[WorkDashboardSpawn, ...] = ()
+    sessions: tuple[WorkSessionItem, ...] = ()
 
     def format_text(self, ctx: FormatContext | None = None) -> str:
         _ = ctx
@@ -226,7 +260,124 @@ class WorkShowOutput(BaseModel):
             lines.append("")
             lines.append("Spawns:")
             lines.extend(_format_spawn_rows(self.spawns, indent="  "))
+        lines.append("")
+        lines.append("Sessions:")
+        lines.extend(_format_session_rows(self.sessions, indent="  "))
         return "\n".join(lines)
+
+
+class WorkSessionsInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    work_id: str = ""
+    all: bool = False
+    repo_root: str | None = None
+
+
+class WorkSessionsOutput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    work_id: str
+    sessions: tuple[WorkSessionItem, ...] = ()
+    all: bool = False
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        _ = ctx
+        lines = _format_session_rows(self.sessions, indent="")
+        if not self.all:
+            lines.append("")
+            lines.append("Use --all to include historical sessions.")
+        return "\n".join(lines)
+
+
+def _resolve_work_id(
+    *,
+    payload_work_id: str,
+    state_root: Path,
+    ctx: RuntimeContext | None,
+) -> str:
+    normalized = payload_work_id.strip()
+    if normalized:
+        return normalized
+
+    resolved_ctx = runtime_context(ctx)
+    if resolved_ctx.work_id is not None and resolved_ctx.work_id.strip():
+        return resolved_ctx.work_id.strip()
+
+    chat_id = resolved_ctx.chat_id.strip()
+    if chat_id:
+        attached_work_id = session_store.get_session_active_work_id(state_root, chat_id)
+        if attached_work_id is not None and attached_work_id.strip():
+            return attached_work_id.strip()
+
+    raise ValueError(
+        "No work item resolved. Pass `meridian work sessions <work_id>`, "
+        "set `MERIDIAN_WORK_ID`, or run from a session attached to a work item."
+    )
+
+
+def _work_session_chat_ids(
+    state_root: Path,
+    work_id: str,
+    *,
+    include_all: bool,
+) -> set[str]:
+    normalized_work_id = work_id.strip()
+    if not normalized_work_id:
+        return set()
+
+    from meridian.lib.state.reaper import reconcile_spawns
+
+    chat_ids: set[str] = set()
+    if include_all:
+        chat_ids.update(
+            session_store.chat_ids_ever_attached_to_work(state_root, normalized_work_id)
+        )
+        for spawn in reconcile_spawns(state_root, spawn_store.list_spawns(state_root)):
+            if (spawn.work_id or "").strip() != normalized_work_id:
+                continue
+            chat_id = (spawn.chat_id or "").strip()
+            if chat_id:
+                chat_ids.add(chat_id)
+        return chat_ids
+
+    for record in session_store.list_active_session_records(state_root):
+        if record.active_work_id == normalized_work_id:
+            chat_ids.add(record.chat_id)
+    for spawn in reconcile_spawns(state_root, spawn_store.list_spawns(state_root)):
+        if spawn.kind == "primary":
+            continue
+        if not is_active_spawn_status(spawn.status):
+            continue
+        if (spawn.work_id or "").strip() != normalized_work_id:
+            continue
+        chat_id = (spawn.chat_id or "").strip()
+        if chat_id:
+            chat_ids.add(chat_id)
+    return chat_ids
+
+
+def _work_sessions_for_work_id(
+    state_root: Path,
+    work_id: str,
+    *,
+    include_all: bool,
+) -> tuple[WorkSessionItem, ...]:
+    active_chat_ids = set(session_store.list_active_sessions(state_root))
+    chat_ids = _work_session_chat_ids(state_root, work_id, include_all=include_all)
+    records = session_store.get_session_records(state_root, chat_ids)
+    records.sort(key=lambda record: (record.started_at, record.chat_id))
+    return tuple(
+        WorkSessionItem(
+            chat_id=record.chat_id,
+            harness=(record.harness or "").strip() or "-",
+            harness_session_id=(record.harness_session_id or "").strip() or "-",
+            status="active" if record.chat_id in active_chat_ids else "stopped",
+            model=(record.model or "").strip() or "-",
+            agent=(record.agent or "").strip() or "-",
+        )
+        for record in records
+    )
 
 
 def work_dashboard_sync(
@@ -333,12 +484,36 @@ def work_show_sync(
         created_at=item.created_at,
         work_dir=work_dir_display(repo_root, state_root, item.name),
         spawns=tuple(associated_spawns),
+        sessions=_work_sessions_for_work_id(state_root, item.name, include_all=False),
+    )
+
+
+def work_sessions_sync(
+    payload: WorkSessionsInput,
+    ctx: RuntimeContext | None = None,
+) -> WorkSessionsOutput:
+    state_root = resolve_roots(payload.repo_root).state_root
+    resolved_work_id = _resolve_work_id(
+        payload_work_id=payload.work_id,
+        state_root=state_root,
+        ctx=ctx,
+    )
+
+    item = work_store.get_work_item(state_root, resolved_work_id)
+    if item is None:
+        raise ValueError(f"Work item '{resolved_work_id}' not found")
+
+    return WorkSessionsOutput(
+        work_id=item.name,
+        sessions=_work_sessions_for_work_id(state_root, item.name, include_all=payload.all),
+        all=payload.all,
     )
 
 
 work_dashboard = async_from_sync(work_dashboard_sync)
 work_list = async_from_sync(work_list_sync)
 work_show = async_from_sync(work_show_sync)
+work_sessions = async_from_sync(work_sessions_sync)
 
 
 __all__ = [
@@ -349,6 +524,9 @@ __all__ = [
     "WorkListInput",
     "WorkListItem",
     "WorkListOutput",
+    "WorkSessionItem",
+    "WorkSessionsInput",
+    "WorkSessionsOutput",
     "WorkShowInput",
     "WorkShowOutput",
     "work_dashboard",
@@ -356,6 +534,8 @@ __all__ = [
     "work_dir_display",
     "work_list",
     "work_list_sync",
+    "work_sessions",
+    "work_sessions_sync",
     "work_show",
     "work_show_sync",
 ]
