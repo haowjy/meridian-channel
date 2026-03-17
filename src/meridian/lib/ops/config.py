@@ -17,11 +17,19 @@ from meridian.lib.config.settings import (
     resolve_repo_root,
 )
 from meridian.lib.core.util import FormatContext, to_jsonable
+from meridian.lib.launch.resolve import configured_default_agent_warning
 from meridian.lib.ops.runtime import async_from_sync
 from meridian.lib.state.paths import ensure_gitignore, resolve_state_paths
 
 _SECTION_ORDER: tuple[str, ...] = ("defaults", "timeouts", "harness", "output")
 _OUTPUT_VERBOSITY_PRESETS = frozenset({"quiet", "normal", "verbose", "debug"})
+
+
+def _merge_warnings(*warnings: str | None) -> str | None:
+    parts = [item.strip() for item in warnings if item and item.strip()]
+    if not parts:
+        return None
+    return "; ".join(parts)
 
 
 class _ConfigKeySpec(BaseModel):
@@ -732,6 +740,21 @@ def config_show_sync(payload: ConfigShowInput) -> ConfigShowOutput:
     warning: str | None = None
     if not repo_root.exists():
         warning = f"Resolved repo root '{repo_root.as_posix()}' does not exist on disk."
+    warning = _merge_warnings(
+        warning,
+        configured_default_agent_warning(
+            repo_root=repo_root,
+            configured_agent=resolved_config.primary_agent,
+            builtin_default="__meridian-orchestrator",
+            config_key="defaults.primary_agent",
+        ),
+        configured_default_agent_warning(
+            repo_root=repo_root,
+            configured_agent=resolved_config.default_agent,
+            builtin_default="__meridian-subagent",
+            config_key="defaults.agent",
+        ),
+    )
 
     return ConfigShowOutput(path=path.as_posix(), values=tuple(values), warning=warning)
 

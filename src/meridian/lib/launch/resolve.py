@@ -54,6 +54,37 @@ def load_agent_profile_with_fallback(
     return None
 
 
+def configured_default_agent_warning(
+    *,
+    repo_root: Path,
+    configured_agent: str,
+    builtin_default: str,
+    config_key: str,
+) -> str | None:
+    configured_profile = configured_agent.strip()
+    if not configured_profile:
+        return None
+
+    builtin_profile = builtin_default.strip()
+    if builtin_profile and configured_profile == builtin_profile:
+        return None
+
+    try:
+        load_agent_profile(
+            configured_profile,
+            repo_root=repo_root,
+        )
+    except FileNotFoundError:
+        if builtin_profile:
+            return (
+                f"Configured {config_key} '{configured_profile}' is unavailable locally; "
+                f"Meridian will use builtin default '{builtin_profile}' until you update it."
+            )
+        return f"Configured {config_key} '{configured_profile}' is unavailable locally."
+
+    return None
+
+
 class ResolvedSkills(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -338,6 +369,7 @@ def _resolve_agent_profile_with_builtin_fallback(
 __all__ = [
     "ResolvedPolicies",
     "ResolvedSkills",
+    "configured_default_agent_warning",
     "ensure_bootstrap_ready",
     "load_agent_profile_with_fallback",
     "resolve_harness",

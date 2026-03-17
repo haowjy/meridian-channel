@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.core.spawn_lifecycle import is_active_spawn_status
 from meridian.lib.core.util import FormatContext
+from meridian.lib.launch.resolve import configured_default_agent_warning
 from meridian.lib.ops.runtime import build_runtime, resolve_state_root
 from meridian.lib.state import spawn_store
 from meridian.lib.state.session_store import cleanup_stale_sessions
@@ -92,6 +93,22 @@ def doctor_sync(payload: DoctorInput) -> DoctorOutput:
         warnings.append("No configured skills directories were found.")
     if not agents_dirs:
         warnings.append("No configured agent profile directories were found.")
+    default_agent_warning = configured_default_agent_warning(
+        repo_root=runtime.repo_root,
+        configured_agent=runtime.config.primary_agent,
+        builtin_default="__meridian-orchestrator",
+        config_key="defaults.primary_agent",
+    )
+    if default_agent_warning is not None:
+        warnings.append(default_agent_warning)
+    subagent_warning = configured_default_agent_warning(
+        repo_root=runtime.repo_root,
+        configured_agent=runtime.config.default_agent,
+        builtin_default="__meridian-subagent",
+        config_key="defaults.agent",
+    )
+    if subagent_warning is not None:
+        warnings.append(subagent_warning)
 
     running = [
         row.id
