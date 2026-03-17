@@ -27,6 +27,8 @@ _BOOTSTRAP_URL = "https://github.com/haowjy/meridian-base.git"
 _BOOTSTRAP_AGENT_NAMES = frozenset({"__meridian-orchestrator", "__meridian-subagent"})
 # Known skill deps for bootstrap agents — auto-included when bootstrapping
 _BOOTSTRAP_SKILL_NAMES = frozenset({"__meridian-orchestrate", "__meridian-spawn-agent"})
+_BOOTSTRAP_AGENT_LIST = tuple(sorted(_BOOTSTRAP_AGENT_NAMES))
+_BOOTSTRAP_SKILL_LIST = tuple(sorted(_BOOTSTRAP_SKILL_NAMES))
 
 
 class BootstrapPlan(BaseModel):
@@ -190,8 +192,8 @@ def _ensure_bootstrap_source(
     item_ids: tuple[str, ...],
 ) -> SourceManifest:
     existing = manifest.find_source(_BOOTSTRAP_SOURCE_NAME)
-    # Extract agent names from item_ids (all bootstrap items are agents)
-    required_agent_names = tuple(parse_item_id(item_id)[1] for item_id in item_ids)
+    # Validate item ids even though the source we record is the complete bootstrap set.
+    _ = tuple(parse_item_id(item_id)[1] for item_id in item_ids)
 
     if existing is None:
         bootstrap_source = SourceConfig(
@@ -199,8 +201,8 @@ def _ensure_bootstrap_source(
             kind="git",
             url=_BOOTSTRAP_URL,
             ref="main",
-            agents=required_agent_names,
-            skills=tuple(sorted(_BOOTSTRAP_SKILL_NAMES)),
+            agents=_BOOTSTRAP_AGENT_LIST,
+            skills=_BOOTSTRAP_SKILL_LIST,
         )
         # Bootstrap sources are always shared (git)
         return manifest.with_source(bootstrap_source, target="shared")
@@ -211,14 +213,14 @@ def _ensure_bootstrap_source(
 
     existing_agent_names = set(existing.agents or ())
     merged_agents = list(existing.agents or ())
-    for name in required_agent_names:
+    for name in _BOOTSTRAP_AGENT_LIST:
         if name not in existing_agent_names:
             merged_agents.append(name)
 
     # Also ensure skill deps are included
     existing_skill_names = set(existing.skills or ())
     merged_skills = list(existing.skills or ())
-    for skill_name in sorted(_BOOTSTRAP_SKILL_NAMES):
+    for skill_name in _BOOTSTRAP_SKILL_LIST:
         if skill_name not in existing_skill_names:
             merged_skills.append(skill_name)
 

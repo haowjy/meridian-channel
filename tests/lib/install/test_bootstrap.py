@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from meridian.lib.install.bootstrap import (
+    _ensure_bootstrap_source,
     ensure_bootstrap_assets,
     plan_bootstrap_assets,
     planned_bootstrap_agent_names,
@@ -124,6 +125,47 @@ def test_ensure_bootstrap_assets_bootstraps_missing_default(
     lock = read_lock(state_paths.agents_lock_path)
     assert "meridian-base" in lock.sources
     assert "agent:__meridian-subagent" in lock.items
+
+
+def test_ensure_bootstrap_source_records_complete_builtin_filter() -> None:
+    manifest = SourceManifest()
+
+    updated = _ensure_bootstrap_source(
+        manifest=manifest,
+        item_ids=("agent:__meridian-subagent",),
+    )
+
+    source = updated.find_source("meridian-base")
+    assert source is not None
+    assert source.agents == ("__meridian-orchestrator", "__meridian-subagent")
+    assert source.skills == ("__meridian-orchestrate", "__meridian-spawn-agent")
+
+
+def test_ensure_bootstrap_source_upgrades_partial_filter_to_complete_builtin_filter() -> None:
+    manifest = SourceManifest(
+        shared=SourcesConfig(
+            sources=(
+                SourceConfig(
+                    name="meridian-base",
+                    kind="git",
+                    url="https://github.com/haowjy/meridian-base.git",
+                    ref="main",
+                    agents=("__meridian-subagent",),
+                    skills=("__meridian-orchestrate",),
+                ),
+            )
+        )
+    )
+
+    updated = _ensure_bootstrap_source(
+        manifest=manifest,
+        item_ids=("agent:__meridian-subagent",),
+    )
+
+    source = updated.find_source("meridian-base")
+    assert source is not None
+    assert source.agents == ("__meridian-subagent", "__meridian-orchestrator")
+    assert source.skills == ("__meridian-orchestrate", "__meridian-spawn-agent")
 
 
 def test_ensure_bootstrap_assets_rejects_unknown_missing_default(tmp_path: Path) -> None:
