@@ -64,16 +64,13 @@ Ask the user: `Would you like to install the dev workflow agents and skills? Thi
 If yes:
 
 ```bash
-meridian sources add @haowjy/meridian-base
-meridian sources add @haowjy/meridian-dev-workflow
-meridian sources install
+meridian sources install @haowjy/meridian-dev-workflow
 ```
 
-If they only want the core coordination primitives:
+If they only want the core coordination primitives (without the dev team):
 
 ```bash
-meridian sources add @haowjy/meridian-base
-meridian sources install
+meridian sources install @haowjy/meridian-base
 ```
 
 Verify what's installed:

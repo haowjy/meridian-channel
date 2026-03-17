@@ -163,14 +163,9 @@ Meridian discovers agent profiles from `.agents/agents/` and skills from
 ### [meridian-base](https://github.com/haowjy/meridian-base) — Core coordination
 
 The orchestrator and subagent profiles, plus skills for spawning, work
-coordination, session context, install management, and troubleshooting.
-Meridian auto-bootstraps the essential agents from here; install explicitly
-to get everything:
-
-```bash
-meridian sources add @haowjy/meridian-base
-meridian sources install
-```
+coordination, session context, and troubleshooting. Meridian auto-bootstraps
+the essential runtime agents from here — you don't need to install it
+manually unless you want the full skill set.
 
 ### [meridian-dev-workflow](https://github.com/haowjy/meridian-dev-workflow) — Dev team
 
@@ -179,16 +174,11 @@ researcher, documenter — plus workflow skills for design, planning,
 implementation, review, testing, and documentation:
 
 ```bash
-meridian sources add @haowjy/meridian-base
-meridian sources add @haowjy/meridian-dev-workflow
-meridian sources install
+meridian sources install @haowjy/meridian-dev-workflow
 ```
 
-Browse their READMEs for full agent/skill catalogs.
-
-```bash
-meridian sources list      # What's installed and where it came from
-```
+Browse their READMEs for full agent/skill catalogs. Check what's installed
+with `meridian sources list`.
 
 ## Architecture
 
