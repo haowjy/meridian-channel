@@ -821,6 +821,10 @@ def main(argv: Sequence[str] | None = None) -> None:
         try:
             repo_root = Path.cwd().resolve()
             state_root = resolve_state_paths(repo_root).root_dir
+            if state_root.is_dir():
+                from meridian.lib.state.paths import ensure_gitignore
+
+                ensure_gitignore(repo_root)
             cleanup_stale_sessions(state_root)
         except Exception:
             logger.debug("stale session cleanup failed", exc_info=True)
