@@ -7,7 +7,6 @@ on:
 
 jobs:
   build:
-    if: github.event.created == true
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -44,7 +43,6 @@ jobs:
           path: dist/
 
   publish:
-    if: github.event.created == true
     needs: build
     runs-on: ubuntu-latest
     permissions:
