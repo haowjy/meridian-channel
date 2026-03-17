@@ -1,5 +1,6 @@
 """Model routing, discovery, alias resolution, and catalog."""
 
+import fnmatch
 import importlib.resources
 import json
 import logging
@@ -36,7 +37,103 @@ class RoutingDecision(BaseModel):
     warning: str | None = None
 
 
-def route_model(model: str, mode: SpawnMode = "harness") -> RoutingDecision:
+_DEFAULT_HARNESS_PATTERNS: dict[HarnessId, tuple[str, ...]] = {
+    HarnessId.CLAUDE: ("claude-*", "opus*", "sonnet*", "haiku*"),
+    HarnessId.CODEX: ("gpt-*", "o1*", "o3*", "o4*", "codex*"),
+    HarnessId.OPENCODE: ("opencode-*", "gemini*", "*/*"),
+}
+
+
+class ModelVisibilityConfig(BaseModel):
+    """Default-list visibility policy for `meridian models list`."""
+
+    model_config = ConfigDict(frozen=True)
+
+    include: tuple[str, ...] = ()
+    exclude: tuple[str, ...] = (
+        "*-latest",
+        "*-deep-research",
+        "gemini-live-*",
+        "o1*",
+        "o3*",
+        "o4*",
+    )
+    max_input_cost: float | None = 10.0
+    max_age_days: int | None = 180
+    hide_date_variants: bool = True
+
+
+_DEFAULT_MODEL_VISIBILITY = ModelVisibilityConfig()
+
+
+def _match_pattern(pattern: str, value: str) -> bool:
+    return fnmatch.fnmatchcase(value, pattern)
+
+
+def _coerce_pattern_list(raw_value: object, *, source: str) -> tuple[str, ...]:
+    if not isinstance(raw_value, list):
+        raise ValueError(f"Invalid value for '{source}': expected array of strings.")
+    patterns: list[str] = []
+    for raw_pattern in cast("list[object]", raw_value):
+        if not isinstance(raw_pattern, str):
+            raise ValueError(f"Invalid value for '{source}': expected array of strings.")
+        pattern = raw_pattern.strip()
+        if not pattern:
+            raise ValueError(f"Invalid value for '{source}': empty pattern.")
+        patterns.append(pattern)
+    return tuple(patterns)
+
+
+def _load_models_file_payload(path: Path) -> dict[str, object]:
+    payload_obj = tomllib.loads(path.read_text(encoding="utf-8"))
+    return cast("dict[str, object]", payload_obj)
+
+
+def _load_user_harness_patterns(repo_root: Path | None = None) -> dict[HarnessId, tuple[str, ...]]:
+    if repo_root is None:
+        return {}
+
+    path = _catalog_path(resolve_repo_root(repo_root))
+    if not path.is_file():
+        return {}
+
+    payload = _load_models_file_payload(path)
+    raw_section = payload.get("harness_patterns")
+    if raw_section is None:
+        return {}
+    if not isinstance(raw_section, dict):
+        raise ValueError("Invalid value for 'harness_patterns': expected table.")
+
+    patterns_by_harness: dict[HarnessId, tuple[str, ...]] = {}
+    for raw_harness, raw_patterns in cast("dict[object, object]", raw_section).items():
+        if not isinstance(raw_harness, str):
+            raise ValueError("Invalid value for 'harness_patterns': expected harness keys.")
+        harness_name = raw_harness.strip()
+        try:
+            harness = HarnessId(harness_name)
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid harness_patterns key '{raw_harness}'. "
+                f"Expected one of: {', '.join(str(item) for item in HarnessId)}."
+            ) from exc
+        patterns_by_harness[harness] = _coerce_pattern_list(
+            raw_patterns, source=f"harness_patterns.{harness_name}"
+        )
+    return patterns_by_harness
+
+
+def load_harness_patterns(repo_root: Path | None = None) -> dict[HarnessId, tuple[str, ...]]:
+    patterns = dict(_DEFAULT_HARNESS_PATTERNS)
+    patterns.update(_load_user_harness_patterns(repo_root=repo_root))
+    return patterns
+
+
+def route_model(
+    model: str,
+    mode: SpawnMode = "harness",
+    *,
+    repo_root: Path | None = None,
+) -> RoutingDecision:
     """Route a model ID to the corresponding harness family.
 
     Unknown model families are rejected to avoid silently choosing the wrong harness.
@@ -46,15 +143,22 @@ def route_model(model: str, mode: SpawnMode = "harness") -> RoutingDecision:
     if mode == "direct":
         return RoutingDecision(harness_id=HarnessId.DIRECT)
 
-    if normalized.startswith(("claude-", "opus", "sonnet", "haiku")):
-        return RoutingDecision(harness_id=HarnessId.CLAUDE)
-    if normalized.startswith(("gpt-", "o1", "o3", "o4", "codex")):
-        return RoutingDecision(harness_id=HarnessId.CODEX)
-    if normalized.startswith(("opencode-", "gemini-", "gemini")) or "/" in normalized:
-        return RoutingDecision(harness_id=HarnessId.OPENCODE)
+    matched_harnesses = [
+        harness
+        for harness, patterns in load_harness_patterns(repo_root=repo_root).items()
+        if any(_match_pattern(pattern, normalized) for pattern in patterns)
+    ]
+    if len(matched_harnesses) == 1:
+        return RoutingDecision(harness_id=matched_harnesses[0])
+    if len(matched_harnesses) > 1:
+        joined = ", ".join(str(harness) for harness in matched_harnesses)
+        raise ValueError(
+            f"Model '{model}' matches multiple harness_patterns entries: {joined}. "
+            "Update .meridian/models.toml to disambiguate."
+        )
 
     raise ValueError(
-        f"Unknown model family '{model}'. Configure an explicit harness in models.toml."
+        f"Unknown model family '{model}'. Configure harness_patterns in .meridian/models.toml."
     )
 
 
@@ -541,11 +645,14 @@ class AliasEntry(BaseModel):
     model_id: ModelId
     role: str | None = None
     strengths: str | None = None
+    resolved_harness: HarnessId | None = Field(default=None, exclude=True)
 
     @property
     def harness(self) -> HarnessId:
         """Harness inferred from the model identifier via prefix routing."""
 
+        if self.resolved_harness is not None:
+            return self.resolved_harness
         return route_model(str(self.model_id)).harness_id
 
     def format_text(self, ctx: FormatContext | None = None) -> str:
@@ -576,6 +683,177 @@ def _coerce_string(value: object) -> str | None:
     return normalized or None
 
 
+def _coerce_optional_float(value: object, *, source: str) -> float | None:
+    if value is None:
+        return None
+    parsed = _parse_float(value)
+    if parsed is None:
+        raise ValueError(f"Invalid value for '{source}': expected float.")
+    return parsed
+
+
+def _coerce_optional_int(value: object, *, source: str) -> int | None:
+    if value is None:
+        return None
+    parsed = _parse_int(value)
+    if parsed is None:
+        raise ValueError(f"Invalid value for '{source}': expected int.")
+    return parsed
+
+
+def _coerce_bool(value: object, *, source: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"Invalid value for '{source}': expected bool.")
+    return value
+
+
+def _coerce_model_visibility(raw_value: object) -> dict[str, object]:
+    if raw_value is None:
+        return {}
+    if not isinstance(raw_value, dict):
+        raise ValueError("Invalid value for 'model_visibility': expected table.")
+
+    values: dict[str, object] = {}
+    for key, value in cast("dict[str, object]", raw_value).items():
+        if key in {"include", "exclude"}:
+            values[key] = _coerce_pattern_list(value, source=f"model_visibility.{key}")
+            continue
+        if key == "max_input_cost":
+            values[key] = _coerce_optional_float(value, source=f"model_visibility.{key}")
+            continue
+        if key == "max_age_days":
+            values[key] = _coerce_optional_int(value, source=f"model_visibility.{key}")
+            continue
+        if key == "hide_date_variants":
+            values[key] = _coerce_bool(value, source=f"model_visibility.{key}")
+            continue
+        logger.warning("Ignoring unknown models.toml key 'model_visibility.%s'.", key)
+    return values
+
+
+def load_model_visibility(repo_root: Path | None = None) -> ModelVisibilityConfig:
+    if repo_root is None:
+        return _DEFAULT_MODEL_VISIBILITY
+
+    path = _catalog_path(resolve_repo_root(repo_root))
+    if not path.is_file():
+        return _DEFAULT_MODEL_VISIBILITY
+
+    payload = _load_models_file_payload(path)
+    updates = _coerce_model_visibility(payload.get("model_visibility"))
+    if not updates:
+        return _DEFAULT_MODEL_VISIBILITY
+    return _DEFAULT_MODEL_VISIBILITY.model_copy(update=updates)
+
+
+def _toml_string(value: str) -> str:
+    return json.dumps(value)
+
+
+def _toml_literal(value: object) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return repr(value)
+    if isinstance(value, str):
+        return _toml_string(value)
+    if isinstance(value, tuple | list):
+        items = cast("tuple[object, ...] | list[object]", value)
+        return "[" + ", ".join(_toml_literal(item) for item in items) + "]"
+    raise ValueError(f"Unsupported models.toml value type: {type(value).__name__}")
+
+
+def scaffold_models_toml() -> str:
+    """Return commented defaults for `.meridian/models.toml`."""
+
+    lines = [
+        "# Model catalog overrides.",
+        "# Uncomment and edit the sections below to customize aliases, routing, and visibility.",
+        "",
+        "# [aliases]",
+        '# opus = "claude-opus-4-6"',
+        '# gpt = "gpt-5.4"',
+        "",
+        "# [metadata.opus]",
+        '# role = "default reviewer"',
+        '# strengths = "deep review, architecture"',
+        "",
+        "# [harness_patterns]",
+        f"# claude = {_toml_literal(_DEFAULT_HARNESS_PATTERNS[HarnessId.CLAUDE])}",
+        f"# codex = {_toml_literal(_DEFAULT_HARNESS_PATTERNS[HarnessId.CODEX])}",
+        f"# opencode = {_toml_literal(_DEFAULT_HARNESS_PATTERNS[HarnessId.OPENCODE])}",
+        "",
+        "# [model_visibility]",
+        "# include = []",
+        f"# exclude = {_toml_literal(_DEFAULT_MODEL_VISIBILITY.exclude)}",
+        f"# hide_date_variants = {_toml_literal(_DEFAULT_MODEL_VISIBILITY.hide_date_variants)}",
+        f"# max_age_days = {_toml_literal(_DEFAULT_MODEL_VISIBILITY.max_age_days)}",
+        f"# max_input_cost = {_toml_literal(_DEFAULT_MODEL_VISIBILITY.max_input_cost)}",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def ensure_models_config(repo_root: Path) -> Path:
+    """Scaffold `.meridian/models.toml` with commented defaults when missing."""
+
+    path = _catalog_path(repo_root)
+    if path.exists():
+        return path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(scaffold_models_toml(), encoding="utf-8")
+    return path
+
+
+def render_models_toml(payload: dict[str, object]) -> str:
+    """Render normalized `.meridian/models.toml` content."""
+
+    lines: list[str] = []
+    aliases = payload.get("aliases")
+    if isinstance(aliases, dict) and aliases:
+        lines.append("[aliases]")
+        for alias in sorted(cast("dict[str, object]", aliases)):
+            value = cast("dict[str, object]", aliases)[alias]
+            lines.append(f"{json.dumps(alias)} = {_toml_literal(value)}")
+
+    metadata = payload.get("metadata")
+    if isinstance(metadata, dict) and metadata:
+        for alias in sorted(cast("dict[str, object]", metadata)):
+            entry = cast("dict[str, object]", cast("dict[str, object]", metadata)[alias])
+            if not entry:
+                continue
+            if lines:
+                lines.append("")
+            lines.append(f"[metadata.{json.dumps(alias)}]")
+            for key in sorted(entry):
+                lines.append(f"{key} = {_toml_literal(entry[key])}")
+
+    harness_patterns = payload.get("harness_patterns")
+    if isinstance(harness_patterns, dict) and harness_patterns:
+        if lines:
+            lines.append("")
+        lines.append("[harness_patterns]")
+        for harness in sorted(cast("dict[str, object]", harness_patterns)):
+            lines.append(
+                f"{harness} = {_toml_literal(cast('dict[str, object]', harness_patterns)[harness])}"
+            )
+
+    model_visibility = payload.get("model_visibility")
+    if isinstance(model_visibility, dict) and model_visibility:
+        if lines:
+            lines.append("")
+        lines.append("[model_visibility]")
+        for key in sorted(cast("dict[str, object]", model_visibility)):
+            value = cast("dict[str, object]", model_visibility)[key]
+            lines.append(f"{key} = {_toml_literal(value)}")
+
+    if not lines:
+        return ""
+    return "\n".join(lines) + "\n"
+
+
 def _coerce_metadata_map(raw_metadata: object) -> dict[str, dict[str, str]]:
     if not isinstance(raw_metadata, dict):
         return {}
@@ -600,6 +878,11 @@ def _entry(*, alias: str, model_id: str, role: str | None, strengths: str | None
         role=role,
         strengths=strengths,
     )
+
+
+def _resolve_alias_harness(entry: AliasEntry, repo_root: Path | None) -> AliasEntry:
+    resolved_harness = route_model(str(entry.model_id), repo_root=repo_root).harness_id
+    return entry.model_copy(update={"resolved_harness": resolved_harness})
 
 
 def _coerce_alias_entries(
@@ -649,10 +932,7 @@ def _coerce_alias_entries(
     return aliases
 
 
-def _load_alias_file(path: Path) -> dict[str, AliasEntry]:
-    payload_obj = tomllib.loads(path.read_text(encoding="utf-8"))
-    payload = cast("dict[str, object]", payload_obj)
-
+def _load_aliases_from_payload(payload: dict[str, object]) -> dict[str, AliasEntry]:
     metadata = _coerce_metadata_map(payload.get("metadata"))
     return _coerce_alias_entries(payload.get("aliases"), metadata=metadata)
 
@@ -663,7 +943,7 @@ def load_builtin_aliases() -> list[AliasEntry]:
     resource_path = Path(
         str(importlib.resources.files("meridian.resources") / _DEFAULT_ALIASES_RESOURCE)
     )
-    entries = _load_alias_file(resource_path)
+    entries = _load_aliases_from_payload(_load_models_file_payload(resource_path))
     return [entries[key] for key in sorted(entries)]
 
 
@@ -675,7 +955,7 @@ def load_user_aliases(repo_root: Path | None = None) -> list[AliasEntry]:
     if not path.is_file():
         return []
 
-    entries = _load_alias_file(path)
+    entries = _load_aliases_from_payload(_load_models_file_payload(path))
     return [entries[key] for key in sorted(entries)]
 
 
@@ -685,7 +965,8 @@ def load_merged_aliases(repo_root: Path | None = None) -> list[AliasEntry]:
     merged: dict[str, AliasEntry] = {entry.alias: entry for entry in load_builtin_aliases()}
     for entry in load_user_aliases(repo_root=repo_root):
         merged[entry.alias] = entry
-    return [merged[key] for key in sorted(merged)]
+    resolved_root = resolve_repo_root(repo_root) if repo_root is not None else None
+    return [_resolve_alias_harness(merged[key], resolved_root) for key in sorted(merged)]
 
 
 def resolve_alias(name: str, repo_root: Path | None = None) -> ModelId | None:
@@ -713,8 +994,14 @@ def resolve_model(name_or_alias: str, repo_root: Path | None = None) -> AliasEnt
     resolved = by_alias.get(normalized)
     if resolved is not None:
         # Validate alias targets through routing to preserve prior behavior.
-        _ = route_model(str(resolved.model_id))
+        _ = route_model(str(resolved.model_id), repo_root=repo_root)
         return resolved
 
-    _ = route_model(normalized)
-    return AliasEntry(alias="", model_id=ModelId(normalized), role=None, strengths=None)
+    resolved_harness = route_model(normalized, repo_root=repo_root).harness_id
+    return AliasEntry(
+        alias="",
+        model_id=ModelId(normalized),
+        role=None,
+        strengths=None,
+        resolved_harness=resolved_harness,
+    )

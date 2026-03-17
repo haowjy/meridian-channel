@@ -12,6 +12,7 @@ def test_resolve_runtime_root_and_config_bootstraps_project_state(tmp_path: Path
     state_root = repo_root / ".meridian"
     assert resolved_root == repo_root.resolve()
     assert (state_root / "config.toml").is_file()
+    assert (state_root / "models.toml").is_file()
     assert (state_root / ".gitignore").is_file()
     assert (state_root / "artifacts").is_dir()
     assert (state_root / "work").is_dir()

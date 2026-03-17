@@ -1,0 +1,136 @@
+from datetime import date, timedelta
+from pathlib import Path
+
+import pytest
+
+from meridian.lib.catalog.models import (
+    AliasEntry,
+    DiscoveredModel,
+    load_model_visibility,
+    route_model,
+)
+from meridian.lib.core.types import HarnessId
+from meridian.lib.ops.catalog import ModelsListInput, models_list_sync
+
+
+def _write_models_toml(repo_root: Path, content: str) -> None:
+    state_root = repo_root / ".meridian"
+    state_root.mkdir(parents=True, exist_ok=True)
+    (state_root / "models.toml").write_text(content, encoding="utf-8")
+
+
+def _model(
+    model_id: str,
+    *,
+    provider: str = "openai",
+    harness: HarnessId = HarnessId.CODEX,
+    cost_input: float | None = 1.0,
+    release_date: str | None = None,
+) -> DiscoveredModel:
+    return DiscoveredModel(
+        id=model_id,
+        name=model_id,
+        family=model_id.split("-", 1)[0],
+        provider=provider,
+        harness=harness,
+        cost_input=cost_input,
+        cost_output=cost_input,
+        context_limit=200000,
+        output_limit=8000,
+        capabilities=("tool_call",),
+        release_date=release_date,
+    )
+
+
+def test_route_model_uses_user_harness_patterns(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_models_toml(
+        repo_root,
+        '[harness_patterns]\n'
+        'codex = ["gpt-*", "foo-*"]\n'
+        'claude = ["claude-*", "opus*", "sonnet*", "haiku*"]\n'
+        'opencode = ["opencode-*", "gemini*", "*/*"]\n',
+    )
+
+    assert route_model("foo-bar", repo_root=repo_root).harness_id == HarnessId.CODEX
+
+
+def test_route_model_rejects_ambiguous_harness_patterns(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_models_toml(
+        repo_root,
+        '[harness_patterns]\n'
+        'codex = ["foo-*"]\n'
+        'opencode = ["foo-*"]\n',
+    )
+
+    with pytest.raises(ValueError, match="matches multiple harness_patterns"):
+        route_model("foo-bar", repo_root=repo_root)
+
+
+def test_load_model_visibility_uses_user_overrides(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_models_toml(
+        repo_root,
+        "[model_visibility]\n"
+        'exclude = ["gemini*"]\n'
+        "max_input_cost = 100.0\n",
+    )
+
+    visibility = load_model_visibility(repo_root=repo_root)
+    assert visibility.exclude == ("gemini*",)
+    assert visibility.max_input_cost == 100.0
+
+
+def test_models_list_uses_visibility_rules_and_keeps_aliased_models_visible(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_models_toml(
+        repo_root,
+        "[aliases]\n"
+        'gem = "gemini-3.1-pro"\n'
+        "\n"
+        "[model_visibility]\n"
+        'exclude = ["gemini*"]\n',
+    )
+
+    old_date = (date.today() - timedelta(days=365)).isoformat()
+    monkeypatch.setattr(
+        "meridian.lib.ops.catalog.load_discovered_models",
+        lambda: [
+            _model("gpt-5.4"),
+            _model("gemini-3.1-pro", provider="google", harness=HarnessId.OPENCODE),
+            _model(
+                "claude-expensive",
+                provider="anthropic",
+                harness=HarnessId.CLAUDE,
+                cost_input=12.0,
+            ),
+            _model(
+                "claude-old",
+                provider="anthropic",
+                harness=HarnessId.CLAUDE,
+                release_date=old_date,
+            ),
+        ],
+    )
+    monkeypatch.setattr(
+        "meridian.lib.ops.catalog.load_merged_aliases",
+        lambda repo_root=None: [
+            AliasEntry(
+                alias="gem",
+                model_id="gemini-3.1-pro",
+                resolved_harness=HarnessId.OPENCODE,
+            )
+        ],
+    )
+
+    output = models_list_sync(ModelsListInput(repo_root=repo_root.as_posix()))
+    model_ids = {str(model.model_id) for model in output.models}
+    assert model_ids == {"gpt-5.4", "gemini-3.1-pro"}

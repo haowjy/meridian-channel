@@ -19,6 +19,7 @@ _GITIGNORE_CONTENT = (
     "\n"
     "# Track project config\n"
     "!config.toml\n"
+    "!models.toml\n"
     "\n"
     "# Track shared install manifest and lock\n"
     "!agents.toml\n"

@@ -1,5 +1,6 @@
 """Catalog discovery operations for models and skills."""
 
+import fnmatch
 import re
 from datetime import date, timedelta
 from pathlib import Path
@@ -9,11 +10,14 @@ from pydantic import BaseModel, ConfigDict, model_serializer
 from meridian.lib.catalog.models import (
     AliasEntry,
     DiscoveredModel,
+    ModelVisibilityConfig,
     load_discovered_models,
     load_merged_aliases,
+    load_model_visibility,
     refresh_models_cache,
     route_model,
 )
+from meridian.lib.config.settings import resolve_repo_root
 from meridian.lib.core.types import HarnessId, ModelId
 from meridian.lib.core.util import FormatContext
 from meridian.lib.ops.runtime import async_from_sync
@@ -157,9 +161,8 @@ class ModelsRefreshOutput(BaseModel):
 
 
 def _repo_root(repo_root: str | None) -> Path | None:
-    if repo_root is None:
-        return None
-    return Path(repo_root).expanduser().resolve()
+    explicit = Path(repo_root).expanduser().resolve() if repo_root is not None else None
+    return resolve_repo_root(explicit)
 
 
 def _format_float(value: float | None) -> str | None:
@@ -188,13 +191,17 @@ def _build_catalog_model(
     model_id: str,
     discovered: DiscoveredModel | None,
     aliases: list[AliasEntry],
+    repo_root: Path | None,
 ) -> CatalogModel:
-    if discovered is not None:
-        harness = discovered.harness
-    elif aliases:
-        harness = aliases[0].harness
-    else:
-        harness = route_model(model_id).harness_id
+    try:
+        harness = route_model(model_id, repo_root=repo_root).harness_id
+    except ValueError:
+        if discovered is not None:
+            harness = discovered.harness
+        elif aliases:
+            harness = aliases[0].harness
+        else:
+            raise
 
     sorted_aliases = tuple(sorted(aliases, key=lambda entry: entry.alias))
 
@@ -242,44 +249,50 @@ def _date_variant_bases(model_id: str) -> tuple[str, ...]:
     return ()
 
 
-_DEFAULT_RECENCY_DAYS = 180
+def _visibility_recency_cutoff(max_age_days: int | None) -> str | None:
+    if max_age_days is None:
+        return None
+    return (date.today() - timedelta(days=max_age_days)).isoformat()
 
 
-def _recency_cutoff() -> str:
-    """Return YYYY-MM-DD string for the recency cutoff (6 months ago)."""
-    return (date.today() - timedelta(days=_DEFAULT_RECENCY_DAYS)).isoformat()
-
-
-def _is_default_visible(model: CatalogModel, all_model_ids: set[str]) -> bool:
+def _is_default_visible(
+    model: CatalogModel,
+    all_model_ids: set[str],
+    *,
+    visibility: ModelVisibilityConfig,
+) -> bool:
     # Aliased models are always visible. User explicitly configured them.
     if model.aliases:
         return True
 
     model_id = str(model.model_id)
 
-    # Noise reduction: redundant variants.
-    if model_id.endswith("-latest"):
+    if visibility.include and not any(
+        _match(model_id, pattern) for pattern in visibility.include
+    ):
         return False
-    if "-chat-latest" in model_id:
-        return False
-    if "-deep-research" in model_id:
-        return False
-    if model_id.startswith("gemini-live-"):
+    if any(_match(model_id, pattern) for pattern in visibility.exclude):
         return False
 
     variant_bases = _date_variant_bases(model_id)
-    if variant_bases and any(base in all_model_ids for base in variant_bases):
+    if visibility.hide_date_variants and variant_bases and any(
+        base in all_model_ids for base in variant_bases
+    ):
         return False
 
-    if model.release_date and model.release_date < _recency_cutoff():
+    cutoff = _visibility_recency_cutoff(visibility.max_age_days)
+    if cutoff is not None and model.release_date and model.release_date < cutoff:
         return False
 
-    # o-series reasoning models do not work with the codex harness.
-    if model_id.startswith(("o1", "o3", "o4")):
-        return False
+    return not (
+        visibility.max_input_cost is not None
+        and model.cost_input is not None
+        and model.cost_input >= visibility.max_input_cost
+    )
 
-    # Hide expensive models ($$$$+) from the default listing.
-    return not (model.cost_input is not None and model.cost_input >= 10.0)
+
+def _match(value: str, pattern: str) -> bool:
+    return fnmatch.fnmatchcase(value, pattern)
 
 
 def _cost_tier(cost_input: float | None) -> str | None:
@@ -297,6 +310,7 @@ def _cost_tier(cost_input: float | None) -> str | None:
 def models_list_sync(payload: ModelsListInput) -> ModelsListOutput:
     root = _repo_root(payload.repo_root)
     aliases = load_merged_aliases(repo_root=root)
+    visibility = load_model_visibility(repo_root=root)
     discovered = load_discovered_models()
 
     aliases_by_model_id: dict[str, list[AliasEntry]] = {}
@@ -311,13 +325,16 @@ def models_list_sync(payload: ModelsListInput) -> ModelsListOutput:
             model_id=model_id,
             discovered=discovered_by_model_id.get(model_id),
             aliases=aliases_by_model_id.get(model_id, []),
+            repo_root=root,
         )
         for model_id in sorted(model_ids)
     ]
     if not payload.all:
         all_model_ids = {str(model.model_id) for model in merged_models}
         merged_models = [
-            model for model in merged_models if _is_default_visible(model, all_model_ids)
+            model
+            for model in merged_models
+            if _is_default_visible(model, all_model_ids, visibility=visibility)
         ]
     return ModelsListOutput(models=tuple(merged_models))
 

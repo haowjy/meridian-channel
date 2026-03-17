@@ -22,5 +22,7 @@ def test_main_help_bootstraps_project_state(
 
     state_root = repo_root / ".meridian"
     assert (state_root / "config.toml").is_file()
+    assert (state_root / "models.toml").is_file()
     assert "!config.toml" in (state_root / ".gitignore").read_text(encoding="utf-8")
+    assert "!models.toml" in (state_root / ".gitignore").read_text(encoding="utf-8")
     assert "Multi-agent orchestration" in capsys.readouterr().out

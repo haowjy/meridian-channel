@@ -668,6 +668,8 @@ def _scaffold_template() -> str:
 def ensure_state_bootstrap_sync(repo_root: Path) -> ConfigInitOutput:
     """Ensure first-run state exists and scaffold project config when missing."""
 
+    from meridian.lib.catalog.models import ensure_models_config
+
     state = resolve_state_paths(repo_root)
     bootstrap_dirs = (
         state.root_dir,
@@ -686,9 +688,11 @@ def ensure_state_bootstrap_sync(repo_root: Path) -> ConfigInitOutput:
 
     path = _config_path(repo_root)
     if path.exists():
+        ensure_models_config(repo_root)
         return ConfigInitOutput(path=path.as_posix(), created=False)
 
     _atomic_write_text(path, _scaffold_template())
+    ensure_models_config(repo_root)
     return ConfigInitOutput(path=path.as_posix(), created=True)
 
 

@@ -17,3 +17,4 @@ def test_ensure_gitignore_tracks_project_config_and_respects_state_root_override
     assert gitignore_path == state_root / ".gitignore"
     assert gitignore_path.is_file()
     assert "!config.toml" in gitignore_path.read_text(encoding="utf-8")
+    assert "!models.toml" in gitignore_path.read_text(encoding="utf-8")
