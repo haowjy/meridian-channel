@@ -10,16 +10,13 @@ This skill defines phase sequencing and judgment. Use `architecture-design` and 
 
 ## Phases of Work
 
-Three kinds of work — **design**, **planning**, and **implementation**. Review is woven through all of them, not a separate phase.
+Work moves through phases — research, design, planning, implementation, testing, documentation, or whatever the task requires. Not every task needs all of these; many skip straight to implementation. The orchestrator's job is to recognize which phases matter for the current work and sequence them appropriately.
 
-Track current focus with `meridian work update --status <status>`: `designing`, `planning`, `implementing`, `done`.
+Track current focus with `meridian work update --status <status>`. Status is free-form — use whatever label fits: `researching`, `designing`, `planning`, `implementing`, `testing`, `done`, etc.
 
-Review looks different at each stage:
-- During design: stress-test the approach — does it handle edge cases, will it conflict with other work, are there simpler alternatives?
-- During planning: sanity-check phase boundaries, dependencies, and scope.
-- During implementation: code review for design drift, verification that the build is clean, testing that the thing actually works.
+Review is woven through every phase, not a separate step. What review looks like depends on the phase — stress-testing an approach during design, sanity-checking boundaries during planning, verifying correctness during implementation.
 
-Not every task needs all three phases. Scale to the work.
+Scale to the work. A bug fix might be one phase. A system redesign might be five.
 
 ## Scaling Ceremony
 
@@ -28,7 +25,7 @@ The biggest mistake is over-coordinating simple work or under-coordinating compl
 1. **How much surface area?** More files and modules touched → more value from design and planning upfront.
 2. **How reversible are mistakes?** Schema changes, API contracts, and public interfaces are expensive to get wrong — worth a design review. Internal refactors are cheap to fix — lighter process.
 
-Skip straight to implementation when the intent is obvious and the blast radius is small. Add design when there are genuine tradeoffs. Use all three phases when work crosses module boundaries, changes interfaces, or requires coordination with other efforts.
+Skip straight to implementation when the intent is obvious and the blast radius is small. Add design when there are genuine tradeoffs. Add more phases when work crosses module boundaries, changes interfaces, or requires coordination with other efforts.
 
 ## Design
 

@@ -60,10 +60,12 @@ Use labels consistently so the team can filter by category. Keep every issue tag
 | `decision-needed` | Needs a decision before work can proceed |
 | `work:<slug>` | Links issue to its originating meridian work item |
 | `tech-debt` | Code quality, cleanup, refactoring needs |
-| `improvement` | Enhancement to existing functionality |
+| `enhancement` | New feature or improvement to existing functionality |
 | `design` | Needs design discussion before implementation |
 | `blocked` | Waiting on external dependency or another issue |
 | `good-first-task` | Well-scoped, good for a single spawn |
+
+These are defaults. Create project-specific labels when none of the above fit — just keep them descriptive and consistent within the repo.
 
 See [`resources/gh-commands.md`](resources/gh-commands.md) for the full label taxonomy with colors, issue body template, and all `gh` CLI commands.
 
