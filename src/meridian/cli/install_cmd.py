@@ -27,7 +27,7 @@ from meridian.lib.install.engine import (
 )
 from meridian.lib.install.hash import compute_item_hash
 from meridian.lib.install.lock import read_lock, state_lock, write_lock
-from meridian.lib.state.paths import resolve_state_paths
+from meridian.lib.state.paths import ensure_gitignore, resolve_state_paths
 
 Emitter = Callable[[Any], None]
 SourceSelector = Literal["git", "path"]
@@ -78,10 +78,12 @@ def _install(
 ) -> None:
     # No source arg → sync from lock (like old `update`)
     if not source.strip():
+        ensure_gitignore(resolve_repo_root())
         _run_install_reconcile(emit, source=None, force=force, dry_run=dry_run, upgrade=False)
         return
 
     repo_root = resolve_repo_root()
+    ensure_gitignore(repo_root)
     state_paths = resolve_state_paths(repo_root)
     source_config = _build_source_config(
         source=source,
