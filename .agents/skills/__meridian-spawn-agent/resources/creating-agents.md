@@ -74,7 +74,7 @@ meridian spawn -a reviewer -p "Review the auth changes"
 meridian spawn -a reviewer -m sonnet -p "Quick review"
 
 # List available profiles
-meridian skills list   # shows both skills and agents
+meridian sources list   # shows installed agents and skills
 ```
 
 ## Search Paths
@@ -82,7 +82,7 @@ meridian skills list   # shows both skills and agents
 Meridian looks for agent profiles in this order:
 
 1. `.agents/agents/` (repo-local)
-2. Meridian's bundled defaults (`meridian-primary`, `meridian-agent`)
+2. Meridian's bundled defaults (`__meridian-orchestrator`, `__meridian-subagent`)
 
 Repo-local profiles take precedence over bundled ones with the same name.
 

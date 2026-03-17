@@ -1,28 +1,37 @@
 ---
 name: __meridian-spawn-agent
-description: Multi-agent coordination via meridian CLI. Spawning subagents, monitoring status, and inspecting outputs. IMPORTANT — always use `meridian spawn` instead of harness-native agent tools (Claude Code's Agent tool, Codex subprocesses). Harness-native tools bypass meridian's tracking and agent profiles.
+description: Multi-agent coordination via the meridian CLI — spawning subagents, waiting for results, checking status, and inspecting outputs. Prefer `meridian spawn` over harness-native agent tools for substantive work (coding, reviewing, testing) because it enables model routing across providers. Use this skill whenever you need to delegate work to another agent, run tasks in parallel, check on spawn progress, or coordinate multiple agents.
 ---
 
 # __meridian-spawn-agent
 
-You have the `meridian` CLI for multi-agent coordination. **Always use `meridian spawn` to delegate work — never use your harness's built-in agent or subagent tools.** Harness-native tools (like Claude Code's Agent tool) bypass meridian's tracking, agent profiles, and state management — spawns created that way are invisible to the dashboard, other agents, and future sessions. Use `meridian spawn` for everything: coding, reviewing, testing, investigating.
+You have the `meridian` CLI for multi-agent coordination. Prefer `meridian spawn` over your harness's built-in agent tools when delegating substantive work. The key reason: **model routing**. Harness-native agents (like Claude Code's Agent tool) are locked to the harness's own model family. `meridian spawn` lets you route each task to the best model — a fast model for implementation, a strong reasoning model for review, a different model family for a second opinion. This is how you get model diversity across an orchestrated workflow.
+
+Harness-native tools and agents are fine for quick operations — searching, exploring the codebase, lightweight lookups. The overhead of a full spawn isn't worth it for "find where X is defined." Use your judgment: if model choice matters for the task, use `meridian spawn`. If you just need a quick answer from your own harness, use what's built in.
 
 In agent mode, all CLI output is JSON.
 
-## Core Loop: Spawn → Wait → Show
+## Core Loop
+
+Spawns run in **foreground** (blocking) by default — the command blocks until the spawn completes and returns the full result including the report. Use your harness's background execution to avoid blocking yourself:
 
 ```bash
+# Run via your harness's background feature (e.g., Bash run_in_background, parallel tool calls)
 meridian spawn -a agent -p "task description"
-# → {"spawn_id": "p107", "status": "running"}
-
-meridian spawn wait p107
-# → {"spawn_id": "p107", "status": "succeeded", "report": "..."}
-
-meridian spawn show p107
-# → Full details including report, tokens, cost
+# → harness notifies you when done, result includes status + full report
 ```
 
-**Capturing spawn IDs:** Agent harnesses often sandbox shell execution, so command substitution like `ID=$(meridian spawn ...)` may silently fail. Always read the `spawn_id` from the JSON output and pass it literally to `spawn wait` or `spawn show`.
+Your harness handles the notification — no need to poll or wait. Use `spawn show` if you need to re-inspect a past spawn's details.
+
+If your harness doesn't support background execution, use `--background` and `spawn wait`:
+
+```bash
+meridian spawn --background -a agent -p "task description"
+# → returns immediately: {"spawn_id": "p107", "status": "running"}
+
+meridian spawn wait p107
+# → blocks until done, returns status + full report
+```
 
 ## Spawning
 
@@ -42,43 +51,33 @@ meridian spawn -a reviewer -m sonnet -p "Quick review"
 meridian spawn -a agent -p "Implement fix" \
   -f plans/step.md \
   -f src/module.py
-
-# With prior spawn context (repeat --from)
-meridian spawn -a coder -p "Phase 2: build on Phase 1" \
-  --from p107 \
-  -f plan/phase-2-slug.md
-
-# With session context (resolves to latest succeeded spawn in that session)
-meridian spawn -a coder -p "Continue from session c5" --from c5
 ```
 
-`--from` injects the referenced spawn's report and file list into the prompt, plus commands the agent can use to explore further (`meridian spawn show`, `meridian spawn files`, `meridian session log`). The agent pulls what it needs on-demand rather than getting everything upfront.
-
-Run `meridian models list` to see available models and aliases. Use `meridian models refresh` to update the model cache from configured providers. Model and agent preferences belong in your project's agent profiles, `meridian config`, or project docs (CLAUDE.md, AGENTS.md) — not hardcoded into spawn commands.
+Run `meridian models list` to see available models and aliases. Model and agent preferences belong in your project's agent profiles, `meridian config`, or project docs (CLAUDE.md, AGENTS.md) — not hardcoded into spawn commands.
 
 To create your own agent profiles, see [`resources/creating-agents.md`](resources/creating-agents.md).
 
 ## Work Items
 
-Work items group spawns by purpose. Use `--work` and `--desc` on `meridian spawn` to connect spawns to an effort:
+Attach spawns to a work item for dashboard grouping and project-level visibility:
 
 ```bash
 # Spawns automatically inherit the active work item
 meridian spawn -a agent --desc "Implement step 2" -p "..."
-# → spawn gets work_id from the current session's active work item
 
 # Or attach explicitly (useful for automation or cross-cutting tasks)
 meridian spawn -a reviewer --work auth-refactor --desc "Review step 1" -p "..."
 ```
 
-See the `__meridian-work-coordination` skill for full work item lifecycle (creating, switching, updating, completing work items, and artifact placement).
+For work item lifecycle (creating, switching, updating, completing, and dashboard), see the `__meridian-work-coordination` skill.
 
 ## Parallel Spawns
 
-Use your harness's native background execution to run multiple spawns concurrently. Each spawn runs in foreground (blocking), but your harness runs them in parallel:
+Spawns run in foreground (blocking) by default. To run multiple spawns concurrently, use your harness's built-in background execution:
 
 ```bash
 # Launch these concurrently using your harness's background/parallel feature
+# (e.g., Claude Code's parallel tool calls, or Bash run_in_background)
 meridian spawn -a agent -p "Step A" --desc "Step A"
 meridian spawn -a agent -p "Step B" --desc "Step B"
 
@@ -96,20 +95,13 @@ meridian spawn wait p108 p109
 
 ## Checking Status
 
-Always track spawns by their ID. Use `spawn list` only for situational awareness.
+Track spawns by their ID. For situational awareness, use the work dashboard — it shows active work items with their attached spawns:
 
 ```bash
-# What's currently running?
-meridian spawn list
-
-# Quick overview (all active + most recent 5)
-meridian spawn list --all
-
-# If output says there are more, increase the limit
-meridian spawn list --all --limit 20
+meridian work
 ```
 
-Stuck spawns auto-recover: if a spawn's process dies or goes stale, the next read (`list`, `show`, `wait`) detects it and marks it failed. You don't need to manually clean up — just check the status and move on.
+Stuck spawns auto-recover: if a spawn's process dies or goes stale, the next read (`show`, `wait`) detects it and marks it failed. You don't need to manually clean up — just check the status and move on.
 
 ## When a Spawn Fails
 
@@ -117,13 +109,7 @@ If `spawn wait` returns `"status": "failed"`, check the `report` field first —
 
 ## Shared Filesystem
 
-Spawns can exchange data through `$MERIDIAN_FS_DIR`:
-
-```bash
-echo "result" > "$MERIDIAN_FS_DIR/step-a-output.txt"
-```
-
-Meridian provides the directory — agents organize it however they want.
+Spawns share two directories for exchanging data — `$MERIDIAN_FS_DIR` for long-lived project reference material and `$MERIDIAN_WORK_DIR` for active work scratch. See the `__meridian-work-coordination` skill for when to use which.
 
 ## Committing Spawn Changes
 
@@ -134,30 +120,20 @@ meridian spawn files p107 | xargs git add
 meridian spawn files p107 -0 | xargs -0 git add   # paths with spaces
 ```
 
-## Reports
+## Template Variables
 
-Reports are how spawn output is recorded and retrieved. Every spawn can have a report — typically written by the spawn itself, but you can also create or update one externally.
+Use `{{KEY}}` placeholders in prompts, replaced at launch time with `--prompt-var`:
 
 ```bash
-# View a spawn's report
-meridian report show --spawn p107
-
-# Search across all spawn reports by text
-meridian report search "auth refactor" --limit 10
-
-# Scope search to a single spawn
-meridian report search "error" --spawn p107
-
-# Create or update a report for a spawn
-meridian report create "Summary of findings..." --spawn p107
-
-# Pipe report content from stdin
-echo "Report content" | meridian report create --spawn p107 --stdin
+meridian spawn -a coder \
+  -p "Implement {{TASK}} following {{CONSTRAINT}}" \
+  --prompt-var TASK=auth-refactor \
+  --prompt-var CONSTRAINT="no direct DB access"
 ```
 
 ## Beyond the Basics
 
-For continue/fork, cancel, stats, permission tiers, template vars, and dry-run, see [`resources/advanced-commands.md`](resources/advanced-commands.md).
+For continue/fork, cancel, stats, permission tiers, reports, and dry-run, see [`resources/advanced-commands.md`](resources/advanced-commands.md).
 For troubleshooting strange behavior, see [`resources/debugging.md`](resources/debugging.md).
 For writing your own agent profiles, see [`resources/creating-agents.md`](resources/creating-agents.md).
 For project defaults (model, agent, permissions, timeouts), see [`resources/configuration.md`](resources/configuration.md).

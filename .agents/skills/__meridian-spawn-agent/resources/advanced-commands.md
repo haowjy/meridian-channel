@@ -1,6 +1,6 @@
 # Advanced Spawn Commands
 
-Read this when you need continue, cancel, stats, permissions, template vars, or dry-run — commands outside the core spawn → wait → show loop. For troubleshooting, read `debugging.md`.
+Read this when you need continue, cancel, stats, permissions, reports, or dry-run — commands beyond the core loop. For troubleshooting, read `debugging.md`.
 
 ## Continue & Fork
 
@@ -37,16 +37,23 @@ meridian spawn show SPAWN_ID --no-report     # omit the full report text
 meridian spawn show SPAWN_ID --include-files  # include file metadata
 ```
 
-## Template Variables
+## Reports
+
+Reports are returned automatically — both with foreground execution and `spawn wait`. To inspect or search past reports:
 
 ```bash
-meridian spawn -m MODEL \
-  -p "Implement {{TASK}} with {{CONSTRAINT}}" \
-  --prompt-var TASK=auth-refactor \
-  --prompt-var CONSTRAINT=no-db
-```
+# View a spawn's report
+meridian spawn report show SPAWN_ID
 
-Use `{{KEY}}` placeholders in prompts, replaced at launch time.
+# Search across all spawn reports by text
+meridian spawn report search "auth refactor" --limit 10
+
+# Create or update a report externally (e.g., orchestrator annotating a spawn)
+meridian spawn report create "Summary of findings..." --spawn SPAWN_ID
+
+# Pipe report content from stdin
+echo "Report content" | meridian spawn report create --spawn SPAWN_ID --stdin
+```
 
 ## Dry Run
 

@@ -4,6 +4,7 @@ description: Bug investigator — briefly investigates flagged issues, quick-fix
 model: gpt
 skills: [issue-tracking]
 sandbox: workspace-write
+thinking: medium
 ---
 
 # Investigator

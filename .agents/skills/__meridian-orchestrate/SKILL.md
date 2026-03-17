@@ -1,6 +1,6 @@
 ---
 name: __meridian-orchestrate
-description: Supervisor workflow for multi-step tasks. Teaches planning, delegation, review-rework cycles, model selection, and parallel execution. Activate when a task needs decomposition across multiple agents or review coordination.
+description: Supervisor workflow for multi-step tasks. Teaches planning, delegation, review cycles, and model selection. Use this whenever you need to break work into subtasks, delegate to specialist agents, coordinate parallel execution, or run review gates. Activate for any task that's too complex or multi-faceted to do in a single pass.
 ---
 
 # Orchestrate
@@ -26,8 +26,6 @@ Before executing, plan the work:
 - Choose the right model for each step based on its nature
 - Estimate which steps need review and which are low-risk
 
-Before starting significant work, consider attaching to a work item (`meridian work start "name"`). This groups your spawns and gives project-level visibility.
-
 When planning, collaborate with the user. Get alignment before executing. During execution, run autonomously — only stop if unrecoverably blocked.
 
 ## Delegation
@@ -39,7 +37,7 @@ Each spawn is: **model + prompt + context**. Compose good prompts:
 - Set clear boundaries — one step per spawn, not the whole plan
 - Tell the subagent to verify its own work within the spawn
 
-Use `meridian spawn` for execution. See the `__meridian-spawn-agent` skill for CLI details.
+Use `meridian spawn` for execution. See the `__meridian-spawn-agent` skill for CLI details, including parallel execution patterns.
 
 ## Model Selection
 
@@ -68,29 +66,10 @@ execute → review → evaluate
     no  → done
 ```
 
-If reviewers disagree, run a tiebreak with a different model. If 3 rework cycles haven't converged, stop and escalate to the user.
-
-## Parallel Execution
-
-Independent steps can run in parallel using background spawns:
-
-```bash
-# Launch background spawns (output is JSON with spawn_id field)
-meridian spawn -m MODEL -p "Step A"
-meridian spawn -m MODEL -p "Step B"
-
-# Or delegate to named agent profiles
-meridian spawn -a coder -p "Step A"
-meridian spawn -a reviewer -p "Step B"
-
-# Wait for them by ID
-meridian spawn wait SPAWN_ID_A SPAWN_ID_B
-```
+If reviewers disagree, run a tiebreak with a different model. Continue until convergence or you think the reviewers are going in circles. You have the final say to move on.
 
 ## When to Stop
 
-- The user explicitly asks you to stop
 - User's intent is fully satisfied
 - Unrecoverable failure after retry
 - All steps in scope are complete
-- You've exhausted rework cycles without convergence — escalate to user
