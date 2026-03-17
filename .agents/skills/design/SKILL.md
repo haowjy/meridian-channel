@@ -1,6 +1,6 @@
 ---
 name: design
-description: Interactive architecture design with the user. Teaches collaborative problem-solving, codebase-first thinking, and durable design artifacts. Use this whenever the user wants to design, architect, or plan an approach before coding — including when they say "let's think about how to do X", "how should we build this", or describe a non-trivial feature, refactor, or system change. Also activate when entering the design phase of dev-workflow.
+description: Interactive architecture design with the user. Teaches collaborative problem-solving, codebase-first thinking, and durable design artifacts. Use this whenever the user wants to design, architect, or plan an approach before coding — including when they say "let's think about how to do X", "how should we build this", or describe a non-trivial feature, refactor, or system change. Also activate when entering the design phase of dev-orchestration.
 ---
 
 # Design
@@ -105,7 +105,7 @@ make one.
 ## Open Questions
 
 Anything unresolved that might affect implementation. Remove items as they
-get decided (move them to decision-log.md with rationale).
+get decided. Resolve them in the Approach section or note why they can wait.
 
 - [ ] Question 1
 - [ ] Question 2
@@ -113,42 +113,13 @@ get decided (move them to decision-log.md with rationale).
 
 Adapt freely. A small feature might need two paragraphs. A system redesign might need subsections and diagrams. The structure shows what's available, not what's mandatory.
 
-### decision-log.md
-
-An append-only record of design decisions. Decisions are immutable once written — if a decision is reversed, add a new entry that supersedes the old one. Never edit or delete existing entries.
-
-This log exists because design decisions have a half-life. A week from now, nobody will remember why you chose approach A over approach B. The rationale matters as much as the decision itself — it tells future agents when the decision still applies and when circumstances have changed enough to reconsider.
-
-Each entry follows this pattern:
-
-```markdown
-## D-{N}: {Decision Title}
-
-**Date:** {YYYY-MM-DD}
-**Status:** accepted | superseded by D-{M}
-
-**Decision:** What was decided, stated clearly enough that someone who wasn't
-in the conversation can understand it.
-
-**Rationale:** Why this choice over the alternatives. Include the reasoning
-that would convince a skeptical reviewer.
-
-**Alternatives Considered:**
-- {Alternative A} — rejected because {reason}
-- {Alternative B} — rejected because {reason}
-```
-
-Number entries sequentially: D-1, D-2, D-3. Never reuse a number. If D-3 gets superseded, it stays as D-3 with `Status: superseded by D-7`, and D-7 explains the new direction.
-
-Record decisions as they happen during the conversation, not in a batch at the end. If the user says "let's go with the middleware approach," that's a decision — capture it now with the rationale that's fresh in context.
-
 ## When Design Is Done
 
 You know design is done when:
 
 - You have an `overview.md` that another engineer could read and implement from without asking clarifying questions about the approach
-- Key decisions are recorded in `decision-log.md` with rationale
-- Open questions in `overview.md` are either resolved (moved to decision-log) or explicitly deferred with a note on why they can wait
+- Key decisions are captured in your design doc with rationale
+- Open questions in `overview.md` are either resolved or explicitly deferred with a note on why they can wait
 - The user has signed off on the direction
 
 Don't gold-plate the design doc. It's a communication tool, not a spec. If the approach is clear, stop writing and move to the next phase.
@@ -162,8 +133,7 @@ Not every area applies to every design. A simple feature addition doesn't need s
 ```bash
 meridian spawn -a reviewer-planning \
   -p "Review this design. Focus on: feasibility (can this be built as described?), integration risks (how does this connect to the existing auth module?), and migration path (how do we get from the current token format to the new one safely?)." \
-  -f $MERIDIAN_WORK_DIR/overview.md \
-  -f $MERIDIAN_WORK_DIR/decision-log.md
+  -f $MERIDIAN_WORK_DIR/overview.md
 ```
 
 Giving reviewers specific areas prevents the "looks good to me" non-review and the "review everything shallowly" waste. Each reviewer should go deep on a few dimensions rather than skimming all of them.
@@ -178,4 +148,4 @@ Giving reviewers specific areas prevents the "looks good to me" non-review and t
 
 **Scope creep during design.** It's tempting to keep expanding scope as you discover related problems. Resist this. Capture the related problems as open questions or future work, and keep the current design focused. A design that tries to solve everything solves nothing well.
 
-**Not recording decisions.** Every "let's go with X" in the conversation is a decision. If it's not in the decision log, it will be re-derived (possibly differently) by the next agent or session that touches this work item.
+**Not recording decisions.** Every "let's go with X" is a decision. Capture it in your design doc — the Approach section, a rationale note, wherever it fits. If it's not written down, it will be re-derived (possibly differently) by the next session.

@@ -46,7 +46,7 @@ Meridian separates work metadata from work-scoped scratch files:
   - status, description, created-at, and other Meridian-owned coordination state
 - `.meridian/work/<slug>/`
   - optional work-scoped scratch/docs
-  - design notes, decision logs, implementation logs, per-phase plans
+  - design notes, planning docs, implementation notes
 - `.meridian/work-archive/<slug>/`
   - archived scratch/docs for completed work items
 - `.meridian/fs/`

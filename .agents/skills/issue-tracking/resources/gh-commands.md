@@ -58,6 +58,11 @@ gh label create "backlog" --color "0075ca" --description "Work needed but out of
 gh label create "deferred" --color "fbca04" --description "Explicitly deferred from current work" 2>/dev/null
 gh label create "review-finding" --color "7057ff" --description "From code review, not blocking" 2>/dev/null
 gh label create "decision-needed" --color "d876e3" --description "Needs a decision before it can be worked on" 2>/dev/null
+gh label create "tech-debt" --color "D4C5F9" --description "Technical debt to address later" 2>/dev/null
+gh label create "improvement" --color "A2EEEF" --description "Enhancement or optimization opportunity" 2>/dev/null
+gh label create "design" --color "F9D0C4" --description "Needs design discussion or decision" 2>/dev/null
+gh label create "blocked" --color "B60205" --description "Cannot proceed without external resolution" 2>/dev/null
+gh label create "good-first-task" --color "7057FF" --description "Good for a new agent or contributor" 2>/dev/null
 ```
 
 Create work item labels as needed:
@@ -179,7 +184,7 @@ gh issue close 42 --comment "Fixed in $(git rev-parse --short HEAD)"
 ### When a decision is made
 
 ```bash
-gh issue close 42 --comment "Decided: use JWT with 15-minute expiry. Recorded in decision-log.md."
+gh issue close 42 --comment "Decided: use JWT with 15-minute expiry."
 ```
 
 ### Automatic closure via commit message

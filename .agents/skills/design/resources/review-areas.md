@@ -109,12 +109,12 @@ When spawning design reviewers, include the specific areas most relevant to the 
 # For a new API feature:
 meridian spawn -a reviewer-planning \
   -p "Review this design. Focus on: feasibility, integration risks, security implications." \
-  -f $MERIDIAN_WORK_DIR/overview.md -f $MERIDIAN_WORK_DIR/decision-log.md
+  -f $MERIDIAN_WORK_DIR/overview.md
 
 # For an internal refactor:
 meridian spawn -a reviewer-solid \
   -p "Review this design. Focus on: scope boundaries, migration path, alternative approaches." \
-  -f $MERIDIAN_WORK_DIR/overview.md -f $MERIDIAN_WORK_DIR/decision-log.md
+  -f $MERIDIAN_WORK_DIR/overview.md
 ```
 
 Different reviewers can cover different areas. If you spawn two reviewers, split the areas between them rather than giving both the same list.

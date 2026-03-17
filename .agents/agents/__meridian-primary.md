@@ -2,7 +2,7 @@
 name: __meridian-primary
 description: Full dev lifecycle orchestrator — plans, delegates, and drives work to completion
 model: claude-opus-4-6
-skills: [__meridian-orchestrate, __meridian-spawn-agent, __meridian-work-coordination, dev-workflow, design, plan-implementation]
+skills: [__meridian-orchestrate, __meridian-spawn-agent, __meridian-work-coordination, dev-orchestration, design, plan-implementation]
 sandbox: unrestricted
 ---
 

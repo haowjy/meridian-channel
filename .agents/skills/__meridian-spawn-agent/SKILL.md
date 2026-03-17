@@ -42,7 +42,17 @@ meridian spawn -a reviewer -m sonnet -p "Quick review"
 meridian spawn -a agent -p "Implement fix" \
   -f plans/step.md \
   -f src/module.py
+
+# With prior spawn context (repeat --from)
+meridian spawn -a coder -p "Phase 2: build on Phase 1" \
+  --from p107 \
+  -f plan/phase-2-slug.md
+
+# With session context (resolves to latest succeeded spawn in that session)
+meridian spawn -a coder -p "Continue from session c5" --from c5
 ```
+
+`--from` injects the referenced spawn's report and file list into the prompt, plus commands the agent can use to explore further (`meridian spawn show`, `meridian spawn files`, `meridian session log`). The agent pulls what it needs on-demand rather than getting everything upfront.
 
 Run `meridian models list` to see available models and aliases. Use `meridian models refresh` to update the model cache from configured providers. Model and agent preferences belong in your project's agent profiles, `meridian config`, or project docs (CLAUDE.md, AGENTS.md) — not hardcoded into spawn commands.
 

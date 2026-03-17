@@ -5,7 +5,7 @@ description: Mirror local tracking artifacts to GitHub Issues for team visibilit
 
 # Issue Tracking
 
-This skill assumes `__meridian-work-coordination` already defines work ownership and artifact placement. Local tracking files (`decision-log.md`, `implementation-log.md` in `$MERIDIAN_WORK_DIR/`) are always the source of truth. GitHub Issues are a visibility layer — they give the team searchability, linkability, and a shared view of what was found during agent work.
+This skill assumes `__meridian-work-coordination` already defines work ownership and artifact placement. Spawn reports and work-scoped notes are the source of truth. GitHub Issues are a visibility layer — they give the team searchability, linkability, and a shared view of what was found during agent work.
 
 If `gh` is unavailable, everything works fine with local tracking only. No errors, no warnings. Issues are a bonus, not a requirement.
 
@@ -33,13 +33,18 @@ Create an issue when you find something worth tracking that you can't or shouldn
 
 **Review finding (deferred)** — A reviewer flagged something HIGH or MEDIUM severity but agreed it's not blocking the current work. File it so it gets addressed in a future pass.
 
+### Quick Decision Rule
+
+- **Fix immediately** if it takes < 5 minutes and you're already in the area
+- **File an issue** if it would derail your current task, requires broader context, or needs design discussion
+
 ## When NOT to Create a GitHub Issue
 
 **CRITICAL review findings** — Fix these immediately. They don't belong in a backlog.
 
 **Things you're fixing in this phase** — If it's part of your current work, just fix it. Don't create tracking overhead for work in progress.
 
-**Decisions already made** — If a decision is recorded in `decision-log.md` and implemented, there's nothing to track. The decision is done.
+**Decisions already made** — If a decision is already made and implemented, there's nothing to track. The decision is done.
 
 ## Labels
 
@@ -54,6 +59,11 @@ Use labels consistently so the team can filter by category. Keep every issue tag
 | `review-finding` | From code review, not blocking |
 | `decision-needed` | Needs a decision before work can proceed |
 | `work:<slug>` | Links issue to its originating meridian work item |
+| `tech-debt` | Code quality, cleanup, refactoring needs |
+| `improvement` | Enhancement to existing functionality |
+| `design` | Needs design discussion before implementation |
+| `blocked` | Waiting on external dependency or another issue |
+| `good-first-task` | Well-scoped, good for a single spawn |
 
 See [`resources/gh-commands.md`](resources/gh-commands.md) for the full label taxonomy with colors, issue body template, and all `gh` CLI commands.
 
@@ -65,7 +75,7 @@ Every issue should answer three questions: where was this found, what is it, and
 
 You're implementing step 3 of `auth-refactor` and discover that the token refresh logic silently swallows errors:
 
-1. Log it in `$MERIDIAN_WORK_DIR/implementation-log.md` — this is the source of truth
+1. Note it in your spawn report or work directory — this is the source of truth
 2. Check `gh` availability
 3. If available, create the issue:
 
