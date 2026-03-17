@@ -46,6 +46,7 @@ class ResolvedPrimaryLaunchPlan(BaseModel):
     command: tuple[str, ...]
     seed_harness_session_id: str
     command_request: LaunchRequest
+    warning: str | None = None
 
 
 def normalize_system_prompt_passthrough_args(
@@ -128,6 +129,7 @@ def resolve_primary_launch_plan(
         configured_default_agent=resolved_config.primary_agent,
         requested_agent=request.agent,
         dry_run=request.dry_run,
+        builtin_default_agent="__meridian-orchestrator",
     )
 
     policies: ResolvedPolicies = resolve_policies(
@@ -138,6 +140,7 @@ def resolve_primary_launch_plan(
         config=resolved_config,
         harness_registry=harness_registry,
         configured_default_agent=resolved_config.primary_agent,
+        builtin_default_agent="__meridian-orchestrator",
         configured_default_harness=resolved_config.primary.harness or "claude",
         skills_readonly=True,
     )
@@ -231,6 +234,7 @@ def resolve_primary_launch_plan(
             command=command,
             seed_harness_session_id=seed_harness_session_id,
             command_request=command_request,
+            warning=policies.warning,
         )
 
     passthrough_args, passthrough_prompt_fragments = normalize_system_prompt_passthrough_args(
@@ -295,6 +299,7 @@ def resolve_primary_launch_plan(
         command=command,
         seed_harness_session_id=seed_harness_session_id,
         command_request=command_request,
+        warning=policies.warning,
     )
 
 

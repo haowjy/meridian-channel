@@ -183,6 +183,7 @@ def build_create_payload(
         configured_default_agent=runtime_view.config.default_agent,
         requested_agent=payload.agent,
         dry_run=payload.dry_run,
+        builtin_default_agent="__meridian-subagent",
     )
 
     policies = resolve_policies(
@@ -193,6 +194,7 @@ def build_create_payload(
         config=runtime_view.config,
         harness_registry=runtime_view.harness_registry,
         configured_default_agent=runtime_view.config.default_agent,
+        builtin_default_agent="__meridian-subagent",
         configured_default_harness=runtime_view.config.default_harness,
         skills_readonly=payload.dry_run,
     )
@@ -281,7 +283,7 @@ def build_create_payload(
         if resolved_skills.missing_skills
         else None
     )
-    warning = merge_warnings(route_warning, missing_skills_warning)
+    warning = merge_warnings(policies.warning, route_warning, missing_skills_warning)
     warning = merge_warnings(warning, continuation_warning)
     warning = merge_warnings(preflight_warning, warning)
     from meridian.lib.harness.adapter import SpawnParams

@@ -47,6 +47,7 @@ def launch_primary(
             command=plan.command,
             exit_code=0,
             continue_ref=None,
+            warning=plan.warning,
         )
 
     outcome = run_harness_process(plan, harness_registry)
@@ -56,6 +57,7 @@ def launch_primary(
         command=outcome.command,
         exit_code=outcome.exit_code,
         continue_ref=continue_ref,
+        warning=plan.warning,
     )
 
 

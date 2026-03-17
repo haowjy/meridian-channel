@@ -187,6 +187,7 @@ def test_planned_bootstrap_agent_names_uses_default_when_request_is_blank() -> N
     assert planned_bootstrap_agent_names(
         configured_default="__meridian-subagent",
         requested_agent="",
+        builtin_default="__meridian-orchestrator",
     ) == ("__meridian-subagent",)
 
 
@@ -194,6 +195,7 @@ def test_planned_bootstrap_agent_names_bootstraps_explicit_builtin_agent() -> No
     assert planned_bootstrap_agent_names(
         configured_default="__meridian-subagent",
         requested_agent="__meridian-orchestrator",
+        builtin_default="__meridian-orchestrator",
     ) == ("__meridian-orchestrator",)
 
 
@@ -202,6 +204,15 @@ def test_planned_bootstrap_agent_names_skips_non_bootstrap_explicit_agent() -> N
         planned_bootstrap_agent_names(
             configured_default="__meridian-subagent",
             requested_agent="coder",
+            builtin_default="__meridian-orchestrator",
         )
         == ()
     )
+
+
+def test_planned_bootstrap_agent_names_uses_builtin_when_configured_default_is_unmanaged() -> None:
+    assert planned_bootstrap_agent_names(
+        configured_default="dev-orchestration",
+        requested_agent="",
+        builtin_default="__meridian-orchestrator",
+    ) == ("__meridian-orchestrator",)

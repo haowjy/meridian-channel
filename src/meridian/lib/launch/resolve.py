@@ -70,6 +70,7 @@ class ResolvedPolicies:
     harness: HarnessId
     adapter: SubprocessHarness
     resolved_skills: ResolvedSkills
+    warning: str | None = None
 
 
 def ensure_bootstrap_ready(
@@ -78,12 +79,14 @@ def ensure_bootstrap_ready(
     configured_default_agent: str,
     requested_agent: str | None,
     dry_run: bool,
+    builtin_default_agent: str,
 ) -> BootstrapPlan:
     """Plan and auto-install bootstrap assets. Raises FileNotFoundError for dry-run."""
 
     agent_names = planned_bootstrap_agent_names(
         configured_default=configured_default_agent,
         requested_agent=requested_agent,
+        builtin_default=builtin_default_agent,
     )
     plan = plan_bootstrap_assets(repo_root=repo_root, agent_names=agent_names)
     if plan.missing_items:
@@ -199,13 +202,15 @@ def resolve_policies(
     config: MeridianConfig,
     harness_registry: HarnessRegistry,
     configured_default_agent: str | None = None,
+    builtin_default_agent: str = "",
     configured_default_harness: str = "claude",
     skills_readonly: bool = True,
 ) -> ResolvedPolicies:
-    profile = load_agent_profile_with_fallback(
+    profile, profile_warning = _resolve_agent_profile_with_builtin_fallback(
         repo_root=repo_root,
         requested_agent=requested_agent,
         configured_default=configured_default_agent or "",
+        builtin_default=builtin_default_agent,
     )
 
     resolved_model = requested_model.strip()
@@ -282,7 +287,52 @@ def resolve_policies(
         harness=harness_id,
         adapter=adapter,
         resolved_skills=resolved_skills,
+        warning=profile_warning,
     )
+
+
+def _resolve_agent_profile_with_builtin_fallback(
+    *,
+    repo_root: Path,
+    requested_agent: str | None,
+    configured_default: str,
+    builtin_default: str,
+) -> tuple[AgentProfile | None, str | None]:
+    requested_profile = requested_agent.strip() if requested_agent is not None else ""
+    if requested_profile:
+        return (
+            load_agent_profile(
+                requested_profile,
+                repo_root=repo_root,
+            ),
+            None,
+        )
+
+    configured_profile = configured_default.strip()
+    if configured_profile:
+        try:
+            return (
+                load_agent_profile(
+                    configured_profile,
+                    repo_root=repo_root,
+                ),
+                None,
+            )
+        except FileNotFoundError:
+            fallback_profile = builtin_default.strip()
+            if fallback_profile and fallback_profile != configured_profile:
+                return (
+                    load_agent_profile(
+                        fallback_profile,
+                        repo_root=repo_root,
+                    ),
+                    "Configured default agent "
+                    f"'{configured_profile}' is unavailable; using builtin default "
+                    f"'{fallback_profile}'.",
+                )
+            raise
+
+    return None, None
 
 
 __all__ = [

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
-from meridian.lib.catalog.agent import load_agent_profile
+from meridian.lib.catalog.agent import parse_agent_profile
 from meridian.lib.install.config import (
     SourceConfig,
     SourceManifest,
@@ -42,9 +42,9 @@ def bootstrap_source_config() -> SourceConfig:
     """Return the canonical managed source record for bootstrap runtime assets."""
 
     skill_names: set[str] = set()
-    bundled_repo_root = _bundled_repo_root()
+    bundled_tree_root = _bundled_bootstrap_tree_root()
     for agent_name in _BOOTSTRAP_AGENT_LIST:
-        profile = load_agent_profile(agent_name, repo_root=bundled_repo_root)
+        profile = parse_agent_profile(bundled_tree_root / "agents" / f"{agent_name}.md")
         skill_names.update(profile.skills)
 
     return SourceConfig(
@@ -61,13 +61,17 @@ def planned_bootstrap_agent_names(
     *,
     configured_default: str,
     requested_agent: str | None,
+    builtin_default: str,
 ) -> tuple[str, ...]:
     """Return bootstrap-eligible runtime agents that should be present locally."""
 
     requested = (requested_agent or "").strip()
     if not requested:
         configured = configured_default.strip()
-        return (configured,) if configured else ()
+        if configured in _BOOTSTRAP_AGENT_NAMES:
+            return (configured,)
+        builtin = builtin_default.strip()
+        return (builtin,) if builtin in _BOOTSTRAP_AGENT_NAMES else ()
     if requested in _BOOTSTRAP_AGENT_NAMES:
         return (requested,)
     return ()
@@ -241,5 +245,5 @@ def _agent_profile_path(repo_root: Path, item_id: str) -> Path:
     return repo_root / ".agents" / "agents" / f"{name}.md"
 
 
-def _bundled_repo_root() -> Path:
-    return Path(__file__).resolve().parents[4]
+def _bundled_bootstrap_tree_root() -> Path:
+    return Path(__file__).resolve().parents[4] / "meridian-base"

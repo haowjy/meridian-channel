@@ -36,6 +36,7 @@ class LaunchResult(BaseModel):
     command: tuple[str, ...]
     exit_code: int
     continue_ref: str | None = None
+    warning: str | None = None
 
 
 class PrimarySessionMetadata(BaseModel):

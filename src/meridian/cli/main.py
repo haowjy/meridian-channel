@@ -471,6 +471,12 @@ def _run_primary_launch(
 ) -> None:
     """Shared primary launch flow for root command entry."""
 
+    def _merge_warnings(*warnings: str | None) -> str | None:
+        parts = [item.strip() for item in warnings if item and item.strip()]
+        if not parts:
+            return None
+        return "; ".join(parts)
+
     repo_root = Path.cwd().resolve()
     harness_registry = get_default_harness_registry()
     normalized_continue_ref = continue_ref.strip() if continue_ref is not None else ""
@@ -541,7 +547,7 @@ def _run_primary_launch(
                 if launch_result.continue_ref is not None
                 else None
             ),
-            warning=continue_warning,
+            warning=_merge_warnings(continue_warning, launch_result.warning),
         )
     )
 
