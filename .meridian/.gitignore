@@ -7,6 +7,7 @@
 # Track manifest and lock (committed for reproducible installs)
 !agents.toml
 !agents.lock
+!config.toml
 
 # Track fs/ and work/
 !fs/
