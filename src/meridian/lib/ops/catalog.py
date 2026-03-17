@@ -1,8 +1,5 @@
 """Catalog discovery operations for models and skills."""
 
-import fnmatch
-import re
-from datetime import date, timedelta
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, model_serializer
@@ -11,6 +8,7 @@ from meridian.lib.catalog.models import (
     AliasEntry,
     DiscoveredModel,
     ModelVisibilityConfig,
+    is_default_visible_model,
     load_discovered_models,
     load_merged_aliases,
     load_model_visibility,
@@ -223,76 +221,20 @@ def _build_catalog_model(
         cost_tier=_cost_tier(cost_input),
     )
 
-
-_DATE_SUFFIX_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"^(?P<base>.+)-(?P<date>\d{8})$"),
-    re.compile(r"^(?P<base>.+)-(?P<date>\d{4}-\d{2}-\d{2})$"),
-    re.compile(r"^(?P<base>.+)-(?P<date>\d{2}-\d{2})$"),
-    re.compile(r"^(?P<base>.+)-(?P<date>\d{2}-\d{4})$"),
-)
-
-
-def _date_variant_bases(model_id: str) -> tuple[str, ...]:
-    for pattern in _DATE_SUFFIX_PATTERNS:
-        match = pattern.match(model_id)
-        if match is None:
-            continue
-        base = match.group("base")
-        candidates: list[str] = [base]
-        # Anthropic uses `claude-opus-4-0` as canonical but the date-stamped
-        # variant is `claude-opus-4-20250514` (base = `claude-opus-4`).
-        # Also check `{base}-0` so the variant gets filtered.
-        candidates.append(f"{base}-0")
-        if base.endswith("-preview"):
-            candidates.append(base.removesuffix("-preview"))
-        return tuple(candidates)
-    return ()
-
-
-def _visibility_recency_cutoff(max_age_days: int | None) -> str | None:
-    if max_age_days is None:
-        return None
-    return (date.today() - timedelta(days=max_age_days)).isoformat()
-
-
 def _is_default_visible(
     model: CatalogModel,
     all_model_ids: set[str],
     *,
     visibility: ModelVisibilityConfig,
 ) -> bool:
-    # Aliased models are always visible. User explicitly configured them.
-    if model.aliases:
-        return True
-
-    model_id = str(model.model_id)
-
-    if visibility.include and not any(
-        _match(model_id, pattern) for pattern in visibility.include
-    ):
-        return False
-    if any(_match(model_id, pattern) for pattern in visibility.exclude):
-        return False
-
-    variant_bases = _date_variant_bases(model_id)
-    if visibility.hide_date_variants and variant_bases and any(
-        base in all_model_ids for base in variant_bases
-    ):
-        return False
-
-    cutoff = _visibility_recency_cutoff(visibility.max_age_days)
-    if cutoff is not None and model.release_date and model.release_date < cutoff:
-        return False
-
-    return not (
-        visibility.max_input_cost is not None
-        and model.cost_input is not None
-        and model.cost_input >= visibility.max_input_cost
+    return is_default_visible_model(
+        model_id=str(model.model_id),
+        aliased=bool(model.aliases),
+        release_date=model.release_date,
+        cost_input=model.cost_input,
+        all_model_ids=all_model_ids,
+        visibility=visibility,
     )
-
-
-def _match(value: str, pattern: str) -> bool:
-    return fnmatch.fnmatchcase(value, pattern)
 
 
 def _cost_tier(cost_input: float | None) -> str | None:

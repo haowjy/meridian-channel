@@ -8,7 +8,7 @@ from typing import cast
 
 from pydantic import BaseModel, ConfigDict
 
-from meridian.lib.catalog.models import ensure_models_config, render_models_toml
+from meridian.lib.catalog.models_toml import ensure_models_config, render_models_toml
 from meridian.lib.config.settings import resolve_repo_root
 from meridian.lib.core.util import FormatContext, to_jsonable
 from meridian.lib.ops.runtime import async_from_sync
