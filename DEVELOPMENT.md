@@ -46,6 +46,20 @@ uv run pytest-llm
 uv run pyright
 ```
 
+## Release
+
+Use the release helper to bump the package version, create a release commit,
+and create the matching `v<version>` tag in one step:
+
+```bash
+scripts/release.sh patch
+scripts/release.sh 0.1.0 --push
+```
+
+By default it updates `src/meridian/__init__.py`, commits the change, and
+creates an annotated tag locally. Pass `--push` to push both the current branch
+and the new tag.
+
 ## Run from source
 
 ```bash
