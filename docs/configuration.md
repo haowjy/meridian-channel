@@ -9,11 +9,13 @@ Meridian discovery roots.
 ## Quick Start
 
 ```bash
-meridian config init
+meridian
 meridian config show
+meridian config init
 meridian config set defaults.max_retries 5
 meridian config get defaults.max_retries
 meridian config reset defaults.max_retries
+meridian models config show
 ```
 
 ## Repository Layout
@@ -25,6 +27,7 @@ meridian config reset defaults.max_retries
     skills/
   .meridian/
     agents.toml
+    agents.local.toml
     agents.lock
     config.toml
     models.toml
@@ -90,17 +93,26 @@ autocompact_pct = 70
 
 ## Model Catalog Overrides
 
-Override or add models in `.meridian/models.toml`:
+Customize aliases, harness routing, and default list visibility in `.meridian/models.toml`:
 
 ```toml
-[[models]]
-model_id = "my-custom-model-v1"
-aliases = ["mymodel", "mm"]
-harness = "opencode"
-role = "Custom"
-strengths = "Domain-specific"
-cost_tier = "$$"
+[aliases]
+fast = "gpt-5.4"
+
+[metadata.fast]
+role = "default coder"
+strengths = "fast iteration"
+
+[harness_patterns]
+codex = ["gpt-*", "o*", "codex*"]
+opencode = ["gemini*", "opencode-*"]
+
+[model_visibility]
+exclude = ["gemini-live-*", "*-latest"]
+hide_date_variants = true
 ```
+
+Use `meridian models config init/show/get/set/reset` to manage this file from the CLI.
 
 ## Environment Variables
 

@@ -167,7 +167,7 @@ src/meridian/
 
 ---
 
-## Data Flow: `meridian spawn create`
+## Data Flow: `meridian spawn` / `spawn.create`
 
 ```mermaid
 sequenceDiagram
@@ -310,7 +310,7 @@ Each adapter translates `SpawnParams` into native CLI args:
 - **OpenCode**: `opencode --provider google --model X`
 - **Direct**: In-process Anthropic Messages API (programmatic tools, no subprocess)
 
-Routing rules (in `catalog/models.py`): `claude-*|sonnet*|opus*` to Claude, `gpt-*|codex*|o3*|o4*` to Codex, `gemini-*|opencode-*|/*` to OpenCode.
+Routing policy lives in `catalog/model_policy.py`. Builtin `harness_patterns` provide default family routing, and repo-local `.meridian/models.toml` can override those patterns or make them ambiguous on purpose until the user resolves them.
 
 ---
 
@@ -391,7 +391,7 @@ graph TD
     Extract --> Done["finalize_spawn event"]
 ```
 
-Both primary agent launch (`meridian`) and spawn execution (`meridian spawn create`) use the same lifecycle.
+Both primary agent launch (`meridian`) and spawn execution (`meridian spawn`, backed by the internal `spawn.create` operation) use the same lifecycle.
 
 ---
 

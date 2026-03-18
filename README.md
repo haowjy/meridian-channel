@@ -94,7 +94,7 @@ You need at least one harness CLI installed and authenticated:
 |---|---|---|
 | Claude Code | `claude-*`, `sonnet*`, `opus*` | [docs.anthropic.com](https://docs.anthropic.com/en/docs/claude-code) |
 | Codex CLI | `gpt-*`, `codex*`, `o3*`, `o4*` | [github.com/openai/codex](https://github.com/openai/codex) |
-| OpenCode | `gemini-*`, `opencode-*` | [opencode.ai](https://opencode.ai) |
+| OpenCode | anything else | [opencode.ai](https://opencode.ai) |
 
 Claude and Codex are the most exercised paths today. OpenCode has adapter
 support but lighter day-to-day coverage.
@@ -102,7 +102,7 @@ support but lighter day-to-day coverage.
 **Primary session:** Only Claude Code supports system prompt injection
 (`--append-system-prompt`), which is how Meridian loads agent skills into the
 primary session. Codex and OpenCode work well as **spawn targets** but aren't
-suited as the primary harness.
+as suited as the primary harness.
 
 ### Claude Code integration
 
@@ -236,8 +236,10 @@ graph TB
 
 | Command | Description |
 |---|---|
-| `meridian config init` | Initialize repo config |
+| `meridian config show` | Show resolved config and bootstrap `.meridian/` on first run |
+| `meridian config init` | Explicitly scaffold `config.toml` |
 | `meridian config set KEY VALUE` | Set a config value |
+| `meridian models config show` | Show `.meridian/models.toml` policy overrides |
 | `meridian models list` | Inspect the model catalog |
 | `meridian sources list` | Show installed agents, skills, and their sources |
 | `meridian doctor` | Run diagnostics |
@@ -250,6 +252,10 @@ on disk, it doesn't exist.
 
 ```
 .meridian/
+  .gitignore            # Tracks shared repo state, ignores machine-local state
+  agents.toml           # Shared source manifest
+  agents.local.toml     # Optional local-only source overrides
+  agents.lock           # Realized install snapshot
   spawns.jsonl          # Spawn event log
   sessions.jsonl        # Session event log
   spawns/
@@ -258,9 +264,11 @@ on disk, it doesn't exist.
       stderr.log        # Stderr capture
       report.md         # Agent's report
   fs/                   # Shared filesystem between spawns
+  work-items/           # Work item metadata
   work/                 # Work item directories
+  work-archive/         # Completed work item scratch/docs
   config.toml           # Repo configuration
-  models.toml           # Model overrides
+  models.toml           # Model aliases, routing, and visibility overrides
 ```
 
 Writes use `fcntl.flock` plus atomic tmp+rename. If meridian is killed

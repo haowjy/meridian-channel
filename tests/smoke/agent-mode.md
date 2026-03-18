@@ -19,11 +19,11 @@ test -d "$SMOKE_REPO/.git" && echo "PASS: agent-mode repo ready" || echo "FAIL: 
 
 ```bash
 MERIDIAN_DEPTH=1 uv run meridian --help > /tmp/meridian-agent-help.txt && \
-python3 - <<'PY'
+uv run python - <<'PY'
 text = open("/tmp/meridian-agent-help.txt").read()
-for visible in ("spawn", "report", "skills", "models"):
+for visible in ("spawn", "work", "sources", "models"):
     assert visible in text
-for hidden in ("config", "doctor", "install", "update", "upgrade", "remove", "status", "completion", "serve"):
+for hidden in ("config", "doctor", "init", "session", "completion", "serve", "claude", "codex", "opencode"):
     assert hidden not in text
 print("PASS: agent-mode help is restricted")
 PY
@@ -33,9 +33,9 @@ PY
 
 ```bash
 MERIDIAN_DEPTH=1 uv run meridian --human --help > /tmp/meridian-agent-human-help.txt && \
-python3 - <<'PY'
+uv run python - <<'PY'
 text = open("/tmp/meridian-agent-human-help.txt").read()
-for visible in ("config", "doctor", "install", "update", "upgrade", "remove", "status"):
+for visible in ("config", "doctor", "init", "session", "sources", "spawn", "work", "claude", "codex", "opencode", "serve"):
     assert visible in text
 print("PASS: --human restored full help")
 PY
@@ -45,7 +45,7 @@ PY
 
 ```bash
 MERIDIAN_DEPTH=1 uv run meridian models list > /tmp/meridian-agent-models.out && \
-python3 - <<'PY'
+uv run python - <<'PY'
 import json
 for line in open("/tmp/meridian-agent-models.out"):
     line = line.strip()
