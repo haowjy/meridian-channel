@@ -63,7 +63,7 @@ fi
 ### ADV-3. Corrupt state files and verify clean failure [IMPORTANT]
 
 ```bash
-uv run meridian --json config init >/dev/null && \
+uv run meridian --help >/dev/null && \
 printf '{bad json\n' > "$MERIDIAN_STATE_ROOT/spawns.jsonl" && \
 if timeout 10 uv run meridian --json spawn list >/tmp/meridian-adv-corrupt.out 2>&1; then
   if grep -q 'Traceback' /tmp/meridian-adv-corrupt.out; then

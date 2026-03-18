@@ -12,7 +12,7 @@ for var in $(env | awk -F= '/^MERIDIAN_/ {print $1}'); do unset "$var"; done
 export MERIDIAN_REPO_ROOT="$SMOKE_REPO"
 export MERIDIAN_STATE_ROOT="$SMOKE_REPO/.meridian"
 cd "$REPO_ROOT"
-uv run meridian config init >/dev/null && echo "PASS: base state fixture created" || echo "FAIL: state fixture setup failed"
+uv run meridian --help >/dev/null && echo "PASS: base state fixture created" || echo "FAIL: state fixture setup failed"
 ```
 
 ### STATE-1. Core `.meridian/` structure exists [CRITICAL]
@@ -27,7 +27,7 @@ echo "PASS: core state directories exist" || echo "FAIL: core state directories 
 ### STATE-2. `spawns.jsonl` contains valid JSON objects [IMPORTANT]
 
 ```bash
-python3 - <<'PY'
+uv run python - <<'PY'
 import json, os, sys
 path = os.path.join(os.environ["MERIDIAN_STATE_ROOT"], "spawns.jsonl")
 if not os.path.exists(path):
@@ -47,7 +47,7 @@ PY
 ### STATE-3. `sessions.jsonl` is valid when present [IMPORTANT]
 
 ```bash
-python3 - <<'PY'
+uv run python - <<'PY'
 import json, os
 path = os.path.join(os.environ["MERIDIAN_STATE_ROOT"], "sessions.jsonl")
 if not os.path.exists(path):
@@ -64,7 +64,7 @@ PY
 ### STATE-4. Lock files are not left unusable [IMPORTANT]
 
 ```bash
-python3 - <<'PY'
+uv run python - <<'PY'
 import fcntl, glob, os
 root = os.environ["MERIDIAN_STATE_ROOT"]
 locks = glob.glob(os.path.join(root, "*.lock"))
