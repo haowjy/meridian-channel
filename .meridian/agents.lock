@@ -223,8 +223,8 @@
           "path": "skills/__meridian-work-coordination/SKILL.md"
         }
       },
-      "kind": "path",
-      "locator": "./meridian-base",
+      "kind": "git",
+      "locator": "https://github.com/haowjy/meridian-base.git",
       "realized_closure": [
         "agent:__meridian-orchestrator",
         "agent:__meridian-subagent",
@@ -235,9 +235,9 @@
         "skill:__meridian-troubleshoot",
         "skill:__meridian-work-coordination"
       ],
-      "requested_ref": null,
+      "requested_ref": "main",
       "resolved_identity": {
-        "path": "./meridian-base"
+        "commit": "4d27b07b552e68aeff8de788d4ef4c8dc343e3ef"
       }
     },
     "meridian-dev-workflow": {
@@ -318,7 +318,7 @@
         }
       },
       "kind": "path",
-      "locator": "./meridian-dev-workflow",
+      "locator": "meridian-dev-workflow",
       "realized_closure": [
         "agent:browser-tester",
         "agent:coder",
@@ -347,7 +347,7 @@
       ],
       "requested_ref": null,
       "resolved_identity": {
-        "path": "./meridian-dev-workflow"
+        "path": "meridian-dev-workflow"
       }
     }
   },

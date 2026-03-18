@@ -1,9 +1,7 @@
 [[sources]]
-name = "meridian-dev-workflow"
-kind = "path"
-path = "./meridian-dev-workflow"
-
-[[sources]]
 name = "meridian-base"
-kind = "path"
-path = "./meridian-base"
+kind = "git"
+url = "https://github.com/haowjy/meridian-base.git"
+ref = "main"
+agents = ["__meridian-orchestrator", "__meridian-subagent"]
+skills = ["__meridian-install", "__meridian-orchestrate", "__meridian-session-context", "__meridian-spawn-agent", "__meridian-troubleshoot", "__meridian-work-coordination"]

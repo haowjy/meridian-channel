@@ -8,9 +8,13 @@
 !agents.toml
 !agents.lock
 !config.toml
+!models.toml
 
 # Track fs/ and work/
 !fs/
 !fs/**
 !work/
 !work/**
+# Added by Meridian to keep required project state tracked
+!work-archive/
+!work-archive/**
