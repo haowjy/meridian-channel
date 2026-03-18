@@ -25,15 +25,27 @@ export UV_CACHE_DIR=/tmp/uv-cache
 
 This prevents state leakage into the real repo and keeps `uv` cache access predictable.
 
-## Sync-Specific Advice
+## Sources-Specific Advice
 
-When validating `meridian sync` from Codex:
+When validating `meridian sources` from Codex:
 
-- Run the local-path round trip in [`tests/smoke/sync/install-cycle.md`](/home/jimyao/gitrepos/meridian-channel/tests/smoke/sync/install-cycle.md)
-- If remote resolution, lock semantics, or `.claude/` materialization changed, also run one real GitHub-source install
-- Inspect `.agents/`, `.claude/`, `.meridian/config.toml`, and `.meridian/sync.lock`, not just command output
+- Run the local-path round trip in [`tests/smoke/install/install-cycle.md`](/home/jimyao/gitrepos/meridian-channel/tests/smoke/install/install-cycle.md)
+- If remote resolution, lock semantics, or manifest routing changed, also run one real GitHub-source install
+- Inspect `.agents/`, `.meridian/agents.toml`, `.meridian/agents.local.toml`, and `.meridian/agents.lock`, not just command output
 
-The focused smoke doc (`tests/smoke/sync/install-cycle.md`) contains the concrete remote example and should remain the source of truth for exact commands.
+The focused smoke doc (`tests/smoke/install/install-cycle.md`) contains the concrete remote example and should remain the source of truth for exact commands.
+
+## Bootstrap Expectations
+
+Recent Meridian startup bootstrap is part of the smoke surface. In a scratch repo, a plain `uv run meridian --help` or `uv run meridian config show` can create or repair repo-local state such as:
+
+- `.meridian/config.toml`
+- `.meridian/models.toml`
+- `.meridian/.gitignore`
+- `.meridian/agents.toml`
+- `.meridian/agents.lock`
+
+When you are testing source install behavior, decide whether those files came from bootstrap or from the command under test before you call the result a regression.
 
 ## Permission Tiers and Sandbox Nesting
 

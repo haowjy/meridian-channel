@@ -32,18 +32,18 @@ Smoke test guides live in [`tests/smoke/`](tests/smoke/) as markdown files.
 - `tests/smoke/quick-sanity.md` is the minimum bar. Always run it.
 - `tests/smoke/adversarial.md` is for deeper coverage when you expect edge cases or regressions.
 
-Read only the specific smoke docs you need. Do not rewrite them unless that is the task.
+Read only the specific smoke docs you need. If the smoke docs or this skill are stale, fix them in the same change instead of leaving drift behind.
 
 ### Coverage Map
 
-| Source area            | Smoke test files                                  |
-|------------------------|---------------------------------------------------|
-| cli/                   | quick-sanity.md, output-formats.md, agent-mode.md |
-| lib/harness/           | spawn/dry-run.md, spawn/lifecycle.md              |
-| lib/launch/            | spawn/lifecycle.md, spawn/error-paths.md          |
-| lib/state/             | state-integrity.md                                |
-| lib/sync/              | sync/install-cycle.md                             |
-| config changes         | config/init-show-set.md                           |
+| Source area | Smoke test files |
+|-------------|------------------|
+| cli/command surface | quick-sanity.md, output-formats.md, agent-mode.md |
+| spawn, launch, harness | spawn/dry-run.md, spawn/lifecycle.md, spawn/error-paths.md, spawn/context-from.md, spawn/skill-injection.md |
+| state/bootstrap | quick-sanity.md, state-integrity.md |
+| config and defaults | config/init-show-set.md, quick-sanity.md |
+| source install/update/uninstall | install/install-cycle.md |
+| cross-cutting regressions | adversarial.md |
 
 ## General Patterns
 
@@ -53,6 +53,7 @@ For CLI smoke tests, cover the following basics:
 - Exercise at least one error path. Bad input should produce a clean failure, never a traceback.
 - Check agent-mode behavior with `MERIDIAN_DEPTH=1`.
 - Inspect the resulting `.meridian/` state after mutating operations.
+- For first-run flows, verify bootstrap created the expected repo-local state files rather than assuming `meridian init` was run first.
 - For spawn work, prefer `--dry-run` first when you only need to verify command construction.
 
 When a command changes files or state, verify both the visible output and the on-disk result.
@@ -138,9 +139,10 @@ Minimum common smoke-test commands:
 ```bash
 uv run meridian --help
 uv run meridian --json doctor
-uv run meridian --json spawn create --dry-run -p "test"
+uv run meridian --json spawn --dry-run -p "test"
 uv run meridian --json models list
 uv run meridian --json config show
+uv run meridian --json sources list
 uv run meridian spawn list
 uv run meridian spawn list --all
 MERIDIAN_DEPTH=1 uv run meridian --help
@@ -157,8 +159,8 @@ After `quick-sanity.md` passes, run the focused file matching your change area n
 Keep the main smoke-test pass generic. When a change targets one command area, read the focused smoke doc for that feature and any matching reference in `resources/`.
 
 - For spawn lifecycle and harness testing, see [`resources/spawn-lifecycle.md`](resources/spawn-lifecycle.md).
-- For `meridian sync`, use `tests/smoke/sync/install-cycle.md` and [`resources/sync.md`](resources/sync.md).
-- For Codex-specific notes about sandboxed `uv run` usage, cache location, scratch-repo hygiene, and **profile sandbox mapping** (including the sandbox nesting trap), see [`resources/testing-with-codex.md`](resources/testing-with-codex.md).
+- For managed source install/update/uninstall behavior, use [`tests/smoke/install/install-cycle.md`](tests/smoke/install/install-cycle.md) and [`resources/sources.md`](resources/sources.md).
+- For Codex-specific notes about sandboxed `uv run` usage, cache location, scratch-repo hygiene, bootstrap side effects, and profile sandbox mapping, see [`resources/testing-with-codex.md`](resources/testing-with-codex.md).
 
 ## Self-Healing This Skill
 

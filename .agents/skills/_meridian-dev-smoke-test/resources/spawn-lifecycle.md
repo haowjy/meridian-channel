@@ -63,7 +63,7 @@ Source: `map_process_exit_code()` in `src/meridian/lib/launch/signals.py` and th
 If you don't have a working harness binary configured:
 
 1. **Use `--dry-run`** to validate command construction and prompt composition. This covers model resolution, skill materialization, and the full `build_command()` path.
-2. **Read default profiles** at `src/meridian/resources/.agents/agents/meridian-primary.md` to understand what a spawn would configure.
+2. **Read the bundled default profiles** under `meridian-base/agents/`, especially `meridian-base/agents/__meridian-subagent.md` and `meridian-base/agents/__meridian-orchestrator.md`, to understand what bootstrap installs by default.
 3. **Inspect existing artifacts** — if prior spawns exist in `.meridian/artifacts/`, you can verify the state layer without launching a new process.
 
 For full lifecycle coverage, you need a real harness. The `tests/smoke/spawn/lifecycle.md` guide documents the expected flow.
