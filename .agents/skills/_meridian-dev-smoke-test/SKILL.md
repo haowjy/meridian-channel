@@ -141,6 +141,7 @@ uv run meridian --help
 uv run meridian --json doctor
 uv run meridian --json spawn --dry-run -p "test"
 uv run meridian --json models list
+uv run meridian models list --show-superseded
 uv run meridian --json config show
 uv run meridian --json sources list
 uv run meridian spawn list

@@ -8,6 +8,7 @@ from meridian.lib.catalog.models import (
     AliasEntry,
     DiscoveredModel,
     ModelVisibilityConfig,
+    compute_superseded_ids,
     is_default_visible_model,
     load_discovered_models,
     load_merged_aliases,
@@ -26,6 +27,7 @@ class ModelsListInput(BaseModel):
 
     repo_root: str | None = None
     all: bool = False
+    show_superseded: bool = False
 
 
 class ModelsRefreshInput(BaseModel):
@@ -226,6 +228,7 @@ def _is_default_visible(
     all_model_ids: set[str],
     *,
     visibility: ModelVisibilityConfig,
+    superseded_model_ids: frozenset[str] = frozenset(),
 ) -> bool:
     return is_default_visible_model(
         model_id=str(model.model_id),
@@ -234,6 +237,7 @@ def _is_default_visible(
         cost_input=model.cost_input,
         all_model_ids=all_model_ids,
         visibility=visibility,
+        superseded_model_ids=superseded_model_ids,
     )
 
 
@@ -273,10 +277,29 @@ def models_list_sync(payload: ModelsListInput) -> ModelsListOutput:
     ]
     if not payload.all:
         all_model_ids = {str(model.model_id) for model in merged_models}
+
+        effective_visibility = visibility
+        if payload.show_superseded:
+            effective_visibility = visibility.model_copy(
+                update={"hide_superseded": False}
+            )
+
+        superseded: frozenset[str] = frozenset()
+        if effective_visibility.hide_superseded:
+            superseded = compute_superseded_ids([
+                (str(m.model_id), m.provider or "", m.release_date)
+                for m in merged_models
+            ])
+
         merged_models = [
             model
             for model in merged_models
-            if _is_default_visible(model, all_model_ids, visibility=visibility)
+            if _is_default_visible(
+                model,
+                all_model_ids,
+                visibility=effective_visibility,
+                superseded_model_ids=superseded,
+            )
         ]
     return ModelsListOutput(models=tuple(merged_models))
 

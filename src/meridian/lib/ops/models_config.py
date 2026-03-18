@@ -16,9 +16,10 @@ from meridian.lib.ops.runtime import async_from_sync
 from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.paths import resolve_state_paths
 
-_MODELS_VISIBILITY_KEYS = frozenset(
-    {"include", "exclude", "max_input_cost", "max_age_days", "hide_date_variants"}
-)
+_MODELS_VISIBILITY_KEYS = frozenset({
+    "include", "exclude", "max_input_cost", "max_age_days",
+    "hide_date_variants", "hide_superseded",
+})
 _METADATA_KEYS = frozenset({"role", "strengths"})
 _CONFIGURABLE_HARNESS_NAMES = tuple(
     sorted(str(harness) for harness in HarnessId if harness != HarnessId.DIRECT)
@@ -169,7 +170,7 @@ def _validated_key_parts(key: str) -> tuple[str, ...]:
     raise ValueError(
         "Unsupported models config key. Use aliases.<name>, metadata.<alias>.{role|strengths}, "
         f"harness_patterns.{{{'|'.join(_CONFIGURABLE_HARNESS_NAMES)}}}, or model_visibility."
-        "{include|exclude|max_input_cost|max_age_days|hide_date_variants}."
+        "{include|exclude|max_input_cost|max_age_days|hide_date_variants|hide_superseded}."
     )
 
 
@@ -204,9 +205,9 @@ def _validate_value(parts: tuple[str, ...], value: object) -> object:
                 raise ValueError(f"{'.'.join(parts)} expects an array of strings.")
             patterns.append(item.strip())
         return patterns
-    if parts[1] == "hide_date_variants":
+    if parts[1] in {"hide_date_variants", "hide_superseded"}:
         if not isinstance(value, bool):
-            raise ValueError("model_visibility.hide_date_variants expects true or false.")
+            raise ValueError(f"model_visibility.{parts[1]} expects true or false.")
         return value
     if parts[1] == "max_age_days":
         if isinstance(value, bool) or not isinstance(value, int):

@@ -1,12 +1,8 @@
 # Model Catalog Improvements
 
-## 1. Auto-resolve default aliases to latest model per family
+## ~~1. Auto-resolve default aliases to latest model per family~~ (done)
 
-**Current:** `default-aliases.toml` hardcodes `opus = "claude-opus-4-6"`. Goes stale when new models ship.
-
-**Proposed:** Delete `default-aliases.toml`. Instead, auto-resolve builtin aliases (`opus`, `sonnet`, `haiku`, `codex`, `gpt`, `gemini`) to the latest discovered model in each family using `family` + `release_date` from the models.dev catalog. Users who want to pin a specific version set the alias in `.meridian/models.toml`.
-
-**Key file:** `src/meridian/lib/catalog/models.py` — `_infer_family()` already groups models, `release_date` exists on `DiscoveredModel`.
+Builtin aliases are now derived from the models.dev catalog at runtime, picking the latest model per alias family by `release_date`. Hardcoded fallbacks used only when cache is unavailable. User auto-resolve specs supported in `models.toml`. `default-aliases.toml` deleted.
 
 ## 2. CLI for managing models.toml
 
@@ -21,19 +17,9 @@ meridian models unalias mymodel
 
 Writes to `.meridian/models.toml`. Follows existing manifest-driven CLI pattern (`models_cmd.py`).
 
-## 3. Model filtering (include/exclude)
+## ~~3. Model filtering (include/exclude)~~ (done)
 
-**Current:** Hardcoded visibility heuristics in `_is_default_visible()` — hides `-latest` variants, old models, high-cost models. No user configuration.
-
-**Proposed:** User-configurable wildcard include/exclude patterns in `.meridian/models.toml`:
-```toml
-[visibility]
-exclude = ["gpt-5.1-*", "gemini-3-*"]
-# or
-include = ["claude-*", "gpt-5.3-*", "gpt-5.4"]
-```
-
-With sensible defaults (current heuristics as fallback).
+All visibility settings are user-configurable in `[model_visibility]` section of `models.toml`: `include`, `exclude`, `hide_date_variants`, `hide_superseded`, `max_age_days`, `max_input_cost`. Defaults: 120-day window, hide superseded models, hide date variants. Aliased models always pass through. CLI flags: `--show-superseded`, `--all`.
 
 ## 4. Skill for model management
 
@@ -43,9 +29,9 @@ Add a skill in `meridian-base/` teaching agents how to manage models, aliases, d
 
 `meridian-dev-workflow/skills/review-orchestration/SKILL.md` lists specific model names (gpt-5.4, opus, gpt-5.3-codex) in the Model Selection section. Replace with characteristic-based guidance and point to `meridian models list`. Same pattern as `__meridian-orchestrate` which already does this right.
 
-## 6. Fix docs drift
+## ~~6. Fix docs drift~~ (done)
 
-`docs/configuration.md` shows `[[models]]` format but actual loader uses `[aliases]` tables. Sync docs with code.
+`docs/configuration.md` updated with current `[aliases]` format, auto-resolve specs, and full visibility settings table.
 
 ## Research notes
 

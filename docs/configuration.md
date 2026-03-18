@@ -97,7 +97,12 @@ Customize aliases, harness routing, and default list visibility in `.meridian/mo
 
 ```toml
 [aliases]
-fast = "gpt-5.4"
+fast = "gpt-5.4"                      # pinned alias
+
+[aliases.coder]                        # auto-resolve: picks latest match
+provider = "openai"
+include = "codex"
+exclude = ["-mini", "-spark", "-max"]
 
 [metadata.fast]
 role = "default coder"
@@ -110,7 +115,25 @@ opencode = ["gemini*", "opencode-*"]
 [model_visibility]
 exclude = ["gemini-live-*", "*-latest"]
 hide_date_variants = true
+hide_superseded = true
+max_age_days = 120
 ```
+
+Builtin aliases (`opus`, `sonnet`, `haiku`, `codex`, `gpt`, `gemini`) auto-resolve to the latest model per family from the models.dev catalog. Pin an alias to a specific version by setting it as a string value.
+
+### Visibility Defaults
+
+The default model list filters aggressively to show only current, relevant models:
+
+| Setting | Default | Effect |
+|---|---|---|
+| `exclude` | `*-latest`, `*-deep-research`, `gemini-live-*`, `o1*`, `o3*`, `o4*` | Hide by glob pattern |
+| `hide_date_variants` | `true` | Hide date-suffixed variants when base exists |
+| `hide_superseded` | `true` | Hide older models when a newer model in the same lineage exists |
+| `max_age_days` | `120` | Hide models older than 120 days |
+| `max_input_cost` | `10.0` | Hide models costing ≥$10/M input tokens |
+
+Aliased models always pass through all visibility filters. Use `--show-superseded` or `--all` to see hidden models.
 
 Use `meridian models config init/show/get/set/reset` to manage this file from the CLI.
 

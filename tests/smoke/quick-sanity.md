@@ -62,6 +62,18 @@ grep -Eq 'MODEL|gpt-|claude-|gemini-' /tmp/meridian-qs-models.txt && \
 echo "PASS: models list returned catalog data" || echo "FAIL: models list output was unexpected"
 ```
 
+### QS-4b. Models list --show-superseded [IMPORTANT]
+
+Verifies that `--show-superseded` returns more models than the default view (superseded models are hidden by default).
+
+```bash
+DEFAULT_COUNT="$(uv run meridian models list 2>/dev/null | tail -n +2 | wc -l)"
+SUPERSEDED_COUNT="$(uv run meridian models list --show-superseded 2>/dev/null | tail -n +2 | wc -l)"
+[ "$SUPERSEDED_COUNT" -ge "$DEFAULT_COUNT" ] && \
+echo "PASS: --show-superseded shows >= default count ($SUPERSEDED_COUNT >= $DEFAULT_COUNT)" || \
+echo "FAIL: --show-superseded ($SUPERSEDED_COUNT) should show >= default ($DEFAULT_COUNT)"
+```
+
 ### QS-5. Sources list [CRITICAL]
 
 ```bash

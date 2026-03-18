@@ -37,8 +37,9 @@ class ModelVisibilityConfig(BaseModel):
         "o4*",
     )
     max_input_cost: float | None = 10.0
-    max_age_days: int | None = 180
+    max_age_days: int | None = 120
     hide_date_variants: bool = True
+    hide_superseded: bool = True
 
 
 DEFAULT_HARNESS_PATTERNS: dict[HarnessId, tuple[str, ...]] = {
@@ -109,7 +110,7 @@ def coerce_model_visibility(raw_section: object) -> dict[str, object]:
         if key == "max_age_days":
             values[key] = _coerce_optional_int(value, source=f"model_visibility.{key}")
             continue
-        if key == "hide_date_variants":
+        if key in {"hide_date_variants", "hide_superseded"}:
             values[key] = _coerce_bool(value, source=f"model_visibility.{key}")
             continue
         raise ValueError(f"Invalid value for 'model_visibility.{key}': unsupported key.")
@@ -168,6 +169,7 @@ def is_default_visible_model(
     cost_input: float | None,
     all_model_ids: set[str],
     visibility: ModelVisibilityConfig,
+    superseded_model_ids: frozenset[str] = frozenset(),
 ) -> bool:
     if aliased:
         return True
@@ -183,6 +185,9 @@ def is_default_visible_model(
     if visibility.hide_date_variants and variant_bases and any(
         base in all_model_ids for base in variant_bases
     ):
+        return False
+
+    if visibility.hide_superseded and model_id in superseded_model_ids:
         return False
 
     cutoff = _visibility_recency_cutoff(visibility.max_age_days)
@@ -252,3 +257,63 @@ def _coerce_bool(value: object, *, source: str) -> bool:
     if not isinstance(value, bool):
         raise ValueError(f"Invalid value for '{source}': expected bool.")
     return value
+
+
+def _model_lineage(model_id: str) -> str | None:
+    """Extract lineage key by stripping version numbers and meta suffixes."""
+    import re
+
+    if model_id.endswith("-latest"):
+        return None
+
+    s = model_id
+    # Strip trailing date suffixes
+    s = re.sub(r"-\d{8}$", "", s)
+    s = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", s)
+    s = re.sub(r"-\d{2}-\d{2}$", "", s)
+    s = re.sub(r"-\d{2}-\d{4}$", "", s)
+    # Strip -preview and -chat for lineage grouping
+    s = re.sub(r"-preview$", "", s)
+    s = re.sub(r"-chat$", "", s)
+
+    # Split on delimiters, drop purely numeric tokens
+    parts = re.split(r"([-.])", s)
+    result: list[str] = []
+    for token in parts:
+        if re.fullmatch(r"\d+", token):
+            # Drop numeric token and its preceding delimiter
+            if result and re.fullmatch(r"[-.]", result[-1]):
+                result.pop()
+        else:
+            result.append(token)
+
+    return "".join(result) or None
+
+
+def compute_superseded_ids(
+    models: list[tuple[str, str, str | None]],
+) -> frozenset[str]:
+    """Compute model IDs superseded by a newer model in the same lineage.
+
+    Each tuple is ``(model_id, provider, release_date)``.
+    Within each ``(provider, lineage)`` group, all models except the newest
+    are considered superseded.
+    """
+    from collections import defaultdict
+
+    lineages: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    for model_id, provider, release_date in models:
+        lineage = _model_lineage(model_id)
+        if lineage is None:
+            continue
+        lineages[f"{provider}:{lineage}"].append((model_id, release_date or ""))
+
+    superseded: set[str] = set()
+    for group in lineages.values():
+        if len(group) <= 1:
+            continue
+        # Latest date first; for ties, prefer shorter (cleaner) ID
+        group.sort(key=lambda t: (t[1], -len(t[0])), reverse=True)
+        for model_id, _ in group[1:]:
+            superseded.add(model_id)
+    return frozenset(superseded)

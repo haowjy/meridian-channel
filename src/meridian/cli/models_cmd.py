@@ -15,8 +15,8 @@ from meridian.lib.ops.catalog import (
 Emitter = Callable[[Any], None]
 
 
-def _models_list(emit: Emitter, all: bool = False) -> None:
-    emit(models_list_sync(ModelsListInput(all=all)))
+def _models_list(emit: Emitter, all: bool = False, show_superseded: bool = False) -> None:
+    emit(models_list_sync(ModelsListInput(all=all, show_superseded=show_superseded)))
 
 
 def _models_refresh(emit: Emitter) -> None:

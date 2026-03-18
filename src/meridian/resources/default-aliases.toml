@@ -1,7 +1,0 @@
-[aliases]
-opus = "claude-opus-4-6"
-sonnet = "claude-sonnet-4-6"
-haiku = "claude-haiku-4-5"
-codex = "gpt-5.3-codex"
-gpt = "gpt-5.4"
-gemini = "gemini-3.1-pro"

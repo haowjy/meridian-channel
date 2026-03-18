@@ -31,6 +31,7 @@ from meridian.lib.catalog.model_policy import (
     SpawnMode,
     coerce_harness_patterns,
     coerce_model_visibility,
+    compute_superseded_ids,
     is_default_visible_model,
     merge_harness_patterns,
     merge_model_visibility,
@@ -91,9 +92,12 @@ def load_model_visibility(repo_root: Path | None = None) -> ModelVisibilityConfi
     return merge_model_visibility(coerce_model_visibility(payload.get("model_visibility")))
 
 
-def load_user_aliases(repo_root: Path | None = None) -> list[AliasEntry]:
+def load_user_aliases(
+    repo_root: Path | None = None,
+    discovered_models: list[DiscoveredModel] | None = None,
+) -> list[AliasEntry]:
     root = resolve_repo_root(repo_root)
-    return _load_user_aliases(root)
+    return _load_user_aliases(root, discovered_models=discovered_models)
 
 
 def _resolve_alias_harness(entry: AliasEntry, repo_root: Path | None) -> AliasEntry:
@@ -104,9 +108,11 @@ def _resolve_alias_harness(entry: AliasEntry, repo_root: Path | None) -> AliasEn
 def load_merged_aliases(repo_root: Path | None = None) -> list[AliasEntry]:
     """Load built-in aliases merged with user aliases (user wins by alias key)."""
 
+    discovered = load_discovered_models()
+
     merged = merge_alias_entries(
-        load_builtin_aliases(),
-        load_user_aliases(repo_root=repo_root),
+        load_builtin_aliases(discovered_models=discovered),
+        load_user_aliases(repo_root=repo_root, discovered_models=discovered),
     )
     resolved_root = resolve_repo_root(repo_root) if repo_root is not None else None
     return [_resolve_alias_harness(entry, resolved_root) for entry in merged]
@@ -617,6 +623,7 @@ __all__ = [
     "SpawnMode",
     "coerce_harness_patterns",
     "coerce_model_visibility",
+    "compute_superseded_ids",
     "ensure_models_config",
     "fetch_models_dev",
     "is_default_visible_model",
