@@ -386,11 +386,7 @@ def write_source_manifest(
         local_path.unlink()
 
 
-def route_source_to_file(
-    source: SourceConfig,
-    *,
-    force_local: bool = False,
-) -> ManifestFile:
+def route_source_to_file(*, force_local: bool = False) -> ManifestFile:
     """Determine which manifest file a new source should be written to."""
     if force_local:
         return "local"

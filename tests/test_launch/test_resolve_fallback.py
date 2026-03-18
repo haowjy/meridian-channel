@@ -94,3 +94,35 @@ def test_resolve_policies_does_not_fallback_explicit_missing_agent(tmp_path: Pat
             configured_default_harness="codex",
             skills_readonly=True,
         )
+
+
+def test_resolve_policies_preserves_repo_local_harness_pattern_errors(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    state_root = repo_root / ".meridian"
+    state_root.mkdir()
+    (state_root / "models.toml").write_text(
+        "\n".join(
+            [
+                "[harness_patterns]",
+                'codex = ["foo-*"]',
+                'opencode = ["foo-*"]',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="matches multiple harness_patterns"):
+        resolve_policies(
+            repo_root=repo_root,
+            requested_model="foo-bar",
+            requested_harness=None,
+            requested_agent=None,
+            config=load_config(repo_root),
+            harness_registry=get_default_harness_registry(),
+            configured_default_agent="",
+            builtin_default_agent="__meridian-orchestrator",
+            configured_default_harness="codex",
+            skills_readonly=True,
+        )

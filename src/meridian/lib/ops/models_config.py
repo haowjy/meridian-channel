@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.catalog.models_toml import ensure_models_config, render_models_toml
 from meridian.lib.config.settings import resolve_repo_root
+from meridian.lib.core.types import HarnessId
 from meridian.lib.core.util import FormatContext, to_jsonable
 from meridian.lib.ops.runtime import async_from_sync
 from meridian.lib.state.atomic import atomic_write_text
@@ -19,6 +20,9 @@ _MODELS_VISIBILITY_KEYS = frozenset(
     {"include", "exclude", "max_input_cost", "max_age_days", "hide_date_variants"}
 )
 _METADATA_KEYS = frozenset({"role", "strengths"})
+_CONFIGURABLE_HARNESS_NAMES = tuple(
+    sorted(str(harness) for harness in HarnessId if harness != HarnessId.DIRECT)
+)
 
 
 class ModelsConfigInitInput(BaseModel):
@@ -156,7 +160,7 @@ def _validated_key_parts(key: str) -> tuple[str, ...]:
     if (
         root == "harness_patterns"
         and len(parts) == 2
-        and parts[1] in {"claude", "codex", "opencode"}
+        and parts[1] in _CONFIGURABLE_HARNESS_NAMES
     ):
         return parts
     if root == "model_visibility" and len(parts) == 2 and parts[1] in _MODELS_VISIBILITY_KEYS:
@@ -164,7 +168,7 @@ def _validated_key_parts(key: str) -> tuple[str, ...]:
 
     raise ValueError(
         "Unsupported models config key. Use aliases.<name>, metadata.<alias>.{role|strengths}, "
-        "harness_patterns.{claude|codex|opencode}, or model_visibility."
+        f"harness_patterns.{{{'|'.join(_CONFIGURABLE_HARNESS_NAMES)}}}, or model_visibility."
         "{include|exclude|max_input_cost|max_age_days|hide_date_variants}."
     )
 

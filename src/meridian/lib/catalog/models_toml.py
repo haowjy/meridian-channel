@@ -9,6 +9,7 @@ from typing import cast
 
 from meridian.lib.catalog.model_policy import DEFAULT_HARNESS_PATTERNS, DEFAULT_MODEL_VISIBILITY
 from meridian.lib.core.types import HarnessId
+from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.paths import resolve_state_paths
 
 
@@ -28,7 +29,7 @@ def ensure_models_config(repo_root: Path) -> Path:
     if path.exists():
         return path
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(scaffold_models_toml(), encoding="utf-8")
+    atomic_write_text(path, scaffold_models_toml())
     return path
 
 
@@ -127,4 +128,3 @@ def _toml_literal(value: object) -> str:
         items = cast("tuple[object, ...] | list[object]", value)
         return "[" + ", ".join(_toml_literal(item) for item in items) + "]"
     raise ValueError(f"Unsupported models.toml value type: {type(value).__name__}")
-

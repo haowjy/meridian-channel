@@ -122,11 +122,11 @@ def _install(
         # Merge agents/skills (union)
         merged_source = _merge_source_config(existing_source, source_config)
         target = manifest.file_for_source(source_config.name) or route_source_to_file(
-            source_config, force_local=local
+            force_local=local
         )
         updated_manifest = manifest.with_source(merged_source, target=target)
     else:
-        target = route_source_to_file(source_config, force_local=local)
+        target = route_source_to_file(force_local=local)
         updated_manifest = manifest.with_source(source_config, target=target)
 
     with state_lock(state_paths.agents_lock_path):

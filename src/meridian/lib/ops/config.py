@@ -17,7 +17,7 @@ from meridian.lib.config.settings import (
     resolve_repo_root,
 )
 from meridian.lib.core.util import FormatContext, to_jsonable
-from meridian.lib.launch.resolve import configured_default_agent_warning
+from meridian.lib.launch.default_agent_policy import configured_default_agent_warning
 from meridian.lib.ops.runtime import async_from_sync
 from meridian.lib.state.paths import ensure_gitignore, resolve_state_paths
 
@@ -676,7 +676,7 @@ def _scaffold_template() -> str:
 def ensure_state_bootstrap_sync(repo_root: Path) -> ConfigInitOutput:
     """Ensure first-run state exists and scaffold project config when missing."""
 
-    from meridian.lib.catalog.models import ensure_models_config
+    from meridian.lib.catalog.models_toml import ensure_models_config
 
     state = resolve_state_paths(repo_root)
     bootstrap_dirs = (

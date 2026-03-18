@@ -19,6 +19,9 @@ from meridian.lib.install.bootstrap import (
     plan_bootstrap_assets,
     planned_bootstrap_agent_names,
 )
+from meridian.lib.launch.default_agent_policy import (
+    resolve_agent_profile_with_builtin_fallback,
+)
 
 from .prompt import dedupe_skill_names, load_skill_contents
 
@@ -50,37 +53,6 @@ def load_agent_profile_with_fallback(
             configured_profile,
             repo_root=repo_root,
         )
-
-    return None
-
-
-def configured_default_agent_warning(
-    *,
-    repo_root: Path,
-    configured_agent: str,
-    builtin_default: str,
-    config_key: str,
-) -> str | None:
-    configured_profile = configured_agent.strip()
-    if not configured_profile:
-        return None
-
-    builtin_profile = builtin_default.strip()
-    if builtin_profile and configured_profile == builtin_profile:
-        return None
-
-    try:
-        load_agent_profile(
-            configured_profile,
-            repo_root=repo_root,
-        )
-    except FileNotFoundError:
-        if builtin_profile:
-            return (
-                f"Configured {config_key} '{configured_profile}' is unavailable locally; "
-                f"Meridian will use builtin default '{builtin_profile}' until you update it."
-            )
-        return f"Configured {config_key} '{configured_profile}' is unavailable locally."
 
     return None
 
@@ -193,7 +165,7 @@ def resolve_harness(
         resolved = resolve_model(str(model), repo_root=repo_root)
         routed_harness_id = resolved.harness
     except ValueError:
-        decision = route_model(str(model), mode="harness")
+        decision = route_model(str(model), mode="harness", repo_root=repo_root)
         routed_harness_id = decision.harness_id
         warning = decision.warning
     supported_primary_harnesses = tuple(
@@ -237,7 +209,7 @@ def resolve_policies(
     configured_default_harness: str = "claude",
     skills_readonly: bool = True,
 ) -> ResolvedPolicies:
-    profile, profile_warning = _resolve_agent_profile_with_builtin_fallback(
+    profile, profile_warning = resolve_agent_profile_with_builtin_fallback(
         repo_root=repo_root,
         requested_agent=requested_agent,
         configured_default=configured_default_agent or "",
@@ -320,56 +292,9 @@ def resolve_policies(
         resolved_skills=resolved_skills,
         warning=profile_warning,
     )
-
-
-def _resolve_agent_profile_with_builtin_fallback(
-    *,
-    repo_root: Path,
-    requested_agent: str | None,
-    configured_default: str,
-    builtin_default: str,
-) -> tuple[AgentProfile | None, str | None]:
-    requested_profile = requested_agent.strip() if requested_agent is not None else ""
-    if requested_profile:
-        return (
-            load_agent_profile(
-                requested_profile,
-                repo_root=repo_root,
-            ),
-            None,
-        )
-
-    configured_profile = configured_default.strip()
-    if configured_profile:
-        try:
-            return (
-                load_agent_profile(
-                    configured_profile,
-                    repo_root=repo_root,
-                ),
-                None,
-            )
-        except FileNotFoundError:
-            fallback_profile = builtin_default.strip()
-            if fallback_profile and fallback_profile != configured_profile:
-                return (
-                    load_agent_profile(
-                        fallback_profile,
-                        repo_root=repo_root,
-                    ),
-                    "Configured default agent "
-                    f"'{configured_profile}' is unavailable; using builtin default "
-                    f"'{fallback_profile}'.",
-                )
-            raise
-
-    return None, None
-
-
 __all__ = [
     "ResolvedPolicies",
     "ResolvedSkills",
-    "configured_default_agent_warning",
     "ensure_bootstrap_ready",
     "load_agent_profile_with_fallback",
     "resolve_harness",

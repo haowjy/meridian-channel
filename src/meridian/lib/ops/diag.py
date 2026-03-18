@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.core.spawn_lifecycle import is_active_spawn_status
 from meridian.lib.core.util import FormatContext
-from meridian.lib.launch.resolve import configured_default_agent_warning
+from meridian.lib.launch.default_agent_policy import configured_default_agent_warning
 from meridian.lib.ops.runtime import build_runtime, resolve_state_root
 from meridian.lib.state import spawn_store
 from meridian.lib.state.session_store import cleanup_stale_sessions

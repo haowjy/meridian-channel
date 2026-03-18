@@ -259,20 +259,8 @@ def test_manifest_is_not_overridden_for_local_only_source() -> None:
 
 
 def test_route_source_to_file_defaults_path_sources_to_shared() -> None:
-    source = SourceConfig(
-        name="workflow",
-        kind="path",
-        path="meridian-dev-workflow",
-    )
-
-    assert route_source_to_file(source) == "shared"
+    assert route_source_to_file() == "shared"
 
 
 def test_route_source_to_file_uses_local_when_explicitly_requested() -> None:
-    source = SourceConfig(
-        name="workflow",
-        kind="path",
-        path="meridian-dev-workflow",
-    )
-
-    assert route_source_to_file(source, force_local=True) == "local"
+    assert route_source_to_file(force_local=True) == "local"
