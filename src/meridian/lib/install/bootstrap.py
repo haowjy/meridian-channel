@@ -39,21 +39,19 @@ class BootstrapPlan(BaseModel):
 
 
 def bootstrap_source_config() -> SourceConfig:
-    """Return the canonical managed source record for bootstrap runtime assets."""
+    """Return the canonical managed source record for bundled Meridian assets."""
 
-    skill_names: set[str] = set()
     bundled_tree_root = _bundled_bootstrap_tree_root()
-    for agent_name in _BOOTSTRAP_AGENT_LIST:
-        profile = parse_agent_profile(bundled_tree_root / "agents" / f"{agent_name}.md")
-        skill_names.update(profile.skills)
+    agent_names = _bundled_agent_names(bundled_tree_root)
+    skill_names = _bundled_skill_names(bundled_tree_root)
 
     return SourceConfig(
         name=_BOOTSTRAP_SOURCE_NAME,
         kind="git",
         url=_BOOTSTRAP_URL,
         ref="main",
-        agents=_BOOTSTRAP_AGENT_LIST,
-        skills=tuple(sorted(skill_names)),
+        agents=agent_names,
+        skills=skill_names,
     )
 
 
@@ -164,10 +162,13 @@ def _select_runtime_sources(
     for item_id in missing_items:
         locked_item = lock.items.get(item_id)
         if locked_item is not None:
-            selected_sources.append(locked_item.source_name)
+            if manifest.find_source(locked_item.source_name) is not None:
+                selected_sources.append(locked_item.source_name)
+                continue
+            unresolved_bootstrap_items.append(item_id)
             continue
 
-        source_name = _locked_source_owning_item(item_id, lock)
+        source_name = _locked_source_owning_item(item_id, lock, manifest=manifest)
         if source_name is not None:
             selected_sources.append(source_name)
             continue
@@ -195,9 +196,14 @@ def _select_runtime_sources(
     return tuple(dict.fromkeys(selected_sources)), updated_manifest
 
 
-def _locked_source_owning_item(item_id: str, lock: InstallLock) -> str | None:
+def _locked_source_owning_item(
+    item_id: str,
+    lock: InstallLock,
+    *,
+    manifest: SourceManifest,
+) -> str | None:
     for source_name, source_record in lock.sources.items():
-        if item_id in source_record.items:
+        if item_id in source_record.items and manifest.find_source(source_name) is not None:
             return source_name
     return None
 
@@ -205,6 +211,21 @@ def _locked_source_owning_item(item_id: str, lock: InstallLock) -> str | None:
 def _is_bootstrap_item(item_id: str) -> bool:
     kind, name = parse_item_id(item_id)
     return kind == "agent" and name in _BOOTSTRAP_AGENT_NAMES
+
+
+def _bundled_agent_names(bundled_tree_root: Path) -> tuple[str, ...]:
+    agent_names: list[str] = []
+    for agent_path in sorted((bundled_tree_root / "agents").glob("*.md")):
+        profile = parse_agent_profile(agent_path)
+        agent_names.append(profile.name)
+    return tuple(agent_names)
+
+
+def _bundled_skill_names(bundled_tree_root: Path) -> tuple[str, ...]:
+    skill_names: list[str] = []
+    for skill_path in sorted((bundled_tree_root / "skills").glob("*/SKILL.md")):
+        skill_names.append(skill_path.parent.name)
+    return tuple(skill_names)
 
 
 def ensure_bootstrap_source_manifest(

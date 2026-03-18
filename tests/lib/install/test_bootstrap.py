@@ -128,12 +128,82 @@ def test_ensure_bootstrap_assets_bootstraps_missing_default(
     assert "agent:__meridian-subagent" in lock.items
 
 
-def test_bootstrap_source_config_records_runtime_bootstrap_filter() -> None:
+def test_ensure_bootstrap_assets_rehydrates_missing_bootstrap_manifest_from_lock(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    source_root = tmp_path / "bootstrap-source"
+    _write_source_tree(source_root, agent_name="__meridian-subagent")
+
+    paths = resolve_state_paths(repo_root)
+    config = SourcesConfig(
+        sources=(
+            SourceConfig(
+                name="meridian-base",
+                kind="path",
+                path=source_root.as_posix(),
+                agents=("__meridian-subagent",),
+            ),
+        )
+    )
+    write_sources_config(paths.agents_manifest_path, config)
+
+    lock = read_lock(paths.agents_lock_path)
+    reconcile_sources(
+        repo_root=repo_root,
+        sources=config.sources,
+        lock=lock,
+        agents_cache_dir=paths.agents_cache_dir,
+    )
+    write_lock(paths.agents_lock_path, lock)
+
+    installed_path = repo_root / ".agents" / "agents" / "__meridian-subagent.md"
+    installed_path.unlink()
+    paths.agents_manifest_path.unlink()
+
+    def fake_ensure_bootstrap_source_manifest(
+        *,
+        manifest: SourceManifest,
+        item_ids: tuple[str, ...],
+    ) -> SourceManifest:
+        from meridian.lib.install.types import parse_item_id
+
+        required_agent_names = tuple(parse_item_id(item_id)[1] for item_id in item_ids)
+        bootstrap_source = SourceConfig(
+            name="meridian-base",
+            kind="path",
+            path=source_root.as_posix(),
+            agents=required_agent_names,
+        )
+        return manifest.with_source(bootstrap_source, target="shared")
+
+    monkeypatch.setattr(
+        "meridian.lib.install.bootstrap.ensure_bootstrap_source_manifest",
+        fake_ensure_bootstrap_source_manifest,
+    )
+
+    plan = plan_bootstrap_assets(
+        repo_root=repo_root,
+        agent_names=("__meridian-subagent",),
+    )
+    ensure_bootstrap_assets(repo_root=repo_root, plan=plan)
+
+    assert installed_path.is_file()
+    rehydrated = load_sources_config(paths.agents_manifest_path)
+    assert [source.name for source in rehydrated.sources] == ["meridian-base"]
+
+
+def test_bootstrap_source_config_records_all_bundled_meridian_items() -> None:
     source = bootstrap_source_config()
     assert source.agents == ("__meridian-orchestrator", "__meridian-subagent")
     assert source.skills == (
+        "__meridian-install",
         "__meridian-orchestrate",
+        "__meridian-session-context",
         "__meridian-spawn-agent",
+        "__meridian-troubleshoot",
         "__meridian-work-coordination",
     )
 
@@ -164,8 +234,11 @@ def test_ensure_bootstrap_source_manifest_upgrades_partial_filter(
     assert source is not None
     assert source.agents == ("__meridian-orchestrator", "__meridian-subagent")
     assert source.skills == (
+        "__meridian-install",
         "__meridian-orchestrate",
+        "__meridian-session-context",
         "__meridian-spawn-agent",
+        "__meridian-troubleshoot",
         "__meridian-work-coordination",
     )
 
