@@ -52,3 +52,40 @@ def test_ensure_gitignore_repairs_missing_models_toml_entry(tmp_path: Path) -> N
     updated = gitignore_path.read_text(encoding="utf-8")
     assert "!models.toml" in updated
     assert "# Added by Meridian to keep required project state tracked" in updated
+
+
+def test_ensure_gitignore_removes_deprecated_work_items_tracking(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    state_root = repo_root / ".meridian"
+    state_root.mkdir()
+    gitignore_path = state_root / ".gitignore"
+    gitignore_path.write_text(
+        "\n".join(
+            [
+                "# Ignore everything by default",
+                "*",
+                "",
+                "# Track .gitignore itself",
+                "!.gitignore",
+                "",
+                "# Track shared repo state",
+                "!fs/",
+                "!fs/**",
+                "!work-items/",
+                "!work-items/**",
+                "!work/",
+                "!work/**",
+                "",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    ensure_gitignore(repo_root)
+
+    updated = gitignore_path.read_text(encoding="utf-8")
+    assert "!work-items/" not in updated
+    assert "!work-items/**" not in updated
+    assert "!work/" in updated

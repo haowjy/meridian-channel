@@ -28,8 +28,6 @@ _GITIGNORE_CONTENT = (
     "# Track shared repo state\n"
     "!fs/\n"
     "!fs/**\n"
-    "!work-items/\n"
-    "!work-items/**\n"
     "!work/\n"
     "!work/**\n"
     "!work-archive/\n"
@@ -43,12 +41,14 @@ _REQUIRED_GITIGNORE_LINES = (
     "!agents.lock",
     "!fs/",
     "!fs/**",
-    "!work-items/",
-    "!work-items/**",
     "!work/",
     "!work/**",
     "!work-archive/",
     "!work-archive/**",
+)
+_DEPRECATED_GITIGNORE_LINES = (
+    "!work-items/",
+    "!work-items/**",
 )
 
 
@@ -217,10 +217,19 @@ def ensure_gitignore(repo_root: Path) -> Path:
 
 
 def _merge_required_gitignore_lines(existing_text: str) -> str:
-    present_lines = {line.strip() for line in existing_text.splitlines()}
+    filtered_lines = [
+        line
+        for line in existing_text.splitlines()
+        if line.strip() not in _DEPRECATED_GITIGNORE_LINES
+    ]
+    normalized_existing = "\n".join(filtered_lines)
+    if existing_text.endswith("\n"):
+        normalized_existing += "\n"
+
+    present_lines = {line.strip() for line in filtered_lines}
     missing_lines = [line for line in _REQUIRED_GITIGNORE_LINES if line not in present_lines]
     if not missing_lines:
-        return existing_text
+        return normalized_existing
 
     suffix = "\n".join(
         [
@@ -230,6 +239,6 @@ def _merge_required_gitignore_lines(existing_text: str) -> str:
             "",
         ]
     )
-    if not existing_text.endswith("\n"):
-        return existing_text + suffix
-    return existing_text + suffix.lstrip("\n")
+    if not normalized_existing.endswith("\n"):
+        return normalized_existing + suffix
+    return normalized_existing + suffix.lstrip("\n")
