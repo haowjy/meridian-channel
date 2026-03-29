@@ -2,7 +2,6 @@
 
 import json
 import os
-import tempfile
 import tomllib
 from pathlib import Path
 from typing import Literal, cast
@@ -19,6 +18,7 @@ from meridian.lib.config.settings import (
 from meridian.lib.core.util import FormatContext, to_jsonable
 from meridian.lib.launch.default_agent_policy import configured_default_agent_warning
 from meridian.lib.ops.runtime import async_from_sync
+from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.paths import ensure_gitignore, resolve_state_paths
 
 _SECTION_ORDER: tuple[str, ...] = ("defaults", "timeouts", "harness", "output")
@@ -547,23 +547,6 @@ def _render_config_toml(overrides: dict[str, object]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _atomic_write_text(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
-    tmp_path = Path(tmp_name)
-
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp_path, path)
-    finally:
-        if tmp_path.exists():
-            tmp_path.unlink(missing_ok=True)
-
-
 def _source_for_key(
     spec: _ConfigKeySpec,
     *,
@@ -699,7 +682,7 @@ def ensure_state_bootstrap_sync(repo_root: Path) -> ConfigInitOutput:
         ensure_models_config(repo_root)
         return ConfigInitOutput(path=path.as_posix(), created=False)
 
-    _atomic_write_text(path, _scaffold_template())
+    atomic_write_text(path, _scaffold_template())
     ensure_models_config(repo_root)
     return ConfigInitOutput(path=path.as_posix(), created=True)
 
@@ -769,7 +752,7 @@ def config_set_sync(payload: ConfigSetInput) -> ConfigSetOutput:
     file_overrides = _extract_file_overrides(_read_file_payload(path))
     file_overrides[spec.canonical_key] = value
 
-    _atomic_write_text(path, _render_config_toml(file_overrides))
+    atomic_write_text(path, _render_config_toml(file_overrides))
 
     return ConfigSetOutput(
         path=path.as_posix(),
@@ -813,7 +796,7 @@ def config_reset_sync(payload: ConfigResetInput) -> ConfigResetOutput:
     removed = spec.canonical_key in file_overrides
     file_overrides.pop(spec.canonical_key, None)
 
-    _atomic_write_text(path, _render_config_toml(file_overrides))
+    atomic_write_text(path, _render_config_toml(file_overrides))
 
     return ConfigResetOutput(path=path.as_posix(), key=spec.canonical_key, removed=removed)
 

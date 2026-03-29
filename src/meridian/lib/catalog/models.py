@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import tempfile
 import time
 from pathlib import Path
 from typing import cast
@@ -50,6 +48,7 @@ from meridian.lib.catalog.models_toml import (
 )
 from meridian.lib.config.settings import resolve_repo_root
 from meridian.lib.core.types import HarnessId, ModelId
+from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.paths import resolve_cache_dir
 
 logger = logging.getLogger(__name__)
@@ -523,8 +522,6 @@ def _read_cache(cache_file: Path) -> tuple[float, list[DiscoveredModel]] | None:
 
 
 def _write_cache(cache_file: Path, models: list[DiscoveredModel]) -> None:
-    cache_file.parent.mkdir(parents=True, exist_ok=True)
-
     payload: dict[str, object] = {
         "fetched_at": int(time.time()),
         "models": [
@@ -537,22 +534,7 @@ def _write_cache(cache_file: Path, models: list[DiscoveredModel]) -> None:
         ],
     }
 
-    fd, tmp_name = tempfile.mkstemp(
-        prefix=f".{cache_file.name}.",
-        suffix=".tmp",
-        dir=cache_file.parent,
-    )
-    tmp_path = Path(tmp_name)
-
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, indent=2, sort_keys=True))
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp_path, cache_file)
-    finally:
-        tmp_path.unlink(missing_ok=True)
+    atomic_write_text(cache_file, json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
 def refresh_models_cache(cache_dir: Path | str | None = None) -> list[DiscoveredModel]:
