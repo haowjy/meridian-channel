@@ -2,107 +2,168 @@
 
 ## Problem
 
-Meridian has four configuration layers that have diverged: ENV vars, config TOML, agent YAML profiles, and CLI flags. Fields are added to one layer but not others, naming is inconsistent (`autocompact_pct` vs `autocompact`), and the precedence chain isn't enforced through shared infrastructure.
+Meridian has five configuration layers that have diverged: CLI flags, ENV vars, agent YAML profiles, project config TOML, and user config TOML. Fields are added to one layer but not others, naming is inconsistent (`autocompact_pct` vs `autocompact`), and the precedence chain isn't enforced through shared infrastructure. Adding a new field requires touching 5+ files independently.
 
-## Current State
-
-### Full matrix (as of March 2026)
-
-| Field | ENV var | Config TOML | YAML Profile | Spawn CLI | Primary CLI |
-|-------|---------|-------------|-------------|-----------|-------------|
-| model | `MERIDIAN_MODEL` | `primary.model` + `default_model` | `model` | `--model` | `--model` |
-| harness | `MERIDIAN_HARNESS` | `primary.harness` + `default_harness` | `harness` | ❌ (p418) | `--harness` |
-| skills | ❌ | ❌ | `skills` | `--skills` | ❌ |
-| tools | ❌ | ❌ | `tools` | ❌ | ❌ |
-| mcp_tools | ❌ | ❌ | `mcp_tools` | ❌ | ❌ |
-| sandbox | ❌ | ❌ | `sandbox` | ❌ (p418) | ❌ |
-| thinking | ❌ | ❌ | `thinking` | ❌ (p418) | ❌ |
-| approval | ❌ | ❌ | `approval` | `--yolo` only | `--yolo` only |
-| autocompact | ❌ | `primary.autocompact_pct` ⚠️ | `autocompact` | ❌ (p418) | `--autocompact` |
-| timeout | ❌ | ❌ | ❌ | `--timeout` | ❌ |
-| budget | `MERIDIAN_BUDGET` | `primary.budget` | ❌ | ❌ | ❌ |
-| max_turns | `MERIDIAN_MAX_TURNS` | `primary.max_turns` | ❌ | ❌ | ❌ |
-| max_input_tokens | `MERIDIAN_MAX_INPUT_TOKENS` | `primary.max_input_tokens` | ❌ | ❌ | ❌ |
-| max_output_tokens | `MERIDIAN_MAX_OUTPUT_TOKENS` | `primary.max_output_tokens` | ❌ | ❌ | ❌ |
-| max_depth | `MERIDIAN_MAX_DEPTH` | `max_depth` | ❌ | ❌ | ❌ |
-| max_retries | `MERIDIAN_MAX_RETRIES` | `max_retries` | ❌ | ❌ | ❌ |
-| agent | `MERIDIAN_AGENT` | `primary.agent` + `primary_agent` + `default_agent` | — (is the profile) | `--agent` | `--agent` |
-| work | ❌ | ❌ | ❌ | `--work` | `--work` |
-
-### Naming inconsistencies
-- Config: `autocompact_pct` vs YAML/CLI: `autocompact`
-- Config: `primary_agent` vs `default_agent` vs `primary.agent` (three fields for agent defaults)
-- ENV: `MERIDIAN_DEFAULT_HARNESS` vs `MERIDIAN_HARNESS` (which one wins?)
-
-## Design: Unified Field Registry
-
-### Principle
-
-Define each field ONCE in a registry. The registry entry specifies:
-- **name**: canonical field name (used in YAML and CLI)
-- **type**: int, str, float, bool
-- **valid_values**: optional set of allowed values (e.g., `{default, confirm, auto, yolo}`)
-- **range**: optional min/max for numeric fields
-- **layers**: which layers this field appears in (`{env, config, yaml, cli_spawn, cli_primary}`)
-- **env_var**: `MERIDIAN_*` name (derived from name if not specified)
-- **config_path**: TOML path (e.g., `primary.autocompact`)
-- **harness_mapping**: per-harness flag translation (for fields that map to harness CLI flags)
-
-From this single definition, generate:
-- AgentProfile field + parser
-- SpawnCreateInput / LaunchRequest field
-- Config key spec + template
-- ENV var spec
-- CLI flag (via cyclopts Parameter)
-- Validation logic
-
-### Which fields go where
-
-**Universal fields** (all layers): model, harness, thinking, sandbox, approval, autocompact, timeout, budget, max_turns
-
-**YAML + CLI only** (per-agent/invocation, not global defaults): skills, tools, mcp_tools
-
-**Config + ENV only** (global operational tuning): max_depth, max_retries, retry_backoff_seconds, kill_grace_minutes
-
-**CLI only** (runtime, not defaults): work, desc, dry_run, verbose, quiet, background, continue, fork
-
-### Precedence
+## Precedence
 
 ```
-CLI flag > YAML profile > Config TOML > ENV var > harness default
+CLI > ENV > YAML profile > Project Config > User Config > harness default
 ```
 
-Each layer overrides the one below. `None`/unset means "fall through to next layer."
+- **CLI** — you explicitly typed it, highest intent
+- **ENV** — `MERIDIAN_*` vars, personal/CI override without editing files
+- **YAML profile** — this agent's baked-in defaults
+- **Project Config** — this repo's team settings (`.meridian/config.toml`)
+- **User Config** — global personal preferences (`~/.meridian/config.toml`)
+- **Harness default** — what the harness does on its own
 
-### Naming convention
+Key change from current state: ENV is currently baked into config via pydantic-settings (`builtin < project TOML < user TOML < env`). This refactor separates ENV into its own layer between CLI and profile. Config loading becomes purely TOML-based. Project TOML wins over User TOML (currently inverted).
 
-- Field name is the same everywhere: `autocompact` (not `autocompact_pct` in config)
-- ENV var is `MERIDIAN_` + UPPER_SNAKE: `MERIDIAN_AUTOCOMPACT`
-- Config TOML path: `primary.autocompact` or top-level for globals
-- CLI flag: `--autocompact`
-- YAML key: `autocompact`
+## Architecture: RuntimeOverrides
+
+### Core idea
+
+Define universal "tuning knob" fields ONCE in a shared Pydantic model. Every layer uses this same model. Adding a field = add it to `RuntimeOverrides`, done. No drift possible.
+
+```python
+class RuntimeOverrides(BaseModel):
+    """Fields that can be set at any config layer."""
+    model: str | None = None
+    harness: str | None = None
+    thinking: str | None = None
+    sandbox: str | None = None
+    approval: str | None = None
+    autocompact: int | None = None
+    timeout: float | None = None
+    budget: float | None = None
+    max_turns: int | None = None
+```
+
+### Resolution
+
+One function, five layers, explicit precedence:
+
+```python
+def resolve(
+    cli: RuntimeOverrides,       # from --flags
+    env: RuntimeOverrides,       # from MERIDIAN_* vars (read separately, not via pydantic-settings)
+    profile: RuntimeOverrides,   # from agent YAML frontmatter
+    project: RuntimeOverrides,   # from project TOML
+    user: RuntimeOverrides,      # from user TOML
+) -> RuntimeOverrides:
+    resolved = {}
+    for field in RuntimeOverrides.model_fields:
+        resolved[field] = first_non_none(
+            getattr(cli, field),
+            getattr(env, field),
+            getattr(profile, field),
+            getattr(project, field),
+            getattr(user, field),
+        )
+    return RuntimeOverrides(**resolved)
+```
+
+### Layer composition
+
+Each existing model composes `RuntimeOverrides`:
+- `PrimaryConfig` embeds or inherits RuntimeOverrides fields (TOML source)
+- `AgentProfile` has RuntimeOverrides fields (YAML source, parsed from frontmatter)
+- `SpawnCreateInput` / `LaunchRequest` has RuntimeOverrides fields (CLI source)
+- ENV is read into a RuntimeOverrides instance directly from `MERIDIAN_*` vars
+
+Layer-specific fields stay on their own models:
+- `AgentProfile`: name, description, skills, tools, mcp_tools, body, path
+- `SpawnCreateInput`: prompt, files, context_from, desc, work, background, etc.
+- Config: max_depth, max_retries, retry_backoff, kill_grace, primary_agent, default_agent, per-harness model defaults
+
+### Harness mapping
+
+Harness-specific flag translation (approval → `--dangerously-skip-permissions`, thinking → `--effort`, etc.) stays adapter-owned. `RuntimeOverrides` carries abstract values; adapters translate. This is not the registry's job.
+
+### What this replaces
+
+- Scattered precedence logic in `prepare.py`, `plan.py`, `resolve.py` → one `resolve()` function
+- Independent field definitions in 5 models → one `RuntimeOverrides` model
+- Hand-maintained consistency tests → structural impossibility of drift
+- pydantic-settings ENV loading → explicit ENV parsing into RuntimeOverrides
+
+## Current State Matrix
+
+| Field | ENV | CLI (spawn) | CLI (primary) | YAML | Project Config | User Config |
+|-------|-----|-------------|---------------|------|---------------|-------------|
+| model | `MERIDIAN_MODEL` | `--model` | `--model` | ✅ | `primary.model` | `primary.model` |
+| harness | `MERIDIAN_HARNESS` | `--harness` | `--harness` | ✅ | `primary.harness` | `primary.harness` |
+| thinking | ❌ | `--thinking` | ❌ | ✅ | ❌ | ❌ |
+| sandbox | ❌ | `--sandbox` | ❌ | ✅ | ❌ | ❌ |
+| approval | ❌ | `--approval` | `--yolo` only | ✅ | ❌ | ❌ |
+| autocompact | ❌ | `--autocompact` | `--autocompact` | ✅ | `autocompact_pct` ⚠️ | `autocompact_pct` ⚠️ |
+| timeout | ❌ | `--timeout` | ❌ | ❌ | ❌ | ❌ |
+| budget | `MERIDIAN_BUDGET` | ❌ | ❌ | ❌ | `primary.budget` | `primary.budget` |
+| max_turns | `MERIDIAN_MAX_TURNS` | ❌ | ❌ | ❌ | `primary.max_turns` | `primary.max_turns` |
+
+### Target state (after refactor)
+
+Every RuntimeOverrides field present in ALL applicable layers:
+
+| Field | ENV | CLI (spawn) | CLI (primary) | YAML | Project Config | User Config |
+|-------|-----|-------------|---------------|------|---------------|-------------|
+| model | `MERIDIAN_MODEL` | `--model` | `--model` | ✅ | ✅ | ✅ |
+| harness | `MERIDIAN_HARNESS` | `--harness` | `--harness` | ✅ | ✅ | ✅ |
+| thinking | `MERIDIAN_THINKING` | `--thinking` | `--thinking` | ✅ | ✅ | ✅ |
+| sandbox | `MERIDIAN_SANDBOX` | `--sandbox` | `--sandbox` | ✅ | ✅ | ✅ |
+| approval | `MERIDIAN_APPROVAL` | `--approval` | `--approval` | ✅ | ✅ | ✅ |
+| autocompact | `MERIDIAN_AUTOCOMPACT` | `--autocompact` | `--autocompact` | ✅ | ✅ | ✅ |
+| timeout | `MERIDIAN_TIMEOUT` | `--timeout` | `--timeout` | ✅ | ✅ | ✅ |
+| budget | `MERIDIAN_BUDGET` | `--budget` | `--budget` | ✅ | ✅ | ✅ |
+| max_turns | `MERIDIAN_MAX_TURNS` | `--max-turns` | `--max-turns` | ✅ | ✅ | ✅ |
+
+### Fields that stay layer-specific
+
+| Field | Layers | Reason |
+|-------|--------|--------|
+| tools, mcp-tools | YAML only | Complex structured data |
+| skills | YAML + CLI | Per-agent/invocation, not a global default |
+| max_depth, max_retries, kill_grace | Config + ENV only | Global safety limits |
+| primary_agent, default_agent | Config + ENV only | Role-based defaults (orchestrator vs subagent) |
+| work, desc, background, continue, fork | CLI only | Runtime context |
+| per-harness model defaults | Config + ENV only | Harness routing |
 
 ## Refactor Plan
 
-### Phase 1: Rename for consistency (non-breaking)
-- Config: rename `autocompact_pct` → `autocompact` (keep old name as deprecated alias)
-- Config: consolidate `primary_agent`/`default_agent`/`primary.agent` — clarify which does what
+### Phase 1: Create RuntimeOverrides model
+- Define `RuntimeOverrides` in a new shared module (e.g., `lib/core/overrides.py`)
+- Include all 9 universal fields with validation
+- Add `from_env()` classmethod that reads `MERIDIAN_*` vars into an instance
+- Add `from_agent_profile()` that extracts overrides from an AgentProfile
+- Add `from_config()` that extracts from PrimaryConfig
+- Write the `resolve()` function
 
-### Phase 2: Field registry
-- Create a `FieldSpec` model that defines one field across all layers
-- Create the registry as a tuple of FieldSpec entries
-- Generate AgentProfile fields, SpawnCreateInput fields, config key specs, and ENV var specs from it
-- Validate at import time that all layers are in sync
+### Phase 2: Rip ENV out of pydantic-settings config loading
+- Stop pydantic-settings from reading `MERIDIAN_*` for RuntimeOverrides fields
+- Config loading becomes purely TOML: `builtin defaults < User TOML < Project TOML`
+- Fix precedence: project wins over user (currently inverted)
+- ENV is read separately via `RuntimeOverrides.from_env()`
 
-### Phase 3: Close gaps
-- Add missing fields to each layer per the matrix above
-- Add missing ENV vars (MERIDIAN_APPROVAL, MERIDIAN_THINKING, MERIDIAN_SANDBOX, etc.)
-- Ensure primary CLI and spawn CLI have matching flags for universal fields
+### Phase 3: Wire resolution through spawn + primary paths
+- Replace scattered precedence logic in `prepare.py`, `plan.py`, `resolve.py` with calls to `resolve()`
+- Both spawn and primary launch use the same resolution function
+- Single source of truth for precedence
 
-### Phase 4: Harness mapping unification
-- Centralize the field → harness flag translation (currently scattered across permissions.py, harness adapters, and SpawnParams strategies)
-- Each FieldSpec optionally carries a harness_mapping that translates the abstract value to per-harness CLI flags
+### Phase 4: Close remaining gaps
+- Add missing fields to each layer per the target state matrix
+- Rename `autocompact_pct` → `autocompact` (deprecated alias)
+- Add `--approval`, `--thinking`, `--sandbox`, `--timeout`, `--budget`, `--max-turns` to primary CLI
+- Add missing ENV vars
 
-## Risk
+### Phase 5: Naming convention enforcement
+- Validate at test time: every RuntimeOverrides field has a matching ENV var (`MERIDIAN_` + UPPER_SNAKE), config key (`primary.<field>`), and CLI flag (`--<field>`)
+- This test is structural — it introspects RuntimeOverrides.model_fields, not a hand-maintained list
 
-The field registry is a significant abstraction. If it's too magical (code generation, metaclasses), it becomes harder to understand than the duplication it replaces. Keep it simple: a data table that's validated at import time, not a code generator. The actual CLI/YAML/config code can still be explicit — the registry just ensures they stay in sync.
+## Reviewer feedback incorporated
+
+- **No single god-registry** (p419) — RuntimeOverrides is just a Pydantic model, not a metadata table with callbacks. Harness mapping stays adapter-owned.
+- **Introspect, don't hand-maintain** (p421, p423) — Phase 5 test introspects RuntimeOverrides.model_fields, not a static list. No KNOWN_GAPS to game.
+- **Don't bless dead fields** (p423) — only add CLI flags for fields that have real consumers in the launch/spawn pipeline. budget and max_turns need actual wiring before getting CLI flags.
+- **Resolve in one place** (p423) — `resolve()` replaces duplicated precedence logic in prepare.py and plan.py.
+- **Phase 3.3 was too big** (p421, p422) — split into Phase 2 (config loading) and Phase 3 (resolution wiring) as separate steps.
+- **Config precedence was inverted** (p422) — project TOML now wins over user TOML.
