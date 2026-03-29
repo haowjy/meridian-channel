@@ -189,7 +189,7 @@ def build_create_payload(
     policies = resolve_policies(
         repo_root=runtime_view.repo_root,
         requested_model=payload.model,
-        requested_harness=None,
+        requested_harness=payload.harness,
         requested_agent=payload.agent,
         config=runtime_view.config,
         harness_registry=runtime_view.harness_registry,
@@ -288,8 +288,12 @@ def build_create_payload(
     warning = merge_warnings(preflight_warning, warning)
     from meridian.lib.harness.adapter import SpawnParams
 
+    resolved_sandbox = (
+        payload.sandbox
+        or (profile.sandbox if profile is not None else None)
+    )
     permission_config, resolver = resolve_permission_pipeline(
-        sandbox=profile.sandbox if profile is not None else None,
+        sandbox=resolved_sandbox,
         allowed_tools=profile.tools if profile is not None else (),
         approval=(
             payload.approval
@@ -302,12 +306,16 @@ def build_create_payload(
     if prompt_policy.skill_injection_mode == "append-system-prompt":
         appended_system_prompt = compose_skill_injections(resolved_skills.loaded_skills) or None
 
+    resolved_thinking = (
+        payload.thinking
+        or (profile.thinking if profile is not None else None)
+    )
     preview_command = tuple(
         harness.build_command(
             SpawnParams(
                 prompt=composed_prompt,
                 model=ModelId(policies.model) if policies.model else None,
-                thinking=profile.thinking if profile is not None else None,
+                thinking=resolved_thinking,
                 skills=resolved_skills.skill_names,
                 agent=agent_for_params,
                 adhoc_agent_payload=adhoc_agent_payload,
@@ -352,7 +360,11 @@ def build_create_payload(
         cli_command=preview_command,
         passthrough_args=payload.passthrough_args,
         appended_system_prompt=appended_system_prompt,
-        autocompact=profile.autocompact if profile is not None else None,
+        autocompact=(
+            payload.autocompact
+            if payload.autocompact is not None
+            else (profile.autocompact if profile is not None else None)
+        ),
         session=SessionContinuation(
             harness_session_id=resolved_continue_harness_session_id,
             continue_fork=resolved_continue_fork,

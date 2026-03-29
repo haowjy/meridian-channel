@@ -161,6 +161,44 @@ def _spawn_create(
             help="Maximum runtime in minutes before spawn timeout.",
         ),
     ] = None,
+    approval: Annotated[
+        str | None,
+        Parameter(
+            name="--approval",
+            help="Approval mode: default, confirm, auto, yolo. Overrides agent profile.",
+        ),
+    ] = None,
+    autocompact: Annotated[
+        int | None,
+        Parameter(
+            name="--autocompact",
+            help="Autocompact threshold percentage (1-100). Overrides agent profile.",
+        ),
+    ] = None,
+    thinking: Annotated[
+        str | None,
+        Parameter(
+            name="--thinking",
+            help="Thinking budget: low, medium, high, xhigh. Overrides agent profile.",
+        ),
+    ] = None,
+    sandbox: Annotated[
+        str | None,
+        Parameter(
+            name="--sandbox",
+            help=(
+                "Sandbox mode: read-only, workspace-write, full-access, "
+                "danger-full-access, unrestricted. Overrides agent profile."
+            ),
+        ),
+    ] = None,
+    harness: Annotated[
+        str | None,
+        Parameter(
+            name="--harness",
+            help="Harness id to use. Overrides agent profile.",
+        ),
+    ] = None,
     yolo: Annotated[
         bool,
         Parameter(
@@ -177,6 +215,13 @@ def _spawn_create(
         Parameter(name="--fork", help="Fork a new branch when continuing (use with --continue)."),
     ] = False,
 ) -> None:
+    # Resolve --yolo / --approval interaction.
+    if yolo and approval is not None:
+        raise ValueError(
+            "Cannot use --yolo with --approval (--yolo is shorthand for --approval yolo)."
+        )
+    resolved_approval = approval if approval is not None else ("yolo" if yolo else None)
+
     if continue_from is not None:
         if context_from:
             raise ValueError("Cannot use --from with --continue")
@@ -214,7 +259,11 @@ def _spawn_create(
                 stream=stream,
                 background=background,
                 timeout=timeout,
-                approval="yolo" if yolo else None,
+                approval=resolved_approval,
+                autocompact=autocompact,
+                thinking=thinking,
+                sandbox=sandbox,
+                harness=harness,
                 passthrough_args=passthrough,
             ),
             sink=current_output_sink(),
@@ -474,5 +523,6 @@ def register_spawn_commands(app: App, emit: Emitter) -> tuple[set[str], dict[str
         app,
         group="spawn",
         handlers=handlers,
+        emit=emit,
         default_handler=partial(_spawn_create, emit),
     )

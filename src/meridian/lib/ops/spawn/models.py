@@ -37,6 +37,10 @@ class SpawnCreateInput(BaseModel):
     repo_root: str | None = None
     timeout: float | None = None
     approval: str | None = None
+    autocompact: int | None = None
+    thinking: str | None = None
+    sandbox: str | None = None
+    harness: str | None = None
     passthrough_args: tuple[str, ...] = ()
     continue_harness_session_id: str | None = None
     continue_harness: str | None = None
