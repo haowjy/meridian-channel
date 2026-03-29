@@ -36,9 +36,17 @@ def _make_auto_handler(
     input_type = spec.input_type
     fields = input_type.model_fields
     for field_name, field_info in fields.items():
-        if field_name in _IMPLICIT_INPUT_FIELDS:
-            continue
         if field_info.is_required():
+            if field_name in _IMPLICIT_INPUT_FIELDS:
+                # An implicit field that's required means the model cannot be
+                # constructed without a value we don't have at auto-generation
+                # time.  Fall back to requiring an explicit handler.
+                logger.debug(
+                    "Auto-handler skipped for %s: implicit field '%s' is required.",
+                    spec.name,
+                    field_name,
+                )
+                return None
             return None
 
     # All non-implicit fields have defaults — generate a no-arg handler.

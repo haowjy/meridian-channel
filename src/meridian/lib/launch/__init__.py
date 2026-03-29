@@ -60,8 +60,8 @@ def launch_primary(
             warning=plan.warning,
         )
 
-    # Resolve work-item attachment at the policy layer, not inside the
-    # process mechanism.  This keeps lib/launch free of ops dependencies.
+    # Resolve work-item attachment at the policy layer (this entry-point
+    # function), not inside process.py (the subprocess mechanism layer).
     resolved_work_id = _resolve_work_id_for_launch(plan.state_root, request)
     resolved_plan = plan.model_copy(update={"resolved_work_id": resolved_work_id})
 
