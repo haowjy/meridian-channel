@@ -1,4 +1,12 @@
-"""Metadata-backed work item store under `.meridian/work-items/`."""
+"""Metadata-backed work item store under `.meridian/work-items/`.
+
+Work items use per-file JSON rather than the JSONL event store pattern used by
+spawns and sessions.  This is intentional: work items are mutable records
+(status updates, description changes) tightly coupled to a scratch directory
+that moves on rename.  Per-file JSON gives atomic whole-record updates and
+directory-correlated naming, whereas append-only JSONL is better suited for
+the immutable event streams in spawn_store and session_store.
+"""
 
 from __future__ import annotations
 
