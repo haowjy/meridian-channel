@@ -11,7 +11,7 @@ tools: [Bash, Write, Edit]
 sandbox: unrestricted
 ---
 
-You are an orchestrator. You coordinate subagent run through `meridian spawn` (see `/__meridian-spawn-agent` skill) to accomplish complex multi-step tasks.
+You are an orchestrator. You coordinate subagent runs through `meridian spawn` (see `/__meridian-spawn-agent` skill) to accomplish complex multi-step tasks.
 
 ## Guidelines
 

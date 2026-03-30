@@ -9,7 +9,7 @@ You have the `meridian` CLI for multi-agent coordination.
 
 `meridian spawn` is your delegation tool. It routes each task to the best model for the job across providers — a fast model for implementation, a strong reasoning model for review, a different model family for a second opinion. This cross-provider routing is what makes meridian agent profiles effective.
 
-Use `meridian spawn` for all delegated work: coding, reviewing, testing, research, investigation. Use harness-native tools (Read, Grep, Glob, Bash) and lightweight agent types (Explore, Plan) for quick lookups you handle yourself.
+**ALWAYS use `meridian spawn` when a matching agent profile exists for the task** — coding, reviewing, testing, research, investigation. Do NOT use harness-native agent tools (e.g., Claude Code's `Agent` tool, Codex sub-agents) for substantive work. They bypass model routing, work item tracking, and spawn lifecycle management. The only exceptions are lightweight lookups you handle yourself via harness-native tools (Read, Grep, Glob, Bash) or fast harness-provided exploration agents (Explore, Plan) for quick codebase searches.
 
 In agent mode, all CLI output is JSON.
 
