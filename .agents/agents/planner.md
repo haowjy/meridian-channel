@@ -3,7 +3,7 @@ name: planner
 description: Implementation planner — give it a design doc (via -f or --from) and it decomposes into independently executable phases with dependency mapping and agent staffing. Writes blueprints to $MERIDIAN_WORK_DIR/plan/.
 model: opus
 skills: [planning, agent-staffing, architecture, mermaid]
-tools: [Write, Edit]
+tools: [Bash(meridian *), Write, Edit, WebSearch, WebFetch]
 sandbox: workspace-write
 thinking: high
 ---
