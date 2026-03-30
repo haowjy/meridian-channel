@@ -115,6 +115,36 @@ class WorkDoneInput(BaseModel):
     repo_root: str | None = None
 
 
+class WorkDeleteInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    work_id: str
+    force: bool = False
+    repo_root: str | None = None
+
+
+class WorkDeleteOutput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    had_artifacts: bool
+    deleted: bool
+    warning: str = ""
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        _ = ctx
+        lines: list[str] = []
+        if not self.deleted:
+            lines.append(f"Work item '{self.name}' has artifacts. Use --force to delete.")
+        elif self.had_artifacts:
+            lines.append(f"Deleted work item '{self.name}' and its artifacts.")
+        else:
+            lines.append(f"Deleted work item '{self.name}'.")
+        if self.warning:
+            lines.append(self.warning)
+        return "\n".join(lines)
+
+
 class WorkSwitchInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -284,6 +314,35 @@ def work_done_sync(
     )
 
 
+def work_delete_sync(
+    payload: WorkDeleteInput,
+    ctx: RuntimeContext | None = None,
+) -> WorkDeleteOutput:
+    nested_warning = _work_warning(ctx)
+    state_root = resolve_roots(payload.repo_root).state_root
+    try:
+        item, had_artifacts = work_store.delete_work_item(
+            state_root,
+            payload.work_id,
+            force=payload.force,
+        )
+        return WorkDeleteOutput(
+            name=item.name,
+            had_artifacts=had_artifacts,
+            deleted=True,
+            warning=nested_warning or "",
+        )
+    except ValueError as exc:
+        if "has artifacts" in str(exc):
+            return WorkDeleteOutput(
+                name=payload.work_id,
+                had_artifacts=True,
+                deleted=False,
+                warning=nested_warning or "",
+            )
+        raise
+
+
 def work_reopen_sync(
     payload: WorkReopenInput,
     ctx: RuntimeContext | None = None,
@@ -357,6 +416,7 @@ def work_clear_sync(
 work_start = async_from_sync(work_start_sync)
 work_update = async_from_sync(work_update_sync)
 work_done = async_from_sync(work_done_sync)
+work_delete = async_from_sync(work_delete_sync)
 work_reopen = async_from_sync(work_reopen_sync)
 work_switch = async_from_sync(work_switch_sync)
 work_rename = async_from_sync(work_rename_sync)
@@ -366,6 +426,8 @@ work_clear = async_from_sync(work_clear_sync)
 __all__ = [
     "WorkClearInput",
     "WorkClearOutput",
+    "WorkDeleteInput",
+    "WorkDeleteOutput",
     "WorkDoneInput",
     "WorkRenameInput",
     "WorkRenameOutput",
@@ -379,6 +441,8 @@ __all__ = [
     "WorkUpdateOutput",
     "work_clear",
     "work_clear_sync",
+    "work_delete",
+    "work_delete_sync",
     "work_done",
     "work_done_sync",
     "work_rename",

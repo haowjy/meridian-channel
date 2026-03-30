@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -355,6 +356,43 @@ def archive_work_item(state_root: Path, work_id: str) -> WorkItem:
         updated = current.model_copy(update={"status": "done"})
         atomic_write_text(_work_item_path(state_root, work_id), _serialize_work_item(updated))
         return updated
+
+
+def delete_work_item(
+    state_root: Path,
+    work_id: str,
+    *,
+    force: bool = False,
+) -> tuple[WorkItem, bool]:
+    """Delete a work item and optionally its scratch directories.
+
+    Returns ``(deleted_item, had_artifacts)``. Raises ``ValueError`` if artifacts
+    exist and ``force`` is ``False``.
+    """
+
+    paths = StateRootPaths.from_root_dir(state_root)
+    with lock_file(paths.work_items_flock):
+        reconcile_work_store(state_root)
+        current = get_work_item(state_root, work_id)
+        if current is None:
+            raise ValueError(f"Work item '{work_id}' not found")
+
+        active_dir = _work_scratch_dir(paths, work_id)
+        archived_dir = _archived_work_scratch_dir(paths, work_id)
+        has_artifacts = active_dir.exists() or archived_dir.exists()
+
+        if has_artifacts and not force:
+            raise ValueError(f"Work item '{work_id}' has artifacts. Use --force to delete.")
+
+        if active_dir.exists():
+            shutil.rmtree(active_dir)
+        if archived_dir.exists():
+            shutil.rmtree(archived_dir)
+
+        item_path = _work_item_path(state_root, work_id)
+        item_path.unlink(missing_ok=True)
+
+        return current, has_artifacts
 
 
 def reopen_work_item(state_root: Path, work_id: str, *, status: str = "open") -> WorkItem:

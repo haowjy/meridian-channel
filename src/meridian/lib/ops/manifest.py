@@ -119,6 +119,8 @@ from meridian.lib.ops.work_dashboard import (
 from meridian.lib.ops.work_lifecycle import (
     WorkClearInput,
     WorkClearOutput,
+    WorkDeleteInput,
+    WorkDeleteOutput,
     WorkDoneInput,
     WorkRenameInput,
     WorkRenameOutput,
@@ -132,6 +134,8 @@ from meridian.lib.ops.work_lifecycle import (
     WorkUpdateOutput,
     work_clear,
     work_clear_sync,
+    work_delete,
+    work_delete_sync,
     work_done,
     work_done_sync,
     work_rename,
@@ -508,6 +512,20 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="work",
         cli_name="done",
         mcp_name="work_done",
+        surfaces=frozenset({"cli"}),
+    ),
+    _spec(
+        name="work.delete",
+        description=(
+            "Delete a work item. Fails when scratch artifacts exist unless --force is provided."
+        ),
+        handler=work_delete,
+        sync_handler=work_delete_sync,
+        input_type=WorkDeleteInput,
+        output_type=WorkDeleteOutput,
+        cli_group="work",
+        cli_name="delete",
+        mcp_name="work_delete",
         surfaces=frozenset({"cli"}),
     ),
     _spec(

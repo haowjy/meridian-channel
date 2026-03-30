@@ -20,6 +20,8 @@ from meridian.lib.ops.work_dashboard import (
 )
 from meridian.lib.ops.work_lifecycle import (
     WorkClearInput,
+    WorkDeleteInput,
+    WorkDeleteOutput,
     WorkDoneInput,
     WorkRenameInput,
     WorkReopenInput,
@@ -27,6 +29,7 @@ from meridian.lib.ops.work_lifecycle import (
     WorkSwitchInput,
     WorkUpdateInput,
     work_clear_sync,
+    work_delete_sync,
     work_done_sync,
     work_rename_sync,
     work_reopen_sync,
@@ -143,6 +146,21 @@ def _work_done(
     emit(work_done_sync(WorkDoneInput(work_id=work_id)))
 
 
+def _work_delete(
+    emit: Emitter,
+    work_id: Annotated[
+        str,
+        Parameter(help="Work item id."),
+    ],
+    force: Annotated[
+        bool,
+        Parameter(name="--force", help="Delete even if work item has artifacts."),
+    ] = False,
+) -> None:
+    output: WorkDeleteOutput = work_delete_sync(WorkDeleteInput(work_id=work_id, force=force))
+    emit(output)
+
+
 def _work_switch(
     emit: Emitter,
     work_id: Annotated[
@@ -195,6 +213,7 @@ def register_work_commands(app: App, emit: Emitter) -> tuple[set[str], dict[str,
         "work.sessions": lambda: partial(_work_sessions, emit),
         "work.update": lambda: partial(_work_update, emit),
         "work.done": lambda: partial(_work_done, emit),
+        "work.delete": lambda: partial(_work_delete, emit),
         "work.switch": lambda: partial(_work_switch, emit),
         "work.reopen": lambda: partial(_work_reopen, emit),
         "work.rename": lambda: partial(_work_rename, emit),
