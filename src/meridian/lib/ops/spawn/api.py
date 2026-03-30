@@ -652,6 +652,7 @@ def spawn_continue_sync(
         continue_source_tracked=resolved_reference.tracked,
         continue_source_ref=resolved_spawn_id,
         continue_fork=payload.fork,
+        forked_from_chat_id=resolved_reference.source_chat_id if payload.fork else None,
         passthrough_args=payload.passthrough_args,
         approval=payload.approval,
     )

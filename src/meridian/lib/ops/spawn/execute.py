@@ -261,6 +261,7 @@ def _write_params_json(
     *,
     desc: str = "",
     work_id: str | None = None,
+    forked_from_chat_id: str | None = None,
 ) -> None:
     """Write resolved execution params to the spawn directory."""
     params_path = resolve_spawn_log_dir(repo_root, spawn_id) / "params.json"
@@ -285,6 +286,7 @@ def _write_params_json(
         "bootstrap_missing_items": list(prepared.bootstrap_missing_items),
         "continue_session": prepared.session.harness_session_id,
         "continue_fork": prepared.session.continue_fork,
+        "forked_from_chat_id": forked_from_chat_id,
     }
     atomic_write_text(params_path, json.dumps(params_payload, indent=2) + "\n")
     atomic_write_text(prompt_path, prepared.prompt)
@@ -307,6 +309,7 @@ def _session_execution_context(
     bootstrap_missing_items: tuple[str, ...],
     run_agent_name: str | None,
     inherited_work_id: str | None = None,
+    forked_from_chat_id: str | None = None,
 ) -> Iterator[_SessionExecutionContext]:
     with session_scope(
         state_root=state_root,
@@ -321,6 +324,7 @@ def _session_execution_context(
         skill_sources=skill_sources,
         bootstrap_required_items=bootstrap_required_items,
         bootstrap_missing_items=bootstrap_missing_items,
+        forked_from_chat_id=forked_from_chat_id,
     ) as managed:
         attached_work_id = get_session_active_work_id(state_root, managed.chat_id)
         if attached_work_id is None:
@@ -355,6 +359,7 @@ async def _execute_existing_spawn(
     adhoc_agent_payload: str = "",
     appended_system_prompt: str | None = None,
     autocompact: int | None = None,
+    forked_from_chat_id: str | None = None,
     sink: OutputSink | None = None,
     ctx: RuntimeContext | None = None,
 ) -> int:
@@ -427,6 +432,7 @@ async def _execute_existing_spawn(
         bootstrap_missing_items=spawn_record.bootstrap_missing_items,
         run_agent_name=agent_name,
         inherited_work_id=spawn_record.work_id,
+        forked_from_chat_id=forked_from_chat_id,
     ) as session_context:
         resolved_plan = plan.model_copy(update={"agent_name": session_context.resolved_agent_name})
         return await execute_with_finalization(
@@ -467,6 +473,7 @@ def _build_background_worker_command(
     adhoc_agent_payload: str = "",
     appended_system_prompt: str | None = None,
     autocompact: int | None = None,
+    forked_from_chat_id: str | None = None,
 ) -> tuple[str, ...]:
     command: list[str] = [
         sys.executable,
@@ -506,6 +513,8 @@ def _build_background_worker_command(
         command.extend(["--session-skill-path", skill_path])
     if autocompact is not None:
         command.extend(["--autocompact", str(autocompact)])
+    if forked_from_chat_id is not None and forked_from_chat_id.strip():
+        command.extend(["--forked-from-chat-id", forked_from_chat_id.strip()])
     if appended_system_prompt is not None:
         command.extend(["--appended-system-prompt", appended_system_prompt])
     return tuple(command)
@@ -539,6 +548,7 @@ def execute_spawn_background(
             prepared,
             desc=payload.desc,
             work_id=context.work_id,
+            forked_from_chat_id=payload.forked_from_chat_id,
         )
     except Exception:
         logger.warning("Failed to write params.json", spawn_id=spawn_id_text, exc_info=True)
@@ -561,6 +571,7 @@ def execute_spawn_background(
         adhoc_agent_payload=prepared.adhoc_agent_payload,
         appended_system_prompt=prepared.appended_system_prompt,
         autocompact=prepared.autocompact,
+        forked_from_chat_id=payload.forked_from_chat_id,
     )
     log_dir = resolve_spawn_log_dir(runtime.repo_root, context.spawn.spawn_id)
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -673,6 +684,7 @@ def execute_spawn_blocking(
             prepared,
             desc=payload.desc,
             work_id=context.work_id,
+            forked_from_chat_id=payload.forked_from_chat_id,
         )
     except Exception:
         logger.warning("Failed to write params.json", spawn_id=str(spawn.spawn_id), exc_info=True)
@@ -696,6 +708,7 @@ def execute_spawn_blocking(
         bootstrap_missing_items=prepared.bootstrap_missing_items,
         run_agent_name=prepared.agent_name,
         inherited_work_id=context.work_id,
+        forked_from_chat_id=payload.forked_from_chat_id,
     ) as session_context:
         resolved_plan = prepared.model_copy(
             update={"agent_name": session_context.resolved_agent_name}
@@ -789,6 +802,7 @@ def _build_background_worker_parser() -> argparse.ArgumentParser:
     parser.add_argument("--adhoc-agent-payload", default="")
     parser.add_argument("--appended-system-prompt", default=None)
     parser.add_argument("--autocompact", type=int, default=None)
+    parser.add_argument("--forked-from-chat-id", default=None)
     return parser
 
 
@@ -827,6 +841,7 @@ def _background_worker_main(
             adhoc_agent_payload=str(parsed.adhoc_agent_payload),
             appended_system_prompt=cast("str | None", parsed.appended_system_prompt),
             autocompact=cast("int | None", parsed.autocompact),
+            forked_from_chat_id=cast("str | None", parsed.forked_from_chat_id),
             ctx=resolved_context,
         )
     )

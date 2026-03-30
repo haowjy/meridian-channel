@@ -9,6 +9,8 @@ from cyclopts import App, Parameter
 from meridian.cli.main import agent_mode_enabled, current_output_sink
 from meridian.cli.registration import register_manifest_cli_group
 from meridian.lib.core.domain import SpawnStatus
+from meridian.lib.ops.reference import resolve_session_reference
+from meridian.lib.ops.runtime import resolve_runtime_root_and_config
 from meridian.lib.ops.spawn.api import (
     SpawnActionOutput,
     SpawnCancelInput,
@@ -58,6 +60,12 @@ def _parse_csv_list(raw: str | None, *, field_name: str) -> tuple[str, ...]:
             f"Invalid value for '{field_name}': expected comma-separated non-empty names."
         )
     return tuple(parts)
+
+
+def _missing_fork_session_error(source_ref: str) -> str:
+    if source_ref.startswith("p") and source_ref[1:].isdigit():
+        return f"Spawn '{source_ref}' has no recorded session — cannot continue/fork."
+    return f"Session '{source_ref}' has no recorded harness session — cannot continue/fork."
 
 
 def _spawn_create(
@@ -210,10 +218,10 @@ def _spawn_create(
         str | None,
         Parameter(name="--continue", help="Continue from a previous spawn ID."),
     ] = None,
-    fork: Annotated[
-        bool,
-        Parameter(name="--fork", help="Fork a new branch when continuing (use with --continue)."),
-    ] = False,
+    fork_from: Annotated[
+        str | None,
+        Parameter(name="--fork", help="Fork from a session or spawn reference."),
+    ] = None,
 ) -> None:
     # Resolve --yolo / --approval interaction.
     if yolo and approval is not None:
@@ -221,18 +229,85 @@ def _spawn_create(
             "Cannot use --yolo with --approval (--yolo is shorthand for --approval yolo)."
         )
     resolved_approval = approval if approval is not None else ("yolo" if yolo else None)
+    parsed_skills = _parse_csv_list(skills, field_name="skills")
+    resolved_continue_from = (continue_from or "").strip() or None
+    resolved_fork_from = (fork_from or "").strip() or None
 
-    if continue_from is not None:
+    if resolved_fork_from is not None and resolved_continue_from is not None:
+        raise ValueError("Cannot combine --fork with --continue.")
+
+    if resolved_fork_from is not None:
+        if context_from:
+            raise ValueError("Cannot combine --fork with --from (MVP limitation).")
+
+        repo_root, _ = resolve_runtime_root_and_config(None)
+        resolved_reference = resolve_session_reference(repo_root, resolved_fork_from)
+        if resolved_reference.missing_harness_session_id:
+            raise ValueError(_missing_fork_session_error(resolved_fork_from))
+
+        requested_harness = (harness or "").strip() or None
+        source_harness = (resolved_reference.harness or "").strip() or None
+        if (
+            requested_harness is not None
+            and source_harness is not None
+            and requested_harness != source_harness
+        ):
+            raise ValueError(
+                "Cannot fork across harnesses: "
+                f"source is '{source_harness}', target is '{requested_harness}'."
+            )
+
+        requested_model = model.strip()
+        requested_agent = (agent or "").strip() or None
+        requested_work = work.strip()
+
+        inherited_skills = (
+            resolved_reference.source_skills
+            if skills is None and requested_agent is None
+            else parsed_skills
+        )
+
+        result = spawn_create_sync(
+            SpawnCreateInput(
+                prompt=prompt,
+                model=requested_model or (resolved_reference.source_model or ""),
+                files=references,
+                template_vars=template_vars,
+                agent=requested_agent or resolved_reference.source_agent,
+                skills=inherited_skills,
+                desc=desc,
+                work=requested_work or (resolved_reference.source_work_id or ""),
+                dry_run=dry_run,
+                verbose=verbose,
+                quiet=quiet,
+                stream=stream,
+                background=background,
+                timeout=timeout,
+                approval=resolved_approval,
+                autocompact=autocompact,
+                thinking=thinking,
+                sandbox=sandbox,
+                harness=requested_harness or resolved_reference.harness,
+                passthrough_args=passthrough,
+                continue_harness_session_id=resolved_reference.harness_session_id,
+                continue_harness=resolved_reference.harness,
+                continue_source_tracked=resolved_reference.tracked,
+                continue_source_ref=resolved_fork_from,
+                continue_fork=True,
+                forked_from_chat_id=resolved_reference.source_chat_id,
+            ),
+            sink=current_output_sink(),
+        )
+    elif resolved_continue_from is not None:
         if context_from:
             raise ValueError("Cannot use --from with --continue")
         result = spawn_continue_sync(
             SpawnContinueInput(
-                spawn_id=continue_from,
+                spawn_id=resolved_continue_from,
                 prompt=prompt,
                 model=model,
                 agent=agent,
-                skills=_parse_csv_list(skills, field_name="skills"),
-                fork=fork,
+                skills=parsed_skills,
                 dry_run=dry_run,
                 timeout=timeout,
                 passthrough_args=passthrough,
@@ -249,7 +324,7 @@ def _spawn_create(
                 context_from=context_from,
                 template_vars=template_vars,
                 agent=agent,
-                skills=_parse_csv_list(skills, field_name="skills"),
+                skills=parsed_skills,
                 desc=desc,
                 work=work,
                 dry_run=dry_run,

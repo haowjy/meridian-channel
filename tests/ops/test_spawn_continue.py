@@ -98,3 +98,4 @@ def test_spawn_continue_passes_valid_resume_session_to_spawn_create(
     assert captured_input.continue_source_tracked is True
     assert captured_input.continue_source_ref == "p21"
     assert captured_input.continue_fork is True
+    assert captured_input.forked_from_chat_id == "c-seed"

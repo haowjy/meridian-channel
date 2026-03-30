@@ -47,6 +47,7 @@ class SpawnCreateInput(BaseModel):
     continue_source_tracked: bool = False
     continue_source_ref: str | None = None
     continue_fork: bool = False
+    forked_from_chat_id: str | None = None
 
 
 class SpawnActionOutput(BaseModel):
