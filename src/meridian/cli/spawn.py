@@ -429,7 +429,10 @@ def _spawn_list(
 
 def _spawn_show(
     emit: Any,
-    spawn_id: str,
+    spawn_ids: Annotated[
+        tuple[str, ...],
+        Parameter(name="spawn_id", help="One or more spawn IDs to show."),
+    ],
     report: Annotated[
         bool,
         Parameter(
@@ -441,15 +444,16 @@ def _spawn_show(
         ),
     ] = True,
 ) -> None:
-    emit(
-        spawn_show_sync(
-            SpawnShowInput(
-                spawn_id=spawn_id,
-                include_report_body=report,
-            ),
-            sink=current_output_sink(),
+    for spawn_id in spawn_ids:
+        emit(
+            spawn_show_sync(
+                SpawnShowInput(
+                    spawn_id=spawn_id,
+                    include_report_body=report,
+                ),
+                sink=current_output_sink(),
+            )
         )
-    )
 
 
 def _spawn_stats(
