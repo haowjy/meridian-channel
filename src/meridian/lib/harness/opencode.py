@@ -27,7 +27,7 @@ from meridian.lib.harness.common import (
     extract_session_id_from_artifacts_with_patterns,
     extract_usage_from_artifacts,
 )
-from meridian.lib.harness.launch_types import PromptPolicy
+from meridian.lib.harness.launch_types import PromptPolicy, SessionSeed
 from meridian.lib.safety.permissions import PermissionConfig
 
 logger = logging.getLogger(__name__)
@@ -214,6 +214,20 @@ class OpenCodeAdapter(BaseSubprocessHarness):
 
     def extract_usage(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> TokenUsage:
         return extract_usage_from_artifacts(artifacts, spawn_id)
+
+    def seed_session(
+        self,
+        *,
+        is_resume: bool,
+        harness_session_id: str,
+        passthrough_args: tuple[str, ...],
+    ) -> SessionSeed:
+        _ = is_resume, passthrough_args
+        normalized_harness_session_id = harness_session_id.strip()
+        if not normalized_harness_session_id:
+            return SessionSeed()
+        # Resume and fork both seed from an existing harness session id.
+        return SessionSeed(session_id=normalized_harness_session_id)
 
     def filter_launch_content(
         self,

@@ -325,14 +325,19 @@ class ClaudeAdapter(BaseSubprocessHarness):
         harness_session_id: str,
         passthrough_args: tuple[str, ...],
     ) -> SessionSeed:
-        # If user provided --session-id via passthrough, use that value
+        normalized_harness_session_id = harness_session_id.strip()
+        # Resume and fork both provide an explicit harness session id. Fork is
+        # represented as is_resume=False with harness_session_id set.
+        if normalized_harness_session_id:
+            return SessionSeed(session_id=normalized_harness_session_id)
+
+        # If user provided --session-id via passthrough, use that value.
         passthrough_session_id = _extract_passthrough_session_id(passthrough_args)
         if passthrough_session_id:
             return SessionSeed(session_id=passthrough_session_id)
-        session_id = harness_session_id or str(uuid4())
-        # Only inject --session-id for fresh sessions
-        if harness_session_id:
-            return SessionSeed(session_id=session_id)
+
+        session_id = str(uuid4())
+        # Only inject --session-id for truly fresh sessions.
         return SessionSeed(
             session_id=session_id,
             session_args=("--session-id", session_id),
