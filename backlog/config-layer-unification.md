@@ -35,8 +35,6 @@ class RuntimeOverrides(BaseModel):
     approval: str | None = None
     autocompact: int | None = None
     timeout: float | None = None
-    budget: float | None = None
-    max_turns: int | None = None
 ```
 
 ### Resolution
@@ -98,8 +96,6 @@ Harness-specific flag translation (approval → `--dangerously-skip-permissions`
 | approval | ❌ | `--approval` | `--yolo` only | ✅ | ❌ | ❌ |
 | autocompact | ❌ | `--autocompact` | `--autocompact` | ✅ | `autocompact_pct` ⚠️ | `autocompact_pct` ⚠️ |
 | timeout | ❌ | `--timeout` | ❌ | ❌ | ❌ | ❌ |
-| budget | `MERIDIAN_BUDGET` | ❌ | ❌ | ❌ | `primary.budget` | `primary.budget` |
-| max_turns | `MERIDIAN_MAX_TURNS` | ❌ | ❌ | ❌ | `primary.max_turns` | `primary.max_turns` |
 
 ### Target state (after refactor)
 
@@ -114,8 +110,6 @@ Every RuntimeOverrides field present in ALL applicable layers:
 | approval | `MERIDIAN_APPROVAL` | `--approval` | `--approval` | ✅ | ✅ | ✅ |
 | autocompact | `MERIDIAN_AUTOCOMPACT` | `--autocompact` | `--autocompact` | ✅ | ✅ | ✅ |
 | timeout | `MERIDIAN_TIMEOUT` | `--timeout` | `--timeout` | ✅ | ✅ | ✅ |
-| budget | `MERIDIAN_BUDGET` | `--budget` | `--budget` | ✅ | ✅ | ✅ |
-| max_turns | `MERIDIAN_MAX_TURNS` | `--max-turns` | `--max-turns` | ✅ | ✅ | ✅ |
 
 ### Fields that stay layer-specific
 
@@ -163,7 +157,7 @@ Every RuntimeOverrides field present in ALL applicable layers:
 
 - **No single god-registry** (p419) — RuntimeOverrides is just a Pydantic model, not a metadata table with callbacks. Harness mapping stays adapter-owned.
 - **Introspect, don't hand-maintain** (p421, p423) — Phase 5 test introspects RuntimeOverrides.model_fields, not a static list. No KNOWN_GAPS to game.
-- **Don't bless dead fields** (p423) — only add CLI flags for fields that have real consumers in the launch/spawn pipeline. budget and max_turns need actual wiring before getting CLI flags.
+- **Don't bless dead fields** (p423) — only add CLI flags for fields that have real consumers in the launch/spawn pipeline. budget and max_turns were removed entirely as dead fields with no pipeline consumers.
 - **Resolve in one place** (p423) — `resolve()` replaces duplicated precedence logic in prepare.py and plan.py.
 - **Phase 3.3 was too big** (p421, p422) — split into Phase 2 (config loading) and Phase 3 (resolution wiring) as separate steps.
 - **Config precedence was inverted** (p422) — project TOML now wins over user TOML.

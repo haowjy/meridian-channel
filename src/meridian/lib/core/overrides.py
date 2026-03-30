@@ -78,8 +78,6 @@ class RuntimeOverrides(BaseModel):
     approval: str | None = None
     autocompact: int | None = None
     timeout: float | None = None
-    budget: float | None = None
-    max_turns: int | None = None
 
     @field_validator("thinking")
     @classmethod
@@ -132,7 +130,7 @@ class RuntimeOverrides(BaseModel):
             )
         return value
 
-    @field_validator("timeout", "budget")
+    @field_validator("timeout")
     @classmethod
     def _validate_positive_float(cls, value: float | None, info: object) -> float | None:
         if value is None:
@@ -144,23 +142,10 @@ class RuntimeOverrides(BaseModel):
             )
         return value
 
-    @field_validator("max_turns")
-    @classmethod
-    def _validate_max_turns(cls, value: int | None) -> int | None:
-        if value is None:
-            return None
-        if isinstance(value, bool) or value <= 0:
-            raise ValueError(
-                f"Invalid runtime override 'max_turns': expected int > 0, got {value!r}."
-            )
-        return value
-
     @classmethod
     def from_env(cls) -> RuntimeOverrides:
         autocompact_raw = _read_env_string("MERIDIAN_AUTOCOMPACT")
         timeout_raw = _read_env_string("MERIDIAN_TIMEOUT")
-        budget_raw = _read_env_string("MERIDIAN_BUDGET")
-        max_turns_raw = _read_env_string("MERIDIAN_MAX_TURNS")
         return cls(
             model=_read_env_string("MERIDIAN_MODEL"),
             harness=_read_env_string("MERIDIAN_HARNESS"),
@@ -175,16 +160,6 @@ class RuntimeOverrides(BaseModel):
             timeout=(
                 _parse_env_float(timeout_raw, env_name="MERIDIAN_TIMEOUT")
                 if timeout_raw is not None
-                else None
-            ),
-            budget=(
-                _parse_env_float(budget_raw, env_name="MERIDIAN_BUDGET")
-                if budget_raw is not None
-                else None
-            ),
-            max_turns=(
-                _parse_env_int(max_turns_raw, env_name="MERIDIAN_MAX_TURNS")
-                if max_turns_raw is not None
                 else None
             ),
         )
@@ -215,8 +190,6 @@ class RuntimeOverrides(BaseModel):
             approval=primary.approval,
             autocompact=primary.autocompact,
             timeout=primary.timeout,
-            budget=primary.budget,
-            max_turns=primary.max_turns,
         )
 
     @classmethod

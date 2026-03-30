@@ -299,15 +299,6 @@ def _normalize_primary_table(raw_value: object, *, source: str) -> dict[str, obj
             values[key] = _normalize_required_string(value, source=f"{source}.{key}")
             continue
 
-        if key in {"max_turns", "max_input_tokens", "max_output_tokens"}:
-            if isinstance(value, bool) or not isinstance(value, int):
-                raise ValueError(
-                    f"Invalid value for '{source}.{key}': expected int, got "
-                    f"{type(value).__name__} ({value!r})."
-                )
-            values[key] = value
-            continue
-
         if key == "autocompact":
             if isinstance(value, bool) or not isinstance(value, int):
                 raise ValueError(
@@ -321,15 +312,6 @@ def _normalize_primary_table(raw_value: object, *, source: str) -> dict[str, obj
                     f"{_PRIMARY_AUTOCOMPACT_PCT_MAX}, got {value!r}."
                 )
             values[key] = value
-            continue
-
-        if key == "budget":
-            if isinstance(value, bool) or not isinstance(value, int | float):
-                raise ValueError(
-                    f"Invalid value for '{source}.budget': expected float, got "
-                    f"{type(value).__name__} ({value!r})."
-                )
-            values[key] = float(value)
             continue
 
         if key == "timeout":
@@ -504,16 +486,6 @@ def _env_alias_overrides(repo_root: Path) -> dict[str, object]:
         ("MERIDIAN_HARNESS_MODEL_CLAUDE", ("harness", "claude"), "str"),
         ("MERIDIAN_HARNESS_MODEL_CODEX", ("harness", "codex"), "str"),
         ("MERIDIAN_HARNESS_MODEL_OPENCODE", ("harness", "opencode"), "str"),
-        (
-            "MERIDIAN_MAX_INPUT_TOKENS",
-            ("primary", "max_input_tokens"),
-            "int",
-        ),
-        (
-            "MERIDIAN_MAX_OUTPUT_TOKENS",
-            ("primary", "max_output_tokens"),
-            "int",
-        ),
         ("MERIDIAN_AGENT", ("primary", "agent"), "str"),
         ("MERIDIAN_FORMAT", ("output", "format"), "str"),
     )
@@ -586,10 +558,6 @@ class PrimaryConfig(BaseModel):
     autocompact_pct: int | None = None
     model: str | None = None
     harness: str | None = None
-    max_turns: int | None = None
-    max_input_tokens: int | None = None
-    max_output_tokens: int | None = None
-    budget: float | None = None
     agent: str | None = None
     thinking: str | None = None
     sandbox: str | None = None

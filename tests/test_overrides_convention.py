@@ -47,8 +47,6 @@ _TEST_VALUES: dict[str, str] = {
     "approval": "auto",
     "autocompact": "50",
     "timeout": "30.0",
-    "budget": "5.0",
-    "max_turns": "10",
 }
 
 
@@ -86,15 +84,8 @@ def test_every_field_has_spawn_cli_flag() -> None:
     from meridian.lib.ops.spawn.models import SpawnCreateInput
 
     input_fields = set(SpawnCreateInput.model_fields.keys())
-    # Fields not expected on SpawnCreateInput (no consumer in spawn path)
-    SPAWN_EXCLUDED = {
-        "budget",     # No --budget flag on spawn yet; needs wiring before CLI exposure
-        "max_turns",  # No --max-turns flag on spawn yet; needs wiring before CLI exposure
-    }
 
     for field_name in RuntimeOverrides.model_fields:
-        if field_name in SPAWN_EXCLUDED:
-            continue
         assert field_name in input_fields, (
             f"RuntimeOverrides field '{field_name}' has no matching SpawnCreateInput field. "
             f"Add it or document the exclusion in SPAWN_EXCLUDED."
@@ -107,15 +98,8 @@ def test_every_field_has_primary_cli_flag() -> None:
     from meridian.lib.launch.types import LaunchRequest
 
     request_fields = set(LaunchRequest.model_fields.keys())
-    # Fields not expected on LaunchRequest (no consumer in primary pipeline)
-    PRIMARY_EXCLUDED = {
-        "budget",     # No --budget flag on primary yet; needs wiring before CLI exposure
-        "max_turns",  # No --max-turns flag on primary yet; needs wiring before CLI exposure
-    }
 
     for field_name in RuntimeOverrides.model_fields:
-        if field_name in PRIMARY_EXCLUDED:
-            continue
         assert field_name in request_fields, (
             f"RuntimeOverrides field '{field_name}' has no matching LaunchRequest field. "
             f"Add it or document the exclusion in PRIMARY_EXCLUDED."
@@ -136,7 +120,7 @@ def test_from_env_round_trip() -> None:
 
 
 def test_from_config_round_trip() -> None:
-    """from_config reads all 9 RuntimeOverrides fields from PrimaryConfig."""
+    """from_config reads all RuntimeOverrides fields from PrimaryConfig."""
     from meridian.lib.config.settings import MeridianConfig, PrimaryConfig
     from meridian.lib.core.overrides import RuntimeOverrides
 
@@ -148,8 +132,6 @@ def test_from_config_round_trip() -> None:
         approval="auto",
         autocompact=50,
         timeout=30.0,
-        budget=5.0,
-        max_turns=10,
     )
     config = MeridianConfig(primary=primary)
     result = RuntimeOverrides.from_config(config)
@@ -167,11 +149,11 @@ def test_resolve_precedence() -> None:
     env = RuntimeOverrides(model="env-model", thinking="high")
     profile = RuntimeOverrides(model="profile-model", thinking="low", sandbox="full-access")
     config = RuntimeOverrides(
-        model="config-model", thinking="medium", sandbox="read-only", budget=10.0
+        model="config-model", thinking="medium", sandbox="read-only", timeout=10.0
     )
 
     result = resolve(cli, env, profile, config)
     assert result.model == "cli-model"
     assert result.thinking == "high"
     assert result.sandbox == "full-access"
-    assert result.budget == 10.0
+    assert result.timeout == 10.0
