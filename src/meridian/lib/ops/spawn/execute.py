@@ -42,7 +42,7 @@ from meridian.lib.utils.time import minutes_to_seconds
 from ..runtime import OperationRuntime, build_runtime, resolve_chat_id, runtime_context
 from .models import SpawnActionOutput, SpawnCreateInput
 from .plan import ExecutionPolicy, PreparedSpawnPlan, SessionContinuation
-from .query import read_report_text, read_spawn_row
+from .query import read_spawn_row
 
 logger = structlog.get_logger(__name__)
 _BACKGROUND_SUBMIT_MESSAGE = "Background spawn submitted."
@@ -737,7 +737,7 @@ def execute_spawn_blocking(
         )
     duration = time.monotonic() - started
     row = read_spawn_row(runtime.repo_root, str(spawn.spawn_id))
-    _, report_text = read_report_text(runtime.repo_root, str(spawn.spawn_id))
+    # Report is read on-demand via `spawn show --report`, not inlined here.
     status = "failed"
     if row is not None:
         status = row.status
@@ -776,7 +776,7 @@ def execute_spawn_blocking(
         reference_files=prepared.reference_files,
         template_vars=prepared.template_vars,
         context_from_resolved=prepared.context_from_resolved,
-        report=report_text,
+        report=None,
         exit_code=exit_code,
         duration_secs=duration,
     )

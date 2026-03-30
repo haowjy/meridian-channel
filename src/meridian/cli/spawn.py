@@ -505,16 +505,6 @@ def _spawn_wait(
         bool,
         Parameter(name="--quiet", help="Suppress wait heartbeat output.", show=_HUMAN_ONLY),
     ] = False,
-    report: Annotated[
-        bool,
-        Parameter(
-            name="--report",
-            help=(
-                "Include full spawn report body in output "
-                "(default: enabled). Use --no-report to omit."
-            ),
-        ),
-    ] = True,
 ) -> None:
     result = spawn_wait_sync(
         SpawnWaitInput(
@@ -522,7 +512,7 @@ def _spawn_wait(
             timeout=timeout,
             verbose=verbose,
             quiet=quiet,
-            include_report_body=report,
+            include_report_body=False,
         ),
         sink=current_output_sink(),
     )

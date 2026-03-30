@@ -15,15 +15,22 @@ In agent mode, all CLI output is JSON.
 
 ## Core Loop
 
-Spawns run in **foreground** (blocking) by default — the command blocks until the spawn completes and returns the full result including the report. Use your harness's background execution to avoid blocking yourself:
+Spawns run in **foreground** (blocking) by default — the command blocks until the spawn completes and returns status (spawn_id, status, duration). Use your harness's background execution to avoid blocking yourself:
 
 ```bash
 # Run via your harness's background feature (e.g., Bash run_in_background, parallel tool calls)
 meridian spawn -a agent -p "task description"
-# → harness notifies you when done, result includes status + full report
+# → harness notifies you when done, result includes spawn_id + status
+
+# Read the report when you need it
+meridian spawn show <spawn_id> --report
+# → full status + report text
+
+# Read multiple reports at once
+meridian spawn show p107 p108 p109 --report
 ```
 
-Your harness handles the notification — no need to poll or wait. Use `spawn show` if you need to re-inspect a past spawn's details.
+Your harness handles the notification — no need to poll or wait. Always read reports via `spawn show --report`, not from the spawn command's output.
 
 ## Spawning
 
@@ -73,7 +80,9 @@ Spawns run in foreground (blocking) by default. To run multiple spawns concurren
 meridian spawn -a agent -p "Step A" --desc "Step A"
 meridian spawn -a agent -p "Step B" --desc "Step B"
 
-# Each returns when its spawn completes — no need for spawn wait.
+# Each returns spawn_id + status when done.
+# Read reports afterward:
+meridian spawn show <id1> <id2> --report
 ```
 
 ## Checking Status
@@ -88,7 +97,13 @@ Stuck spawns auto-recover: if a spawn's process dies or goes stale, the next rea
 
 ## When a Spawn Fails
 
-If `spawn wait` returns `"status": "failed"`, check the `report` field first — it usually contains the error or the agent's last output. For deeper investigation, use `spawn show SPAWN_ID` and see [`resources/debugging.md`](resources/debugging.md) for log inspection.
+If a spawn fails, read its report for details:
+
+```bash
+meridian spawn show SPAWN_ID --report
+```
+
+For deeper investigation, see [`resources/debugging.md`](resources/debugging.md) for log inspection.
 
 ## Shared Filesystem
 
