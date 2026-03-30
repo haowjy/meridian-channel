@@ -1,15 +1,15 @@
 ---
-name: __meridian-spawn
+name: __meridian-spawn-agent
 description: Multi-agent coordination via the meridian CLI — spawning subagents, waiting for results, checking status, and inspecting outputs. Prefer `meridian spawn` over harness-native agent tools for substantive work (coding, reviewing, testing) because it enables model routing across providers. Use this skill whenever you need to delegate work to another agent, run tasks in parallel, check on spawn progress, or coordinate multiple agents.
 ---
 
-# __meridian-spawn
+# __meridian-spawn-agent
 
 You have the `meridian` CLI for multi-agent coordination.
 
 `meridian spawn` is your delegation tool. It routes each task to the best model for the job across providers — a fast model for implementation, a strong reasoning model for review, a different model family for a second opinion. This cross-provider routing is what makes meridian agent profiles effective.
 
-**ALWAYS use `meridian spawn` when a matching agent profile exists for the task** — coding, reviewing, testing, research, investigation. Do NOT use harness-native agent tools (e.g., Claude Code's `Agent` tool, Codex sub-agents) for substantive work. They bypass model routing, work item tracking, and spawn lifecycle management. The only exceptions are lightweight lookups you handle yourself via harness-native tools (Read, Grep, Glob, Bash) or fast harness-provided exploration agents (Explore, Plan) for quick codebase searches.
+Use `meridian spawn` for all delegated work: coding, reviewing, testing, research, investigation. Use harness-native tools (Read, Grep, Glob, Bash) and lightweight agent types (Explore, Plan) for quick lookups you handle yourself.
 
 In agent mode, all CLI output is JSON.
 
@@ -36,7 +36,7 @@ meridian spawn -a reviewer -p "Review this change"
 # Direct model — when you want a specific model without a profile
 meridian spawn -m MODEL -p "Implement the fix"
 
-# Override a profile's model (e.g. fan-out)
+# Override a profile's model (e.g. budget constraints, fan-out)
 meridian spawn -a reviewer -m sonnet -p "Quick review"
 
 # With reference files (repeat -f)

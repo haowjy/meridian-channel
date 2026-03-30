@@ -8,6 +8,27 @@ You orchestrate work phases, delegate execution and review, and keep state visib
 
 This skill defines phase sequencing and judgment. Use `architecture` and `planning` for phase-specific craft. `__meridian-work-coordination` owns work setup, status semantics, and artifact placement.
 
+## Orchestrator Roles
+
+The dev lifecycle is split between two orchestrators:
+
+- **dev-orchestrator**: The interactive entry point. Owns design and planning — spawns architects, reviewers, and planners WITH the user. Every design decision and plan goes through user approval before proceeding. Does not write code or execute plans.
+- **dev-runner**: The autonomous executor. Spawned by dev-orchestrator with approved plan artifacts. Runs the code → test → review → fix loop per phase, drives to completion without human intervention. Ships, doesn't plan.
+
+The **handoff** between them is the critical boundary: dev-orchestrator produces approved design docs and phase blueprints, then spawns dev-runner with those artifacts via `-f`. From that point, dev-runner runs autonomously.
+
+```bash
+# dev-orchestrator hands off to dev-runner
+meridian spawn -a dev-runner \
+  -p "Execute the implementation plan for [feature]" \
+  -f $MERIDIAN_WORK_DIR/design.md \
+  -f $MERIDIAN_WORK_DIR/plan/phase-1-slug.md \
+  -f $MERIDIAN_WORK_DIR/plan/phase-2-slug.md \
+  -f $MERIDIAN_WORK_DIR/decisions.md
+```
+
+The legacy **dev-orchestrator** combines both roles in a single agent. It still works for simpler tasks where the overhead of a formal handoff isn't justified, but for substantive work the split gives better results — interactive alignment on the plan, then uninterrupted execution.
+
 ## Phases of Work
 
 Work moves through phases — research, design, planning, implementation, testing, documentation, or whatever the task requires. Not every task needs all of these; many skip straight to implementation. The orchestrator's job is to recognize which phases matter for the current work and sequence them appropriately.
@@ -27,17 +48,25 @@ The biggest mistake is over-coordinating simple work or under-coordinating compl
 
 Skip straight to implementation when the intent is obvious and the blast radius is small. Add design when there are genuine tradeoffs. Add more phases when work crosses module boundaries, changes interfaces, or requires coordination with other efforts.
 
+In the split model, this maps directly to orchestrator choice: use **dev-orchestrator** when the work needs interactive design alignment or has real architectural tradeoffs; spawn **dev-runner** directly when a solid plan already exists and autonomous execution is appropriate; use **dev-orchestrator** for simple tasks where the handoff overhead isn't justified.
+
 ## Design
 
 Read `architecture` for method. Before designing, check `meridian work list` — if another work item touches the same area, read its design doc so efforts don't conflict. Surface significant overlap to the user.
 
 When the design feels solid, fan out reviewers to stress-test it. Read `review-orchestration` for how to choose focus areas, select models, and synthesize findings.
 
+In the split model, design is owned by the **dev-orchestrator** — it spawns the architect with `--from $MERIDIAN_CHAT_ID`, presents the design to the user, fans out reviewers, and iterates until the user approves.
+
 ## Planning
 
 Read `planning` for phase decomposition, dependencies, and staffing.
 
+In the split model, planning is also owned by the **dev-orchestrator**. It spawns the planner with the approved design doc, presents the plan to the user, and iterates until approved. The approved plan artifacts are what get handed off to dev-runner.
+
 ## Implementation
+
+In the split model, implementation is owned by the **dev-runner** — it receives plan artifacts, explores the codebase, and runs the execution loop autonomously. It maintains `$MERIDIAN_WORK_DIR/plan/status.md` as ground truth for phase progress and records adaptation decisions in `decisions.md`.
 
 The loop per phase: **Code → Test → Review → Fix if needed.**
 

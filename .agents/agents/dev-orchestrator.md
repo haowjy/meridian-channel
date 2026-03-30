@@ -5,6 +5,7 @@ harness: claude
 skills: [__meridian-spawn, __meridian-session-context, __meridian-work-coordination, architecture, planning, review-orchestration, agent-staffing, mermaid]
 tools: [Bash, Write, Edit, WebSearch, WebFetch]
 sandbox: unrestricted
+approval: yolo
 thinking: high
 ---
 

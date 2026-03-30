@@ -7,6 +7,29 @@ description: Team composition for implementation phases — which agents to spaw
 
 Compose the right team for each phase. Two questions drive most staffing decisions: how much surface area does the change touch, and how reversible are mistakes if something goes wrong?
 
+## Orchestrators
+
+The dev lifecycle splits between two orchestrators. Choosing the right entry point matters more than any other staffing decision — it sets the coordination pattern for everything downstream.
+
+**dev-orchestrator** is the default entry point for substantive work. Use it when:
+- The task needs design exploration or architectural decisions
+- The user should review and approve the approach before execution begins
+- The work crosses module boundaries or changes interfaces
+- There are genuine tradeoffs that need interactive discussion
+
+It runs interactively with the user through design and planning, then hands off approved plan artifacts to dev-runner for autonomous execution. The handoff is a clean boundary — dev-orchestrator produces design docs and phase blueprints, dev-runner consumes them.
+
+**dev-runner** is the autonomous executor. It's spawned by dev-orchestrator (or directly when a plan already exists) with plan artifacts via `-f`. Use it when:
+- An approved implementation plan already exists
+- The work is well-scoped and the approach is settled
+- Autonomous execution without human checkpoints is appropriate
+
+It runs the code → test → review → fix loop per phase, tracks progress in `status.md`, and adapts to findings without stopping for approval. It should be the primary consumer of `agent-staffing` advice when composing phase teams.
+
+**dev-orchestrator** (legacy) combines both roles. Still appropriate for simpler tasks where the overhead of a formal handoff isn't justified — small bug fixes, single-phase changes, or exploratory work where design and execution are interleaved. For anything with multiple phases or real design decisions, prefer the split.
+
+The remaining sections — Coders, Reviewers, Testers, etc. — are primarily consumed by the executor (dev-runner or dev-orchestrator) when composing per-phase teams. Plan-orchestrator doesn't staff implementation phases; it staffs design and review during the planning process.
+
 ## Coders
 
 One coder per phase — multiple coders on the same files create merge conflicts and duplicated work. If a phase feels too big for one coder, the plan needs splitting. Pick the coder variant that matches the work: `coder` for backend/infrastructure, `frontend-coder` for UI.

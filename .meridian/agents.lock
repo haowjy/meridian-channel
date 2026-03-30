@@ -12,95 +12,107 @@
       "source_item_id": "agent:__meridian-subagent",
       "source_name": "meridian-base"
     },
+    "agent:architect": {
+      "content_hash": "sha256:17580ae3751120b65c4fb6a8191040bdbdb3db63460206045396e6ce73ab006b",
+      "destination_path": ".agents/agents/architect.md",
+      "source_item_id": "agent:architect",
+      "source_name": "meridian-dev-workflow"
+    },
     "agent:browser-tester": {
-      "content_hash": "sha256:095bd8f457cf46f840dbfdbe117b623e1d4409aaad67515965724f16982c0243",
+      "content_hash": "sha256:7772b8a6d15a231d4399ddce7f66312237328d97246984a40b6c5cb7b62a8a75",
       "destination_path": ".agents/agents/browser-tester.md",
       "source_item_id": "agent:browser-tester",
       "source_name": "meridian-dev-workflow"
     },
     "agent:coder": {
-      "content_hash": "sha256:b3e5c95c4b42b461d5f5ae7006c3f894668ee8abc246542c137f93b12dc15c1a",
+      "content_hash": "sha256:385d0e7d64e319a45c4e753c016a5df7e35d70e29b41d4adf3b5436b6d9b8fbe",
       "destination_path": ".agents/agents/coder.md",
       "source_item_id": "agent:coder",
       "source_name": "meridian-dev-workflow"
     },
     "agent:dev-orchestrator": {
-      "content_hash": "sha256:99bc3dda457b02b7b79cf850f08d3cc46090888b2d5f91681bc8f5a8f53a9491",
+      "content_hash": "sha256:3d11c45398f8f06d8e7906996c180a9d5b68b59ce7325f694239ee00988ca19f",
       "destination_path": ".agents/agents/dev-orchestrator.md",
       "source_item_id": "agent:dev-orchestrator",
       "source_name": "meridian-dev-workflow"
     },
+    "agent:dev-runner": {
+      "content_hash": "sha256:2be9e01940c81bd786a8d6c48e5fc13bee0557d76b54d68fd395458df1dfb84b",
+      "destination_path": ".agents/agents/dev-runner.md",
+      "source_item_id": "agent:dev-runner",
+      "source_name": "meridian-dev-workflow"
+    },
     "agent:documenter": {
-      "content_hash": "sha256:773c2400115967a25cb7253a66f764650249f27503dc75a6d6ff45ebfcd6153d",
+      "content_hash": "sha256:187494d37975ed37374b2c4fd949d0f27caddcc9cd21ed768fc3b421598297d9",
       "destination_path": ".agents/agents/documenter.md",
       "source_item_id": "agent:documenter",
       "source_name": "meridian-dev-workflow"
     },
     "agent:explorer": {
-      "content_hash": "sha256:c21ccd5d8ef5a9dd769dc65566f1b546de7006597cf502638fac105f3a359a65",
+      "content_hash": "sha256:cf22c0aaff670f6e0f5b41db199bd7d0cd6f96df7eeba34fa36f69d2eb646ab7",
       "destination_path": ".agents/agents/explorer.md",
       "source_item_id": "agent:explorer",
       "source_name": "meridian-dev-workflow"
     },
     "agent:frontend-coder": {
-      "content_hash": "sha256:138ce825f7dc74e3009b14f5fe5a1642de8af9c3131ee408723acd57e0a7751f",
+      "content_hash": "sha256:e760c2d75e5f7054c6e7074e8d64334b7e443cc9c61238b61014ed00ea35e008",
       "destination_path": ".agents/agents/frontend-coder.md",
       "source_item_id": "agent:frontend-coder",
       "source_name": "meridian-dev-workflow"
     },
     "agent:frontend-designer": {
-      "content_hash": "sha256:2f896be79f73514945f6c2db926c41e9349576496476f6be54240958740653ed",
+      "content_hash": "sha256:06eacad776b07f30c9393777dc6b1d0937ca87b9fce32dd909ee2fddc8311f75",
       "destination_path": ".agents/agents/frontend-designer.md",
       "source_item_id": "agent:frontend-designer",
       "source_name": "meridian-dev-workflow"
     },
-    "agent:implementation-planner": {
-      "content_hash": "sha256:e33578515243981f72f9b9c5b943dbeae1f867604a23862a77cca3c1dcbd824c",
-      "destination_path": ".agents/agents/implementation-planner.md",
-      "source_item_id": "agent:implementation-planner",
-      "source_name": "meridian-dev-workflow"
-    },
     "agent:investigator": {
-      "content_hash": "sha256:b5260ba82dd188ba69864a0d1d24dff86aee8db3c69425a00165d23d8c9af9d4",
+      "content_hash": "sha256:2f9e8dc950e4a0975e096ed1f6ed5bb3be8f013b4e6fa21c652373c81484e702",
       "destination_path": ".agents/agents/investigator.md",
       "source_item_id": "agent:investigator",
       "source_name": "meridian-dev-workflow"
     },
+    "agent:planner": {
+      "content_hash": "sha256:8721e04d3093e6ec6ae774e660ba568210617964ef26a8422d16316e70452aaf",
+      "destination_path": ".agents/agents/planner.md",
+      "source_item_id": "agent:planner",
+      "source_name": "meridian-dev-workflow"
+    },
     "agent:researcher": {
-      "content_hash": "sha256:444c7c6abf398ed0bf6676ddd0717c127d3fd29c2cb80b6a20f59a2ca46c2408",
+      "content_hash": "sha256:edb8ca0b0ef4734fb8bf97d2ab422f2fcc74927b51a061daabd0a282b2878a84",
       "destination_path": ".agents/agents/researcher.md",
       "source_item_id": "agent:researcher",
       "source_name": "meridian-dev-workflow"
     },
     "agent:reviewer": {
-      "content_hash": "sha256:a64a8fad1a7d4b49f70fb248ce2bc2b951bfd7c0c146865c8291988b27afed84",
+      "content_hash": "sha256:92d563e670e0c1323619295486e2caeb836db7328e2248b6f72b491387266d5a",
       "destination_path": ".agents/agents/reviewer.md",
       "source_item_id": "agent:reviewer",
       "source_name": "meridian-dev-workflow"
     },
     "agent:smoke-tester": {
-      "content_hash": "sha256:e899a86c9ba9c0fda03104413d4b2443a56f8f69f3438847d13e7b201ed30c3f",
+      "content_hash": "sha256:8a446cbca061a5ff993ed88bfc3a3b856a3d4890d10786c3d18c800833a3fe84",
       "destination_path": ".agents/agents/smoke-tester.md",
       "source_item_id": "agent:smoke-tester",
       "source_name": "meridian-dev-workflow"
     },
-    "agent:system-architect": {
-      "content_hash": "sha256:f2dd50ef64bd772b3ba9eae373ca265a20a72f11bb774f1928bebc49e0a0e057",
-      "destination_path": ".agents/agents/system-architect.md",
-      "source_item_id": "agent:system-architect",
-      "source_name": "meridian-dev-workflow"
-    },
     "agent:unit-tester": {
-      "content_hash": "sha256:8839bf8d036577860a11799f0f52294f92a9014cf51715661f20e0e2d90e3852",
+      "content_hash": "sha256:9d6346c09a50d6a385f33db0b008c7280064d7953d5ea28788f96e4d627623da",
       "destination_path": ".agents/agents/unit-tester.md",
       "source_item_id": "agent:unit-tester",
       "source_name": "meridian-dev-workflow"
     },
-    "agent:verification-tester": {
-      "content_hash": "sha256:fa327a5085d5e616af7018b9cfddec5a66fa8d88206bb838cb98e061faf4bcff",
-      "destination_path": ".agents/agents/verification-tester.md",
-      "source_item_id": "agent:verification-tester",
+    "agent:verifier": {
+      "content_hash": "sha256:54da33b737ea7f538fc431e6a46c574a2efc240b312820893eaf65569385cea9",
+      "destination_path": ".agents/agents/verifier.md",
+      "source_item_id": "agent:verifier",
       "source_name": "meridian-dev-workflow"
+    },
+    "skill:__meridian-diagnostics": {
+      "content_hash": "sha256:34057d818da9719be85d6a5e6d721ccc7bed969510d8b8f261c766ed7d948aa3",
+      "destination_path": ".agents/skills/__meridian-diagnostics",
+      "source_item_id": "skill:__meridian-diagnostics",
+      "source_name": "meridian-base"
     },
     "skill:__meridian-install": {
       "content_hash": "sha256:979a5a4e775e80e0234f214a062d333e02bda1d9aeef9a4c9e433870b6a20aab",
@@ -108,10 +120,10 @@
       "source_item_id": "skill:__meridian-install",
       "source_name": "meridian-base"
     },
-    "skill:__meridian-orchestrate": {
+    "skill:__meridian-orchestration": {
       "content_hash": "sha256:63cc1e3fcb6137d9b0bdfe302eb946929872fa2eea48eecd5d34488c7432fac5",
-      "destination_path": ".agents/skills/__meridian-orchestrate",
-      "source_item_id": "skill:__meridian-orchestrate",
+      "destination_path": ".agents/skills/__meridian-orchestration",
+      "source_item_id": "skill:__meridian-orchestration",
       "source_name": "meridian-base"
     },
     "skill:__meridian-session-context": {
@@ -120,44 +132,38 @@
       "source_item_id": "skill:__meridian-session-context",
       "source_name": "meridian-base"
     },
-    "skill:__meridian-spawn-agent": {
+    "skill:__meridian-spawn": {
       "content_hash": "sha256:079aed7897c6ecc2151fbe5b357d8a9819918b8391a4598213231678fcdd31f9",
-      "destination_path": ".agents/skills/__meridian-spawn-agent",
-      "source_item_id": "skill:__meridian-spawn-agent",
-      "source_name": "meridian-base"
-    },
-    "skill:__meridian-troubleshoot": {
-      "content_hash": "sha256:34057d818da9719be85d6a5e6d721ccc7bed969510d8b8f261c766ed7d948aa3",
-      "destination_path": ".agents/skills/__meridian-troubleshoot",
-      "source_item_id": "skill:__meridian-troubleshoot",
+      "destination_path": ".agents/skills/__meridian-spawn",
+      "source_item_id": "skill:__meridian-spawn",
       "source_name": "meridian-base"
     },
     "skill:__meridian-work-coordination": {
-      "content_hash": "sha256:00456a2370061fc08cc80f2d3009c9bf4f814ad175775398791a2f187ff681af",
+      "content_hash": "sha256:f0e6ced561bc5492c52b0273d4cadf88cc0e7cd5f5b65deb14d342cb3f6812de",
       "destination_path": ".agents/skills/__meridian-work-coordination",
       "source_item_id": "skill:__meridian-work-coordination",
       "source_name": "meridian-base"
     },
     "skill:agent-staffing": {
-      "content_hash": "sha256:309f3a2500168d7fc8be9f1b0d6daeec60690a6d7f4a3e8d6cc98754b7ed5d5e",
+      "content_hash": "sha256:b7bc9b29296082bd4a4ac4d82780caae4d69f55c2123345839037632c160ce1b",
       "destination_path": ".agents/skills/agent-staffing",
       "source_item_id": "skill:agent-staffing",
       "source_name": "meridian-dev-workflow"
     },
-    "skill:architecture-design": {
-      "content_hash": "sha256:798216650294aad93097f5329438fd0db4462ff1cff2cbad960029a08b24638a",
-      "destination_path": ".agents/skills/architecture-design",
-      "source_item_id": "skill:architecture-design",
+    "skill:architecture": {
+      "content_hash": "sha256:229279bd5a42793d547b469b166a5cad9b7d08bedb3d91f757025b777f44e893",
+      "destination_path": ".agents/skills/architecture",
+      "source_item_id": "skill:architecture",
       "source_name": "meridian-dev-workflow"
     },
-    "skill:browser-testing": {
-      "content_hash": "sha256:da3d6e77f49ac2730cb2cf6ae68268cfe848b3fcbc018c7609679e3af360eabe",
-      "destination_path": ".agents/skills/browser-testing",
-      "source_item_id": "skill:browser-testing",
+    "skill:browser-test": {
+      "content_hash": "sha256:4ed3ca96b40ab974b2ac05ee4ca2c283c083eaf3ad2afa916e8c22a276255d3f",
+      "destination_path": ".agents/skills/browser-test",
+      "source_item_id": "skill:browser-test",
       "source_name": "meridian-dev-workflow"
     },
     "skill:dev-orchestration": {
-      "content_hash": "sha256:6c192be79918fcb8b2e1ced751db84b6dc25b76b5370f30625b2852f12348c16",
+      "content_hash": "sha256:b665a96ed5b6f786533b74759222b7271a3f744553a0a221397741ef46939327",
       "destination_path": ".agents/skills/dev-orchestration",
       "source_item_id": "skill:dev-orchestration",
       "source_name": "meridian-dev-workflow"
@@ -168,10 +174,10 @@
       "source_item_id": "skill:frontend-design",
       "source_name": "meridian-dev-workflow"
     },
-    "skill:issue-tracking": {
-      "content_hash": "sha256:830087b234405ae3764943b4a73156f6fc024c0d322bf96817c03953d1f2a570",
-      "destination_path": ".agents/skills/issue-tracking",
-      "source_item_id": "skill:issue-tracking",
+    "skill:issues": {
+      "content_hash": "sha256:ae69322c784145169bafe3dbc9600f51c8cea7583c94883fce4c68d6cb09b90c",
+      "destination_path": ".agents/skills/issues",
+      "source_item_id": "skill:issues",
       "source_name": "meridian-dev-workflow"
     },
     "skill:mermaid": {
@@ -180,10 +186,10 @@
       "source_item_id": "skill:mermaid",
       "source_name": "meridian-dev-workflow"
     },
-    "skill:plan-implementation": {
-      "content_hash": "sha256:dee71f9d82e6483c78d3c31cbafc20f911719c9fa3146c11616f00131bd8119f",
-      "destination_path": ".agents/skills/plan-implementation",
-      "source_item_id": "skill:plan-implementation",
+    "skill:planning": {
+      "content_hash": "sha256:32cd91390713c3ba8580302038509217a1239b03b9a3407d26ed22033855ee5b",
+      "destination_path": ".agents/skills/planning",
+      "source_item_id": "skill:planning",
       "source_name": "meridian-dev-workflow"
     },
     "skill:review": {
@@ -198,10 +204,10 @@
       "source_item_id": "skill:review-orchestration",
       "source_name": "meridian-dev-workflow"
     },
-    "skill:smoke-testing": {
-      "content_hash": "sha256:396e879c8bdff7be13fb23d84c7aa223b38042e0914c16526b12f147f474cc4f",
-      "destination_path": ".agents/skills/smoke-testing",
-      "source_item_id": "skill:smoke-testing",
+    "skill:smoke-test": {
+      "content_hash": "sha256:71d756394cda50098b2597307313595762fbfcb413ed9892c6e6b7fa014773cb",
+      "destination_path": ".agents/skills/smoke-test",
+      "source_item_id": "skill:smoke-test",
       "source_name": "meridian-dev-workflow"
     },
     "skill:tech-docs": {
@@ -210,23 +216,23 @@
       "source_item_id": "skill:tech-docs",
       "source_name": "meridian-dev-workflow"
     },
-    "skill:unit-testing": {
-      "content_hash": "sha256:7a6445d02b0697f9e51c60e5d44dbe1333ca8ee84b89f4b8d2def254049352a8",
-      "destination_path": ".agents/skills/unit-testing",
-      "source_item_id": "skill:unit-testing",
+    "skill:unit-test": {
+      "content_hash": "sha256:ffd9b41d32b72ccb6c295c852438df436cc5cd2a3f6a0406ed1865931bb9d149",
+      "destination_path": ".agents/skills/unit-test",
+      "source_item_id": "skill:unit-test",
       "source_name": "meridian-dev-workflow"
     },
-    "skill:verification-testing": {
-      "content_hash": "sha256:c3301ba605f341ac3dba55c76018127819464fecf864871a84f0b3002aa45c6e",
-      "destination_path": ".agents/skills/verification-testing",
-      "source_item_id": "skill:verification-testing",
+    "skill:verification": {
+      "content_hash": "sha256:a422fbef57ce7c661485e1a1364affd4adce8e451955d80e69164b8c2636c03c",
+      "destination_path": ".agents/skills/verification",
+      "source_item_id": "skill:verification",
       "source_name": "meridian-dev-workflow"
     }
   },
   "sources": {
     "meridian-base": {
       "installed_at": null,
-      "installed_tree_hash": "sha256:8df2d795d369857922a72e514a93d3eca520189380f25345337761e9d491029a",
+      "installed_tree_hash": "sha256:d2db9c9c79d5e46757ef24615c540160214733c6004840e52252b53ddb4ef845",
       "items": {
         "agent:__meridian-orchestrator": {
           "path": "agents/__meridian-orchestrator.md"
@@ -234,20 +240,20 @@
         "agent:__meridian-subagent": {
           "path": "agents/__meridian-subagent.md"
         },
+        "skill:__meridian-diagnostics": {
+          "path": "skills/__meridian-diagnostics/SKILL.md"
+        },
         "skill:__meridian-install": {
           "path": "skills/__meridian-install/SKILL.md"
         },
-        "skill:__meridian-orchestrate": {
-          "path": "skills/__meridian-orchestrate/SKILL.md"
+        "skill:__meridian-orchestration": {
+          "path": "skills/__meridian-orchestration/SKILL.md"
         },
         "skill:__meridian-session-context": {
           "path": "skills/__meridian-session-context/SKILL.md"
         },
-        "skill:__meridian-spawn-agent": {
-          "path": "skills/__meridian-spawn-agent/SKILL.md"
-        },
-        "skill:__meridian-troubleshoot": {
-          "path": "skills/__meridian-troubleshoot/SKILL.md"
+        "skill:__meridian-spawn": {
+          "path": "skills/__meridian-spawn/SKILL.md"
         },
         "skill:__meridian-work-coordination": {
           "path": "skills/__meridian-work-coordination/SKILL.md"
@@ -258,22 +264,25 @@
       "realized_closure": [
         "agent:__meridian-orchestrator",
         "agent:__meridian-subagent",
+        "skill:__meridian-diagnostics",
         "skill:__meridian-install",
-        "skill:__meridian-orchestrate",
+        "skill:__meridian-orchestration",
         "skill:__meridian-session-context",
-        "skill:__meridian-spawn-agent",
-        "skill:__meridian-troubleshoot",
+        "skill:__meridian-spawn",
         "skill:__meridian-work-coordination"
       ],
       "requested_ref": "main",
       "resolved_identity": {
-        "commit": "80491a68390eb6ad65e78f554c8575803db3c70f"
+        "commit": "e1f01e4a33db3aa1aca18d611c30de18459664c7"
       }
     },
     "meridian-dev-workflow": {
       "installed_at": null,
-      "installed_tree_hash": "sha256:9866269aec0350035e35c2ee1cf4b243ab828f654737c6fba5b003919db1e5f4",
+      "installed_tree_hash": "sha256:e1a6aef0e048a07bc30b1246193dc2a7c3e6c3f0e0612d918845c3a522dbf74f",
       "items": {
+        "agent:architect": {
+          "path": "agents/architect.md"
+        },
         "agent:browser-tester": {
           "path": "agents/browser-tester.md"
         },
@@ -282,6 +291,9 @@
         },
         "agent:dev-orchestrator": {
           "path": "agents/dev-orchestrator.md"
+        },
+        "agent:dev-runner": {
+          "path": "agents/dev-runner.md"
         },
         "agent:documenter": {
           "path": "agents/documenter.md"
@@ -295,11 +307,11 @@
         "agent:frontend-designer": {
           "path": "agents/frontend-designer.md"
         },
-        "agent:implementation-planner": {
-          "path": "agents/implementation-planner.md"
-        },
         "agent:investigator": {
           "path": "agents/investigator.md"
+        },
+        "agent:planner": {
+          "path": "agents/planner.md"
         },
         "agent:researcher": {
           "path": "agents/researcher.md"
@@ -310,23 +322,20 @@
         "agent:smoke-tester": {
           "path": "agents/smoke-tester.md"
         },
-        "agent:system-architect": {
-          "path": "agents/system-architect.md"
-        },
         "agent:unit-tester": {
           "path": "agents/unit-tester.md"
         },
-        "agent:verification-tester": {
-          "path": "agents/verification-tester.md"
+        "agent:verifier": {
+          "path": "agents/verifier.md"
         },
         "skill:agent-staffing": {
           "path": "skills/agent-staffing/SKILL.md"
         },
-        "skill:architecture-design": {
-          "path": "skills/architecture-design/SKILL.md"
+        "skill:architecture": {
+          "path": "skills/architecture/SKILL.md"
         },
-        "skill:browser-testing": {
-          "path": "skills/browser-testing/SKILL.md"
+        "skill:browser-test": {
+          "path": "skills/browser-test/SKILL.md"
         },
         "skill:dev-orchestration": {
           "path": "skills/dev-orchestration/SKILL.md"
@@ -334,14 +343,14 @@
         "skill:frontend-design": {
           "path": "skills/frontend-design/SKILL.md"
         },
-        "skill:issue-tracking": {
-          "path": "skills/issue-tracking/SKILL.md"
+        "skill:issues": {
+          "path": "skills/issues/SKILL.md"
         },
         "skill:mermaid": {
           "path": "skills/mermaid/SKILL.md"
         },
-        "skill:plan-implementation": {
-          "path": "skills/plan-implementation/SKILL.md"
+        "skill:planning": {
+          "path": "skills/planning/SKILL.md"
         },
         "skill:review": {
           "path": "skills/review/SKILL.md"
@@ -349,51 +358,52 @@
         "skill:review-orchestration": {
           "path": "skills/review-orchestration/SKILL.md"
         },
-        "skill:smoke-testing": {
-          "path": "skills/smoke-testing/SKILL.md"
+        "skill:smoke-test": {
+          "path": "skills/smoke-test/SKILL.md"
         },
         "skill:tech-docs": {
           "path": "skills/tech-docs/SKILL.md"
         },
-        "skill:unit-testing": {
-          "path": "skills/unit-testing/SKILL.md"
+        "skill:unit-test": {
+          "path": "skills/unit-test/SKILL.md"
         },
-        "skill:verification-testing": {
-          "path": "skills/verification-testing/SKILL.md"
+        "skill:verification": {
+          "path": "skills/verification/SKILL.md"
         }
       },
       "kind": "path",
       "locator": "meridian-dev-workflow",
       "realized_closure": [
+        "agent:architect",
         "agent:browser-tester",
         "agent:coder",
         "agent:dev-orchestrator",
+        "agent:dev-runner",
         "agent:documenter",
         "agent:explorer",
         "agent:frontend-coder",
         "agent:frontend-designer",
-        "agent:implementation-planner",
         "agent:investigator",
+        "agent:planner",
         "agent:researcher",
         "agent:reviewer",
         "agent:smoke-tester",
-        "agent:system-architect",
         "agent:unit-tester",
-        "agent:verification-tester",
+        "agent:verifier",
         "skill:agent-staffing",
-        "skill:architecture-design",
-        "skill:browser-testing",
+        "skill:architecture",
+        "skill:browser-test",
         "skill:dev-orchestration",
         "skill:frontend-design",
-        "skill:issue-tracking",
+        "skill:issues",
         "skill:mermaid",
-        "skill:plan-implementation",
+        "skill:planning",
         "skill:review",
         "skill:review-orchestration",
-        "skill:smoke-testing",
+        "skill:smoke-test",
         "skill:tech-docs",
-        "skill:unit-testing",
-        "skill:verification-testing"
+        "skill:unit-test",
+        "skill:verification"
       ],
       "requested_ref": null,
       "resolved_identity": {
