@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_serializer
 
 from meridian.lib.core.domain import SpawnStatus
 from meridian.lib.core.util import FormatContext
+from meridian.lib.ops.spawn.plan import SessionContinuation
 
 
 def _empty_template_vars() -> dict[str, str]:
@@ -44,6 +45,7 @@ class SpawnCreateInput(BaseModel):
     sandbox: str | None = None
     harness: str | None = None
     passthrough_args: tuple[str, ...] = ()
+    session: SessionContinuation = Field(default_factory=SessionContinuation)
     continue_harness_session_id: str | None = None
     continue_harness: str | None = None
     continue_source_tracked: bool = False

@@ -6,6 +6,8 @@ from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from meridian.lib.ops.spawn.plan import SessionContinuation
+
 _CONTINUATION_GUIDANCE = (
     "You are resuming an existing Meridian session. Continue from the current state, "
     "preserve prior decisions unless evidence has changed, and avoid duplicating "
@@ -56,6 +58,7 @@ class LaunchRequest(BaseModel):
     thinking: str | None = None
     sandbox: str | None = None
     timeout: float | None = None
+    session: SessionContinuation = Field(default_factory=SessionContinuation)
     # Deprecated: use `session_mode` and `SessionIntent` for new code.
     continue_harness_session_id: str | None = None
     # Deprecated: use `session_mode` and `SessionIntent` for new code.

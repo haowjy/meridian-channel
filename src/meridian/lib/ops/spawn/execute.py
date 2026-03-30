@@ -20,6 +20,7 @@ from meridian.lib.core.domain import Spawn, SpawnStatus
 from meridian.lib.core.sink import OutputSink
 from meridian.lib.core.types import ModelId, SpawnId
 from meridian.lib.harness.adapter import PermissionResolver
+from meridian.lib.launch.cwd import resolve_child_execution_cwd
 from meridian.lib.launch.runner import execute_with_finalization
 from meridian.lib.launch.session_scope import session_scope
 from meridian.lib.ops.work_attachment import ensure_explicit_work_item
@@ -92,6 +93,7 @@ class BackgroundWorkerParams(BaseModel):
     appended_system_prompt: str | None = None
     autocompact: int | None = None
     forked_from_chat_id: str | None = None
+    execution_cwd: str | None = None
 
 
 def _optional_spawn_id(spawn_id: str | None) -> SpawnId | None:
@@ -210,6 +212,7 @@ def _init_spawn(
     work_id: str | None = None,
     status: SpawnStatus = "running",
     launch_mode: LaunchMode | None = None,
+    execution_cwd: str | None = None,
     ctx: RuntimeContext | None = None,
 ) -> _SpawnContext:
     resolved_context = runtime_context(ctx)
@@ -241,6 +244,7 @@ def _init_spawn(
         desc=resolved_desc,
         work_id=resolved_work_id,
         harness_session_id=prepared.session.harness_session_id,
+        execution_cwd=execution_cwd,
         launch_mode=launch_mode,
         status=status,
     )
@@ -336,6 +340,7 @@ def _session_execution_context(
     run_agent_name: str | None,
     inherited_work_id: str | None = None,
     forked_from_chat_id: str | None = None,
+    execution_cwd: str | None = None,
 ) -> Iterator[_SessionExecutionContext]:
     with session_scope(
         state_root=state_root,
@@ -351,6 +356,7 @@ def _session_execution_context(
         bootstrap_required_items=bootstrap_required_items,
         bootstrap_missing_items=bootstrap_missing_items,
         forked_from_chat_id=forked_from_chat_id,
+        execution_cwd=execution_cwd,
     ) as managed:
         attached_work_id = get_session_active_work_id(state_root, managed.chat_id)
         if attached_work_id is None:
@@ -386,6 +392,7 @@ async def _execute_existing_spawn(
     appended_system_prompt: str | None = None,
     autocompact: int | None = None,
     forked_from_chat_id: str | None = None,
+    execution_cwd: str | None = None,
     sink: OutputSink | None = None,
     ctx: RuntimeContext | None = None,
 ) -> int:
@@ -442,6 +449,15 @@ async def _execute_existing_spawn(
         cli_command=(),
         passthrough_args=passthrough_args,
     )
+    resolved_execution_cwd = execution_cwd
+    if not resolved_execution_cwd:
+        resolved_execution_cwd = str(
+            resolve_child_execution_cwd(
+                repo_root=repo_root,
+                spawn_id=str(spawn_id),
+                harness_id=spawn_record.harness or "",
+            )
+        )
 
     with _session_execution_context(
         state_root=state_root,
@@ -459,6 +475,7 @@ async def _execute_existing_spawn(
         run_agent_name=agent_name,
         inherited_work_id=spawn_record.work_id,
         forked_from_chat_id=forked_from_chat_id,
+        execution_cwd=resolved_execution_cwd,
     ) as session_context:
         resolved_plan = plan.model_copy(update={"agent_name": session_context.resolved_agent_name})
         return await execute_with_finalization(
@@ -514,9 +531,25 @@ def execute_spawn_background(
         work_id=payload.work,
         status="queued",
         launch_mode=BACKGROUND_LAUNCH_MODE,
+        execution_cwd=str(runtime.repo_root),
         ctx=resolved_context,
     )
     spawn_id_text = str(context.spawn.spawn_id)
+    execution_cwd_str = str(
+        resolve_child_execution_cwd(
+            repo_root=runtime.repo_root,
+            spawn_id=spawn_id_text,
+            harness_id=prepared.harness_id,
+        )
+    )
+    # Record pre-computed execution_cwd immediately so it's correct even if
+    # the background worker dies before runner.py's authoritative update.
+    if execution_cwd_str != str(runtime.repo_root):
+        spawn_store.update_spawn(
+            context.state_root,
+            context.spawn.spawn_id,
+            execution_cwd=execution_cwd_str,
+        )
     log_dir = resolve_spawn_log_dir(runtime.repo_root, context.spawn.spawn_id)
     log_dir.mkdir(parents=True, exist_ok=True)
     try:
@@ -554,6 +587,7 @@ def execute_spawn_background(
             appended_system_prompt=prepared.appended_system_prompt,
             autocompact=prepared.autocompact,
             forked_from_chat_id=payload.forked_from_chat_id,
+            execution_cwd=execution_cwd_str,
         )
         _persist_bg_worker_params(log_dir, bg_params)
     except Exception as exc:
@@ -687,9 +721,25 @@ def execute_spawn_blocking(
         work_id=payload.work,
         status="queued",
         launch_mode=FOREGROUND_LAUNCH_MODE,
+        execution_cwd=str(runtime.repo_root),
         ctx=resolved_context,
     )
     spawn = context.spawn
+    execution_cwd_str = str(
+        resolve_child_execution_cwd(
+            repo_root=runtime.repo_root,
+            spawn_id=str(spawn.spawn_id),
+            harness_id=prepared.harness_id,
+        )
+    )
+    if execution_cwd_str != str(runtime.repo_root):
+        # Pre-compute execution CWD for immediate visibility.
+        # runner.py writes the authoritative value right before execution.
+        spawn_store.update_spawn(
+            context.state_root,
+            spawn.spawn_id,
+            execution_cwd=execution_cwd_str,
+        )
     try:
         _write_params_json(
             runtime.repo_root,
@@ -722,6 +772,7 @@ def execute_spawn_blocking(
         run_agent_name=prepared.agent_name,
         inherited_work_id=context.work_id,
         forked_from_chat_id=payload.forked_from_chat_id,
+        execution_cwd=execution_cwd_str,
     ) as session_context:
         resolved_plan = prepared.model_copy(
             update={"agent_name": session_context.resolved_agent_name}
@@ -860,6 +911,7 @@ def _background_worker_main(
             appended_system_prompt=params.appended_system_prompt,
             autocompact=params.autocompact,
             forked_from_chat_id=params.forked_from_chat_id,
+            execution_cwd=params.execution_cwd,
             ctx=resolved_context,
         )
     )

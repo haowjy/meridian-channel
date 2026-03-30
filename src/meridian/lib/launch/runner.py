@@ -668,6 +668,13 @@ async def execute_with_finalization(
                 child_cwd = resolved_cwd
                 child_cwd.mkdir(parents=True, exist_ok=True)
                 command = (*command, "--add-dir", str(execution_cwd))
+            # Record the actual execution CWD on the spawn record (authoritative).
+            # Mirrors execute.py pre-compute; both sites must stay in sync.
+            spawn_store.update_spawn(
+                state_root,
+                run.spawn_id,
+                execution_cwd=str(child_cwd),
+            )
 
             retries_attempted = 0
 

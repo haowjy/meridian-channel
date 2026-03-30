@@ -336,6 +336,7 @@ def start_session(
     bootstrap_required_items: tuple[str, ...] = (),
     bootstrap_missing_items: tuple[str, ...] = (),
     forked_from_chat_id: str | None = None,
+    execution_cwd: str | None = None,
 ) -> str:
     """Append a session start event and acquire a lifetime session lock."""
 
@@ -353,6 +354,7 @@ def start_session(
             chat_id=resolved_chat_id,
             harness=harness,
             harness_session_id=harness_session_id,
+            execution_cwd=execution_cwd,
             model=model,
             agent=agent,
             agent_path=agent_path,

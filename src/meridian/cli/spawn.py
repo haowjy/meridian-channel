@@ -31,6 +31,7 @@ from meridian.lib.ops.spawn.api import (
     spawn_wait_sync,
 )
 from meridian.lib.ops.spawn.log import SpawnLogInput, spawn_log_sync
+from meridian.lib.ops.spawn.plan import SessionContinuation
 
 # In agent mode (MERIDIAN_DEPTH > 0), hide human-only flags from --help.
 # Flags still work when passed — show only affects help text.
@@ -289,6 +290,11 @@ def _spawn_create(
                 sandbox=sandbox,
                 harness=requested_harness or resolved_reference.harness,
                 passthrough_args=passthrough,
+                session=SessionContinuation(
+                    harness_session_id=resolved_reference.harness_session_id,
+                    continue_fork=True,
+                    forked_from_chat_id=resolved_reference.source_chat_id,
+                ),
                 continue_harness_session_id=resolved_reference.harness_session_id,
                 continue_harness=resolved_reference.harness,
                 continue_source_tracked=resolved_reference.tracked,

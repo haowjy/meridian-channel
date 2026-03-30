@@ -541,7 +541,10 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
     ),
     _spec(
         name="work.list",
-        description='List work items. Use --active to hide items with status "done".',
+        description=(
+            'List work items. Use --done / --no-done to control whether'
+            ' items with status "done" are shown.'
+        ),
         handler=work_list,
         sync_handler=work_list_sync,
         input_type=WorkListInput,

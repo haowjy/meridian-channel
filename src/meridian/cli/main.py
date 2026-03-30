@@ -32,6 +32,7 @@ from meridian.lib.harness.registry import get_default_harness_registry
 from meridian.lib.launch import LaunchRequest, SessionMode, launch_primary
 from meridian.lib.ops.reference import resolve_session_reference
 from meridian.lib.ops.spawn.api import SpawnActionOutput
+from meridian.lib.ops.spawn.plan import SessionContinuation
 from meridian.lib.state.paths import resolve_state_paths
 from meridian.lib.state.session_store import cleanup_stale_sessions
 from meridian.server.main import run_server
@@ -645,6 +646,11 @@ def _run_primary_launch(
             thinking=thinking,
             sandbox=sandbox,
             timeout=timeout,
+            session=SessionContinuation(
+                harness_session_id=continue_harness_session_id,
+                continue_fork=continue_fork,
+                forked_from_chat_id=forked_from_chat_id,
+            ),
             continue_harness_session_id=continue_harness_session_id,
             continue_chat_id=continue_chat_id,
             continue_fork=continue_fork,
