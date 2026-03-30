@@ -32,9 +32,11 @@ meridian work update auth-refactor --status designing
 meridian work update auth-refactor --status implementing
 meridian work done auth-refactor
 meridian work reopen auth-refactor
+meridian work delete stale-item          # remove empty work items
+meridian work delete old-item --force    # remove even if it has artifacts
 ```
 
-`work done` archives the work directory. `work reopen` restores it.
+`work done` archives the work directory. `work reopen` restores it. `work delete` removes the work item entirely — requires `--force` if it has artifacts.
 
 ## Artifact Placement
 
