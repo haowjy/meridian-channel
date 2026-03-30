@@ -96,15 +96,25 @@ class PrimaryLaunchOutput(BaseModel):
         lines: list[str] = []
         if self.warning:
             lines.append(f"warning: {self.warning}")
+        if self.command:
+            if self.forked_from:
+                lines.append(f"{self.message} (from {self.forked_from})")
+            else:
+                lines.append(self.message)
+            lines.append(shlex.join(self.command))
+            return "\n".join(lines)
         if self.resume_command:
+            if self.forked_from:
+                lines.append(f"Session forked from {self.forked_from}.")
+            else:
+                lines.append(self.message)
             lines.append("To continue with meridian:")
             lines.append(self.resume_command)
             return "\n".join(lines)
-        if self.command:
+        if self.forked_from:
+            lines.append(f"{self.message} (from {self.forked_from})")
+        else:
             lines.append(self.message)
-            lines.append(shlex.join(self.command))
-            return "\n".join(lines)
-        lines.append(self.message)
         return "\n".join(lines)
 
 
@@ -154,7 +164,12 @@ def emit(payload: object) -> None:
     options = get_global_options()
     sink, flush_after = _resolve_sink(options)
     if isinstance(payload, SpawnActionOutput):
-        emit_output(payload.to_wire(), sink=sink)
+        if options.output.format == "json" or _agent_sink_enabled(
+            output_explicit=options.output_explicit
+        ):
+            emit_output(payload.to_wire(), sink=sink)
+        else:
+            emit_output(payload, sink=sink)
     else:
         emit_output(payload, sink=sink)
     if flush_after:

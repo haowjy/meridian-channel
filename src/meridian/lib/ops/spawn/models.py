@@ -1,5 +1,7 @@
 """Spawn operation input/output models and shared lightweight helpers."""
 
+import shlex
+
 from pydantic import BaseModel, ConfigDict, Field, model_serializer
 
 from meridian.lib.core.domain import SpawnStatus
@@ -80,12 +82,15 @@ class SpawnActionOutput(BaseModel):
     exit_code: int | None = None
     duration_secs: float | None = None
     background: bool = False
+    forked_from: str | None = None
 
     def to_wire(self) -> dict[str, object]:
         """Project minimal external JSON shape. Omit nulls and input echo."""
         wire: dict[str, object] = {"status": self.status}
         if self.spawn_id is not None:
             wire["spawn_id"] = self.spawn_id
+        if self.forked_from is not None:
+            wire["forked_from"] = self.forked_from
         if self.duration_secs is not None:
             wire["duration_secs"] = round(self.duration_secs, 2)
         if self.report is not None:
@@ -128,6 +133,31 @@ class SpawnActionOutput(BaseModel):
             if self.cli_command:
                 wire["cli_command"] = list(self.cli_command)
         return wire
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        _ = ctx
+        lines: list[str] = []
+        if self.message:
+            lines.append(self.message)
+        else:
+            lines.append(f"Spawn {self.status}.")
+        if self.spawn_id:
+            lines.append(f"Spawn id: {self.spawn_id}")
+        if self.forked_from:
+            lines.append(f"Forked from: {self.forked_from}")
+        if self.model and self.harness_id:
+            lines.append(f"Model: {self.model} ({self.harness_id})")
+        elif self.model:
+            lines.append(f"Model: {self.model}")
+        if self.error:
+            lines.append(f"Error: {self.error}")
+        if self.warning:
+            lines.append(f"Warning: {self.warning}")
+        if self.cli_command:
+            lines.append(shlex.join(self.cli_command))
+        if self.exit_code is not None:
+            lines.append(f"Exit code: {self.exit_code}")
+        return "\n".join(lines)
 
 
 class SpawnListInput(BaseModel):

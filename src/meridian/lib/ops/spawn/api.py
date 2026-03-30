@@ -55,6 +55,19 @@ from .query import (
 _WAIT_HEARTBEAT_INTERVAL_SECS = 5.0
 
 
+def _forked_from_output(payload: SpawnCreateInput) -> str | None:
+    if not payload.continue_fork:
+        return None
+
+    source_chat_id = (payload.forked_from_chat_id or "").strip()
+    if source_chat_id:
+        return source_chat_id
+    source_ref = (payload.continue_source_ref or "").strip()
+    if source_ref:
+        return source_ref
+    return None
+
+
 def spawn_create_sync(
     payload: SpawnCreateInput,
     ctx: RuntimeContext | None = None,
@@ -78,6 +91,7 @@ def spawn_create_sync(
         preflight_warning=preflight_warning,
         ctx=resolved_context,
     )
+    forked_from = _forked_from_output(payload)
     if payload.dry_run:
         return SpawnActionOutput(
             command="spawn.create",
@@ -99,23 +113,28 @@ def spawn_create_sync(
             composed_prompt=prepared.prompt,
             cli_command=prepared.cli_command,
             message="Dry run complete.",
+            forked_from=forked_from,
         )
 
     if runtime is None:
         raise RuntimeError("Spawn runtime was not initialized.")
     if payload.background:
-        return execute_spawn_background(
+        result = execute_spawn_background(
             payload=payload,
             prepared=prepared,
             runtime=runtime,
             ctx=resolved_context,
         )
-    return execute_spawn_blocking(
-        payload=payload,
-        prepared=prepared,
-        runtime=runtime,
-        ctx=resolved_context,
-    )
+    else:
+        result = execute_spawn_blocking(
+            payload=payload,
+            prepared=prepared,
+            runtime=runtime,
+            ctx=resolved_context,
+        )
+    if forked_from is None:
+        return result
+    return result.model_copy(update={"forked_from": forked_from})
 
 
 async def spawn_create(
