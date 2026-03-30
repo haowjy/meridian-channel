@@ -88,6 +88,10 @@ If `meridian` is not on your PATH: `uv tool update-shell`
 
 ### Prerequisites
 
+**Platforms:** macOS and Linux. Windows is supported via
+[WSL](https://learn.microsoft.com/en-us/windows/wsl/) (native Windows is not
+supported).
+
 You need at least one harness CLI installed and authenticated:
 
 | Harness | Model prefixes | Install |
