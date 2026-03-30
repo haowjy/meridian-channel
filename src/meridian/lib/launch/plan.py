@@ -27,7 +27,13 @@ from .resolve import (
     resolve_profile_path,
     resolve_skill_paths,
 )
-from .types import LaunchRequest, PrimarySessionMetadata, build_primary_prompt
+from .types import (
+    LaunchRequest,
+    PrimarySessionMetadata,
+    SessionIntent,
+    SessionMode,
+    build_primary_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -198,8 +204,17 @@ def resolve_primary_launch_plan(
         if request.continue_harness_session_id is not None
         else ""
     )
+    session_intent = SessionIntent(
+        mode=request.session_mode,
+        harness_session_id=explicit_harness_session_id or None,
+        chat_id=request.continue_chat_id,
+        forked_from_chat_id=request.forked_from_chat_id,
+    )
+    continuation_harness_session_id = (
+        session_intent.harness_session_id if session_intent.mode != SessionMode.FRESH else None
+    )
     seed = adapter.seed_session(
-        is_resume=bool(explicit_harness_session_id),
+        is_resume=session_intent.mode == SessionMode.RESUME,
         harness_session_id=explicit_harness_session_id,
         passthrough_args=request.passthrough_args,
     )
@@ -226,7 +241,7 @@ def resolve_primary_launch_plan(
             repo_root=resolved_root.as_posix(),
             mcp_tools=profile.mcp_tools if profile is not None else (),
             interactive=True,
-            continue_harness_session_id=explicit_harness_session_id or None,
+            continue_harness_session_id=continuation_harness_session_id,
         )
         return ResolvedPrimaryLaunchPlan(
             repo_root=resolved_root,
@@ -255,7 +270,7 @@ def resolve_primary_launch_plan(
 
     # Let the adapter decide what prompt/skill content to include.
     # Resume launches typically suppress prompt and skill injection.
-    is_resume = bool(explicit_harness_session_id)
+    is_resume = session_intent.mode == SessionMode.RESUME
     skill_injection = compose_skill_injections(resolved_skills.loaded_skills) or ""
     if adapter.id == HarnessId.CODEX and profile is not None and profile.body.strip():
         skill_injection = "\n\n".join(
@@ -297,7 +312,7 @@ def resolve_primary_launch_plan(
         repo_root=resolved_root.as_posix(),
         mcp_tools=profile.mcp_tools if profile is not None else (),
         interactive=True,
-        continue_harness_session_id=explicit_harness_session_id or None,
+        continue_harness_session_id=continuation_harness_session_id,
         appended_system_prompt=appended_system_prompt,
     )
     command = tuple(adapter.build_command(run_params, resolver))

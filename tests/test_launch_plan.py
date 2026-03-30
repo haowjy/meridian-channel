@@ -8,7 +8,7 @@ from meridian.lib.harness.registry import get_default_harness_registry
 from meridian.lib.install.bootstrap import BootstrapPlan
 from meridian.lib.launch.plan import resolve_primary_launch_plan
 from meridian.lib.launch.resolve import ResolvedPolicies, ResolvedSkills
-from meridian.lib.launch.types import LaunchRequest
+from meridian.lib.launch.types import LaunchRequest, SessionMode, build_primary_prompt
 
 
 def test_resolve_primary_launch_plan_prefixes_agent_profile_for_codex(
@@ -64,7 +64,12 @@ def test_resolve_primary_launch_plan_prefixes_agent_profile_for_codex(
 
     plan = resolve_primary_launch_plan(
         repo_root=repo_root,
-        request=LaunchRequest(model="gpt-5.3-codex", harness="codex", agent="coder", fresh=True),
+        request=LaunchRequest(
+            model="gpt-5.3-codex",
+            harness="codex",
+            agent="coder",
+            session_mode=SessionMode.FRESH,
+        ),
         harness_registry=harness_registry,
         config=config,
     )
@@ -75,3 +80,23 @@ def test_resolve_primary_launch_plan_prefixes_agent_profile_for_codex(
     assert "# Agent Profile\n\nFollow the agent contract." in prompt
     assert prompt.index("# Agent Profile") < prompt.index(f"# Skill: {skill.path}")
     assert prompt.index(f"# Skill: {skill.path}") < prompt.index("# Meridian Session")
+
+
+def test_build_primary_prompt_uses_continuation_guidance_for_resume_mode() -> None:
+    prompt = build_primary_prompt(
+        LaunchRequest(
+            session_mode=SessionMode.RESUME,
+            continue_harness_session_id="session-1",
+        )
+    )
+
+    assert "# Continuation Guidance" in prompt
+    assert "Start a fresh primary conversation for this space." not in prompt
+
+
+def test_build_primary_prompt_uses_fresh_guidance_for_fresh_mode() -> None:
+    prompt = build_primary_prompt(LaunchRequest(session_mode=SessionMode.FRESH))
+
+    assert "# Session Mode" in prompt
+    assert "Start a fresh primary conversation for this space." in prompt
+    assert "# Continuation Guidance" not in prompt

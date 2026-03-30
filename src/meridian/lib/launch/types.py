@@ -1,12 +1,34 @@
 """Shared types for the launch pipeline."""
 
-from pydantic import BaseModel, ConfigDict, Field
+from dataclasses import dataclass
+from enum import StrEnum
+from typing import Any, cast
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 _CONTINUATION_GUIDANCE = (
     "You are resuming an existing Meridian session. Continue from the current state, "
     "preserve prior decisions unless evidence has changed, and avoid duplicating "
     "already-completed work."
 )
+
+
+class SessionMode(StrEnum):
+    """How this launch relates to prior conversation state."""
+
+    FRESH = "fresh"
+    RESUME = "resume"
+    FORK = "fork"
+
+
+@dataclass(frozen=True)
+class SessionIntent:
+    """Resolved session intent for launch planning."""
+
+    mode: SessionMode
+    harness_session_id: str | None = None
+    chat_id: str | None = None
+    forked_from_chat_id: str | None = None
 
 
 class LaunchRequest(BaseModel):
@@ -18,7 +40,9 @@ class LaunchRequest(BaseModel):
     harness: str | None = None
     agent: str | None = None
     work_id: str | None = None
-    fresh: bool = False
+    # Deprecated: use `session_mode` for new code.
+    fresh: bool = True
+    session_mode: SessionMode = SessionMode.FRESH
     autocompact: int | None = None
     passthrough_args: tuple[str, ...] = ()
     pinned_context: str = ""
@@ -27,8 +51,40 @@ class LaunchRequest(BaseModel):
     thinking: str | None = None
     sandbox: str | None = None
     timeout: float | None = None
+    # Deprecated: use `session_mode` and `SessionIntent` for new code.
     continue_harness_session_id: str | None = None
+    # Deprecated: use `session_mode` and `SessionIntent` for new code.
     continue_chat_id: str | None = None
+    forked_from_chat_id: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _sync_session_mode_fields(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+
+        payload = cast("dict[str, Any]", value).copy()
+        has_session_mode = payload.get("session_mode") is not None
+        has_fresh = payload.get("fresh") is not None
+
+        if has_session_mode:
+            mode_raw = payload["session_mode"]
+            mode = mode_raw if isinstance(mode_raw, SessionMode) else SessionMode(str(mode_raw))
+            if mode == SessionMode.FORK:
+                raise ValueError(
+                    "SessionMode.FORK is not yet implemented. "
+                    "It will be enabled when the fork launch path is complete."
+                )
+            payload["fresh"] = mode == SessionMode.FRESH
+            return payload
+
+        if has_fresh:
+            payload["session_mode"] = (
+                SessionMode.FRESH if bool(payload["fresh"]) else SessionMode.RESUME
+            )
+            return payload
+
+        return payload
 
 
 class LaunchResult(BaseModel):
@@ -62,7 +118,7 @@ def build_primary_prompt(request: LaunchRequest) -> str:
 
     sections: list[str] = ["# Meridian Session"]
 
-    if request.fresh:
+    if request.session_mode == SessionMode.FRESH:
         sections.extend(
             [
                 "",
@@ -84,5 +140,7 @@ __all__ = [
     "LaunchRequest",
     "LaunchResult",
     "PrimarySessionMetadata",
+    "SessionIntent",
+    "SessionMode",
     "build_primary_prompt",
 ]

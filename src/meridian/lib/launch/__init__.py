@@ -26,7 +26,14 @@ from .resolve import (
     resolve_policies,
     resolve_skills_from_profile,
 )
-from .types import LaunchRequest, LaunchResult, PrimarySessionMetadata, build_primary_prompt
+from .types import (
+    LaunchRequest,
+    LaunchResult,
+    PrimarySessionMetadata,
+    SessionIntent,
+    SessionMode,
+    build_primary_prompt,
+)
 
 
 def _resolve_work_id_for_launch(state_root: Path, request: LaunchRequest) -> str | None:
@@ -84,6 +91,8 @@ __all__ = [
     "ResolvedPolicies",
     "ResolvedPrimaryLaunchPlan",
     "ResolvedSkills",
+    "SessionIntent",
+    "SessionMode",
     "build_harness_command",
     "build_launch_env",
     "build_primary_prompt",

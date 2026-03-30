@@ -30,7 +30,7 @@ from meridian.lib.core.sink import OutputSink
 from meridian.lib.core.util import FormatContext
 from meridian.lib.harness.registry import get_default_harness_registry
 from meridian.lib.harness.session_detection import infer_harness_from_untracked_session_ref
-from meridian.lib.launch import LaunchRequest, launch_primary
+from meridian.lib.launch import LaunchRequest, SessionMode, launch_primary
 from meridian.lib.ops.spawn.api import SpawnActionOutput
 from meridian.lib.state.paths import resolve_state_paths
 from meridian.lib.state.session_store import cleanup_stale_sessions, resolve_session_ref
@@ -523,7 +523,7 @@ def _run_primary_launch(
     continue_chat_id: str | None = None
     continue_harness: str | None = None
     continue_warning: str | None = None
-    fresh = True
+    session_mode = SessionMode.FRESH
     explicit_harness = harness.strip() if harness is not None and harness.strip() else None
     if resume_target is not None:
         if model.strip():
@@ -543,7 +543,7 @@ def _run_primary_launch(
                 "Use --harness to specify which harness owns this session."
             )
         continue_warning = resolved_continue.warning
-        fresh = False
+        session_mode = SessionMode.RESUME
 
     launch_result = launch_primary(
         repo_root=repo_root,
@@ -554,7 +554,7 @@ def _run_primary_launch(
             work_id=work.strip() or None,
             autocompact=autocompact,
             passthrough_args=passthrough,
-            fresh=fresh,
+            session_mode=session_mode,
             pinned_context="",
             dry_run=dry_run,
             approval=resolved_approval,
