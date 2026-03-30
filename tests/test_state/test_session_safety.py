@@ -249,6 +249,29 @@ def test_start_session_rolls_back_lock_and_event_on_append_failure(
     assert queue.get(timeout=5) is True
 
 
+def test_start_session_includes_null_forked_from_chat_id_by_default(tmp_path: Path) -> None:
+    state_root = _state_root(tmp_path)
+    chat_id = session_store.start_session(
+        state_root,
+        harness="codex",
+        harness_session_id="thread-fork-default",
+        model="gpt-5.4",
+    )
+    session_store.stop_session(state_root, chat_id)
+
+    rows = [
+        json.loads(line)
+        for line in (state_root / "sessions.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    start_rows = [
+        row for row in rows if row.get("event") == "start" and row.get("chat_id") == chat_id
+    ]
+    assert len(start_rows) == 1
+    assert "forked_from_chat_id" in start_rows[0]
+    assert start_rows[0]["forked_from_chat_id"] is None
+
+
 def test_cleanup_stale_sessions_skips_generation_mismatch(tmp_path: Path) -> None:
     state_root = _state_root(tmp_path)
     chat_id = "c7"
@@ -402,6 +425,7 @@ def test_records_by_session_ignores_mismatched_generation_stop_and_update(tmp_pa
     assert record.harness_session_id == "thread-2"
     assert record.harness_session_ids == ("thread-1", "thread-2")
     assert record.active_work_id == "work-1"
+    assert record.forked_from_chat_id is None
     assert record.stopped_at is None
 
 

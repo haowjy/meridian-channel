@@ -37,6 +37,7 @@ def session_scope(
     skill_sources: dict[str, str] | None = None,
     bootstrap_required_items: tuple[str, ...] = (),
     bootstrap_missing_items: tuple[str, ...] = (),
+    forked_from_chat_id: str | None = None,
     _start_session: Callable[..., str] = start_session,
     _stop_session: Callable[[Path, str], None] = stop_session,
     _update_session_harness_id: Callable[[Path, str, str], None] = update_session_harness_id,
@@ -56,6 +57,7 @@ def session_scope(
         skill_sources=skill_sources or {},
         bootstrap_required_items=bootstrap_required_items,
         bootstrap_missing_items=bootstrap_missing_items,
+        forked_from_chat_id=forked_from_chat_id,
     )
 
     def _record_harness_session_id(session_id: str) -> None:

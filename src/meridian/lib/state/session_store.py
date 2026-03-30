@@ -37,6 +37,7 @@ class SessionRecord(BaseModel):
     stopped_at: str | None
     session_instance_id: str = ""
     active_work_id: str | None = None
+    forked_from_chat_id: str | None = None
 
 
 class SessionStartEvent(BaseModel):
@@ -59,6 +60,7 @@ class SessionStartEvent(BaseModel):
     params: tuple[str, ...] = ()
     session_instance_id: str = ""
     started_at: str
+    forked_from_chat_id: str | None = None
 
 
 class SessionStopEvent(BaseModel):
@@ -125,6 +127,7 @@ def _record_from_start_event(event: SessionStartEvent) -> SessionRecord:
         stopped_at=None,
         session_instance_id=event.session_instance_id,
         active_work_id=None,
+        forked_from_chat_id=event.forked_from_chat_id,
     )
 
 
@@ -329,6 +332,7 @@ def start_session(
     skill_sources: dict[str, str] | None = None,
     bootstrap_required_items: tuple[str, ...] = (),
     bootstrap_missing_items: tuple[str, ...] = (),
+    forked_from_chat_id: str | None = None,
 ) -> str:
     """Append a session start event and acquire a lifetime session lock."""
 
@@ -358,6 +362,7 @@ def start_session(
             params=params,
             session_instance_id=session_instance_id,
             started_at=started_at,
+            forked_from_chat_id=forked_from_chat_id,
         )
         with lock_file(paths.sessions_flock):
             append_event(paths.sessions_jsonl, paths.sessions_flock, event, store_name="session")
