@@ -1,7 +1,7 @@
 {
   "items": {
     "agent:__meridian-orchestrator": {
-      "content_hash": "sha256:cbc4ed42d0d33a9a85e90276bf571ee7df43b83117deb8b1edd79cacd62ce74d",
+      "content_hash": "sha256:bcc815d54f4cd1b4d8ab82f86eb220b986cabdf6b15e46aeca2398780e22b5b3",
       "destination_path": ".agents/agents/__meridian-orchestrator.md",
       "source_item_id": "agent:__meridian-orchestrator",
       "source_name": "meridian-base"
@@ -109,19 +109,19 @@
       "source_name": "meridian-dev-workflow"
     },
     "skill:__meridian-diagnostics": {
-      "content_hash": "sha256:34057d818da9719be85d6a5e6d721ccc7bed969510d8b8f261c766ed7d948aa3",
+      "content_hash": "sha256:2c7bfe9acf917bdf512204c20eaaf8e527177e7a728939c1e28f580aafe8dac4",
       "destination_path": ".agents/skills/__meridian-diagnostics",
       "source_item_id": "skill:__meridian-diagnostics",
       "source_name": "meridian-base"
     },
     "skill:__meridian-install": {
-      "content_hash": "sha256:979a5a4e775e80e0234f214a062d333e02bda1d9aeef9a4c9e433870b6a20aab",
+      "content_hash": "sha256:c43e3cc5b49389c447cb9efc4c95e3dd5795cf7bfcabe6a8181c098c8761a28f",
       "destination_path": ".agents/skills/__meridian-install",
       "source_item_id": "skill:__meridian-install",
       "source_name": "meridian-base"
     },
     "skill:__meridian-orchestration": {
-      "content_hash": "sha256:63cc1e3fcb6137d9b0bdfe302eb946929872fa2eea48eecd5d34488c7432fac5",
+      "content_hash": "sha256:98235a5c3ddee6ddf9f09877a85fd6aa636a81ddec0856d534d4dd708569c0f7",
       "destination_path": ".agents/skills/__meridian-orchestration",
       "source_item_id": "skill:__meridian-orchestration",
       "source_name": "meridian-base"
@@ -133,7 +133,7 @@
       "source_name": "meridian-base"
     },
     "skill:__meridian-spawn": {
-      "content_hash": "sha256:079aed7897c6ecc2151fbe5b357d8a9819918b8391a4598213231678fcdd31f9",
+      "content_hash": "sha256:210f2a487c1881c78b0ade7f8a99f9efffa98aff5e9767925272d704093eb499",
       "destination_path": ".agents/skills/__meridian-spawn",
       "source_item_id": "skill:__meridian-spawn",
       "source_name": "meridian-base"
@@ -232,7 +232,7 @@
   "sources": {
     "meridian-base": {
       "installed_at": null,
-      "installed_tree_hash": "sha256:d2db9c9c79d5e46757ef24615c540160214733c6004840e52252b53ddb4ef845",
+      "installed_tree_hash": "sha256:4ccfb922f3d9d8de027f5e15129fd976c68b0a95abd4d20813ee346092406457",
       "items": {
         "agent:__meridian-orchestrator": {
           "path": "agents/__meridian-orchestrator.md"
@@ -273,7 +273,7 @@
       ],
       "requested_ref": "main",
       "resolved_identity": {
-        "commit": "e1f01e4a33db3aa1aca18d611c30de18459664c7"
+        "commit": "eca8749efca1539426e17c7f91c52e4ddf90a29f"
       }
     },
     "meridian-dev-workflow": {

@@ -1,9 +1,9 @@
 ---
-name: __meridian-spawn-agent
+name: __meridian-spawn
 description: Multi-agent coordination via the meridian CLI — spawning subagents, waiting for results, checking status, and inspecting outputs. Prefer `meridian spawn` over harness-native agent tools for substantive work (coding, reviewing, testing) because it enables model routing across providers. Use this skill whenever you need to delegate work to another agent, run tasks in parallel, check on spawn progress, or coordinate multiple agents.
 ---
 
-# __meridian-spawn-agent
+# __meridian-spawn
 
 You have the `meridian` CLI for multi-agent coordination.
 
