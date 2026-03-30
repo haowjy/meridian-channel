@@ -15,19 +15,15 @@ In agent mode, all CLI output is JSON.
 
 ## Core Loop
 
-Spawns run in **foreground** (blocking) by default — the command blocks until the spawn completes and returns status (spawn_id, status, duration). Use your harness's background execution to avoid blocking yourself:
+Spawns run in **foreground** (blocking) by default — the command blocks until the spawn completes and returns status only (`spawn_id`, `status`, `duration`). Use your harness's background execution to avoid blocking yourself:
 
 ```bash
 # Run via your harness's background feature (e.g., Bash run_in_background, parallel tool calls)
 meridian spawn -a agent -p "task description"
 # → harness notifies you when done, result includes spawn_id + status
-
-# Read the report when you need it
-meridian spawn show <spawn_id>
-# → full status + report text
 ```
 
-Your harness handles the notification — no need to poll or wait. Always read reports via `spawn show`, not from the spawn command's output.
+Your harness handles the notification — no need to poll or wait. Use `spawn show` to read report content.
 
 ## Spawning
 
@@ -77,10 +73,7 @@ Spawns run in foreground (blocking) by default. To run multiple spawns concurren
 meridian spawn -a agent -p "Step A" --desc "Step A"
 meridian spawn -a agent -p "Step B" --desc "Step B"
 
-# Each returns spawn_id + status when done.
-# Read reports afterward:
-meridian spawn show <id1>
-meridian spawn show <id2>
+# Each returns when its spawn completes — no need for spawn wait.
 ```
 
 ## Checking Status
@@ -95,13 +88,7 @@ Stuck spawns auto-recover: if a spawn's process dies or goes stale, the next rea
 
 ## When a Spawn Fails
 
-If a spawn fails, read its report for details:
-
-```bash
-meridian spawn show SPAWN_ID
-```
-
-For deeper investigation, see [`resources/debugging.md`](resources/debugging.md) for log inspection.
+If `spawn wait` returns `"status": "failed"`, read the report via `spawn show SPAWN_ID` first — it usually contains the error or the agent's last output. For deeper investigation, see [`resources/debugging.md`](resources/debugging.md) for log inspection.
 
 ## Shared Filesystem
 

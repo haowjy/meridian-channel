@@ -19,13 +19,13 @@
       "source_name": "meridian-dev-workflow"
     },
     "agent:browser-tester": {
-      "content_hash": "sha256:7772b8a6d15a231d4399ddce7f66312237328d97246984a40b6c5cb7b62a8a75",
+      "content_hash": "sha256:bf46ff049e1d8f6de624790faacb092d9376a8f076b213a354746e5955452cb5",
       "destination_path": ".agents/agents/browser-tester.md",
       "source_item_id": "agent:browser-tester",
       "source_name": "meridian-dev-workflow"
     },
     "agent:coder": {
-      "content_hash": "sha256:385d0e7d64e319a45c4e753c016a5df7e35d70e29b41d4adf3b5436b6d9b8fbe",
+      "content_hash": "sha256:24c57575309a2ed9179a6ede97b37638cf31a25cfc1957ac4bf1b20719689ba6",
       "destination_path": ".agents/agents/coder.md",
       "source_item_id": "agent:coder",
       "source_name": "meridian-dev-workflow"
@@ -55,13 +55,13 @@
       "source_name": "meridian-dev-workflow"
     },
     "agent:frontend-coder": {
-      "content_hash": "sha256:e760c2d75e5f7054c6e7074e8d64334b7e443cc9c61238b61014ed00ea35e008",
+      "content_hash": "sha256:e381f6b2c1cd36df998425b5456c726f89f4f830c3540419389e3ec0a733d3d1",
       "destination_path": ".agents/agents/frontend-coder.md",
       "source_item_id": "agent:frontend-coder",
       "source_name": "meridian-dev-workflow"
     },
     "agent:frontend-designer": {
-      "content_hash": "sha256:06eacad776b07f30c9393777dc6b1d0937ca87b9fce32dd909ee2fddc8311f75",
+      "content_hash": "sha256:3b9d0f0703cea1fb93b55d1fa26519797c2992a4575622261e98fe9c4fc2dbaf",
       "destination_path": ".agents/agents/frontend-designer.md",
       "source_item_id": "agent:frontend-designer",
       "source_name": "meridian-dev-workflow"
@@ -73,13 +73,13 @@
       "source_name": "meridian-dev-workflow"
     },
     "agent:planner": {
-      "content_hash": "sha256:8721e04d3093e6ec6ae774e660ba568210617964ef26a8422d16316e70452aaf",
+      "content_hash": "sha256:db872c33a6ac37115a5c28982ac48c3b5feaa781d77c87bf747529097cef3f96",
       "destination_path": ".agents/agents/planner.md",
       "source_item_id": "agent:planner",
       "source_name": "meridian-dev-workflow"
     },
     "agent:researcher": {
-      "content_hash": "sha256:edb8ca0b0ef4734fb8bf97d2ab422f2fcc74927b51a061daabd0a282b2878a84",
+      "content_hash": "sha256:d663015342114ed297d12269e09496003c447ec19595b0dd530d12445d61158f",
       "destination_path": ".agents/agents/researcher.md",
       "source_item_id": "agent:researcher",
       "source_name": "meridian-dev-workflow"
@@ -91,7 +91,7 @@
       "source_name": "meridian-dev-workflow"
     },
     "agent:smoke-tester": {
-      "content_hash": "sha256:8a446cbca061a5ff993ed88bfc3a3b856a3d4890d10786c3d18c800833a3fe84",
+      "content_hash": "sha256:8de33c9a42204d9242e57f544ee681b1d2adbce240b2ff4c288b87272b34e636",
       "destination_path": ".agents/agents/smoke-tester.md",
       "source_item_id": "agent:smoke-tester",
       "source_name": "meridian-dev-workflow"
@@ -103,7 +103,7 @@
       "source_name": "meridian-dev-workflow"
     },
     "agent:verifier": {
-      "content_hash": "sha256:54da33b737ea7f538fc431e6a46c574a2efc240b312820893eaf65569385cea9",
+      "content_hash": "sha256:b2180b8b050356957fea3954b334aebc2036c34416635e36f83c39ce58eb01d6",
       "destination_path": ".agents/agents/verifier.md",
       "source_item_id": "agent:verifier",
       "source_name": "meridian-dev-workflow"
@@ -133,7 +133,7 @@
       "source_name": "meridian-base"
     },
     "skill:__meridian-spawn": {
-      "content_hash": "sha256:210f2a487c1881c78b0ade7f8a99f9efffa98aff5e9767925272d704093eb499",
+      "content_hash": "sha256:eccfc332c8287b90401f8af3de51d1cb45d6ab4e346c3550162e96cfedc340a6",
       "destination_path": ".agents/skills/__meridian-spawn",
       "source_item_id": "skill:__meridian-spawn",
       "source_name": "meridian-base"
@@ -232,7 +232,7 @@
   "sources": {
     "meridian-base": {
       "installed_at": null,
-      "installed_tree_hash": "sha256:4ccfb922f3d9d8de027f5e15129fd976c68b0a95abd4d20813ee346092406457",
+      "installed_tree_hash": "sha256:46014ebc4b5ad9a7093706235a7be83dec7dd58291971f191433e162516f7571",
       "items": {
         "agent:__meridian-orchestrator": {
           "path": "agents/__meridian-orchestrator.md"
@@ -273,12 +273,12 @@
       ],
       "requested_ref": "main",
       "resolved_identity": {
-        "commit": "eca8749efca1539426e17c7f91c52e4ddf90a29f"
+        "commit": "f0aa2cfdfbc1c23ecef79e0213b2d5b91f757bd6"
       }
     },
     "meridian-dev-workflow": {
       "installed_at": null,
-      "installed_tree_hash": "sha256:e1a6aef0e048a07bc30b1246193dc2a7c3e6c3f0e0612d918845c3a522dbf74f",
+      "installed_tree_hash": "sha256:c84ef716efc6f55f2ec3027ad8059861d7c9f45587ee54efbb665646569c9c66",
       "items": {
         "agent:architect": {
           "path": "agents/architect.md"
