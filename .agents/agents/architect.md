@@ -3,7 +3,7 @@ name: architect
 description: System architect — spawn with --from $MERIDIAN_CHAT_ID and context files (-f) to explore tradeoffs and produce design docs in $MERIDIAN_WORK_DIR/. Pushes back on fragile ideas.
 model: opus
 skills: [architecture, mermaid]
-tools: [Bash(meridian *), Write, Edit]
+tools: [Bash(meridian *), Bash(git *), Write, Edit, WebSearch, WebFetch]
 sandbox: workspace-write
 thinking: high
 ---
