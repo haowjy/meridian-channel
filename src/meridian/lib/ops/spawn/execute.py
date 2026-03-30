@@ -737,7 +737,7 @@ def execute_spawn_blocking(
         )
     duration = time.monotonic() - started
     row = read_spawn_row(runtime.repo_root, str(spawn.spawn_id))
-    # Report is read on-demand via `spawn show --report`, not inlined here.
+    # Report is read on-demand via `spawn show`, not inlined here.
     status = "failed"
     if row is not None:
         status = row.status

@@ -61,7 +61,7 @@ assert '<prior-spawn-context spawn=\"$SEED_ID\">' in p, 'missing context block'
 assert '## Report' in p, 'missing report section'
 assert 'Phase 1 Report' in p, 'missing report content'
 assert '## Explore Further' in p, 'missing explore section'
-assert 'meridian spawn show $SEED_ID --report' in p, 'missing show command'
+assert 'meridian spawn show $SEED_ID' in p, 'missing show command'
 print('PASS: FROM-1 basic --from')
 " || echo "FAIL: FROM-1"
 ```

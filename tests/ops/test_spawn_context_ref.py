@@ -105,7 +105,7 @@ def test_resolve_context_ref_session_prefers_latest_succeeded(tmp_path: Path) ->
     assert f'<prior-spawn-context spawn="{succeeded_id}">' in rendered
     assert "## Report" in rendered
     assert "## Files Modified" in rendered
-    assert f"`meridian spawn show {succeeded_id} --report`" in rendered
+    assert f"`meridian spawn show {succeeded_id}`" in rendered
     assert "`meridian session log c5`" in rendered
 
 

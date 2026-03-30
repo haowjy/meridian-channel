@@ -58,7 +58,7 @@ doc = json.load(open("/tmp/meridian-lifecycle-create.json"))
 print(doc.get("spawn_id") or doc.get("id"))
 PY
 )" && \
-uv run meridian spawn show "$SPAWN_ID" --report > /tmp/meridian-lifecycle-show.txt && \
+uv run meridian spawn show "$SPAWN_ID" > /tmp/meridian-lifecycle-show.txt && \
 grep -q 'Status:' /tmp/meridian-lifecycle-show.txt && \
 grep -q "Spawn: $SPAWN_ID" /tmp/meridian-lifecycle-show.txt && \
 echo "PASS: spawn show returned lifecycle data" || echo "FAIL: spawn show output was incomplete"

@@ -26,7 +26,7 @@ meridian spawn -a researcher -p "Map the auth module — token handling, session
 
 # Wait for it, then read what it found
 meridian spawn wait p1
-meridian spawn show p1 --report
+meridian spawn show p1
 
 # Spawn coders in parallel on Codex, passing the researcher's findings
 meridian spawn -a coder --from p1 -p "Phase 1: Replace session tokens with JWT" -f src/auth/tokens.py
@@ -38,7 +38,7 @@ meridian spawn wait p2 p3
 # Fan out reviewers with different focus areas
 meridian spawn -a reviewer --from p2 -p "Review phase 1 — focus on token expiry edge cases"
 # → {"spawn_id": "p4", "model": "gpt-5.4"}
-meridian spawn show p4 --report
+meridian spawn show p4
 
 # Pick up context from a prior session
 meridian session search "auth refactor"
@@ -141,7 +141,7 @@ directly:
 meridian spawn -m codex -p "Fix the flaky test in tests/auth/"
 meridian spawn list
 meridian spawn wait p1
-meridian spawn show p1 --report
+meridian spawn show p1
 ```
 
 ## How It Works
@@ -221,7 +221,7 @@ graph TB
 | `meridian spawn -a AGENT -p "task"` | Delegate work to a routed model |
 | `meridian spawn list` | See running and recent spawns |
 | `meridian spawn wait ID` | Block until a spawn completes |
-| `meridian spawn show ID --report` | Read a spawn's report |
+| `meridian spawn show ID` | Read a spawn's report |
 | `meridian spawn --continue ID -p "more"` | Continue a prior spawn |
 | `meridian spawn --from ID -p "next"` | Start new spawn with prior context |
 
