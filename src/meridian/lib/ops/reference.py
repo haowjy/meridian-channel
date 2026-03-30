@@ -1,0 +1,180 @@
+"""Shared session/spawn reference resolution helpers."""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from pathlib import Path
+
+from meridian.lib.harness.registry import get_default_harness_registry
+from meridian.lib.harness.session_detection import infer_harness_from_untracked_session_ref
+from meridian.lib.state import session_store, spawn_store
+from meridian.lib.state.paths import resolve_state_paths
+
+_SPAWN_REF_RE = re.compile(r"^p\d+$")
+_CHAT_REF_RE = re.compile(r"^c\d+$")
+
+
+@dataclass(frozen=True)
+class ResolvedSessionReference:
+    """Result of resolving a user-provided session/spawn reference."""
+
+    harness_session_id: str | None
+    harness: str | None
+    source_chat_id: str | None
+    source_model: str | None
+    source_agent: str | None
+    source_skills: tuple[str, ...]
+    source_work_id: str | None
+    tracked: bool
+    warning: str | None = None
+
+
+def _normalize_optional(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _latest_harness_session_id(record: session_store.SessionRecord) -> str | None:
+    for candidate in reversed(record.harness_session_ids):
+        normalized = candidate.strip()
+        if normalized:
+            return normalized
+    return _normalize_optional(record.harness_session_id)
+
+
+def _resolve_untracked_reference(repo_root: Path, ref: str) -> ResolvedSessionReference:
+    registry = get_default_harness_registry()
+    inferred_harness = infer_harness_from_untracked_session_ref(
+        repo_root,
+        ref,
+        registry=registry,
+    )
+    return ResolvedSessionReference(
+        harness_session_id=ref,
+        harness=str(inferred_harness) if inferred_harness is not None else None,
+        source_chat_id=None,
+        source_model=None,
+        source_agent=None,
+        source_skills=(),
+        source_work_id=None,
+        tracked=False,
+        warning=(
+            f"Session '{ref}' is not tracked yet; "
+            "resuming with the provided harness session id."
+        ),
+    )
+
+
+def _resolve_spawn_reference(
+    state_root: Path, ref: str, repo_root: Path
+) -> ResolvedSessionReference:
+    row = spawn_store.get_spawn(state_root, ref)
+    if row is None:
+        return _resolve_untracked_reference(repo_root, ref)
+
+    harness_session_id = _normalize_optional(row.harness_session_id)
+    stored_harness = _normalize_optional(row.harness)
+    registry = get_default_harness_registry()
+    verified_harness = (
+        infer_harness_from_untracked_session_ref(
+            repo_root,
+            harness_session_id,
+            registry=registry,
+        )
+        if harness_session_id is not None
+        else None
+    )
+    return ResolvedSessionReference(
+        harness_session_id=harness_session_id,
+        harness=str(verified_harness) if verified_harness is not None else stored_harness,
+        source_chat_id=_normalize_optional(row.chat_id),
+        source_model=_normalize_optional(row.model),
+        source_agent=_normalize_optional(row.agent),
+        source_skills=row.skills,
+        source_work_id=_normalize_optional(row.work_id),
+        tracked=True,
+    )
+
+
+def _resolve_chat_reference(
+    state_root: Path, ref: str, repo_root: Path
+) -> ResolvedSessionReference:
+    records = session_store.get_session_records(state_root, {ref})
+    if not records:
+        return _resolve_untracked_reference(repo_root, ref)
+
+    session = records[0]
+    harness_session_id = _latest_harness_session_id(session)
+    stored_harness = _normalize_optional(session.harness)
+    registry = get_default_harness_registry()
+    verified_harness = (
+        infer_harness_from_untracked_session_ref(
+            repo_root,
+            harness_session_id,
+            registry=registry,
+        )
+        if harness_session_id is not None
+        else None
+    )
+    return ResolvedSessionReference(
+        harness_session_id=harness_session_id,
+        harness=str(verified_harness) if verified_harness is not None else stored_harness,
+        source_chat_id=session.chat_id,
+        source_model=_normalize_optional(session.model),
+        source_agent=_normalize_optional(session.agent),
+        source_skills=session.skills,
+        source_work_id=_normalize_optional(session.active_work_id),
+        tracked=True,
+    )
+
+
+def _resolve_harness_session_reference(
+    state_root: Path, ref: str, repo_root: Path
+) -> ResolvedSessionReference:
+    session = session_store.resolve_session_ref(state_root, ref)
+    if session is None:
+        return _resolve_untracked_reference(repo_root, ref)
+
+    stored_harness_session_id = _normalize_optional(session.harness_session_id)
+    harness_session_id = stored_harness_session_id or ref
+    stored_harness = _normalize_optional(session.harness)
+    registry = get_default_harness_registry()
+    verified_harness = infer_harness_from_untracked_session_ref(
+        repo_root,
+        harness_session_id,
+        registry=registry,
+    )
+    return ResolvedSessionReference(
+        harness_session_id=harness_session_id,
+        harness=str(verified_harness) if verified_harness is not None else stored_harness,
+        source_chat_id=session.chat_id,
+        source_model=_normalize_optional(session.model),
+        source_agent=_normalize_optional(session.agent),
+        source_skills=session.skills,
+        source_work_id=_normalize_optional(session.active_work_id),
+        tracked=True,
+    )
+
+
+def resolve_session_reference(repo_root: Path, ref: str) -> ResolvedSessionReference:
+    """Resolve a session/spawn reference to harness session ID and source metadata."""
+
+    normalized = ref.strip()
+    if not normalized:
+        raise ValueError("Session reference is required.")
+
+    state_root = resolve_state_paths(repo_root).root_dir
+    if _SPAWN_REF_RE.fullmatch(normalized):
+        return _resolve_spawn_reference(state_root, normalized, repo_root)
+    if _CHAT_REF_RE.fullmatch(normalized):
+        return _resolve_chat_reference(state_root, normalized, repo_root)
+    return _resolve_harness_session_reference(state_root, normalized, repo_root)
+
+
+__all__ = [
+    "ResolvedSessionReference",
+    "resolve_session_reference",
+]

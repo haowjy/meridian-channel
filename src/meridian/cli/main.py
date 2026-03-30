@@ -29,11 +29,11 @@ from meridian.cli.session_cmd import register_session_commands
 from meridian.lib.core.sink import OutputSink
 from meridian.lib.core.util import FormatContext
 from meridian.lib.harness.registry import get_default_harness_registry
-from meridian.lib.harness.session_detection import infer_harness_from_untracked_session_ref
 from meridian.lib.launch import LaunchRequest, SessionMode, launch_primary
+from meridian.lib.ops.reference import resolve_session_reference
 from meridian.lib.ops.spawn.api import SpawnActionOutput
 from meridian.lib.state.paths import resolve_state_paths
-from meridian.lib.state.session_store import cleanup_stale_sessions, resolve_session_ref
+from meridian.lib.state.session_store import cleanup_stale_sessions
 from meridian.server.main import run_server
 
 logger = logging.getLogger(__name__)
@@ -719,45 +719,13 @@ def _resolve_continue_target(
     if not normalized:
         raise ValueError("--continue requires a non-empty session reference.")
 
-    state_root = resolve_state_paths(repo_root).root_dir
-    registry = get_default_harness_registry()
-
-    # Look up what our session store says (hint, not authority).
-    session = resolve_session_ref(state_root, normalized)
-    stored_harness_session_id = (
-        session.harness_session_id.strip() or None if session is not None else None
-    )
-    stored_harness = session.harness.strip() or None if session is not None else None
-    # The actual session ID to resume — either what the store recorded or the
-    # raw ref the user gave us.
-    session_id = stored_harness_session_id or normalized
-
-    # Ask adapters who actually owns this session (ground truth).
-    verified_harness = infer_harness_from_untracked_session_ref(
-        repo_root,
-        session_id,
-        registry=registry,
-    )
-
-    # Resolution order: adapter verification > stored metadata.
-    # If nobody recognizes the session, return harness=None and let
-    # the caller decide — it may have an explicit --harness override.
-    harness = verified_harness or stored_harness
-
-    warning = (
-        None
-        if session is not None
-        else (
-            f"Session '{normalized}' is not tracked yet; "
-            "resuming with the provided harness session id."
-        )
-    )
+    resolved = resolve_session_reference(repo_root, normalized)
     return _ResolvedContinueTarget(
-        harness_session_id=session_id,
-        chat_id=session.chat_id if session is not None else None,
-        harness=harness,
-        tracked=session is not None,
-        warning=warning,
+        harness_session_id=resolved.harness_session_id,
+        chat_id=resolved.source_chat_id,
+        harness=resolved.harness,
+        tracked=resolved.tracked,
+        warning=resolved.warning,
     )
 
 

@@ -10,6 +10,7 @@ from pathlib import Path
 from meridian.lib.core.context import RuntimeContext
 from meridian.lib.core.sink import NullSink, OutputSink
 from meridian.lib.core.spawn_lifecycle import ACTIVE_SPAWN_STATUSES, is_active_spawn_status
+from meridian.lib.ops.reference import ResolvedSessionReference, resolve_session_reference
 from meridian.lib.ops.runtime import (
     build_runtime_from_root_and_config,
     resolve_runtime_root_and_config,
@@ -591,12 +592,13 @@ async def spawn_wait(
 def _source_spawn_for_follow_up(
     payload_spawn_id: str,
     repo_root: Path,
-) -> tuple[str, spawn_store.SpawnRecord]:
+) -> tuple[str, spawn_store.SpawnRecord, ResolvedSessionReference]:
     resolved_spawn_id = resolve_spawn_reference(repo_root, payload_spawn_id)
     row = read_spawn_row(repo_root, resolved_spawn_id)
     if row is None:
         raise ValueError(f"Spawn '{resolved_spawn_id}' not found")
-    return resolved_spawn_id, row
+    resolved_reference = resolve_session_reference(repo_root, resolved_spawn_id)
+    return resolved_spawn_id, row, resolved_reference
 
 
 def _prompt_for_follow_up(
@@ -628,10 +630,10 @@ def spawn_continue_sync(
     sink: OutputSink | None = None,
 ) -> SpawnActionOutput:
     repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
-    resolved_spawn_id, source_spawn = _source_spawn_for_follow_up(payload.spawn_id, repo_root)
+    resolved_spawn_id, source_spawn, resolved_reference = _source_spawn_for_follow_up(
+        payload.spawn_id, repo_root
+    )
     derived_prompt = _prompt_for_follow_up(source_spawn, resolved_spawn_id, payload.prompt)
-    source_harness = (source_spawn.harness or "").strip() or None
-    source_session_id = (source_spawn.harness_session_id or "").strip() or None
     create_input = SpawnCreateInput(
         prompt=derived_prompt,
         model=_model_for_follow_up(source_spawn, payload.model),
@@ -640,8 +642,8 @@ def spawn_continue_sync(
         repo_root=payload.repo_root,
         dry_run=payload.dry_run,
         timeout=payload.timeout,
-        continue_harness_session_id=source_session_id,
-        continue_harness=source_harness,
+        continue_harness_session_id=resolved_reference.harness_session_id,
+        continue_harness=resolved_reference.harness,
         continue_fork=payload.fork,
         passthrough_args=payload.passthrough_args,
         approval=payload.approval,
