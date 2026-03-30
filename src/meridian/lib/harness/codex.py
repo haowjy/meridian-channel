@@ -2,9 +2,14 @@
 
 import json
 import logging
+import os
 import re
+import sqlite3
+import tempfile
+import time
 from pathlib import Path
 from typing import ClassVar, cast
+from uuid import uuid4
 
 from meridian.lib.core.domain import TokenUsage
 from meridian.lib.core.types import HarnessId, SpawnId
@@ -42,6 +47,71 @@ def _codex_thinking_transform(value: object, args: list[str]) -> None:
     if not normalized:
         return
     args.extend(["-c", f'model_reasoning_effort="{normalized}"'])
+
+
+def _codex_continue_fork_transform(value: object, args: list[str]) -> None:
+    _ = value, args
+
+
+def _fsync_directory(path: Path) -> None:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        flags |= os.O_DIRECTORY
+    directory_fd = os.open(path, flags)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
+def _rewrite_forked_session_meta(line: str, new_session_id: str) -> str:
+    try:
+        payload_obj = json.loads(line)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Codex rollout first line is not valid JSON.") from exc
+    if not isinstance(payload_obj, dict):
+        raise RuntimeError("Codex rollout first line must be a JSON object.")
+    payload_dict_obj = cast("dict[str, object]", payload_obj)
+    payload = payload_dict_obj.get("payload")
+    if payload_dict_obj.get("type") != "session_meta" or not isinstance(payload, dict):
+        raise RuntimeError("Codex rollout first line must be a session_meta payload.")
+
+    payload_dict = cast("dict[str, object]", payload)
+    payload_dict["id"] = new_session_id
+    payload_dict_obj["payload"] = payload_dict
+    return json.dumps(payload_dict_obj) + "\n"
+
+
+def _copy_rollout_atomic(*, source_path: Path, target_path: Path, new_session_id: str) -> None:
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{target_path.name}.",
+        suffix=".tmp",
+        dir=target_path.parent,
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as target_handle:
+            with source_path.open("r", encoding="utf-8") as source_handle:
+                first_line = source_handle.readline()
+                if not first_line:
+                    raise RuntimeError(f"Codex rollout file is empty: {source_path}")
+                target_handle.write(_rewrite_forked_session_meta(first_line, new_session_id))
+                for line in source_handle:
+                    target_handle.write(line)
+            target_handle.flush()
+            os.fsync(target_handle.fileno())
+        os.replace(tmp_path, target_path)
+        _fsync_directory(target_path.parent)
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+
+
+def _fork_rollout_path(*, source_path: Path, source_session_id: str, new_session_id: str) -> Path:
+    source_name = source_path.name
+    if source_session_id in source_name:
+        return source_path.with_name(source_name.replace(source_session_id, new_session_id, 1))
+    return source_path.with_name(f"{source_path.stem}-{new_session_id}{source_path.suffix}")
 
 
 def _resolve_rollout_session_id(path: Path, resolved_repo: Path) -> str | None:
@@ -211,7 +281,10 @@ class CodexAdapter(BaseSubprocessHarness):
         "agent": FlagStrategy(effect=FlagEffect.DROP),
         "skills": FlagStrategy(effect=FlagEffect.DROP),
         "continue_harness_session_id": FlagStrategy(effect=FlagEffect.DROP),
-        "continue_fork": FlagStrategy(effect=FlagEffect.DROP),
+        "continue_fork": FlagStrategy(
+            effect=FlagEffect.TRANSFORM,
+            transform=_codex_continue_fork_transform,
+        ),
         "appended_system_prompt": FlagStrategy(effect=FlagEffect.DROP),
     }
     PROMPT_MODE: ClassVar[PromptMode] = PromptMode.POSITIONAL
@@ -241,6 +314,7 @@ class CodexAdapter(BaseSubprocessHarness):
             supports_stream_events=True,
             supports_stdin_prompt=True,
             supports_session_resume=True,
+            supports_session_fork=True,
             supports_native_skills=True,
             supports_programmatic_tools=False,
             supports_primary_launch=True,
@@ -366,6 +440,74 @@ class CodexAdapter(BaseSubprocessHarness):
             json_keys=self.SESSION_ID_KEYS,
             text_patterns=self.SESSION_ID_TEXT_PATTERNS,
         )
+
+    def fork_session(self, source_session_id: str) -> str:
+        normalized_source_session_id = source_session_id.strip()
+        if not normalized_source_session_id:
+            raise ValueError("source_session_id is required.")
+
+        db_path = Path.home() / ".codex" / "state_5.sqlite"
+        connection: sqlite3.Connection | None = None
+        try:
+            connection = sqlite3.connect(str(db_path), timeout=10)
+            connection.row_factory = sqlite3.Row
+            source_row = connection.execute(
+                "SELECT * FROM threads WHERE id = ?",
+                (normalized_source_session_id,),
+            ).fetchone()
+            if source_row is None:
+                raise ValueError(
+                    f"Codex session '{normalized_source_session_id}' not found in threads table."
+                )
+
+            source_rollout_path_raw = source_row["rollout_path"]
+            if not isinstance(source_rollout_path_raw, str):
+                raise RuntimeError("Codex threads.rollout_path must be a string.")
+
+            source_rollout_path = Path(source_rollout_path_raw).expanduser()
+            if not source_rollout_path.is_file():
+                raise FileNotFoundError(f"Codex rollout file not found: {source_rollout_path}")
+
+            new_session_id = str(uuid4())
+            target_rollout_path = _fork_rollout_path(
+                source_path=source_rollout_path,
+                source_session_id=normalized_source_session_id,
+                new_session_id=new_session_id,
+            )
+            _copy_rollout_atomic(
+                source_path=source_rollout_path,
+                target_path=target_rollout_path,
+                new_session_id=new_session_id,
+            )
+
+            # Codex owns this schema. Clone source row and only patch Meridian-relevant
+            # fields to reduce coupling to Codex-internal table evolution.
+            inserted_values = dict(source_row)
+            inserted_values["id"] = new_session_id
+            inserted_values["rollout_path"] = str(target_rollout_path)
+            now = int(time.time())
+            for timestamp_column in ("created_at", "updated_at"):
+                if timestamp_column in inserted_values and isinstance(
+                    inserted_values[timestamp_column], int
+                ):
+                    inserted_values[timestamp_column] = now
+
+            columns = tuple(inserted_values.keys())
+            column_sql = ", ".join(f'"{column_name}"' for column_name in columns)
+            placeholders = ", ".join("?" for _ in columns)
+            connection.execute(
+                f"INSERT INTO threads ({column_sql}) VALUES ({placeholders})",
+                tuple(inserted_values[column_name] for column_name in columns),
+            )
+            connection.commit()
+            return new_session_id
+        except (FileNotFoundError, ValueError):
+            raise
+        except (OSError, RuntimeError, json.JSONDecodeError, sqlite3.Error) as exc:
+            raise RuntimeError(f"Failed to fork Codex session: {exc}") from exc
+        finally:
+            if connection is not None:
+                connection.close()
 
     def owns_untracked_session(self, *, repo_root: Path, session_ref: str) -> bool:
         return _owns_session(repo_root, session_ref)

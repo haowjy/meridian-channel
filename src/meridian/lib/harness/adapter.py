@@ -210,6 +210,12 @@ class BaseSubprocessHarness:
         _ = name, description, prompt
         return ""
 
+    def fork_session(self, source_session_id: str) -> str:
+        """Fork one harness session and return the new session ID."""
+
+        _ = source_session_id
+        raise NotImplementedError
+
     def owns_untracked_session(self, *, repo_root: Path, session_ref: str) -> bool:
         _ = repo_root, session_ref
         return False
