@@ -4,7 +4,7 @@ description: Context scoping for agent spawns — choosing between -f, --from, a
 ---
 # Context Handoffs
 
-Every spawn starts with a context decision. Get it wrong and the agent either guesses (too little context) or drowns (too much). The `__meridian-spawn` skill teaches the mechanics of `-f`, `--from`, and spawn commands. This skill teaches the judgment — when to use which, how much to pass, and when to materialize before spawning.
+Every spawn starts with a context decision. Get it wrong and the agent either guesses (too little context) or drowns (too much). The `/__meridian-spawn` skill teaches the mechanics of `-f`, `--from`, and spawn commands. This skill teaches the judgment — when to use which, how much to pass, and when to materialize before spawning.
 
 ## Choose the Right Mechanism
 

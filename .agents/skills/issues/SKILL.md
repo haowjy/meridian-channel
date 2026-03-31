@@ -5,7 +5,7 @@ description: Mirror local tracking artifacts to GitHub Issues for team visibilit
 
 # Issue Tracking
 
-This skill assumes `__meridian-work-coordination` already defines work ownership and artifact placement. Spawn reports and work-scoped notes are the source of truth. GitHub Issues are a visibility layer — they give the team searchability, linkability, and a shared view of what was found during agent work.
+This skill assumes `/__meridian-work-coordination` already defines work ownership and artifact placement. Spawn reports and work-scoped notes are the source of truth. GitHub Issues are a visibility layer — they give the team searchability, linkability, and a shared view of what was found during agent work.
 
 If `gh` is unavailable, everything works fine with local tracking only. No errors, no warnings. Issues are a bonus, not a requirement.
 

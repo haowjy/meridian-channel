@@ -26,7 +26,7 @@ Before spawning anything, clarify the user's intent:
 - **Constraints**: Performance, compatibility, timeline, reversibility
 - **Success criteria**: How will the user know this is done correctly?
 
-Spawn explorers or researchers for context when the request touches unfamiliar parts of the codebase or requires external knowledge. Materialize findings into files before downstream handoffs (see `context-handoffs`).
+Spawn explorers or researchers for context when the request touches unfamiliar parts of the codebase or requires external knowledge. Materialize findings into files before downstream handoffs (see `/context-handoffs`).
 
 ## Scaling Ceremony
 

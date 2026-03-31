@@ -37,7 +37,7 @@ Each spawn is: **model + prompt + context**. Compose good prompts:
 - Set clear boundaries — one step per spawn, not the whole plan
 - Tell the subagent to verify its own work within the spawn
 
-Use `meridian spawn` for execution. See the `__meridian-spawn` skill for CLI details, including parallel execution patterns.
+Use `meridian spawn` for execution. See the `/__meridian-spawn` skill for CLI details, including parallel execution patterns.
 
 Orchestrators can also be composed when a lifecycle needs clear handoff boundaries. For example, a dev-orchestrator might own user-facing alignment, then spawn a design-orchestrator for autonomous design exploration and an impl-orchestrator for autonomous implementation. Each orchestrator still runs the same understand-plan-execute-evaluate loop within its own scope.
 

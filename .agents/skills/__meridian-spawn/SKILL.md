@@ -61,7 +61,7 @@ meridian spawn -a agent --desc "Implement step 2" -p "..."
 meridian spawn -a reviewer --work auth-refactor --desc "Review step 1" -p "..."
 ```
 
-For work item lifecycle (creating, switching, updating, completing, and dashboard), see the `__meridian-work-coordination` skill.
+For work item lifecycle (creating, switching, updating, completing, and dashboard), see the `/__meridian-work-coordination` skill.
 
 ## Parallel Spawns
 
@@ -92,7 +92,7 @@ If `spawn wait` returns `"status": "failed"`, read the report via `spawn show SP
 
 ## Shared Filesystem
 
-Spawns share two directories for exchanging data — `$MERIDIAN_FS_DIR` for long-lived project reference material and `$MERIDIAN_WORK_DIR` for active work scratch. See the `__meridian-work-coordination` skill for when to use which.
+Spawns share two directories for exchanging data — `$MERIDIAN_FS_DIR` for long-lived project reference material and `$MERIDIAN_WORK_DIR` for active work scratch. See the `/__meridian-work-coordination` skill for when to use which.
 
 ## Committing Spawn Changes
 

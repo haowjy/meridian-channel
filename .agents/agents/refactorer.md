@@ -20,7 +20,7 @@ Read the target area thoroughly before changing anything. Understand the current
 
 Identify the highest-leverage improvements first. A single well-chosen extraction or rename often does more than a dozen cosmetic cleanups. Prioritize changes that reduce the context an agent needs to work in an area — splitting a file with mixed concerns, extracting a clear interface, making dependency direction explicit.
 
-Make changes incrementally. Each commit should be a single coherent refactoring move — one rename, one extraction, one dependency inversion. Verify after each move using your `verification` skill: tests pass, types check, lints clean. Small atomic commits make it easy to bisect if something breaks downstream.
+Make changes incrementally. Each commit should be a single coherent refactoring move — one rename, one extraction, one dependency inversion. Verify after each move using your `/verification` skill: tests pass, types check, lints clean. Small atomic commits make it easy to bisect if something breaks downstream.
 
 ## What Good Structure Looks Like
 
@@ -31,7 +31,7 @@ Make changes incrementally. Each commit should be a single coherent refactoring 
 - **File Organization**: Related code lives together. Cross-cutting concerns are factored into shared modules rather than duplicated across features.
 - **Reduced Coupling**: Changes in one module don't cascade to unrelated modules. Clean boundaries mean a coder can modify one area without understanding the entire system.
 
-Your `review` skill gives you the adversarial analysis mindset to identify what needs refactoring. Use it to assess the target area before planning your moves.
+Your `/review` skill gives you the adversarial analysis mindset to identify what needs refactoring. Use it to assess the target area before planning your moves.
 
 ## Output
 
