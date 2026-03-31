@@ -47,23 +47,23 @@ pub struct SyncReport {
 
 /// The complete sync pipeline.
 ///
-/// 1. Load config (agents.toml + agents.local.toml merge)
-/// 2. Load existing lock file
-/// 3. Fetch sources + resolve dependency graph
-/// 4. Discover items in each source, apply filtering
-/// 5. Build target state, detect collisions
-/// 6. Diff current state against target (using dual checksums from lock)
-/// 7. Plan actions from diff
-/// 8. Acquire sync lock
+/// 1. Acquire sync lock (flock on .agents/.mars/sync.lock)
+/// 2. Load config (agents.toml + agents.local.toml merge)
+/// 3. Load existing lock file
+/// 4. Fetch sources + resolve dependency graph — abort on any fetch failure
+/// 5. Discover items in each source, apply filtering
+/// 6. Build target state, detect collisions, rewrite frontmatter
+/// 7. Diff current state against rendered target (using dual checksums from lock)
+/// 8. Plan actions from diff
 /// 9. Apply plan (or dry-run)
-/// 10. Write new lock file
-/// 11. Release sync lock
-/// 12. Validate agent→skill references (warnings)
+/// 10. Write new lock file (atomic)
+/// 11. Validate agent→skill references (warnings)
+/// 12. Release sync lock
 /// 13. Return report
 pub fn sync(ctx: &SyncContext) -> Result<SyncReport>;
 ```
 
-**Key invariant**: Steps 1-7 are pure computation (fetch has I/O, but it's idempotent). Steps 8-11 are the critical section under the advisory flock. This minimizes lock hold time.
+**Key invariant**: The sync lock is held from start to end (step 1 → step 12). This prevents TOCTOU races where two concurrent syncs compute diffs from the same stale lock. The diff logic relies on lock checksums — if the lock changes between diff and apply, the plan is invalid.
 
 **Abort semantics**: If ANY source fetch fails in step 3, abort before modifying `.agents/` or the lock. Partially updated caches are fine (non-authoritative). The lock file is only written after all apply actions succeed.
 
@@ -110,6 +110,8 @@ pub fn build(
 /// (exists on disk, not in lock).
 pub fn check_collisions(
     target: &mut TargetState,
+    graph: &ResolvedGraph,     // needed for source URLs → {owner}_{repo} extraction
+    config: &EffectiveConfig,  // needed for explicit rename precedence
     lock: &LockFile,
     root: &Path,
 ) -> Result<Vec<CollisionWarning>>;

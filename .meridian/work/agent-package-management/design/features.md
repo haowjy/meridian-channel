@@ -22,6 +22,8 @@ Note: `mars add` auto-initializes if no `.agents/` exists, so explicit `mars ini
 
 Add a source to `agents.toml`, resolve, install, and update the lock file. If `.agents/` doesn't exist, auto-initializes first (no separate `mars init` required).
 
+If the source already exists in config, `mars add` is an **upsert** — updates the version constraint and re-resolves. This is the way to pin a source to a different version without using `mars upgrade`.
+
 Accepts git URLs, GitHub shorthand (`owner/repo`), and local paths. Defaults to `@latest` when no version is specified.
 
 ```bash

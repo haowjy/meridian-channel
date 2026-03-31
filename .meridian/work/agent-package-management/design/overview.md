@@ -11,9 +11,13 @@
 
 ## Why It Exists
 
-The `.agents/` directory is an industry standard used by 16+ tools, but nobody manages it properly. Existing skill managers (Skills.sh, Skild, Tessl) handle individual skill installation — none do dependency resolution, merge strategies, provenance tracking, or manage agent profiles alongside skills.
+The `.agents/` directory is an industry convention used by many AI coding tools, and several skill managers exist (Skills.sh, Skild, Tessl, Vett). They handle skill installation, discovery, and even dependency bundling — but they all avoid managing `.agents/` as a live working directory where users customize installed content alongside managed content.
 
-Meridian currently has a basic file copier (`meridian sources`) that syncs from git repos/local paths. It works but has real gaps: no dependency validation, binary conflict handling, no merge strategies, no orphan pruning on renames. mars-agents replaces this with a proper package manager.
+Mars solves the **mixed-ownership problem**: multiple sources composing into one `.agents/` directory where local edits are expected, preserved via three-way merge, and collisions are resolved automatically with dependency-graph-aware frontmatter rewrites. No other tool manages agent profiles alongside skills as one install graph with cross-source constraint resolution.
+
+**Security posture (v1)**: commit SHA pinning + checksums for integrity. Cryptographic signing and risk gating (as offered by Vett) are explicit non-goals for v1 — mars assumes trusted sources (team-internal repos, known publishers).
+
+Meridian currently has a basic file copier (`meridian sources`). mars-agents replaces this with a proper package manager.
 
 ## Core Concepts
 
