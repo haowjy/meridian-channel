@@ -135,6 +135,17 @@ Resolution options:
 
 Rename only changes the filename on disk. The frontmatter `name:` field is preserved, so the agent remains reachable by its original name (harnesses match on both filename and frontmatter name). Renames don't break cross-references.
 
+### Collision with User-Authored Files
+
+If a source tries to install an item at a path that already exists on disk but isn't in the lock (i.e., user-created), mars errors:
+
+```
+error: can't install skills/my-custom-skill from `meridian-base` — a user-authored file already exists at that path
+  hint: rename the source item via `rename` in agents.toml, or remove your file
+```
+
+Mars never silently overwrites user content. Same principle as source-to-source collisions.
+
 ## v1: Dependency System
 
 ### Version Resolution
