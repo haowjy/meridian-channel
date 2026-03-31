@@ -33,21 +33,31 @@ mars add haowjy/meridian-base --agents coder --skills frontend-design
 
 The core operation. Fetch sources, resolve dependencies, install into `.agents/`, update lock file.
 
-1. Read `agents.toml` for declared sources (merged with `agents.local.toml` if present)
-2. Fetch/update source content (git clone/pull or local copy)
-3. Read manifests from each source (if present; filesystem discovery otherwise)
-4. Resolve dependency graph (topological sort with version constraints)
-5. Validate: warn if any `skills: [X]` reference in agent frontmatter doesn't resolve
-6. Detect name collisions — error if two sources provide the same item name
-7. Diff current `.agents/` against resolved target state
-8. Apply changes:
-   - New files: copy in
-   - Unchanged files: skip
-   - Clean updates (no local modifications): overwrite
-   - Conflicting updates (local mods + upstream changes): three-way merge, write conflict markers if needed
-9. Prune orphans: files in old lock but not new lock get removed (one owner per item)
-10. Write new `agents.lock`
-11. Report: installed, updated, conflicted, pruned
+Acquires an advisory file lock (`flock` on `.agents/.mars/sync.lock`) at the start and holds it through completion. Concurrent `mars sync` processes block until the lock is released — no stale-plan races.
+
+If any source fetch fails (network error, auth failure), the entire sync aborts before modifying `.agents/` or the lock file. Partially updated caches are fine (non-authoritative, reused next run).
+
+Pipeline:
+
+1. Acquire sync lock
+2. Read `agents.toml` for declared sources (merged with `agents.local.toml` if present)
+3. Fetch/update source content (git clone/pull or local copy) — abort on any failure
+4. Read manifests from each source (if present; filesystem discovery otherwise)
+5. Resolve dependency graph (topological sort with version constraints)
+6. Build target state: apply intent-based filtering (`agents`/`skills`/`exclude`), resolve skill deps from frontmatter
+7. Detect collisions on destination paths — auto-rename with `{name}__{owner}_{repo}`
+8. Rewrite frontmatter skill references for renamed transitive deps
+9. Validate: warn if any `skills: [X]` reference doesn't resolve
+10. Diff current `.agents/` against target state (using dual checksums from lock)
+11. Apply changes:
+    - New files: copy in (atomic write)
+    - Unchanged files: skip
+    - Clean updates (no local modifications): overwrite
+    - Conflicting updates (local mods + upstream changes): three-way merge via `git2::merge_file()`, write conflict markers if needed
+12. Prune orphans: items in old lock but not new lock get removed
+13. Write new `agents.lock` (atomic write)
+14. Release sync lock
+15. Report: installed, updated, conflicted, pruned
 
 Exit code: 0 if clean, 1 if unresolved conflicts remain.
 
@@ -124,7 +134,7 @@ architect (agent)
 
 Three-way merge is the core differentiating feature. Without it, mars offers the same binary keep/overwrite behavior as existing tools.
 
-Uses `threeway_merge` crate (libgit2/xdiff algorithms, 100% compatible with `git merge-file`). Base = last synced version (checksum + cached content from lock). Local = current file on disk. Theirs = new source version.
+Uses `git2::merge_file()` — libgit2's built-in three-way merge with conflict markers (git2 is already a dependency for git operations, no extra crate needed). Base = last synced version (cached content from lock). Local = current file on disk. Theirs = new source version.
 
 Four cases on sync, determined by comparing checksums against lock:
 
