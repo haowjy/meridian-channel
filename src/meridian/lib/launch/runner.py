@@ -8,7 +8,7 @@ import time
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import structlog
 from pydantic import BaseModel, ConfigDict
@@ -100,30 +100,6 @@ class SpawnResult(BaseModel):
     stderr_log_path: Path
     budget_breach: BudgetBreach | None = None
     terminated_by_report_watchdog: bool = False
-
-
-def _materialize_forked_session_if_needed(
-    *,
-    harness: Any,
-    run_params: SpawnParams,
-) -> SpawnParams:
-    """Materialize Codex fork state before command construction when requested."""
-
-    if harness.id != HarnessId.CODEX or not run_params.continue_fork:
-        return run_params
-
-    source_session_id = (run_params.continue_harness_session_id or "").strip()
-    if not source_session_id:
-        return run_params
-
-    forked_session_id = harness.fork_session(source_session_id)
-    return run_params.model_copy(
-        update={
-            "continue_harness_session_id": forked_session_id,
-            # Fork has already been materialized for Codex.
-            "continue_fork": False,
-        }
-    )
 
 
 def run_log_dir(repo_root: Path, spawn_id: SpawnId) -> Path:
@@ -613,6 +589,10 @@ async def execute_with_finalization(
         report_output_path=report_path.as_posix(),
         appended_system_prompt=plan.appended_system_prompt,
     )
+    # Codex fork materialization is resolved during plan construction:
+    # - Child spawns: ops/spawn/prepare.py
+    # - Primary launches: launch/process.py
+    # runner.py executes the prepared plan and must not re-fork.
     prompt_stdin = run.prompt if harness.capabilities.supports_stdin_prompt else None
 
     resolved_perms = plan.execution.permission_resolver
@@ -655,10 +635,6 @@ async def execute_with_finalization(
             launch_mode=FOREGROUND_LAUNCH_MODE,
             status="queued",
         )
-    run_params = _materialize_forked_session_if_needed(
-        harness=harness,
-        run_params=run_params,
-    )
     materialized_session_id = (run_params.continue_harness_session_id or "").strip()
     if (
         materialized_session_id

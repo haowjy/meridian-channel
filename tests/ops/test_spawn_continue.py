@@ -57,7 +57,7 @@ def test_spawn_continue_errors_when_source_spawn_lacks_harness_session_id(
         raise AssertionError("Expected continue from missing harness session to fail.")
 
 
-def test_spawn_continue_passes_resume_details_in_legacy_and_session_dto_fields(
+def test_spawn_continue_passes_resume_details_in_session_dto_fields(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -99,15 +99,12 @@ def test_spawn_continue_passes_resume_details_in_legacy_and_session_dto_fields(
     assert result.command == "spawn.continue"
     assert captured_input is not None
 
-    # Legacy continuation fields remain populated for compatibility.
-    assert captured_input.continue_harness_session_id == "session-21"
-    assert captured_input.continue_harness == "codex"
-    assert captured_input.continue_source_tracked is True
-    assert captured_input.continue_source_ref == "p21"
-    assert captured_input.continue_fork is True
-
     # Session DTO carries the canonical continuation payload.
     assert captured_input.session.harness_session_id == "session-21"
+    assert captured_input.session.continue_harness == "codex"
+    assert captured_input.session.continue_source_tracked is True
+    assert captured_input.session.continue_source_ref == "p21"
     assert captured_input.session.continue_fork is True
+    assert captured_input.session.continue_chat_id == "c-seed"
     assert captured_input.session.forked_from_chat_id == "c-seed"
     assert captured_input.session.source_execution_cwd == "/tmp/source-cwd"

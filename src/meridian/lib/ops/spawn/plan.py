@@ -26,6 +26,10 @@ class SessionContinuation(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     harness_session_id: str | None = None
+    continue_harness: str | None = None
+    continue_source_tracked: bool = False
+    continue_source_ref: str | None = None
+    continue_chat_id: str | None = None
     continue_fork: bool = False
     forked_from_chat_id: str | None = None
     source_execution_cwd: str | None = None

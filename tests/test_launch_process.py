@@ -12,6 +12,7 @@ from meridian.lib.harness.registry import get_default_harness_registry
 from meridian.lib.launch import process
 from meridian.lib.launch.plan import ResolvedPrimaryLaunchPlan
 from meridian.lib.launch.types import LaunchRequest, PrimarySessionMetadata, SessionMode
+from meridian.lib.ops.spawn.plan import SessionContinuation
 from meridian.lib.safety.permissions import PermissionConfig, TieredPermissionResolver
 
 if TYPE_CHECKING:
@@ -91,9 +92,12 @@ def test_run_harness_process_fork_uses_new_chat_and_materialized_session(
         model="gpt-5.4",
         harness="codex",
         session_mode=SessionMode.FORK,
-        continue_harness_session_id="source-session",
-        continue_chat_id="c7",
-        forked_from_chat_id="c7",
+        session=SessionContinuation(
+            harness_session_id="source-session",
+            continue_chat_id="c7",
+            forked_from_chat_id="c7",
+            continue_fork=True,
+        ),
     )
     plan = ResolvedPrimaryLaunchPlan(
         repo_root=repo_root,

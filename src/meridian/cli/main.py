@@ -652,14 +652,12 @@ def _run_primary_launch(
             timeout=timeout,
             session=SessionContinuation(
                 harness_session_id=continue_harness_session_id,
+                continue_harness=continue_harness,
+                continue_chat_id=continue_chat_id,
                 continue_fork=continue_fork,
                 forked_from_chat_id=forked_from_chat_id,
                 source_execution_cwd=source_execution_cwd,
             ),
-            continue_harness_session_id=continue_harness_session_id,
-            continue_chat_id=continue_chat_id,
-            continue_fork=continue_fork,
-            forked_from_chat_id=forked_from_chat_id,
         ),
         harness_registry=harness_registry,
     )

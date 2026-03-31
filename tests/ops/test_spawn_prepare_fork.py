@@ -6,6 +6,7 @@ from meridian.lib.harness.registry import get_default_harness_registry
 from meridian.lib.launch.resolve import ResolvedPolicies, ResolvedSkills
 from meridian.lib.ops.runtime import build_runtime_from_root_and_config
 from meridian.lib.ops.spawn.models import SpawnCreateInput
+from meridian.lib.ops.spawn.plan import SessionContinuation
 from meridian.lib.ops.spawn.prepare import build_create_payload
 
 
@@ -55,9 +56,11 @@ def test_fork_materializes_only_for_non_dry_run(monkeypatch, tmp_path: Path) -> 
         SpawnCreateInput(
             prompt="fork prompt",
             repo_root=tmp_path.as_posix(),
-            continue_harness_session_id="source-session",
-            continue_harness="codex",
-            continue_fork=True,
+            session=SessionContinuation(
+                harness_session_id="source-session",
+                continue_harness="codex",
+                continue_fork=True,
+            ),
             dry_run=False,
         ),
         runtime=runtime,
@@ -66,9 +69,11 @@ def test_fork_materializes_only_for_non_dry_run(monkeypatch, tmp_path: Path) -> 
         SpawnCreateInput(
             prompt="fork prompt",
             repo_root=tmp_path.as_posix(),
-            continue_harness_session_id="source-session",
-            continue_harness="codex",
-            continue_fork=True,
+            session=SessionContinuation(
+                harness_session_id="source-session",
+                continue_harness="codex",
+                continue_fork=True,
+            ),
             dry_run=True,
         ),
         runtime=runtime,

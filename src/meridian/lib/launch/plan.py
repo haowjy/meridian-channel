@@ -235,24 +235,24 @@ def resolve_primary_launch_plan(
         bootstrap_missing_items=bootstrap_plan.missing_items,
     )
 
-    # Prefer session DTO fields, then fall back to legacy top-level inputs.
-    resolved_harness_session_id = (
-        request.session.harness_session_id
-        or (request.continue_harness_session_id or "").strip()
-        or None
-    )
-    resolved_continue_chat_id = (request.continue_chat_id or "").strip() or None
-    resolved_continue_fork = request.session.continue_fork or request.continue_fork
-    resolved_forked_from_chat_id = (
-        request.session.forked_from_chat_id or request.forked_from_chat_id
-    )
+    resolved_harness_session_id = (request.session.harness_session_id or "").strip() or None
+    resolved_continue_chat_id = (request.session.continue_chat_id or "").strip() or None
+    resolved_continue_fork = request.session.continue_fork
+    resolved_forked_from_chat_id = request.session.forked_from_chat_id
+    resolved_continue_harness = (request.session.continue_harness or "").strip() or None
     source_execution_cwd = request.session.source_execution_cwd
-    resolved_request = request.model_copy(
+    resolved_session = request.session.model_copy(
         update={
-            "continue_harness_session_id": resolved_harness_session_id,
+            "harness_session_id": resolved_harness_session_id,
+            "continue_harness": resolved_continue_harness,
             "continue_chat_id": resolved_continue_chat_id,
             "continue_fork": resolved_continue_fork,
             "forked_from_chat_id": resolved_forked_from_chat_id,
+        }
+    )
+    resolved_request = request.model_copy(
+        update={
+            "session": resolved_session,
         }
     )
 
@@ -260,13 +260,15 @@ def resolve_primary_launch_plan(
     session_intent = SessionIntent(
         mode=resolved_request.session_mode,
         harness_session_id=explicit_harness_session_id or None,
-        chat_id=resolved_request.continue_chat_id,
-        forked_from_chat_id=resolved_request.forked_from_chat_id,
+        chat_id=resolved_request.session.continue_chat_id,
+        forked_from_chat_id=resolved_request.session.forked_from_chat_id,
     )
     continuation_harness_session_id = (
         session_intent.harness_session_id if session_intent.mode != SessionMode.FRESH else None
     )
-    continue_fork = session_intent.mode == SessionMode.FORK or resolved_request.continue_fork
+    continue_fork = (
+        session_intent.mode == SessionMode.FORK or resolved_request.session.continue_fork
+    )
     seed = adapter.seed_session(
         is_resume=session_intent.mode == SessionMode.RESUME,
         harness_session_id=explicit_harness_session_id,

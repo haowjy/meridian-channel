@@ -57,16 +57,13 @@ _WAIT_HEARTBEAT_INTERVAL_SECS = 5.0
 
 
 def _forked_from_output(payload: SpawnCreateInput) -> str | None:
-    continue_fork = payload.session.continue_fork or payload.continue_fork
-    if not continue_fork:
+    if not payload.session.continue_fork:
         return None
 
-    source_chat_id = (
-        payload.session.forked_from_chat_id or payload.forked_from_chat_id or ""
-    ).strip()
+    source_chat_id = (payload.session.forked_from_chat_id or "").strip()
     if source_chat_id:
         return source_chat_id
-    source_ref = (payload.continue_source_ref or "").strip()
+    source_ref = (payload.session.continue_source_ref or "").strip()
     if source_ref:
         return source_ref
     return None
@@ -670,15 +667,13 @@ def spawn_continue_sync(
         repo_root=payload.repo_root,
         dry_run=payload.dry_run,
         timeout=payload.timeout,
-        continue_harness_session_id=resolved_reference.harness_session_id,
-        continue_harness=resolved_reference.harness,
-        continue_source_tracked=resolved_reference.tracked,
-        continue_source_ref=resolved_spawn_id,
-        continue_fork=payload.fork,
-        forked_from_chat_id=resolved_reference.source_chat_id if payload.fork else None,
         session=SessionContinuation(
             harness_session_id=resolved_reference.harness_session_id,
+            continue_harness=resolved_reference.harness,
+            continue_source_tracked=resolved_reference.tracked,
+            continue_source_ref=resolved_spawn_id,
             continue_fork=payload.fork,
+            continue_chat_id=resolved_reference.source_chat_id,
             forked_from_chat_id=resolved_reference.source_chat_id if payload.fork else None,
             source_execution_cwd=resolved_reference.source_execution_cwd,
         ),

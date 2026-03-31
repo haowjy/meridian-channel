@@ -277,17 +277,13 @@ def build_create_payload(
         prior_output=prior_output,
         reference_mode=reference_mode,
     )
-    requested_harness_session_id = (
-        payload.session.harness_session_id
-        or (payload.continue_harness_session_id or "").strip()
-        or None
-    )
-    requested_continue_fork = payload.session.continue_fork or payload.continue_fork
-    resolved_forked_from = payload.session.forked_from_chat_id or payload.forked_from_chat_id
+    requested_harness_session_id = (payload.session.harness_session_id or "").strip() or None
+    requested_continue_fork = payload.session.continue_fork
+    resolved_forked_from = payload.session.forked_from_chat_id
     resolved_source_execution_cwd = payload.session.source_execution_cwd
-    requested_harness = (payload.continue_harness or "").strip()
-    if payload.continue_source_tracked and requested_harness_session_id is None:
-        raise ValueError(_missing_continue_session_error(payload.continue_source_ref))
+    requested_harness = (payload.session.continue_harness or "").strip()
+    if payload.session.continue_source_tracked and requested_harness_session_id is None:
+        raise ValueError(_missing_continue_session_error(payload.session.continue_source_ref))
     resolved_continue_harness_session_id: str | None = None
     resolved_continue_fork = False
     continuation_warning: str | None = None
@@ -322,7 +318,8 @@ def build_create_payload(
         if not forked_session_id:
             raise RuntimeError("Harness adapter returned empty fork session ID.")
         resolved_continue_harness_session_id = forked_session_id
-        # Codex forking is materialized before command construction.
+        # Canonical fork materialization for child spawns happens during
+        # prepare so runner.py executes an already-materialized plan.
         resolved_continue_fork = False
 
     missing_skills_warning = (
@@ -398,6 +395,10 @@ def build_create_payload(
         autocompact=resolved.autocompact,
         session=SessionContinuation(
             harness_session_id=resolved_continue_harness_session_id,
+            continue_harness=payload.session.continue_harness,
+            continue_source_tracked=payload.session.continue_source_tracked,
+            continue_source_ref=payload.session.continue_source_ref,
+            continue_chat_id=payload.session.continue_chat_id,
             continue_fork=resolved_continue_fork,
             forked_from_chat_id=resolved_forked_from,
             source_execution_cwd=resolved_source_execution_cwd,

@@ -6,7 +6,7 @@ import fcntl
 import json
 import threading
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, Any, TypeVar, cast
@@ -17,17 +17,6 @@ from meridian.lib.state.atomic import append_text_line
 
 T = TypeVar("T")
 _THREAD_LOCAL = threading.local()
-EventObserver = Callable[[str, dict[str, Any]], None]  # (store_name, event_payload)
-_observers: list[EventObserver] = []
-
-
-def register_observer(observer: EventObserver) -> None:
-    _observers.append(observer)
-
-
-def unregister_observer(observer: EventObserver) -> None:
-    with suppress(ValueError):
-        _observers.remove(observer)
 
 
 def utc_now_iso() -> str:
@@ -79,16 +68,12 @@ def append_event(
     store_name: str,
     exclude_none: bool = False,
 ) -> None:
+    # Preserved for caller compatibility; observers were removed.
+    _ = store_name
     payload = event.model_dump(exclude_none=exclude_none)
     line = json.dumps(payload, separators=(",", ":"), sort_keys=True) + "\n"
     with lock_file(lock_path):
         append_text_line(data_path, line)
-
-    # Notify observers after durable write, outside the lock.
-    # Snapshot the list so mutations during dispatch are safe.
-    for observer in list(_observers):
-        with suppress(Exception):
-            observer(store_name, payload)
 
 
 def read_events(

@@ -97,7 +97,8 @@ def _resolve_command_and_session(
     run_params = run_params.model_copy(
         update={
             "continue_harness_session_id": forked_session_id,
-            # Codex forking is materialized before launch command build.
+            # Primary launches bypass ops/spawn/prepare.py, so this is the
+            # canonical fork materialization site for launch CLI execution.
             "continue_fork": False,
         }
     )
@@ -287,7 +288,9 @@ def run_harness_process(
     artifacts = LocalStore(root_dir=resolve_state_paths(plan.repo_root).artifacts_dir)
 
     resume_chat_id = (
-        plan.request.continue_chat_id if plan.request.session_mode == SessionMode.RESUME else None
+        plan.request.session.continue_chat_id
+        if plan.request.session_mode == SessionMode.RESUME
+        else None
     )
     exit_code = 2
     try:
@@ -297,7 +300,7 @@ def run_harness_process(
             harness_session_id=resolved_harness_session_id,
             model=plan.session_metadata.model,
             chat_id=resume_chat_id,
-            forked_from_chat_id=plan.request.forked_from_chat_id,
+            forked_from_chat_id=plan.request.session.forked_from_chat_id,
             agent=plan.session_metadata.agent,
             agent_path=plan.session_metadata.agent_path,
             agent_source=plan.session_metadata.agent_source,
