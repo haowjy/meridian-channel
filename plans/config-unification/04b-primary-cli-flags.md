@@ -38,7 +38,7 @@ class LaunchRequest(BaseModel):
     continue_harness_session_id: str | None = None
     continue_chat_id: str | None = None
     # NEW fields:
-    thinking: str | None = None
+    effort: str | None = None
     sandbox: str | None = None
     timeout: float | None = None
 ```
@@ -50,11 +50,11 @@ class LaunchRequest(BaseModel):
 Add to the `root()` function parameters:
 
 ```python
-thinking: Annotated[
+effort: Annotated[
     str | None,
     Parameter(
-        name="--thinking",
-        help="Thinking budget: low, medium, high, xhigh.",
+        name="--effort",
+        help="Effort level for reasoning: low, medium, high, xhigh.",
     ),
 ] = None,
 sandbox: Annotated[
@@ -97,7 +97,7 @@ _run_primary_launch(
     work=work,
     yolo=yolo,
     approval=approval,       # NEW
-    thinking=thinking,       # NEW
+    effort=effort,       # NEW
     sandbox=sandbox,         # NEW
     timeout=timeout,         # NEW
     autocompact=autocompact,
@@ -116,7 +116,7 @@ launch_result = launch_primary(
         agent=agent,
         work_id=work.strip() or None,
         autocompact=autocompact,
-        thinking=thinking,           # NEW
+        effort=effort,           # NEW
         sandbox=sandbox,             # NEW
         timeout=timeout,             # NEW
         approval=resolved_approval,
@@ -131,7 +131,7 @@ launch_result = launch_primary(
 The harness shortcut function (claude, codex, opencode) needs the same flags. Add matching parameters:
 
 ```python
-thinking: Annotated[str | None, Parameter(name="--thinking", help="...")] = None,
+effort: Annotated[str | None, Parameter(name="--effort", help="...")] = None,
 sandbox: Annotated[str | None, Parameter(name="--sandbox", help="...")] = None,
 approval: Annotated[str | None, Parameter(name="--approval", help="...")] = None,
 timeout: Annotated[float | None, Parameter(name="--timeout", help="...")] = None,
@@ -152,7 +152,7 @@ def _run_primary_launch(
     work: str,
     yolo: bool,
     approval: str | None,    # NEW
-    thinking: str | None,    # NEW
+    effort: str | None,    # NEW
     sandbox: str | None,     # NEW
     timeout: float | None,   # NEW
     autocompact: int | None,
@@ -169,7 +169,7 @@ def from_launch_request(cls, request: LaunchRequest) -> "RuntimeOverrides":
     return cls(
         model=request.model or None,
         harness=request.harness,
-        thinking=request.thinking,
+        effort=request.effort,
         sandbox=request.sandbox,
         approval=request.approval if request.approval != "default" else None,
         autocompact=request.autocompact,
@@ -184,7 +184,7 @@ Add new flags to the set so the argv parser handles them correctly:
 _TOP_LEVEL_VALUE_FLAGS = frozenset({
     "--format", "--config", "--continue", "--model", "--harness",
     "--agent", "-a", "--work", "--autocompact",
-    "--thinking", "--sandbox", "--approval", "--timeout",  # NEW
+    "--effort", "--sandbox", "--approval", "--timeout",  # NEW
 })
 ```
 
@@ -205,9 +205,9 @@ _TOP_LEVEL_VALUE_FLAGS = frozenset({
 - [ ] `uv run pyright` passes with 0 errors
 - [ ] `uv run ruff check .` passes
 - [ ] `uv run pytest-llm` passes
-- [ ] `uv run meridian --help` shows --thinking, --sandbox, --approval, --timeout
+- [ ] `uv run meridian --help` shows --effort, --sandbox, --approval, --timeout
 - [ ] `uv run meridian claude --help` shows the same new flags
-- [ ] `uv run meridian --dry-run --thinking high` includes thinking in launch plan
+- [ ] `uv run meridian --dry-run --effort high` includes effort in launch plan
 - [ ] `uv run meridian --dry-run --approval auto` works (and --yolo still works)
 - [ ] `uv run meridian --yolo --approval auto` raises error (mutual exclusion)
 - [ ] `uv run meridian --dry-run --sandbox full-access` works

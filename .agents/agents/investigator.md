@@ -5,7 +5,7 @@ model: gpt
 skills: [issues]
 tools: [Bash, Write, Edit, WebSearch, WebFetch]
 sandbox: workspace-write
-thinking: medium
+effort: medium
 ---
 
 # Investigator

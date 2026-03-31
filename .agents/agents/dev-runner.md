@@ -8,7 +8,7 @@ tools: [Bash, Write, Edit, WebSearch, WebFetch]
 sandbox: unrestricted
 approval: auto
 autocompact: 85
-thinking: high
+effort: high
 ---
 
 # Impl Orchestrator

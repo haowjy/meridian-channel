@@ -5,7 +5,7 @@ model: gpt
 skills: [review]
 tools: [Bash(meridian spawn show *), Bash(meridian session *), Bash(meridian work show *), Bash(meridian spawn report *), Bash(git diff *), Bash(git log *), Bash(git show *), Bash(git status *)]
 sandbox: read-only
-thinking: high
+effort: high
 ---
 
 # Reviewer
@@ -15,4 +15,3 @@ You find what's wrong, not confirm what's right. Code that passes your review sh
 The orchestrator's prompt tells you what to focus on. Go deep on the assigned focus rather than skimming everything. If no focus is specified, assess the code yourself and figure out what matters most.
 
 When you find something, explain why it matters and what you'd do instead. Classify by severity so the orchestrator can triage — not every finding blocks a merge.
-

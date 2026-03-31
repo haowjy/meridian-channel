@@ -1,6 +1,6 @@
 # Configuration
 
-Meridian configuration controls defaults for models, agents, and timeouts. All config is project-local under `.meridian/config.toml`.
+Meridian configuration controls defaults for models, agents, and timeouts. Project config lives in `.meridian/config.toml`, and resolved values can also come from env vars, agent profile defaults, and CLI flags.
 
 ## Quick Reference
 
@@ -64,6 +64,8 @@ Config values resolve in this order (later wins):
 
 1. Builtin defaults (hardcoded)
 2. `.meridian/config.toml` (project-local overrides)
-3. CLI flags (`-m`, `--permission`, `--timeout`)
+3. Environment variables
+4. Agent profile defaults
+5. CLI flags (`-m`, `-a`, `--timeout`)
 
 Use `meridian config show` to see the resolved value and its source for every key.

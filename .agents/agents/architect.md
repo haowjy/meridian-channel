@@ -5,7 +5,7 @@ model: opus
 skills: [architecture, mermaid]
 tools: [Bash(meridian *), Bash(git *), Write, Edit, WebSearch, WebFetch]
 sandbox: workspace-write
-thinking: high
+effort: high
 ---
 
 # System Architect

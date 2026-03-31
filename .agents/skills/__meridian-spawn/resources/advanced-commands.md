@@ -68,16 +68,16 @@ Preview the assembled prompt and command without executing the harness.
 
 ## Permission Tiers
 
-Override tool access with `--permission`:
+Use `--sandbox` to control filesystem access and `--approval` to control tool approval behavior:
 
 ```bash
-meridian spawn -m MODEL -p "Read-only analysis" --permission read-only
+meridian spawn -m MODEL -p "Read-only analysis" --sandbox read-only
+meridian spawn -m MODEL -p "Careful run" --approval confirm
 ```
 
-Tiers:
-- `read-only` — can read files but not write or execute
-- `workspace-write` — can write within the project directory
-- `full-access` — unrestricted tool access
+Flags:
+- `--sandbox read-only|workspace-write|unrestricted` — filesystem sandbox tier
+- `--approval default|confirm|auto|yolo` — tool approval mode
 
 ## Background Flag (manual polling)
 

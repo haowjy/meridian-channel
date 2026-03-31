@@ -6,7 +6,7 @@ skills: [__meridian-spawn, __meridian-session-context, __meridian-work-coordinat
 tools: [Bash, Write, Edit, WebSearch, WebFetch]
 sandbox: unrestricted
 approval: yolo
-thinking: high
+effort: high
 ---
 
 # Plan Orchestrator

@@ -97,7 +97,7 @@ Update to:
 ```python
 """Load config with precedence: defaults < user < project < environment.
 
-RuntimeOverrides fields (model, harness, thinking, etc.) are NOT loaded
+RuntimeOverrides fields (model, harness, effort, etc.) are NOT loaded
 from ENV here — they are read separately via RuntimeOverrides.from_env().
 """
 ```

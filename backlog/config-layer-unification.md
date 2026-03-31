@@ -30,7 +30,7 @@ class RuntimeOverrides(BaseModel):
     """Fields that can be set at any config layer."""
     model: str | None = None
     harness: str | None = None
-    thinking: str | None = None
+    effort: str | None = None
     sandbox: str | None = None
     approval: str | None = None
     autocompact: int | None = None
@@ -76,7 +76,7 @@ Layer-specific fields stay on their own models:
 
 ### Harness mapping
 
-Harness-specific flag translation (approval → `--dangerously-skip-permissions`, thinking → `--effort`, etc.) stays adapter-owned. `RuntimeOverrides` carries abstract values; adapters translate. This is not the registry's job.
+Harness-specific flag translation (approval → `--dangerously-skip-permissions`, effort → `--effort`, etc.) stays adapter-owned. `RuntimeOverrides` carries abstract values; adapters translate. This is not the registry's job.
 
 ### What this replaces
 
@@ -91,7 +91,7 @@ Harness-specific flag translation (approval → `--dangerously-skip-permissions`
 |-------|-----|-------------|---------------|------|---------------|-------------|
 | model | `MERIDIAN_MODEL` | `--model` | `--model` | ✅ | `primary.model` | `primary.model` |
 | harness | `MERIDIAN_HARNESS` | `--harness` | `--harness` | ✅ | `primary.harness` | `primary.harness` |
-| thinking | ❌ | `--thinking` | ❌ | ✅ | ❌ | ❌ |
+| effort | ❌ | `--effort` | ❌ | ✅ | ❌ | ❌ |
 | sandbox | ❌ | `--sandbox` | ❌ | ✅ | ❌ | ❌ |
 | approval | ❌ | `--approval` | `--yolo` only | ✅ | ❌ | ❌ |
 | autocompact | ❌ | `--autocompact` | `--autocompact` | ✅ | `autocompact_pct` ⚠️ | `autocompact_pct` ⚠️ |
@@ -105,7 +105,7 @@ Every RuntimeOverrides field present in ALL applicable layers:
 |-------|-----|-------------|---------------|------|---------------|-------------|
 | model | `MERIDIAN_MODEL` | `--model` | `--model` | ✅ | ✅ | ✅ |
 | harness | `MERIDIAN_HARNESS` | `--harness` | `--harness` | ✅ | ✅ | ✅ |
-| thinking | `MERIDIAN_THINKING` | `--thinking` | `--thinking` | ✅ | ✅ | ✅ |
+| effort | `MERIDIAN_EFFORT` | `--effort` | `--effort` | ✅ | ✅ | ✅ |
 | sandbox | `MERIDIAN_SANDBOX` | `--sandbox` | `--sandbox` | ✅ | ✅ | ✅ |
 | approval | `MERIDIAN_APPROVAL` | `--approval` | `--approval` | ✅ | ✅ | ✅ |
 | autocompact | `MERIDIAN_AUTOCOMPACT` | `--autocompact` | `--autocompact` | ✅ | ✅ | ✅ |
@@ -146,7 +146,7 @@ Every RuntimeOverrides field present in ALL applicable layers:
 ### Phase 4: Close remaining gaps
 - Add missing fields to each layer per the target state matrix
 - Rename `autocompact_pct` → `autocompact` (deprecated alias)
-- Add `--approval`, `--thinking`, `--sandbox`, `--timeout`, `--budget`, `--max-turns` to primary CLI
+- Add `--approval`, `--effort`, `--sandbox`, `--timeout`, `--budget`, `--max-turns` to primary CLI
 - Add missing ENV vars
 
 ### Phase 5: Naming convention enforcement
