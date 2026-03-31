@@ -97,6 +97,10 @@ Commit after each step that passes tests. Don't accumulate changes across multip
 2. If you must proceed, `git stash --include-untracked` first
 3. When reverting agent changes, distinguish agent-created files from pre-existing untracked files
 
+## Related Repos
+
+- **mars-agents** (`../mars-agents/`): Standalone agent package manager for `.agents/`. Rust CLI, binary name `mars`. Replaces meridian's `sources`/`agents.toml`/`agents.lock` with a proper package manager — dependency resolution, merge strategies, provenance tracking, user overrides. See `backlog/agent-package-management-redesign.md` for background. Repo: `haowjy/mars-agents`.
+
 ## Current Focus
 
 See `backlog/` for open items. Keep `plans/` limited to current implementation plans only.

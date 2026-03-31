@@ -15,15 +15,21 @@ In agent mode, all CLI output is JSON.
 
 ## Core Loop
 
-Spawns run in **foreground** (blocking) by default — the command blocks until the spawn completes and returns status only (`spawn_id`, `status`, `duration`). Use your harness's background execution to avoid blocking yourself:
+Spawns run in **foreground** (blocking) by default — the command blocks until the spawn completes and returns status only (`spawn_id`, `status`, `duration`). Reports are NOT included in spawn output — read them separately via `spawn show`.
+
+Use your harness's background execution to avoid blocking yourself:
 
 ```bash
 # Run via your harness's background feature (e.g., Bash run_in_background, parallel tool calls)
 meridian spawn -a agent -p "task description"
-# → harness notifies you when done, result includes spawn_id + status
+
+# When the background task notification arrives, read the output to get the spawn ID:
+# → output contains: spawn_id, status, model, exit_code
+# Then read the report:
+meridian spawn show <spawn_id>
 ```
 
-Your harness handles the notification — no need to poll or wait. Use `spawn show` to read report content.
+**Important**: The spawn ID is in the background task's output. When your harness notifies you that a background command completed, read that output to get the spawn ID, then use `meridian spawn show <id>` to read the full report. Do not search for spawn IDs by listing directories or querying the work dashboard — the ID is already in the task output.
 
 ## Spawning
 
@@ -73,7 +79,10 @@ Spawns run in foreground (blocking) by default. To run multiple spawns concurren
 meridian spawn -a agent -p "Step A" --desc "Step A"
 meridian spawn -a agent -p "Step B" --desc "Step B"
 
-# Each returns when its spawn completes — no need for spawn wait.
+# Each returns spawn_id + status when done.
+# As each background task completes, read its output for the spawn ID.
+# Read all reports in one call:
+meridian spawn show <id1> <id2>
 ```
 
 ## Checking Status
