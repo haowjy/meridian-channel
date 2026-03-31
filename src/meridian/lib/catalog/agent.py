@@ -10,8 +10,8 @@ from meridian.lib.catalog.skill import split_markdown_frontmatter
 from meridian.lib.config.settings import resolve_repo_root
 from meridian.lib.core.overrides import (
     KNOWN_APPROVAL_VALUES,
+    KNOWN_EFFORT_VALUES,
     KNOWN_SANDBOX_VALUES,
-    KNOWN_THINKING_VALUES,
 )
 
 logger = logging.getLogger(__name__)
@@ -22,7 +22,7 @@ _AUTOCOMPACT_PCT_MAX = 100
 
 # Re-export under private names for backward compatibility within this module.
 _KNOWN_SANDBOX_VALUES = KNOWN_SANDBOX_VALUES
-_KNOWN_THINKING_VALUES = KNOWN_THINKING_VALUES
+_KNOWN_EFFORT_VALUES = KNOWN_EFFORT_VALUES
 _KNOWN_APPROVAL_VALUES = KNOWN_APPROVAL_VALUES
 
 
@@ -39,7 +39,7 @@ class AgentProfile(BaseModel):
     tools: tuple[str, ...]
     mcp_tools: tuple[str, ...]
     sandbox: str | None
-    thinking: str | None
+    effort: str | None
     approval: str | None = None
     autocompact: int | None = None
     body: str
@@ -82,7 +82,7 @@ def parse_agent_profile(path: Path) -> AgentProfile:
     model_value = frontmatter.get("model")
     harness_value = frontmatter.get("harness")
     sandbox_value = frontmatter.get("sandbox")
-    thinking_value = frontmatter.get("thinking")
+    effort_value = frontmatter.get("effort")
     approval_value = frontmatter.get("approval")
     autocompact_value = frontmatter.get("autocompact")
 
@@ -94,12 +94,12 @@ def parse_agent_profile(path: Path) -> AgentProfile:
             profile_name,
             sandbox,
         )
-    thinking = str(thinking_value).strip() if thinking_value is not None else None
-    if thinking is not None and thinking and thinking not in _KNOWN_THINKING_VALUES:
+    effort = str(effort_value).strip() if effort_value is not None else None
+    if effort is not None and effort and effort not in _KNOWN_EFFORT_VALUES:
         logger.warning(
-            "Agent profile '%s' has unknown thinking '%s'.",
+            "Agent profile '%s' has unknown effort '%s'.",
             profile_name,
-            thinking,
+            effort,
         )
 
     approval = str(approval_value).strip() if approval_value is not None else None
@@ -143,7 +143,7 @@ def parse_agent_profile(path: Path) -> AgentProfile:
         tools=_normalize_string_list(frontmatter.get("tools")),
         mcp_tools=_normalize_deduplicated(frontmatter.get("mcp-tools")),
         sandbox=sandbox,
-        thinking=thinking,
+        effort=effort,
         approval=approval,
         autocompact=autocompact,
         body=body,

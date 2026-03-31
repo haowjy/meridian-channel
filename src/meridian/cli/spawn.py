@@ -184,11 +184,11 @@ def _spawn_create(
             help="Autocompact threshold percentage (1-100). Overrides agent profile.",
         ),
     ] = None,
-    thinking: Annotated[
+    effort: Annotated[
         str | None,
         Parameter(
-            name="--thinking",
-            help="Thinking budget: low, medium, high, xhigh. Overrides agent profile.",
+            name="--effort",
+            help="Effort level: low, medium, high, xhigh. Overrides agent profile.",
         ),
     ] = None,
     sandbox: Annotated[
@@ -286,7 +286,7 @@ def _spawn_create(
                 timeout=timeout,
                 approval=resolved_approval,
                 autocompact=autocompact,
-                thinking=thinking,
+                effort=effort,
                 sandbox=sandbox,
                 harness=requested_harness or resolved_reference.harness,
                 passthrough_args=passthrough,
@@ -342,7 +342,7 @@ def _spawn_create(
                 timeout=timeout,
                 approval=resolved_approval,
                 autocompact=autocompact,
-                thinking=thinking,
+                effort=effort,
                 sandbox=sandbox,
                 harness=harness,
                 passthrough_args=passthrough,

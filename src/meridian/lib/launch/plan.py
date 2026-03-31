@@ -124,7 +124,7 @@ def _build_run_params(
     *,
     prompt: str,
     model: ModelId | None,
-    thinking: str | None,
+    effort: str | None,
     skills: tuple[str, ...],
     agent: str | None,
     adhoc_agent_payload: str,
@@ -139,7 +139,7 @@ def _build_run_params(
     return SpawnParams(
         prompt=prompt,
         model=model,
-        thinking=thinking,
+        effort=effort,
         skills=skills,
         agent=agent,
         adhoc_agent_payload=adhoc_agent_payload,
@@ -276,7 +276,7 @@ def resolve_primary_launch_plan(
         run_params = _build_run_params(
             prompt=resolved_prompt,
             model=model,
-            thinking=resolved.thinking,
+            effort=resolved.effort,
             skills=resolved_skills.skill_names,
             agent=profile_name or None,
             adhoc_agent_payload=adhoc_agent_payload,
@@ -349,7 +349,7 @@ def resolve_primary_launch_plan(
     run_params = _build_run_params(
         prompt=appended_prompt,
         model=model,
-        thinking=resolved.thinking,
+        effort=resolved.effort,
         skills=resolved_skills.skill_names,
         agent=profile_name or None,
         adhoc_agent_payload=adhoc_agent_payload,

@@ -42,7 +42,7 @@ def _env_overrides(overrides: dict[str, str]) -> Iterator[None]:
 _TEST_VALUES: dict[str, str] = {
     "model": "test-model",
     "harness": "claude",
-    "thinking": "high",
+    "effort": "high",
     "sandbox": "full-access",
     "approval": "auto",
     "autocompact": "50",
@@ -127,7 +127,7 @@ def test_from_config_round_trip() -> None:
     primary = PrimaryConfig(
         model="test-model",
         harness="claude",
-        thinking="high",
+        effort="high",
         sandbox="full-access",
         approval="auto",
         autocompact=50,
@@ -146,14 +146,14 @@ def test_resolve_precedence() -> None:
     from meridian.lib.core.overrides import RuntimeOverrides, resolve
 
     cli = RuntimeOverrides(model="cli-model")
-    env = RuntimeOverrides(model="env-model", thinking="high")
-    profile = RuntimeOverrides(model="profile-model", thinking="low", sandbox="full-access")
+    env = RuntimeOverrides(model="env-model", effort="high")
+    profile = RuntimeOverrides(model="profile-model", effort="low", sandbox="full-access")
     config = RuntimeOverrides(
-        model="config-model", thinking="medium", sandbox="read-only", timeout=10.0
+        model="config-model", effort="medium", sandbox="read-only", timeout=10.0
     )
 
     result = resolve(cli, env, profile, config)
     assert result.model == "cli-model"
-    assert result.thinking == "high"
+    assert result.effort == "high"
     assert result.sandbox == "full-access"
     assert result.timeout == 10.0

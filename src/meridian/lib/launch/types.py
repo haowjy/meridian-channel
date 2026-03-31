@@ -55,7 +55,7 @@ class LaunchRequest(BaseModel):
     pinned_context: str = ""
     dry_run: bool = False
     approval: str = "default"
-    thinking: str | None = None
+    effort: str | None = None
     sandbox: str | None = None
     timeout: float | None = None
     session: SessionContinuation = Field(default_factory=SessionContinuation)

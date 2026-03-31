@@ -41,7 +41,7 @@ class SpawnCreateInput(BaseModel):
     timeout: float | None = None
     approval: str | None = None
     autocompact: int | None = None
-    thinking: str | None = None
+    effort: str | None = None
     sandbox: str | None = None
     harness: str | None = None
     passthrough_args: tuple[str, ...] = ()

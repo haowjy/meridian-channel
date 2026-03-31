@@ -15,9 +15,9 @@ class _NoopResolver:
         return []
 
 
-def test_claude_thinking_maps_xhigh_to_max() -> None:
+def test_claude_effort_maps_xhigh_to_max() -> None:
     command = ClaudeAdapter().build_command(
-        SpawnParams(prompt="do work", thinking="xhigh"),
+        SpawnParams(prompt="do work", effort="xhigh"),
         _NoopResolver(),
     )
 
@@ -25,9 +25,9 @@ def test_claude_thinking_maps_xhigh_to_max() -> None:
     assert command[command.index("--effort") + 1] == "max"
 
 
-def test_codex_thinking_emits_reasoning_effort_config() -> None:
+def test_codex_effort_emits_reasoning_effort_config() -> None:
     command = CodexAdapter().build_command(
-        SpawnParams(prompt="do work", thinking="high"),
+        SpawnParams(prompt="do work", effort="high"),
         _NoopResolver(),
     )
 
@@ -35,9 +35,9 @@ def test_codex_thinking_emits_reasoning_effort_config() -> None:
     assert 'model_reasoning_effort="high"' in command
 
 
-def test_opencode_thinking_emits_variant_flag() -> None:
+def test_opencode_effort_emits_variant_flag() -> None:
     command = OpenCodeAdapter().build_command(
-        SpawnParams(prompt="do work", thinking="medium"),
+        SpawnParams(prompt="do work", effort="medium"),
         _NoopResolver(),
     )
 
@@ -53,7 +53,7 @@ def test_opencode_thinking_emits_variant_flag() -> None:
         (OpenCodeAdapter(), "--variant"),
     ),
 )
-def test_missing_or_none_thinking_emits_no_flags(
+def test_missing_or_none_effort_emits_no_flags(
     adapter: _HarnessAdapter,
     flag: str,
 ) -> None:
@@ -62,7 +62,7 @@ def test_missing_or_none_thinking_emits_no_flags(
         _NoopResolver(),
     )
     command_none = adapter.build_command(
-        SpawnParams(prompt="do work", thinking=None),
+        SpawnParams(prompt="do work", effort=None),
         _NoopResolver(),
     )
 

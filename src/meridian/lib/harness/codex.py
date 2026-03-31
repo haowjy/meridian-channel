@@ -42,7 +42,7 @@ CODEX_ROLLOUT_FILENAME_RE = re.compile(
 )
 
 
-def _codex_thinking_transform(value: object, args: list[str]) -> None:
+def _codex_effort_transform(value: object, args: list[str]) -> None:
     normalized = str(value).strip()
     if not normalized:
         return
@@ -274,9 +274,9 @@ class CodexAdapter(BaseSubprocessHarness):
 
     STRATEGIES: ClassVar[StrategyMap] = {
         "model": FlagStrategy(effect=FlagEffect.CLI_FLAG, cli_flag="--model"),
-        "thinking": FlagStrategy(
+        "effort": FlagStrategy(
             effect=FlagEffect.TRANSFORM,
-            transform=_codex_thinking_transform,
+            transform=_codex_effort_transform,
         ),
         "agent": FlagStrategy(effect=FlagEffect.DROP),
         "skills": FlagStrategy(effect=FlagEffect.DROP),

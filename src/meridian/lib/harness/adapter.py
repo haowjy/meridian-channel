@@ -53,7 +53,7 @@ class SpawnParams(BaseModel):
 
     prompt: str
     model: ModelId | None = None
-    thinking: str | None = None
+    effort: str | None = None
     skills: tuple[str, ...] = ()
     agent: str | None = None
     # Pre-built ad-hoc native-agent payload. Empty string when not used.

@@ -350,7 +350,7 @@ def build_create_payload(
             SpawnParams(
                 prompt=composed_prompt,
                 model=ModelId(policies.model) if policies.model else None,
-                thinking=resolved.thinking,
+                effort=resolved.effort,
                 skills=resolved_skills.skill_names,
                 agent=agent_for_params,
                 adhoc_agent_payload=adhoc_agent_payload,

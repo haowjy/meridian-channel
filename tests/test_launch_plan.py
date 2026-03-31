@@ -29,7 +29,7 @@ def test_resolve_primary_launch_plan_prefixes_agent_profile_for_codex(
         tools=(),
         mcp_tools=(),
         sandbox=None,
-        thinking=None,
+        effort=None,
         body="Follow the agent contract.",
         path=repo_root / ".agents" / "agents" / "coder.md",
         raw_content="---\nname: coder\n---\n",

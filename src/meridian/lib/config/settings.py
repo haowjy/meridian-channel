@@ -12,8 +12,8 @@ from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, Settings
 
 from meridian.lib.core.overrides import (
     KNOWN_APPROVAL_VALUES,
+    KNOWN_EFFORT_VALUES,
     KNOWN_SANDBOX_VALUES,
-    KNOWN_THINKING_VALUES,
 )
 from meridian.lib.state.paths import resolve_state_paths
 
@@ -290,7 +290,7 @@ def _normalize_primary_table(raw_value: object, *, source: str) -> dict[str, obj
             values[key] = value
             continue
 
-        if key in {"model", "harness", "agent", "thinking", "sandbox", "approval"}:
+        if key in {"model", "harness", "agent", "effort", "sandbox", "approval"}:
             if not isinstance(value, str):
                 raise ValueError(
                     f"Invalid value for '{source}.{key}': expected str, got "
@@ -559,7 +559,7 @@ class PrimaryConfig(BaseModel):
     model: str | None = None
     harness: str | None = None
     agent: str | None = None
-    thinking: str | None = None
+    effort: str | None = None
     sandbox: str | None = None
     approval: str | None = None
     timeout: float | None = None
@@ -615,16 +615,16 @@ class PrimaryConfig(BaseModel):
     def _validate_optional_string_fields(cls, value: str | None) -> str | None:
         return _normalize_optional_string(value, source="primary")
 
-    @field_validator("thinking")
+    @field_validator("effort")
     @classmethod
-    def _validate_thinking(cls, value: str | None) -> str | None:
-        normalized = _normalize_optional_string(value, source="primary.thinking")
+    def _validate_effort(cls, value: str | None) -> str | None:
+        normalized = _normalize_optional_string(value, source="primary.effort")
         if normalized is None:
             return None
-        if normalized not in KNOWN_THINKING_VALUES:
+        if normalized not in KNOWN_EFFORT_VALUES:
             raise ValueError(
-                "Invalid value for 'primary.thinking': expected one of "
-                f"{sorted(KNOWN_THINKING_VALUES)}, got {value!r}."
+                "Invalid value for 'primary.effort': expected one of "
+                f"{sorted(KNOWN_EFFORT_VALUES)}, got {value!r}."
             )
         return normalized
 
@@ -794,7 +794,7 @@ class MeridianConfig(BaseSettings):
 def load_config(repo_root: Path, *, user_config: Path | None = None) -> MeridianConfig:
     """Load config with precedence: defaults < user < project < environment.
 
-    RuntimeOverrides fields (model, harness, thinking, etc.) are NOT loaded
+    RuntimeOverrides fields (model, harness, effort, etc.) are NOT loaded
     from ENV here — they are read separately via RuntimeOverrides.from_env().
     """
 

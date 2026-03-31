@@ -48,7 +48,7 @@ def _opencode_model_transform(value: object, args: list[str]) -> None:
     args.extend(["--model", _strip_opencode_prefix(str(value))])
 
 
-def _opencode_thinking_transform(value: object, args: list[str]) -> None:
+def _opencode_effort_transform(value: object, args: list[str]) -> None:
     normalized = str(value).strip()
     if not normalized:
         return
@@ -139,9 +139,9 @@ class OpenCodeAdapter(BaseSubprocessHarness):
 
     STRATEGIES: ClassVar[StrategyMap] = {
         "model": FlagStrategy(effect=FlagEffect.TRANSFORM, transform=_opencode_model_transform),
-        "thinking": FlagStrategy(
+        "effort": FlagStrategy(
             effect=FlagEffect.TRANSFORM,
-            transform=_opencode_thinking_transform,
+            transform=_opencode_effort_transform,
         ),
         "agent": FlagStrategy(effect=FlagEffect.DROP),
         "skills": FlagStrategy(effect=FlagEffect.DROP),

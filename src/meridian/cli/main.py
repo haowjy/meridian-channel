@@ -351,9 +351,9 @@ def root(
         int | None,
         Parameter(name="--autocompact", help="Auto-compact threshold in messages."),
     ] = None,
-    thinking: Annotated[
+    effort: Annotated[
         str | None,
-        Parameter(name="--thinking", help="Thinking budget: low, medium, high, xhigh."),
+        Parameter(name="--effort", help="Effort level: low, medium, high, xhigh."),
     ] = None,
     sandbox: Annotated[
         str | None,
@@ -407,7 +407,7 @@ def root(
         yolo=yolo,
         approval=approval,
         autocompact=autocompact,
-        thinking=thinking,
+        effort=effort,
         sandbox=sandbox,
         timeout=timeout,
         dry_run=dry_run,
@@ -530,7 +530,7 @@ def _run_primary_launch(
     yolo: bool,
     approval: str | None,
     autocompact: int | None,
-    thinking: str | None,
+    effort: str | None,
     sandbox: str | None,
     timeout: float | None,
     dry_run: bool,
@@ -646,7 +646,7 @@ def _run_primary_launch(
             pinned_context="",
             dry_run=dry_run,
             approval=resolved_approval,
-            thinking=thinking,
+            effort=effort,
             sandbox=sandbox,
             timeout=timeout,
             session=SessionContinuation(
@@ -755,9 +755,9 @@ def _register_harness_shortcut_command(harness_name: str) -> None:
             int | None,
             Parameter(name="--autocompact", help="Auto-compact threshold in messages."),
         ] = None,
-        thinking: Annotated[
+        effort: Annotated[
             str | None,
-            Parameter(name="--thinking", help="Thinking budget: low, medium, high, xhigh."),
+            Parameter(name="--effort", help="Effort level: low, medium, high, xhigh."),
         ] = None,
         sandbox: Annotated[
             str | None,
@@ -810,7 +810,7 @@ def _register_harness_shortcut_command(harness_name: str) -> None:
             yolo=yolo,
             approval=approval,
             autocompact=autocompact,
-            thinking=thinking,
+            effort=effort,
             sandbox=sandbox,
             timeout=timeout,
             dry_run=dry_run,
@@ -907,7 +907,7 @@ _TOP_LEVEL_VALUE_FLAGS = frozenset(
         "-a",
         "--work",
         "--autocompact",
-        "--thinking",
+        "--effort",
         "--sandbox",
         "--approval",
         "--timeout",

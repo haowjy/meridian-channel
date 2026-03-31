@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 _AUTOCOMPACT_MIN = 1
 _AUTOCOMPACT_MAX = 100
 
-KNOWN_THINKING_VALUES = frozenset({"low", "medium", "high", "xhigh"})
+KNOWN_EFFORT_VALUES = frozenset({"low", "medium", "high", "xhigh"})
 KNOWN_SANDBOX_VALUES = frozenset(
     {
         "read-only",
@@ -73,22 +73,22 @@ class RuntimeOverrides(BaseModel):
 
     model: str | None = None
     harness: str | None = None
-    thinking: str | None = None
+    effort: str | None = None
     sandbox: str | None = None
     approval: str | None = None
     autocompact: int | None = None
     timeout: float | None = None
 
-    @field_validator("thinking")
+    @field_validator("effort")
     @classmethod
-    def _validate_thinking(cls, value: str | None) -> str | None:
+    def _validate_effort(cls, value: str | None) -> str | None:
         normalized = _normalize_optional_string(value)
         if normalized is None:
             return None
-        if normalized not in KNOWN_THINKING_VALUES:
+        if normalized not in KNOWN_EFFORT_VALUES:
             raise ValueError(
-                "Invalid runtime override 'thinking': expected one of "
-                f"{sorted(KNOWN_THINKING_VALUES)}, got {value!r}."
+                "Invalid runtime override 'effort': expected one of "
+                f"{sorted(KNOWN_EFFORT_VALUES)}, got {value!r}."
             )
         return normalized
 
@@ -149,7 +149,7 @@ class RuntimeOverrides(BaseModel):
         return cls(
             model=_read_env_string("MERIDIAN_MODEL"),
             harness=_read_env_string("MERIDIAN_HARNESS"),
-            thinking=_read_env_string("MERIDIAN_THINKING"),
+            effort=_read_env_string("MERIDIAN_EFFORT"),
             sandbox=_read_env_string("MERIDIAN_SANDBOX"),
             approval=_read_env_string("MERIDIAN_APPROVAL"),
             autocompact=(
@@ -171,7 +171,7 @@ class RuntimeOverrides(BaseModel):
         return cls(
             model=_normalize_optional_string(profile.model),
             harness=_normalize_optional_string(profile.harness),
-            thinking=_normalize_optional_string(profile.thinking),
+            effort=_normalize_optional_string(profile.effort),
             sandbox=_normalize_optional_string(profile.sandbox),
             approval=_normalize_optional_string(profile.approval),
             autocompact=profile.autocompact,
@@ -185,7 +185,7 @@ class RuntimeOverrides(BaseModel):
         return cls(
             model=primary.model,
             harness=primary.harness,
-            thinking=primary.thinking,
+            effort=primary.effort,
             sandbox=primary.sandbox,
             approval=primary.approval,
             autocompact=primary.autocompact,
@@ -197,7 +197,7 @@ class RuntimeOverrides(BaseModel):
         return cls(
             model=_normalize_optional_string(payload.model),
             harness=_normalize_optional_string(payload.harness),
-            thinking=_normalize_optional_string(payload.thinking),
+            effort=_normalize_optional_string(payload.effort),
             sandbox=_normalize_optional_string(payload.sandbox),
             approval=_normalize_optional_string(payload.approval),
             autocompact=payload.autocompact,
@@ -209,7 +209,7 @@ class RuntimeOverrides(BaseModel):
         return cls(
             model=_normalize_optional_string(request.model),
             harness=_normalize_optional_string(request.harness),
-            thinking=_normalize_optional_string(request.thinking),
+            effort=_normalize_optional_string(request.effort),
             sandbox=_normalize_optional_string(request.sandbox),
             approval=request.approval if request.approval != "default" else None,
             autocompact=request.autocompact,
@@ -232,8 +232,8 @@ def resolve(*layers: RuntimeOverrides) -> RuntimeOverrides:
 
 __all__ = [
     "KNOWN_APPROVAL_VALUES",
+    "KNOWN_EFFORT_VALUES",
     "KNOWN_SANDBOX_VALUES",
-    "KNOWN_THINKING_VALUES",
     "RuntimeOverrides",
     "resolve",
 ]
