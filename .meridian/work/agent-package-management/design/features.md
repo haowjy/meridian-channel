@@ -1,8 +1,16 @@
 # mars-agents: Feature Spec
 
+## Core Invariant: All Mutations Resolve First
+
+Every command that changes state (`add`, `remove`, `upgrade`, `rename`, `sync`) proposes a new target state and resolves the full dependency graph against it before touching disk. Either the entire proposed state is satisfiable — all version constraints, no unresolvable collisions, no orphaned transitive deps — or the command fails and nothing changes.
+
+No partial mutations. No "upgrade A now, fix B later." The resolver sees the whole picture and either commits the whole change or rejects it with a clear explanation of what conflicts.
+
+This is the architectural backbone — the sync pipeline (resolve → validate → diff → plan → apply) is the single path every mutation flows through.
+
 ## v1: Core Package Management
 
-V1 commands: `init`, `add`, `sync`, `sync --force`, `sync --diff`, `remove`, `resolve`, `rename`, `list`, `why`.
+V1 commands: `init`, `add`, `sync`, `sync --force`, `sync --diff`, `sync --frozen`, `remove`, `resolve`, `rename`, `upgrade`, `list`, `why`.
 
 ### `mars init`
 
@@ -69,6 +77,20 @@ Source wins for managed files. Overwrite managed files with upstream content, di
 
 Dry run. Show what would change without applying. Preview before committing to a sync.
 
+### `mars sync --frozen`
+
+Install exactly from the committed lock file. Error if the lock is stale (config changed but lock wasn't updated), or if any resolution would produce different versions than what's locked. No fetching of new versions, no resolution — just install what the lock says.
+
+For teammates cloning a project and CI pipelines:
+
+```bash
+# Teammate clones and gets exact same versions
+git clone repo && cd repo && mars sync --frozen
+
+# CI enforces lock is up to date
+mars sync --frozen || { echo "Lock is stale, run mars sync and commit"; exit 1; }
+```
+
 ### `mars remove <source>`
 
 Remove a source from `agents.toml` and prune all files owned by that source. Since each item has exactly one owner, removal is straightforward — delete everything that source provided.
@@ -96,6 +118,32 @@ mars rename agents/coder agents/my-coder                       # rename any mana
 ```
 
 Rename only changes the filename on disk — frontmatter `name:` field is preserved. The agent remains reachable by its original frontmatter name.
+
+Explicit renames (via `mars rename`) take precedence over auto-renames. If an explicit rename causes a new collision, mars errors rather than silently re-auto-renaming.
+
+### `mars upgrade`
+
+Upgrade sources to newer compatible versions. Resolves all targets simultaneously to find a compatible version set.
+
+```bash
+mars upgrade                             # upgrade all sources to latest compatible
+mars upgrade meridian-base               # upgrade one source + its deps
+mars upgrade meridian-base cool-agents   # upgrade multiple together
+mars upgrade meridian-base@v0.6.0        # pin to specific version
+```
+
+The resolver takes all upgrade targets, finds the newest versions satisfying all constraints across all sources simultaneously, then syncs. Resolving together avoids intermediate states where one upgrade breaks another's constraints.
+
+If no compatible set exists:
+
+```
+error: cannot upgrade — version constraints conflict:
+  cool-agents requires meridian-base >=0.5.0, <0.6.0
+  dev-workflow requires meridian-base >=0.6.0
+  hint: upgrade cool-agents too, or check if a newer cool-agents widens its constraint
+```
+
+`mars upgrade` also attempts to resolve transitive dependency conflicts first — if upgrading source A requires upgrading its transitive dep B, mars tries to find a compatible B version before erroring.
 
 ### `mars list`
 

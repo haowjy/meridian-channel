@@ -17,6 +17,10 @@ Meridian currently has a basic file copier (`meridian sources`) that syncs from 
 
 ## Core Concepts
 
+### All Mutations Resolve First
+
+Every command that changes state proposes a new target state and resolves the full dependency graph before touching disk. Either the entire state is satisfiable or the command fails and nothing changes. No partial mutations — `add`, `remove`, `upgrade`, `rename`, and `sync` all flow through the same resolve → validate → diff → plan → apply pipeline.
+
 ### `.agents/` Is Mixed, Not Generated
 
 Unlike `node_modules/`, `.agents/` contains both managed and user-authored content. Users already have project-specific agents and skills alongside sourced content. mars respects this — it tracks what it installed via the lock file and never touches anything else.
@@ -28,10 +32,6 @@ The lock file (`agents.lock`) is the ownership registry. If a file is in the loc
 ### Git-Style Conflict Resolution
 
 When mars detects conflicts between local modifications and upstream changes, it writes standard git conflict markers (`<<<<<<<` / `=======` / `>>>>>>>`) into the file. Users resolve in their editor with full IDE support (VS Code "Accept Current/Incoming/Both", etc.). No custom UI needed.
-
-### Rerere (Reuse Recorded Resolution)
-
-Like `git rerere`, mars records conflict resolutions and auto-applies them on future syncs. First conflict: manual resolution. Same pattern next time: auto-resolved. `mars rerere forget <file>` to clear, `mars rerere off` to disable.
 
 ## Source Types
 
