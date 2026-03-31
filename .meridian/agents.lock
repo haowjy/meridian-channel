@@ -157,7 +157,7 @@
       "source_name": "meridian-base"
     },
     "skill:agent-staffing": {
-      "content_hash": "sha256:e852152980c004d5e6541c5acf97b3a58ff65b1e11bce1616773ebf5a583af03",
+      "content_hash": "sha256:9cfe8a657b51be57c93cc42d39cfa5a822b3e44d97ab3cd0cfec8ac931939828",
       "destination_path": ".agents/skills/agent-staffing",
       "source_item_id": "skill:agent-staffing",
       "source_name": "meridian-dev-workflow"
@@ -211,7 +211,7 @@
       "source_name": "meridian-dev-workflow"
     },
     "skill:planning": {
-      "content_hash": "sha256:7e9f09ab8fdc4ba6bc164418b8569306ffece9d9a2a578c2ddf7a06518f9786c",
+      "content_hash": "sha256:c561f5f227f982aa2b06bdbaea02db488d1b5e01222700486665254b66ce3a14",
       "destination_path": ".agents/skills/planning",
       "source_item_id": "skill:planning",
       "source_name": "meridian-dev-workflow"
@@ -302,7 +302,7 @@
     },
     "meridian-dev-workflow": {
       "installed_at": null,
-      "installed_tree_hash": "sha256:63df6dfe90f0574c751820ac2e5c1bdac257de598f44f0a681b1d6913148788a",
+      "installed_tree_hash": "sha256:397118f5f61ab7e82434a124a78646e178843df408e97c10b04ec852be21b274",
       "items": {
         "agent:architect": {
           "path": "agents/architect.md"

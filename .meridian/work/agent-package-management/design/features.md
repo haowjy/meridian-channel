@@ -2,7 +2,7 @@
 
 ## v1: Core Package Management
 
-V1 commands: `init`, `add`, `sync`, `sync --force`, `sync --diff`, `remove`, `resolve`, `list`, `why`.
+V1 commands: `init`, `add`, `sync`, `sync --force`, `sync --diff`, `remove`, `resolve`, `rename`, `list`, `why`.
 
 ### `mars init`
 
@@ -17,10 +17,16 @@ Add a source to `agents.toml`, resolve, install, and update the lock file. If `.
 Accepts git URLs, GitHub shorthand (`owner/repo`), and local paths. Defaults to `@latest` when no version is specified.
 
 ```bash
-mars add haowjy/meridian-base                            # GitHub shorthand, @latest
+mars add haowjy/meridian-base                            # GitHub shorthand, @latest, install everything
 mars add haowjy/meridian-base@v0.5.0                     # pinned version
 mars add github.com/haowjy/meridian-dev-workflow@v2      # full URL, latest v2.x.x
 mars add ../meridian-dev-workflow                          # local path
+
+# Intent-based filtering: only install specific items + their deps
+mars add haowjy/meridian-base --agents coder --skills frontend-design
+# → installs agents/coder, skills/frontend-design, + any skills coder depends on
+# → writes agents = ["coder"], skills = ["frontend-design"] to config
+# → deps re-resolved on every sync (new deps auto-included)
 ```
 
 ### `mars sync`
@@ -69,6 +75,17 @@ After conflicts are resolved by the user (conflict markers removed), mark files 
 mars resolve                    # resolve all conflicted files
 mars resolve agents/coder.md   # resolve specific file
 ```
+
+### `mars rename`
+
+Rename a managed item. Updates the `rename` config in `agents.toml` and re-syncs. CLI-first way to override auto-generated collision names or give any managed item a custom filename.
+
+```bash
+mars rename agents/coder__haowjy_meridian-base agents/coder   # custom name
+mars rename agents/coder agents/my-coder                       # rename any managed item
+```
+
+Rename only changes the filename on disk — frontmatter `name:` field is preserved. The agent remains reachable by its original frontmatter name.
 
 ### `mars list`
 
@@ -120,20 +137,49 @@ Four cases on sync, determined by comparing checksums against lock:
 
 Clean merges are applied automatically. Conflicts get standard git conflict markers (`<<<<<<<` / `=======` / `>>>>>>>`). Users resolve in their editor with full IDE support.
 
-## v1: Name Collisions
+## v1: Name Collisions and Auto-Rename
 
-Name collision = hard error at sync time. Two sources providing the same item name is always an error — no silent precedence, no implicit ordering.
+Collision detection runs on **destination paths** after all filtering and renaming. When two items from different sources would land at the same path, mars auto-renames both using `{name}__{owner}_{repo}` (name-first for autocomplete grouping):
 
 ```
-error: agents/coder is provided by both `meridian-base` and `cool-agents`
-  hint: use `exclude` on one source, or `rename` to install under a different filename
+warning: agents/coder is provided by both `meridian-base` and `cool-agents`
+  auto-renamed to:
+    agents/coder__haowjy_meridian-base.md
+    agents/coder__someone_cool-agents.md
 ```
 
-Resolution options:
-- **`exclude`** on one source — don't install that item at all
-- **`rename`** on one source — install under a different filename
+No implicit precedence — both get renamed. User can override with `mars rename` for custom names, or `exclude` to skip one.
 
-Rename only changes the filename on disk. The frontmatter `name:` field is preserved, so the agent remains reachable by its original name (harnesses match on both filename and frontmatter name). Renames don't break cross-references.
+### Transitive Dependency Collisions
+
+When two sources transitively depend on different implementations of the same skill:
+
+- `dev-workflow` depends on `meridian-base`'s `skills/code-review`
+- `other-pack` depends on `cool-tools`'s `skills/code-review`
+
+Mars auto-renames both skills AND rewrites the frontmatter `skills:` references in affected agents to point at the correct renamed version. Mars uses the manifest dependency chain to determine which agents should reference which renamed skill:
+
+1. Collision detected: `skills/code-review` from two sources
+2. Auto-rename both: `skills/code-review__haowjy_meridian-base/`, `skills/code-review__someone_cool-tools/`
+3. Walk the manifest dep graph: `dev-workflow` depends on `meridian-base` → its agents get `skills: [code-review__haowjy_meridian-base]`
+4. `other-pack` depends on `cool-tools` → its agents get `skills: [code-review__someone_cool-tools]`
+
+This is the one case where mars modifies file content — only when a collision forces a rename AND the affected agents have frontmatter skill references that need updating.
+
+### Dual Checksums in Lock
+
+Because mars may rewrite frontmatter, the lock stores two checksums per item:
+
+- **`source_checksum`**: what upstream provided (pre-rewrite)
+- **`installed_checksum`**: what mars actually wrote to disk (post-rewrite, if any)
+
+The diff logic uses these to correctly classify changes:
+- Source changed? Compare new source content against `source_checksum`
+- Local changed? Compare disk content against `installed_checksum`
+
+This prevents mars-managed rewrites from triggering false conflicts on the next sync.
+
+When no collision/rewrite occurs, both checksums are identical.
 
 ### Collision with User-Authored Files
 
@@ -144,9 +190,21 @@ error: can't install skills/my-custom-skill from `meridian-base` — a user-auth
   hint: rename the source item via `rename` in agents.toml, or remove your file
 ```
 
-Mars never silently overwrites user content. Same principle as source-to-source collisions.
+Mars never silently overwrites user content.
 
 ## v1: Dependency System
+
+### Transitive Source Installation
+
+When a source has a `mars.toml` declaring dependencies, mars fetches and installs from those dependencies too. The user doesn't need to `mars add` every transitive dependency.
+
+```bash
+mars add haowjy/meridian-dev-workflow
+# dev-workflow's mars.toml depends on meridian-base for skills/code-review
+# → mars fetches meridian-base and installs skills/code-review automatically
+```
+
+Transitive deps are tracked in the lock with provenance — `mars why code-review` shows the full chain.
 
 ### Version Resolution
 
@@ -162,40 +220,41 @@ Transitive resolution via topological sort with constraint intersection. If cons
 
 ### Agent-to-Skill Validation
 
-Agent profiles declare `skills: [X, Y, Z]` in YAML frontmatter. Mars validates that every referenced skill exists in `.agents/skills/` after resolution. **Warning at sync time** (not error) — a missing skill doesn't prevent sync from completing but is surfaced clearly.
+Agent profiles declare `skills: [X, Y, Z]` in YAML frontmatter. After resolution (including any auto-renames), mars validates that every referenced skill exists in `.agents/skills/`. **Warning at sync time** (not error) — a missing skill doesn't prevent sync from completing but is surfaced clearly.
 
 ### Pruning
 
-Simple one-owner-per-item model. If an item is in the old lock but not the new lock, remove it. No multi-provider logic — each item has exactly one owning source.
+One-owner-per-item model. If an item is in the old lock but not the new lock, remove it. Transitive deps are pruned when no remaining source requires them.
 
 ## v1: Config
 
 ### `agents.toml`
 
-TOML format. Lives in `.agents/`. Primarily managed via CLI, not hand-edited. Supports `include`, `exclude`, and `rename` per source.
+TOML format. Lives in `.agents/`. Primarily managed via CLI, not hand-edited.
 
 ```toml
 [sources.meridian-base]
 url = "github.com/haowjy/meridian-base"
 version = ">=0.5.0"
+agents = ["coder"]              # intent: only this agent + its skill deps
+skills = ["frontend-design"]    # intent: explicitly requested skill
 
 [sources.meridian-dev-workflow]
 url = "github.com/haowjy/meridian-dev-workflow"
 version = "^2.0"
-exclude = ["agents/deprecated-agent"]
-
-[sources.cool-agents]
-url = "github.com/someone/cool-agents"
-version = ">=1.0.0"
-include = ["agents/researcher", "skills/web-search"]
+exclude = ["agents/deprecated-agent"]  # everything except these
 
 [sources.my-local-agents]
 path = "./my-agents"
-
-# Rename to resolve name collisions between sources
-[sources.cool-agents.rename]
-"agents/coder" = "agents/cool-coder"
+# no agents/skills/exclude = install everything
 ```
+
+Filtering modes (pick one per source):
+- **`agents`/`skills`**: Intent-based. Install these + auto-resolve skill deps from frontmatter. New deps auto-included on future syncs.
+- **`exclude`**: Install everything except these.
+- **Neither**: Install everything (default).
+
+Auto-generated renames (from collision resolution) are tracked in the lock, not in `agents.toml`. User-explicit renames via `mars rename` are written to config.
 
 ### `agents.local.toml` (Gitignored)
 

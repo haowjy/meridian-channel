@@ -151,7 +151,7 @@ Leave out:
 
 ## Agent Staffing
 
-For each phase, match staffing to risk and ambiguity.
+For each phase, match staffing to risk and ambiguity. Run `meridian models list` to see available models — models with descriptions indicate their strengths. Use `-m` to override agent profile defaults when a different model fits the task better.
 
 Implementer:
 Usually `coder`. Use a stronger reasoning model for phases with architectural ambiguity or complex tradeoffs.

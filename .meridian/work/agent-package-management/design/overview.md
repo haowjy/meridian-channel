@@ -138,39 +138,38 @@ TOML format. Lives in `.agents/`. Primarily managed via CLI, not hand-edited. To
 [sources.meridian-base]
 url = "github.com/haowjy/meridian-base"
 version = ">=0.5.0"
+agents = ["coder"]              # only this agent + its skill deps (resolved each sync)
+skills = ["frontend-design"]    # explicitly requested skill
 
 [sources.meridian-dev-workflow]
 url = "github.com/haowjy/meridian-dev-workflow"
 version = "^2.0"
-exclude = ["agents/deprecated-agent"]  # cherry-pick: skip specific items
-
-[sources.cool-agents]
-url = "github.com/someone/cool-agents"
-version = ">=1.0.0"
-include = ["agents/researcher", "skills/web-search"]  # cherry-pick: only these items
+exclude = ["agents/deprecated-agent"]  # everything except these
 
 [sources.my-local-agents]
 path = "./my-agents"
-
-# Rename to resolve name collisions between sources
-[sources.cool-agents.rename]
-"agents/coder" = "agents/cool-coder"  # file renamed, frontmatter name preserved
+# no agents/skills/exclude = install everything
 ```
+
+Filtering modes (pick one per source):
+- **`agents`/`skills`**: Intent-based — install these + auto-resolve skill deps from frontmatter. If an agent adds a new skill dep, it comes in on next sync.
+- **`exclude`**: Install everything except these.
+- **Neither**: Install everything from the source (default).
+
+`agents`/`skills` and `exclude` on the same source is an error — pick one mode.
 
 ### Name Collisions
 
-When two sources provide the same item name (e.g., both ship `agents/coder`), mars errors at sync time:
+When two sources provide the same item name, mars auto-renames both using `{name}__{owner}_{repo}`:
 
 ```
-error: agents/coder is provided by both `meridian-base` and `cool-agents`
-  hint: use `exclude` on one source, or `rename` to install under a different filename
+agents/coder__haowjy_meridian-base.md
+agents/coder__someone_cool-agents.md
 ```
 
-No silent precedence, no implicit ordering. Resolution options:
-- **`exclude`** on one source — don't install that item at all
-- **`rename`** on one source — install under a different filename
+Name-first format groups items by name in autocomplete. Frontmatter `name:` is preserved, so agents are still reachable by original name. No implicit precedence — both get renamed.
 
-Rename only changes the filename on disk. The frontmatter `name:` field is preserved, so the agent remains reachable by its original name (harnesses match on both filename and frontmatter name). This means renames don't break cross-references in other agents' configs.
+Users can override: `mars rename` for custom names, or `exclude` in config to skip one entirely.
 
 ### `agents.local.toml` (Gitignored)
 

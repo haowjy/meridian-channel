@@ -7,6 +7,10 @@ description: Team composition for design and implementation phases — which age
 
 Compose the right team for each phase. Two questions drive most staffing decisions: how much surface area does the change touch, and how reversible are mistakes if something goes wrong?
 
+## Model Selection
+
+Run `meridian models list` to see available models. Models with descriptions indicate their strengths — use these to match models to tasks. Override agent profile defaults with `-m` when a different model is a better fit for the specific work.
+
 ## Design Phase
 
 Design staffing depends on uncertainty more than implementation volume.
