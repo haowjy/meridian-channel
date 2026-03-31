@@ -28,15 +28,22 @@ Focus areas are the primary review lever — multiple reviewers on the strongest
 
 Check your project config (CLAUDE.md, agent profiles) for current model assignments — these shift as model capabilities evolve. A fast reviewer that catches the obvious issues in 30 seconds is more valuable than a deep reviewer that takes 5 minutes to say the same thing. Save depth for where it matters.
 
+## Review Agents
+
+Different agents serve different review purposes — pick the right one for what you need:
+
+- **reviewer** — adversarial code analysis. Specify a focus area in the prompt (security, SOLID, correctness, design alignment) for depth, or leave broad. Read-only — finds problems, doesn't fix them. Pass artifacts via `-f` and session context via `--from`.
+- **refactorer** — structural improvement. Identifies and executes SOLID fixes, renames, extractions, dependency cleanup. Spawn after implementation phases or when reviewers flag structural debt. Reduces entropy so future agents work more effectively.
+- **verifier** — build health gate. Runs tests, type checks, lints. Fixes mechanical breakage (import typos, missing annotations), reports substantive failures back.
+- **investigator** — root-cause triage. Spawn when a test fails unexpectedly or a reviewer flags something that needs deeper analysis. Quick-fixes if small, files GH issues if larger, confirms non-issue if not real.
+
+A typical review round might fan out a reviewer with a correctness focus, a reviewer with a design focus, and a verifier — all in parallel.
+
 ## Synthesizing Findings
 
-When multiple reviewers report back, synthesize by severity:
+If a reviewer found something valid, fix it. Agents are cheap — spawning a coder or refactorer to fix a style issue costs seconds, not hours. Don't create a backlog of deferred paper cuts that never get addressed. The only findings to skip are ones the reviewer got wrong (misunderstood the intent, flagged something that's actually correct).
 
-- **Critical** — blocks progress. Fix before moving on.
-- **High** — the orchestrator decides: fix now, or defer with explicit rationale in the design doc.
-- **Medium/Low** — log if useful, move on. Spawn an investigator for anything worth tracking but not worth stopping for.
-
-When reviewers disagree, make a call. You have context they don't — you've been managing the work, you know the design intent, you know what's coming in the next phase. Record the decision and move on. If you're genuinely uncertain, escalate to the user.
+When reviewers disagree, you have context they don't — you've been managing the work, you know the design intent, you know what's coming in the next phase. Make a call and record it in `$MERIDIAN_WORK_DIR/decisions.md`. If the outcome changes approved architecture direction, update the relevant docs in `$MERIDIAN_WORK_DIR/design/` too. If you're genuinely uncertain, escalate to the user.
 
 Cap review rounds at two for design and three for implementation. If it's still not converging, the issue is structural — more review won't fix it.
 

@@ -2,6 +2,7 @@
 name: frontend-coder
 description: Production frontend code writer — pass phase blueprints and context via -f for scoped UI implementation with distinctive design quality via the frontend-design skill.
 model: opus
+effort: medium
 skills: [frontend-design]
 tools: [Bash, Write, Edit]
 sandbox: workspace-write

@@ -1,38 +1,34 @@
 ---
 name: agent-staffing
-description: Team composition for implementation phases — which agents to spawn, how many, what can run in parallel, and how to scale effort to complexity. Use when planning the agent team for a phase before spawning anyone.
+description: Team composition for design and implementation phases — which agents to spawn, how many, what can run in parallel, and how to scale effort to complexity.
 ---
 
 # Agent Staffing
 
 Compose the right team for each phase. Two questions drive most staffing decisions: how much surface area does the change touch, and how reversible are mistakes if something goes wrong?
 
-## Orchestrators
+## Design Phase
 
-The dev lifecycle splits between two orchestrators. Choosing the right entry point matters more than any other staffing decision — it sets the coordination pattern for everything downstream.
+Design staffing depends on uncertainty more than implementation volume.
 
-**dev-orchestrator** is the default entry point for substantive work. Use it when:
-- The task needs design exploration or architectural decisions
-- The user should review and approve the approach before execution begins
-- The work crosses module boundaries or changes interfaces
-- There are genuine tradeoffs that need interactive discussion
+- **Architects** own structural design, boundaries, interfaces, and tradeoff evaluation for candidate approaches.
+- **Researchers** gather external context: ecosystem best practices, constraints from dependencies, and prior art that can reduce design risk.
+- **Explorers** investigate the current codebase so design decisions reflect real code paths and integration points instead of assumptions.
 
-It runs interactively with the user through design and planning, then hands off approved plan artifacts to dev-runner for autonomous execution. The handoff is a clean boundary — dev-orchestrator produces design docs and phase blueprints, dev-runner consumes them.
-
-**dev-runner** is the autonomous executor. It's spawned by dev-orchestrator (or directly when a plan already exists) with plan artifacts via `-f`. Use it when:
-- An approved implementation plan already exists
-- The work is well-scoped and the approach is settled
-- Autonomous execution without human checkpoints is appropriate
-
-It runs the code → test → review → fix loop per phase, tracks progress in `status.md`, and adapts to findings without stopping for approval. It should be the primary consumer of `agent-staffing` advice when composing phase teams.
-
-**dev-orchestrator** (legacy) combines both roles. Still appropriate for simpler tasks where the overhead of a formal handoff isn't justified — small bug fixes, single-phase changes, or exploratory work where design and execution are interleaved. For anything with multiple phases or real design decisions, prefer the split.
-
-The remaining sections — Coders, Reviewers, Testers, etc. — are primarily consumed by the executor (dev-runner or dev-orchestrator) when composing per-phase teams. Plan-orchestrator doesn't staff implementation phases; it staffs design and review during the planning process.
+One architect is usually enough when the problem is constrained and the tradeoffs are obvious. Staff multiple architects when there are materially different viable approaches, high-cost mistakes, or conflicting non-functional goals (for example, latency vs maintainability).
 
 ## Coders
 
 One coder per phase — multiple coders on the same files create merge conflicts and duplicated work. If a phase feels too big for one coder, the plan needs splitting. Pick the coder variant that matches the work: `coder` for backend/infrastructure, `frontend-coder` for UI.
+
+## Refactorer
+
+Use `refactorer` as structural support for the delivery pipeline:
+- Run after implementation phases to pay down structural debt while context is fresh.
+- Spawn when reviewers flag SOLID violations, tangled dependencies, or abstraction drift.
+- Use proactively before major new work in messy areas to reduce entropy first.
+
+Treat refactoring as infrastructure work that makes every other agent more effective — cleaner boundaries, lower coordination overhead, and more consistent patterns for coders/reviewers/testers.
 
 ## Reviewers
 

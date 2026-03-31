@@ -1,11 +1,11 @@
 ---
 name: reviewer
-description: General code reviewer — specify a focus area in the prompt (SOLID, security, correctness, testing, design alignment) for deep targeted review, or leave unspecified for broad review.
+description: General code reviewer — pass artifacts via -f (design docs, phase specs, code context) or use --from for session context and decision history; specify a focus area in the prompt (SOLID, security, correctness, testing, design alignment) for deep targeted review, or leave unspecified for broad review.
 model: gpt
-skills: [review]
+effort: high
+skills: [review, decision-log, context-handoffs]
 tools: [Bash(meridian spawn show *), Bash(meridian session *), Bash(meridian work show *), Bash(meridian spawn report *), Bash(git diff *), Bash(git log *), Bash(git show *), Bash(git status *)]
 sandbox: read-only
-effort: high
 ---
 
 # Reviewer

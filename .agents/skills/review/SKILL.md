@@ -1,6 +1,6 @@
 ---
 name: review
-description: Code review methodology — adversarial mindset, severity thinking, and structured reporting. Use whenever you're reviewing code, evaluating implementation quality, or assessing changes — including PR reviews, phase reviews, design reviews, and any task where you need to find problems rather than build things.
+description: Code review methodology — adversarial mindset and structured reporting. Use whenever you're reviewing code, evaluating implementation quality, or assessing changes — including PR reviews, phase reviews, design reviews, and any task where you need to find problems rather than build things.
 ---
 # Review
 
@@ -32,19 +32,9 @@ Write your findings however makes sense for what you found. Good findings share 
 - Restating what the code does without identifying a problem
 - Findings about pre-existing code the author didn't touch (unless the change makes it worse)
 
-## Severity
+## Communicating Impact
 
-Classify the severity of each finding so the orchestrator knows how to act on it:
-
-**CRITICAL** — Blocks approval. A bug, security hole, data loss risk, or correctness issue that will cause real problems.
-
-**HIGH** — Significant issue the orchestrator needs to evaluate. A design problem, a missing edge case that matters, a pattern that will cause pain later.
-
-**MEDIUM** — Real but not blocking. A suboptimal approach, a test gap, something worth tracking.
-
-**LOW** — Minor. Style, naming, small improvements. Worth mentioning alongside other findings.
-
-When in doubt between two levels, go higher. It's easier for the orchestrator to downgrade than to discover you under-reported.
+Make it obvious which findings are serious and which are minor. The orchestrator triages your findings against context you don't have — design intent, upcoming phases, blast radius — so give them a clear signal about how much each finding matters and why. Lead with the things that could cause real damage (bugs, security holes, data loss, broken invariants) and let the smaller stuff follow naturally. When in doubt about how serious something is, err toward calling it out — the orchestrator can always downgrade, but they can't act on problems you buried.
 
 ## The Adversarial Mindset
 

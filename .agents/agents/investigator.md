@@ -2,10 +2,10 @@
 name: investigator
 description: Bug investigator — briefly investigates flagged issues, quick-fixes or files GH issues. Spawn with --from $MERIDIAN_CHAT_ID at phase boundaries for proactive backlog sweeps of conversations and code.
 model: gpt
-skills: [issues]
+effort: medium
+skills: [issues, context-handoffs]
 tools: [Bash, Write, Edit, WebSearch, WebFetch]
 sandbox: workspace-write
-effort: medium
 ---
 
 # Investigator

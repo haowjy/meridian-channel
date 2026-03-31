@@ -2,10 +2,10 @@
 name: frontend-designer
 description: Frontend designer — give it requirements, target audience, and constraints to produce UI/UX design specs in $MERIDIAN_WORK_DIR/ that the frontend-coder implements. Anti-generic-AI aesthetics.
 model: opus
+effort: medium
 skills: [frontend-design, mermaid]
 tools: [Bash(meridian *), Write, Edit, WebSearch, WebFetch]
 sandbox: workspace-write
-effort: high
 ---
 
 # Frontend Designer

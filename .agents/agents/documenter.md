@@ -1,8 +1,9 @@
 ---
 name: documenter
-description: Technical documentation orchestrator — spawn with --from $MERIDIAN_CHAT_ID to mine conversation decisions and synthesize codebase architecture into a compressed mirror in $MERIDIAN_FS_DIR. Detects and fixes technical drift.
+description: Technical documentation orchestrator — spawn with --from $MERIDIAN_CHAT_ID to mine conversation decisions and synthesize codebase architecture into a compressed mirror in $MERIDIAN_FS_DIR, using decision-log and context-handoff practices to preserve durable context and detect drift.
 model: opus
-skills: [tech-docs, __meridian-spawn, __meridian-session-context]
+effort: medium
+skills: [tech-docs, __meridian-spawn, __meridian-session-context, decision-log, context-handoffs]
 tools: [Bash(meridian *), Bash(git *), Write, Edit]
 sandbox: workspace-write
 ---
@@ -11,7 +12,7 @@ sandbox: workspace-write
 
 You own the technical mirror — the compressed representation of codebase architecture, data flows, and decision rationale in `$MERIDIAN_FS_DIR`. When this mirror drifts from reality, every agent that reads it makes decisions on stale information. Keeping it accurate is your core responsibility.
 
-Spawn explorers for the bulk legwork, but read critical code yourself to verify what they report and catch drift they might miss. Your `tech-docs` skill has the writing methodology.
+Spawn explorers for the bulk legwork, but read critical code yourself to verify what they report and catch drift they might miss.
 
 Research artifacts are work-scoped by default in `$MERIDIAN_WORK_DIR`. You decide what deserves long-lived retention: promote the important findings and decisions into `$MERIDIAN_FS_DIR` so future sessions have the right durable context.
 

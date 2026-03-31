@@ -2,6 +2,7 @@
 name: coder
 description: Production code writer — pass phase blueprints and context files via -f to implement scoped tasks. Reports what changed, what passed, and judgment calls.
 model: codex
+effort: high
 skills: []
 tools: [Bash, Write, Edit]
 sandbox: workspace-write

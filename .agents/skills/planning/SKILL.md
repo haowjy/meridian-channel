@@ -1,15 +1,23 @@
 ---
 name: planning
-description: Break a design into executable implementation phases with focused blueprints, dependency mapping, and agent staffing. Use this after a design doc exists and before spawning coders — whenever you need to decompose a design into phases, write phase specs, or figure out execution order and parallelism. Also activate when entering the planning phase of dev-orchestration.
+description: Break design docs into executable implementation phases with focused blueprints, dependency mapping, and agent staffing. Use this after design docs exist and before spawning coders — whenever you need to decompose a design into phases, write phase specs, or figure out execution order and parallelism.
 ---
 
 # Plan Implementation
 
 You have a design doc. Now you need to turn it into work that agents can execute. This skill teaches you how to decompose a design into phases, write focused blueprints for each, map dependencies, and staff the agents.
 
-The central idea is focused blueprints. Don't hand a coder the full design doc and expect it to extract what matters. Coders do better with phase-specific context that includes only the interfaces, constraints, and verification criteria needed for that phase.
+The plan is a delta, not a restatement of the full system. Design docs describe the target state; the plan describes what changes from current code to reach it.
+
+The central idea is focused blueprints. Don't hand a coder the full design tree and expect it to extract what matters. Coders do better with phase-specific context that includes only the interfaces, constraints, and verification criteria needed for that phase.
 
 This skill assumes work setup and artifact placement already come from `/__meridian-work-coordination`. Keep phase files and other work-scoped planning artifacts under `$MERIDIAN_WORK_DIR`.
+
+Artifact convention for planning and execution:
+- `$MERIDIAN_WORK_DIR/design/` captures approved architecture decisions in hierarchical docs.
+- `$MERIDIAN_WORK_DIR/plan/phase-*.md` is the current blueprint state.
+- `$MERIDIAN_WORK_DIR/plan/status.md` tracks execution progress.
+- `$MERIDIAN_WORK_DIR/decisions.md` records execution-time pivots, review triage, and deferrals.
 
 ## Phase Decomposition
 
@@ -23,6 +31,8 @@ A good phase is:
 - **Self-contained.** The coder shouldn't need to understand unrelated subsystems to do the work.
 
 Break along natural seams: data model first, then the layer that uses it, then the layer that uses that. If the design has clear architectural boundaries, those are your phase boundaries.
+
+Each phase should reference the specific docs in `design/` that define what to build and why it matters, while keeping phase scope limited to implementation delta.
 
 ### Signs a phase is too big
 
@@ -81,6 +91,7 @@ For each phase, write a blueprint that gives the coder everything it needs, and 
 - **Patterns to follow.** Point to one concrete existing file when conventions matter.
 - **Constraints and boundaries.** State what is explicitly out of scope.
 - **Verification criteria.** Define concrete checks that can gate completion.
+- **Design conformance checks.** Include checks that verify outcomes align with the referenced design spec, not just that tests pass.
 
 ### Exclude
 
@@ -170,7 +181,9 @@ You're ready to move to `implementing` when each phase file gives the coder clea
 Plans rarely survive first contact with implementation unchanged. When a phase reveals that the plan needs adjustment:
 
 - Update the affected phase files in `plan/`
-- Record the change and reasoning in your design doc
+- If execution progress changed, update `$MERIDIAN_WORK_DIR/plan/status.md`
+- If the approved architecture direction changes, update the affected docs under `$MERIDIAN_WORK_DIR/design/`
+- Record execution-time pivots and rationale in `$MERIDIAN_WORK_DIR/decisions.md`
 - If the change affects dependencies, re-evaluate downstream phases
 
 Don't treat the plan as sacred. It's a tool for coordination, not a contract. If reality diverges from the plan, update the plan to match reality — then continue with accurate information.

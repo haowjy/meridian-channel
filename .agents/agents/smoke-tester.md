@@ -2,6 +2,7 @@
 name: smoke-tester
 description: External QA tester — tell it what changed and what to verify for end-to-end testing from the user's perspective.
 model: sonnet
+effort: medium
 skills: [smoke-test]
 tools: [Bash, Write, Edit]
 sandbox: workspace-write
