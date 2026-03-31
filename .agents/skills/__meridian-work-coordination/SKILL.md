@@ -45,3 +45,7 @@ meridian work delete old-item --force    # remove even if it has artifacts
 **`$MERIDIAN_FS_DIR`** — long-lived reference material that helps humans and agents quickly get up to speed. Persists across work items. Examples: architecture overviews, codebase guides, API conventions, onboarding context.
 
 Rule of thumb: if it helps *this* work item, use `$MERIDIAN_WORK_DIR`. If it helps *any* task understand the project, use `$MERIDIAN_FS_DIR`.
+
+## Commit Work Artifacts
+
+Commit work artifacts to git after creating or updating them — design docs, plans, status, decisions, any file in `$MERIDIAN_WORK_DIR` or `$MERIDIAN_FS_DIR` that a future agent would need. These artifacts are the resumability contract: if they're not in git, a future agent (or you, after compaction or a crash) can't pick up where things left off. Don't batch artifact commits until the end — commit as you go so progress is never lost.
