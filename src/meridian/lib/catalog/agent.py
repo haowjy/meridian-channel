@@ -37,6 +37,7 @@ class AgentProfile(BaseModel):
     harness: str | None = None
     skills: tuple[str, ...]
     tools: tuple[str, ...]
+    disallowed_tools: tuple[str, ...]
     mcp_tools: tuple[str, ...]
     sandbox: str | None
     effort: str | None
@@ -141,6 +142,7 @@ def parse_agent_profile(path: Path) -> AgentProfile:
         harness=str(harness_value).strip() if harness_value is not None else None,
         skills=_normalize_string_list(frontmatter.get("skills")),
         tools=_normalize_string_list(frontmatter.get("tools")),
+        disallowed_tools=_normalize_string_list(frontmatter.get("disallowed-tools")),
         mcp_tools=_normalize_deduplicated(frontmatter.get("mcp-tools")),
         sandbox=sandbox,
         effort=effort,

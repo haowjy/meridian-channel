@@ -18,6 +18,7 @@ class ExecutionPolicy(BaseModel):
     permission_config: PermissionConfig
     permission_resolver: PermissionResolver
     allowed_tools: tuple[str, ...] = ()
+    disallowed_tools: tuple[str, ...] = ()
 
 
 class SessionContinuation(BaseModel):

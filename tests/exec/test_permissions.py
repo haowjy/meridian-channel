@@ -2,18 +2,20 @@ import json
 
 import pytest
 
-from meridian.lib.core.types import ModelId
+from meridian.lib.core.types import HarnessId, ModelId
 from meridian.lib.harness.adapter import SpawnParams
 from meridian.lib.harness.claude import ClaudeAdapter
 from meridian.lib.launch.command import build_launch_env
 from meridian.lib.launch.env import build_harness_child_env, inherit_child_env, sanitize_child_env
 from meridian.lib.launch.types import LaunchRequest
 from meridian.lib.safety.permissions import (
+    CombinedToolsResolver,
     ExplicitToolsResolver,
     PermissionConfig,
     PermissionTier,
     build_permission_config,
     opencode_permission_json_for_allowed_tools,
+    opencode_permission_json_for_disallowed_tools,
     resolve_permission_pipeline,
 )
 
@@ -51,6 +53,67 @@ def test_resolve_permission_pipeline_sets_opencode_override_for_explicit_tools()
         "read": "allow",
         "write": "allow",
     }
+
+
+def test_opencode_permission_json_for_disallowed_tools_normalizes_tool_names() -> None:
+    disallowed_tools = ("Read", "Glob", "Grep", "Bash(git status)", "WebSearch")
+    expected = {
+        "*": "allow",
+        "read": "deny",
+        "glob": "deny",
+        "grep": "deny",
+        "bash": "deny",
+        "websearch": "deny",
+    }
+    assert json.loads(opencode_permission_json_for_disallowed_tools(disallowed_tools)) == expected
+
+
+def test_resolve_permission_pipeline_sets_opencode_override_for_disallowed_tools() -> None:
+    config, resolver = resolve_permission_pipeline(
+        sandbox="workspace-write",
+        disallowed_tools=("Read", "Write"),
+        approval="confirm",
+    )
+
+    assert isinstance(resolver, CombinedToolsResolver)
+    assert config.tier is PermissionTier.WORKSPACE_WRITE
+    assert config.opencode_permission_override is not None
+    assert json.loads(config.opencode_permission_override) == {
+        "*": "allow",
+        "read": "deny",
+        "write": "deny",
+    }
+
+
+def test_disallowed_tools_resolver_codex_warns_and_falls_back(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    config, resolver = resolve_permission_pipeline(
+        sandbox="workspace-write",
+        disallowed_tools=("Bash",),
+    )
+
+    assert config.tier is PermissionTier.WORKSPACE_WRITE
+    assert isinstance(resolver, CombinedToolsResolver)
+    with caplog.at_level("WARNING"):
+        assert resolver.resolve_flags(HarnessId.CODEX) == ["--sandbox", "workspace-write"]
+    assert "Codex does not support disallowed-tools" in caplog.text
+
+
+def test_allowed_tools_take_precedence_over_disallowed_tools(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level("WARNING"):
+        config, resolver = resolve_permission_pipeline(
+            sandbox="workspace-write",
+            allowed_tools=("Read",),
+            disallowed_tools=("Read", "Write"),
+        )
+
+    assert isinstance(resolver, CombinedToolsResolver)
+    assert config.opencode_permission_override is not None
+    assert json.loads(config.opencode_permission_override) == {"*": "deny", "read": "allow"}
+    assert "Both tools (allowlist) and disallowed-tools (denylist) are set" in caplog.text
 
 
 def test_sanitize_child_env_filters_parent_secrets_and_keeps_explicit_overrides() -> None:

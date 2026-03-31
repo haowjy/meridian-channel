@@ -335,6 +335,7 @@ def build_create_payload(
     permission_config, resolver = resolve_permission_pipeline(
         sandbox=resolved.sandbox,
         allowed_tools=profile.tools if profile is not None else (),
+        disallowed_tools=profile.disallowed_tools if profile is not None else (),
         approval=resolved.approval or "default",
     )
 
@@ -411,6 +412,7 @@ def build_create_payload(
             permission_config=permission_config,
             permission_resolver=resolver,
             allowed_tools=profile.tools if profile is not None else (),
+            disallowed_tools=profile.disallowed_tools if profile is not None else (),
         ),
     )
 
