@@ -89,6 +89,7 @@ Each subsystem has its own design doc with concrete Rust types:
 | [Frontmatter module](frontmatter.md) | Parse → typed struct → rewrite → serialize | #3 (substring corruption), #4 (temp file collisions), #13 (target.rs split) |
 | [Newtypes and parsing](newtypes-and-parsing.md) | SourceName, ItemName, DestPath, SourceId, RenameRule, SourceSpecParser | #6 (SSH misparse), #8 (stringly-typed), #9 (name-keyed deps), #16 (mixed concerns) |
 | [Resolver and errors](resolver-and-errors.md) | Locked SHA replay, exit code mapping | #5 (resolver ignores SHA), #7 (broken exit codes) |
+| [Extensibility analysis](extensibility.md) | Extension points, v2 compatibility, YAGNI boundaries | Future-proofing without over-engineering |
 
 ## Issue Coverage Matrix
 
