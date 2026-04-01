@@ -482,24 +482,6 @@ allow = ["git", "local"]         # allowed source types
 require-checksum = true           # enforce integrity checks
 ```
 
-## v2: Cache & Offline
-
-### Content-Addressed Cache
-
-Cache source content by hash in `.agents/.mars/cache/`. Don't re-download unchanged sources.
-
-### Offline Mode
-
-`mars sync --offline` installs from cache only. For CI/air-gapped environments.
-
-### Cache Management
-
-```bash
-mars cache list       # show cached sources
-mars cache prune      # remove stale entries
-mars cache clear      # wipe everything
-```
-
 ## Future: Registry & Marketplace
 
 ### `mars search <query>`
