@@ -65,6 +65,7 @@ class SpawnRecord(BaseModel):
 
     id: str
     chat_id: str | None
+    parent_id: str | None
     model: str | None
     agent: str | None
     agent_path: str | None
@@ -102,6 +103,7 @@ class SpawnStartEvent(BaseModel):
     event: Literal["start"] = "start"
     id: str = ""
     chat_id: str | None = None
+    parent_id: str | None = None
     model: str | None = None
     agent: str | None = None
     agent_path: str | None = None
@@ -178,6 +180,7 @@ def start_spawn(
     state_root: Path,
     *,
     chat_id: str,
+    parent_id: str | None = None,
     model: str,
     agent: str,
     agent_path: str | None = None,
@@ -212,6 +215,7 @@ def start_spawn(
         event = SpawnStartEvent(
             id=str(resolved_spawn_id),
             chat_id=chat_id,
+            parent_id=parent_id,
             model=model,
             agent=agent,
             agent_path=agent_path,
@@ -351,6 +355,7 @@ def _empty_record(spawn_id: str) -> SpawnRecord:
     return SpawnRecord(
         id=spawn_id,
         chat_id=None,
+        parent_id=None,
         model=None,
         agent=None,
         agent_path=None,
@@ -402,6 +407,9 @@ def _record_from_events(events: list[SpawnEvent]) -> dict[str, SpawnRecord]:
             records[spawn_id] = current.model_copy(
                 update={
                     "chat_id": event.chat_id if event.chat_id is not None else current.chat_id,
+                    "parent_id": (
+                        event.parent_id if event.parent_id is not None else current.parent_id
+                    ),
                     "model": event.model if event.model is not None else current.model,
                     "agent": event.agent if event.agent is not None else current.agent,
                     "agent_path": (

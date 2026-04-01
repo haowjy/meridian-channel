@@ -281,6 +281,7 @@ class SpawnDetailOutput(BaseModel):
     status: str
     model: str
     harness: str
+    parent_id: str | None = None
     work_id: str | None = None
     desc: str | None = None
     started_at: str

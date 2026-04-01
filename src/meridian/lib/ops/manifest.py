@@ -417,6 +417,18 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         surfaces=frozenset({"cli"}),
     ),
     _spec(
+        name="spawn.children",
+        description="List child spawns for a parent spawn id.",
+        handler=spawn_list,
+        sync_handler=spawn_list_sync,
+        input_type=SpawnListInput,
+        output_type=SpawnListOutput,
+        cli_group="spawn",
+        cli_name="children",
+        mcp_name="spawn_children",
+        surfaces=frozenset({"cli"}),
+    ),
+    _spec(
         name="spawn.continue",
         description="Continue a previous spawn.",
         handler=spawn_continue,

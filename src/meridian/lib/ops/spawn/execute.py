@@ -227,6 +227,7 @@ def _init_spawn(
     spawn_id = spawn_store.start_spawn(
         state_root,
         chat_id=resolve_chat_id(ctx=resolved_context, fallback="c0"),
+        parent_id=str(resolved_context.spawn_id) if resolved_context.spawn_id else None,
         model=prepared.model,
         agent=prepared.agent_name or "",
         agent_path=prepared.agent_path or None,

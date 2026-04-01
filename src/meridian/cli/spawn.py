@@ -11,13 +11,16 @@ from meridian.cli.registration import register_manifest_cli_group
 from meridian.cli.utils import missing_fork_session_error, parse_csv_list
 from meridian.lib.core.domain import SpawnStatus
 from meridian.lib.ops.reference import resolve_session_reference
-from meridian.lib.ops.runtime import resolve_runtime_root_and_config
+from meridian.lib.ops.runtime import resolve_runtime_root_and_config, resolve_state_root
 from meridian.lib.ops.spawn.api import (
     SpawnActionOutput,
     SpawnCancelInput,
     SpawnContinueInput,
     SpawnCreateInput,
+    SpawnDetailOutput,
+    SpawnListEntry,
     SpawnListInput,
+    SpawnListOutput,
     SpawnShowInput,
     SpawnStatsInput,
     SpawnWaitInput,
@@ -33,6 +36,7 @@ from meridian.lib.ops.spawn.api import (
 )
 from meridian.lib.ops.spawn.log import SpawnLogInput, spawn_log_sync
 from meridian.lib.ops.spawn.plan import SessionContinuation
+from meridian.lib.state import spawn_store
 
 # In agent mode (MERIDIAN_DEPTH > 0), hide human-only flags from --help.
 # Flags still work when passed — show only affects help text.
@@ -411,6 +415,55 @@ def _spawn_list(
     emit(result)
 
 
+def _spawn_children(
+    emit: Any,
+    spawn_id: Annotated[
+        str,
+        Parameter(name="spawn_id", help="Parent spawn ID."),
+    ],
+) -> None:
+    normalized_spawn_id = spawn_id.strip()
+    if not normalized_spawn_id:
+        raise ValueError("spawn_id is required")
+    repo_root, _ = resolve_runtime_root_and_config(None)
+    state_root = resolve_state_root(repo_root)
+    from meridian.lib.state.reaper import reconcile_spawns
+
+    children = list(
+        reversed(
+            reconcile_spawns(
+                state_root,
+                spawn_store.list_spawns(
+                    state_root,
+                    filters={"parent_id": normalized_spawn_id},
+                ),
+            )
+        )
+    )
+    emit(
+        SpawnListOutput(
+            spawns=tuple(
+                SpawnListEntry(
+                    spawn_id=row.id,
+                    status=row.status,
+                    model=row.model or "",
+                    duration_secs=row.duration_secs,
+                    cost_usd=row.total_cost_usd,
+                )
+                for row in children
+            ),
+        )
+    )
+
+
+def _format_spawn_show_text(result: SpawnDetailOutput) -> str:
+    rendered = result.format_text()
+    parent_id = (result.parent_id or "").strip()
+    if not parent_id:
+        return rendered
+    return f"{rendered}\nParent: {parent_id}"
+
+
 def _spawn_show(
     emit: Any,
     spawn_ids: Annotated[
@@ -440,7 +493,7 @@ def _spawn_show(
         for spawn_id in spawn_ids
     )
 
-    if len(results) == 1:
+    if len(results) == 1 and get_global_options().output.format == "json":
         emit(results[0])
         return
 
@@ -448,7 +501,7 @@ def _spawn_show(
         emit(list(results))
         return
 
-    emit("\n\n".join(result.format_text() for result in results))
+    emit("\n\n".join(_format_spawn_show_text(result) for result in results))
 
 
 def _spawn_stats(
@@ -574,6 +627,7 @@ def register_spawn_commands(app: App, emit: Emitter) -> tuple[set[str], dict[str
     """Register spawn CLI commands using registry metadata as source of truth."""
 
     handlers: dict[str, Callable[[], Callable[..., None]]] = {
+        "spawn.children": lambda: partial(_spawn_children, emit),
         "spawn.files": lambda: partial(_spawn_files, emit),
         "spawn.log": lambda: partial(_spawn_log, emit),
         "spawn.list": lambda: partial(_spawn_list, emit),

@@ -218,6 +218,7 @@ def detail_from_row(
         status=row.status,
         model=row.model or "",
         harness=row.harness or "",
+        parent_id=row.parent_id,
         work_id=row.work_id,
         desc=row.desc,
         started_at=row.started_at or "",
