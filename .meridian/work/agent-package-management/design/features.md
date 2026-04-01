@@ -10,7 +10,7 @@ This is the architectural backbone — the sync pipeline (resolve → validate �
 
 ## v1: Core Package Management
 
-V1 commands: `init`, `add`, `sync`, `sync --force`, `sync --diff`, `sync --frozen`, `remove`, `resolve`, `rename`, `upgrade`, `list`, `why`, `doctor`, `repair`.
+V1 commands: `init`, `add`, `sync`, `sync --force`, `sync --diff`, `sync --frozen`, `remove`, `resolve`, `rename`, `update`, `list`, `why`, `doctor`, `repair`.
 
 ### `mars init`
 
@@ -123,29 +123,30 @@ Rename only changes the filename on disk — frontmatter `name:` field is preser
 
 Explicit renames (via `mars rename`) take precedence over auto-renames. If an explicit rename causes a new collision, mars errors rather than silently re-auto-renaming.
 
-### `mars upgrade`
+### `mars update`
 
-Upgrade sources to newer compatible versions. Resolves all targets simultaneously to find a compatible version set.
+Update sources to the newest versions satisfying current constraints. Resolves all targets simultaneously.
 
 ```bash
-mars upgrade                             # upgrade all sources to latest compatible
-mars upgrade meridian-base               # upgrade one source + its deps
-mars upgrade meridian-base cool-agents   # upgrade multiple together
-mars upgrade meridian-base@v0.6.0        # pin to specific version
+mars update                              # update all sources within constraints
+mars update meridian-base                # update one source + its deps
+mars update meridian-base cool-agents    # update multiple together
 ```
 
-The resolver takes all upgrade targets, finds the newest versions satisfying all constraints across all sources simultaneously, then syncs. Resolving together avoids intermediate states where one upgrade breaks another's constraints.
+The resolver finds the newest versions satisfying all constraints across all sources simultaneously. Resolving together avoids intermediate states where one update breaks another's constraints.
 
 If no compatible set exists:
 
 ```
-error: cannot upgrade — version constraints conflict:
+error: cannot update — version constraints conflict:
   cool-agents requires meridian-base >=0.5.0, <0.6.0
   dev-workflow requires meridian-base >=0.6.0
-  hint: upgrade cool-agents too, or check if a newer cool-agents widens its constraint
+  hint: use `mars add cool-agents@newversion` to widen its constraint
 ```
 
-`mars upgrade` also attempts to resolve transitive dependency conflicts first — if upgrading source A requires upgrading its transitive dep B, mars tries to find a compatible B version before erroring.
+To go past current constraints (e.g., jump to a new major version), use `mars add source@newversion` which upserts the constraint in config.
+
+`mars update` also attempts to resolve transitive dependency conflicts first — if updating source A requires updating its transitive dep B, mars tries to find a compatible B version before erroring.
 
 ### `mars list`
 
@@ -404,10 +405,9 @@ installed_checksum = "sha256:def456..."
 
 Features deferred from v1. Ordered roughly by expected value.
 
-### `mars outdated` / `mars update`
+### `mars outdated`
 
-- `mars outdated` — show sources with newer versions available
-- `mars update` — update within current version constraints
+Show which sources have newer versions available beyond current constraints. Informational only — suggests `mars add source@newversion` for each.
 
 ### Rerere (Reuse Recorded Resolution)
 
