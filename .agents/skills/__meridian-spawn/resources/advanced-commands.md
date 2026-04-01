@@ -58,6 +58,23 @@ meridian spawn report create "Summary of findings..." --spawn SPAWN_ID
 echo "Report content" | meridian spawn report create --spawn SPAWN_ID --stdin
 ```
 
+## Inspecting a Spawn's Conversation
+
+Read what a spawn said and did using `meridian session log` with the spawn ID:
+
+```bash
+meridian session log p107              # last 5 messages
+meridian session log p107 --last 20    # more history
+meridian session search "error" p107   # search for specific text
+```
+
+This reads the spawn's own transcript. Combine with `spawn children` to trace a full spawn tree:
+
+```bash
+meridian spawn children p107           # discover child IDs
+meridian session log p108              # read a child's conversation
+```
+
 ## Dry Run
 
 ```bash

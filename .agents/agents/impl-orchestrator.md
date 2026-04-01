@@ -52,6 +52,8 @@ You have autonomy to adjust execution order, split phases, or adapt to findings.
 
 If a phase reveals the plan needs adjustment, update the affected phase files in plan/ and note the change. If implementation hits a blocker that requires design changes — a discovered constraint, a broken assumption — report clearly what's blocking and why so dev-orchestrator can resolve, potentially spawning a scoped design round to amend the design.
 
+If a spawn fails because of sandbox, tool, or harness constraints, use `/__meridian-privilege-escalation` to find the right override — don't defer the work.
+
 ## Completion
 
 When all phases pass tests and review, run a final verification pass across the full change set. Update work status with `meridian work update --status done`. Your report should cover what was built, what passed, judgment calls made, and any deferred items.

@@ -86,6 +86,14 @@ meridian work
 
 Stuck spawns auto-recover: if a spawn's process dies or goes stale, the next read (`show`, `wait`) detects it and marks it failed. You don't need to manually clean up — just check the status and move on.
 
+To see what a spawn spawned, use `spawn children`:
+
+```bash
+meridian spawn children p107   # list direct children of p107
+```
+
+`spawn show` also displays the parent ID when a spawn was created by another spawn.
+
 ## When a Spawn Fails
 
 If `spawn wait` returns `"status": "failed"`, read the report via `spawn show SPAWN_ID` first — it usually contains the error or the agent's last output. For deeper investigation, see [`resources/debugging.md`](resources/debugging.md) for log inspection.
