@@ -17,7 +17,6 @@ from meridian.lib.ops.spawn.api import (
     SpawnCancelInput,
     SpawnContinueInput,
     SpawnCreateInput,
-    SpawnDetailOutput,
     SpawnListEntry,
     SpawnListInput,
     SpawnListOutput,
@@ -456,14 +455,6 @@ def _spawn_children(
     )
 
 
-def _format_spawn_show_text(result: SpawnDetailOutput) -> str:
-    rendered = result.format_text()
-    parent_id = (result.parent_id or "").strip()
-    if not parent_id:
-        return rendered
-    return f"{rendered}\nParent: {parent_id}"
-
-
 def _spawn_show(
     emit: Any,
     spawn_ids: Annotated[
@@ -493,7 +484,7 @@ def _spawn_show(
         for spawn_id in spawn_ids
     )
 
-    if len(results) == 1 and get_global_options().output.format == "json":
+    if len(results) == 1:
         emit(results[0])
         return
 
@@ -501,7 +492,7 @@ def _spawn_show(
         emit(list(results))
         return
 
-    emit("\n\n".join(_format_spawn_show_text(result) for result in results))
+    emit("\n\n".join(result.format_text() for result in results))
 
 
 def _spawn_stats(

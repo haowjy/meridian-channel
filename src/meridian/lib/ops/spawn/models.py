@@ -341,11 +341,14 @@ class SpawnDetailOutput(BaseModel):
         work_value = (self.work_id or "").strip() or None
         desc_value = (self.desc or "").strip() or None
 
+        parent_value = (self.parent_id or "").strip() or None
+
         pairs: list[tuple[str, str | None]] = [
             ("Spawn", self.spawn_id),
             ("Status", status_str),
             ("Model", f"{self.model} ({self.harness})"),
             ("Duration", duration_value),
+            ("Parent", parent_value),
             ("Work", work_value),
             ("Desc", desc_value),
             (failure_label or "Failure", self.failure_reason),
