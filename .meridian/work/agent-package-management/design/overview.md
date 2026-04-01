@@ -23,7 +23,7 @@ Meridian currently has a basic file copier (`meridian sources`). mars-agents rep
 
 ### All Mutations Resolve First
 
-Every command that changes state proposes a new target state and resolves the full dependency graph before touching disk. Either the entire state is satisfiable or the command fails and nothing changes. No partial mutations — `add`, `remove`, `upgrade`, `rename`, and `sync` all flow through the same resolve → validate → diff → plan → apply pipeline.
+Every command that changes state proposes a new target state and resolves the full dependency graph before touching disk. Either the entire state is satisfiable or the command fails and nothing changes. No partial mutations — `add`, `remove`, `update`, `rename`, and `sync` all flow through the same resolve → validate → diff → plan → apply pipeline.
 
 ### `.agents/` Is Mixed, Not Generated
 
@@ -113,7 +113,7 @@ Four cases on sync, determined by comparing checksums against lock:
 | No | Yes | Keep local |
 | Yes | Yes | Three-way merge → conflict markers if needed |
 
-Base for three-way diff = what mars installed last time (checksum + cached content from lock). Uses `threeway_merge` crate (libgit2/xdiff algorithms, 100% compatible with git merge-file).
+Base for three-way diff = what mars installed last time (reconstructed from locked commit SHA if cache missing). Uses `git2::merge_file()` — libgit2's built-in three-way merge with conflict markers (no extra crate needed).
 
 ## Architecture
 
@@ -230,7 +230,7 @@ version = ">=1.0.0"
 
 Dependencies are package-level by default — omit `items` and you get everything the package provides. Add `items` to cherry-pick specific agents/skills. This is the package author declaring "I only need these specific things," keeping installs lean without complicating the resolution algorithm.
 
-Item-level filtering in `mars.toml` (package manifest) controls what a package *requires*. Item-level filtering in `agents.toml` (consumer config via `include`/`exclude`) controls what a user *wants*. Both are optional.
+Item-level filtering in `mars.toml` (package manifest) controls what a package *requires*. Intent-based filtering in `agents.toml` (consumer config via `agents`/`skills`/`exclude`) controls what a user *wants*. Both are optional.
 
 Agent frontmatter stays clean — `skills: [X]` uses names only, no source URLs. Mars validates that referenced names exist after resolution. The frontmatter doesn't participate in dependency resolution.
 

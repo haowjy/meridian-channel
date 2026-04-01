@@ -49,7 +49,7 @@ Exit codes are consistent across both modes: 0 = success, 1 = conflicts remain, 
 
 ## v1: Core Package Management
 
-V1 commands: `init`, `add`, `sync`, `sync --force`, `sync --diff`, `sync --frozen`, `remove`, `resolve`, `rename`, `update`, `outdated`, `list`, `why`, `doctor`, `repair`.
+V1 commands: `init`, `add`, `sync`, `sync --force`, `sync --diff`, `sync --frozen`, `remove`, `resolve`, `rename`, `update`, `outdated`, `override`, `list`, `why`, `doctor`, `repair`.
 
 ### `mars init`
 
