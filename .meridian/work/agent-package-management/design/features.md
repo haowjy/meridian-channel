@@ -486,6 +486,32 @@ allow = ["git", "local"]         # allowed source types
 require-checksum = true           # enforce integrity checks
 ```
 
+### `mars diff <source>`
+
+Show what changed upstream since your lock — preview upstream changes before updating. Like `git diff` for your sources.
+
+### `mars audit`
+
+Security scan of installed agents/skills. Check for known vulnerabilities, suspicious patterns, overly broad permissions. Relevant given Vett's positioning in the space.
+
+### Plugin Hooks
+
+Pre/post sync hooks for custom workflows. The sync pipeline's discrete steps with clear inputs/outputs make this a natural extension point.
+
+```toml
+[hooks]
+pre-sync = "scripts/validate-agents.sh"
+post-sync = "scripts/notify-team.sh"
+```
+
+### Private Registry Auth
+
+API tokens, org-scoped packages, credential management for private registries.
+
+### `mars init --from <template>`
+
+Initialize from an existing project's config. Template projects for teams.
+
 ## Future: Registry & Marketplace
 
 ### `mars search <query>`
@@ -503,3 +529,13 @@ Install from registry (vs `mars add` for git/local sources).
 ### Workspace Support
 
 Monorepo with multiple projects sharing a lock file but different install targets.
+
+## v1 Architecture Notes for Future Extensibility
+
+These don't require changes — just awareness during implementation:
+
+- **Lock schema**: extensible via optional fields + `version: 1` field. New fields (signatures, patch metadata) can be added without breaking old locks.
+- **Source resolution**: behind `SourceFetcher` trait. Registry = new adapter, no pipeline change.
+- **Sync pipeline**: discrete steps with clear inputs/outputs. Hooks insert between steps. Patches layer after apply.
+- **Auth**: `git2` credential callbacks already support SSH agent, HTTPS tokens, git credential helpers. Don't bypass them.
+- **Trust**: lock stores checksums + commit SHAs. Signature verification = checking an additional field on the existing data.
