@@ -404,10 +404,6 @@ installed_checksum = "sha256:def456..."
 
 Features deferred from v1. Ordered roughly by expected value.
 
-### Rename / Breaking Change Detection
-
-Diff old lock vs new lock. If a name disappears from a source, check if dependents still reference it. Surface: "agent `verifier` depends on `verification-testing` which no longer exists — did you mean `verification`?"
-
 ### `mars outdated` / `mars update`
 
 - `mars outdated` — show sources with newer versions available
