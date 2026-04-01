@@ -192,9 +192,14 @@ pub fn execute(root: &Path, request: &SyncRequest) -> Result<SyncReport, MarsErr
         apply_mutation(&mut config, mutation)?;
     }
 
-    // Step 4: Merge with agents.local.toml
-    let local = crate::config::load_local(root)?;
-    let effective = crate::config::merge(config.clone(), local)?;
+    // Step 4: Load and mutate agents.local.toml (for override mutations)
+    let mut local = crate::config::load_local(root)?;
+    if let Some(mutation) = &request.mutation {
+        apply_local_mutation(&mut local, mutation)?;
+    }
+
+    // Step 4b: Merge config + local into effective config
+    let effective = crate::config::merge(config.clone(), local.clone())?;
 
     // Step 5: Validate resolution targets exist in config
     validate_targets(&request.resolution, &effective)?;
@@ -254,9 +259,17 @@ pub fn execute(root: &Path, request: &SyncRequest) -> Result<SyncReport, MarsErr
         }
     }
 
-    // Step 15: Persist config (only if mutated and not dry-run)
+    // Step 15: Persist config and/or local config (only if mutated and not dry-run)
     if has_mutation && !request.options.dry_run {
-        crate::config::save(root, &config)?;
+        match &request.mutation {
+            Some(ConfigMutation::UpsertSource { .. } | ConfigMutation::RemoveSource { .. }) => {
+                crate::config::save(root, &config)?;
+            }
+            Some(ConfigMutation::SetOverride { .. } | ConfigMutation::ClearOverride { .. }) => {
+                crate::config::save_local(root, &local)?;
+            }
+            None => {}
+        }
     }
 
     // Step 16: Apply plan
@@ -305,11 +318,45 @@ fn apply_mutation(config: &mut Config, mutation: &ConfigMutation) -> Result<(), 
             config.sources.shift_remove(name);
             Ok(())
         }
-        ConfigMutation::SetOverride { .. } | ConfigMutation::ClearOverride { .. } => {
-            // Override mutations modify agents.local.toml, not agents.toml.
-            // Handled separately after local config load.
+        ConfigMutation::SetOverride { source_name, local_path } => {
+            // Validate the source exists in config
+            if !config.sources.contains_key(source_name) {
+                return Err(MarsError::Source {
+                    source_name: source_name.clone(),
+                    message: format!("source `{source_name}` not found in agents.toml"),
+                });
+            }
+            // Override mutations are applied to local_config, not config.
+            // Caller must also call apply_local_mutation().
             Ok(())
         }
+        ConfigMutation::ClearOverride { source_name } => {
+            Ok(())
+        }
+    }
+}
+
+/// Apply override mutations to agents.local.toml.
+///
+/// SetOverride adds/updates an entry; ClearOverride removes one.
+/// Non-override mutations are no-ops here.
+fn apply_local_mutation(
+    local: &mut LocalConfig,
+    mutation: &ConfigMutation,
+) -> Result<(), MarsError> {
+    match mutation {
+        ConfigMutation::SetOverride { source_name, local_path } => {
+            local.overrides.insert(
+                source_name.clone(),
+                OverrideEntry { path: local_path.clone() },
+            );
+            Ok(())
+        }
+        ConfigMutation::ClearOverride { source_name } => {
+            local.overrides.shift_remove(source_name);
+            Ok(())
+        }
+        _ => Ok(()), // Non-override mutations handled by apply_mutation
     }
 }
 

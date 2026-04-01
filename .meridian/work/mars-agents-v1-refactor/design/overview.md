@@ -94,49 +94,48 @@ Each subsystem has its own design doc with concrete Rust types:
 
 | # | Issue | Subsystem | Phase |
 |---|-------|-----------|-------|
-| 1 | Upgrade forks sync engine | sync-pipeline | 5 |
-| 2 | Config load/mutation races | sync-pipeline | 5 |
+| 1 | Upgrade forks sync engine | sync-pipeline | 4 |
+| 2 | Config load/mutation races | sync-pipeline | 4 |
 | 3 | Frontmatter substring corruption | frontmatter | 1 |
 | 4 | Temp files not namespaced | frontmatter | 1 |
-| 5 | Resolver ignores locked SHA | resolver-and-errors | 6 |
+| 5 | Resolver ignores locked SHA | resolver-and-errors | 5 |
 | 6 | SSH URL misparse | newtypes-and-parsing | 2 |
 | 7 | Exit code mapping broken | resolver-and-errors | 3 |
-| 8 | Stringly-typed identities | newtypes-and-parsing | 7-8 |
-| 9 | Dependency identity by name | newtypes-and-parsing | 8 |
-| 10 | Dead SourceFetcher abstraction | cleanup | 9 |
-| 11 | Lock provenance heuristic | cleanup | 9 |
-| 12 | build()/check_collisions() split | sync-pipeline | 5 |
-| 13 | target.rs 4 responsibilities | sync-pipeline | 5 |
-| 14 | sync/mod.rs too many concerns | sync-pipeline | 5 |
+| 8 | Stringly-typed identities | newtypes-and-parsing | 6-7 |
+| 9 | Dependency identity by name | newtypes-and-parsing | 7 |
+| 10 | Dead SourceFetcher abstraction | cleanup | 8 |
+| 11 | Lock provenance heuristic | cleanup | 8 |
+| 12 | build()/check_collisions() split | sync-pipeline | 4 |
+| 13 | target.rs 4 responsibilities | sync-pipeline | 4 |
+| 14 | sync/mod.rs too many concerns | sync-pipeline | 4 |
 | 15 | EffectiveConfig bundles too much | newtypes-and-parsing | 7 |
 | 16 | parse_source_specifier mixes 4 | newtypes-and-parsing | 2 |
-| 17 | SourceProvider trait is fat | cleanup | 9 |
+| 17 | SourceProvider trait is fat | cleanup | 8 |
 
 ## Phase Ordering Strategy
 
 Phases are ordered to maximize independent shippability while front-loading correctness fixes:
 
 ```
-Phase 1: Frontmatter module          (new module, fixes corruption bug)
-Phase 2: Source spec parser           (new module, fixes SSH parse bug)
-Phase 3: Exit code mapping            (isolated change, fixes exit codes)
-Phase 4: Unified sync pipeline        (the big structural change)
-Phase 5: Flock-first config mutation  (builds on unified pipeline)
-Phase 6: Resolver locked SHA replay   (independent, fixes reproducibility)
-Phase 7: Foundation newtypes          (SourceName, ItemName — systematic)
-Phase 8: Path newtypes + RenameRule   (DestPath, SourceId, RenameRule)
-Phase 9: Cleanup                      (dead code, target split, lock provenance)
+Phase 1: Frontmatter module               (new module, fixes #3 #4)
+Phase 2: Source spec parser                (new module, fixes #6 #16)
+Phase 3: Exit code mapping                 (isolated, fixes #7)
+Phase 4: Unified sync pipeline + flock     (structural, fixes #1 #2 #12 #13 #14)
+Phase 5: Resolver locked SHA replay        (independent, fixes #5)
+Phase 6: Foundation newtypes               (SourceName, ItemName, CommitHash, ContentHash)
+Phase 7: Path newtypes + SourceId          (DestPath, SourceUrl, SourceId, RenameRule)
+Phase 8: Cleanup                           (dead code, lock provenance, SourceProvider split)
 ```
 
 **Rationale for this order:**
-- Phases 1-3 are quick, independent wins that fix real bugs and create clean modules the later phases depend on
-- Phase 4 is the highest-risk structural change — it's easier after the codebase has fewer responsibilities in target.rs (frontmatter extracted)
-- Phase 5 builds directly on phase 4's SyncRequest API
-- Phase 6 is independent of 4-5 but benefits from the cleaner pipeline
-- Phases 7-8 are systematic newtype introductions — lower risk per change, high total touch count. Easier after the pipeline is unified (fewer call sites)
-- Phase 9 is cleanup that's safe to do last
+- Phases 1-3 are quick, independent wins that fix real bugs and create clean modules
+- Phase 1 (frontmatter) reduces target.rs from 4 responsibilities to 3, making phase 4 cleaner
+- Phase 4 is the highest-risk structural change — combines unified pipeline + flock-first config mutation since they're tightly coupled (SyncRequest + ConfigMutation both need to be in the pipeline)
+- Phase 5 depends on phase 4 (uses `ResolutionMode` to determine SHA replay behavior per mode)
+- Phases 6-7 are systematic newtype introductions — lower risk per change, high total touch count. Easier after the pipeline is unified (fewer call sites to update)
+- Phase 8 is cleanup that's safe to do last — dead `SourceFetcher`, fat `SourceProvider` trait, lock provenance heuristics
 
-Each phase produces a shippable state: tests pass, CLI works, no broken commands.
+Each phase produces a shippable state: `cargo test` passes, CLI works, no broken commands.
 
 ## Cross-Cutting Design Decisions
 
