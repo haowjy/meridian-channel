@@ -3,6 +3,7 @@
 import logging
 import os
 import shlex
+import subprocess
 import sys
 from collections.abc import Sequence
 from contextvars import ContextVar
@@ -54,6 +55,7 @@ Quick start:
 Run 'meridian spawn -h' for full usage.
 
 Commands:
+  mars     Forward arguments to bundled mars CLI
   spawn    Create and manage subagent runs (includes report subgroup)
   work     Work item dashboard and coordination
   models   Model catalog
@@ -191,6 +193,9 @@ def _extract_global_options(argv: Sequence[str]) -> tuple[list[str], GlobalOptio
     i = 0
     while i < len(argv):
         arg = argv[i]
+        if arg == "mars":
+            cleaned.extend(argv[i:])
+            break
         if arg == "--json":
             json_mode = True
             output_explicit = True
@@ -275,7 +280,8 @@ app = App(
     name="meridian",
     help=(
         "Multi-agent orchestration across Claude, Codex, and OpenCode.\n\n"
-        "Harness shortcuts: meridian claude, meridian codex, meridian opencode\n\n"
+        "Harness shortcuts: meridian claude, meridian codex, meridian opencode\n"
+        "Bundled package manager: meridian mars <args>\n\n"
         'Run "meridian spawn -h" for subagent usage.'
     ),
     version=__version__,
@@ -420,6 +426,33 @@ def serve() -> None:
     """Start FastMCP server on stdio."""
 
     run_server()
+
+
+def _run_mars_passthrough(args: Sequence[str]) -> None:
+    try:
+        result = subprocess.run(["mars", *args], check=False)
+    except FileNotFoundError:
+        print(
+            "error: Failed to execute 'mars'. Install meridian with dependencies and retry.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from None
+    raise SystemExit(result.returncode)
+
+
+@app.command(name="mars")
+def mars(
+    *args: Annotated[
+        str,
+        Parameter(
+            help="Arguments forwarded to mars.",
+            show=False,
+        ),
+    ],
+) -> None:
+    """Forward all arguments to the bundled mars CLI."""
+
+    _run_mars_passthrough(args)
 
 
 spawn_app = App(
@@ -987,6 +1020,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     configure_logging(json_mode=json_mode, verbosity=verbose_count)
 
     cleaned_args, options = _extract_global_options(args)
+    if cleaned_args and cleaned_args[0] == "mars":
+        _run_mars_passthrough(cleaned_args[1:])
 
     agent_mode = (
         agent_mode_enabled() and not options.force_human and not _interactive_terminal_attached()

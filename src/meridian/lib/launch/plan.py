@@ -21,6 +21,7 @@ from meridian.lib.state.paths import resolve_state_paths
 from .prompt import compose_skill_injections
 from .resolve import (
     ResolvedPolicies,
+    format_missing_skills_warning,
     resolve_policies,
     resolve_profile_path,
     resolve_skill_paths,
@@ -192,10 +193,7 @@ def resolve_primary_launch_plan(
     )
 
     if resolved_skills.missing_skills:
-        logger.warning(
-            "Skipped unavailable skills for primary agent: %s",
-            ", ".join(resolved_skills.missing_skills),
-        )
+        logger.warning("%s", format_missing_skills_warning(resolved_skills.missing_skills))
 
     profile_name = profile.name if profile is not None else ""
     profile_path = resolve_profile_path(profile)

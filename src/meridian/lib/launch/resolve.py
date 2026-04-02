@@ -102,6 +102,24 @@ def resolve_skills_from_profile(
     )
 
 
+def format_missing_skills_warning(missing_skills: tuple[str, ...]) -> str:
+    """Render a user-facing warning for unavailable skills."""
+
+    if not missing_skills:
+        return ""
+
+    expected_paths = [f".agents/skills/{skill}/SKILL.md" for skill in missing_skills]
+    expected_lines = [f"Expected: {expected_paths[0]}"]
+    expected_lines.extend(f"         {path}" for path in expected_paths[1:])
+    return "\n".join(
+        (
+            f"Warning: Skipped unavailable skills: {', '.join(missing_skills)}",
+            *expected_lines,
+            "Run `meridian mars sync` to install missing skills.",
+        )
+    )
+
+
 def resolve_profile_path(profile: AgentProfile | None) -> str:
     if profile is None:
         return ""
@@ -259,6 +277,7 @@ def resolve_policies(
 __all__ = [
     "ResolvedPolicies",
     "ResolvedSkills",
+    "format_missing_skills_warning",
     "load_agent_profile_with_fallback",
     "resolve_harness",
     "resolve_policies",

@@ -5,6 +5,28 @@ from pathlib import Path
 from meridian.lib.catalog.agent import AgentProfile, load_agent_profile
 
 
+def _expected_agent_profile_path(agent_name: str) -> str:
+    return (Path(".agents") / "agents" / f"{agent_name}.md").as_posix()
+
+
+def _default_agent_missing_warning(
+    *,
+    configured_profile: str,
+    builtin_profile: str,
+    config_key: str,
+) -> str:
+    lines = [
+        f"Configured {config_key} '{configured_profile}' is unavailable locally.",
+        f"Expected: {_expected_agent_profile_path(configured_profile)}",
+    ]
+    if builtin_profile and configured_profile != builtin_profile:
+        lines.append(
+            f"Meridian will use builtin default '{builtin_profile}' when it is available."
+        )
+    lines.append("Run `meridian mars sync` to populate missing agent profiles.")
+    return "\n".join(lines)
+
+
 def configured_default_agent_warning(
     *,
     repo_root: Path,
@@ -17,8 +39,6 @@ def configured_default_agent_warning(
         return None
 
     builtin_profile = builtin_default.strip()
-    if builtin_profile and configured_profile == builtin_profile:
-        return None
 
     try:
         load_agent_profile(
@@ -26,12 +46,11 @@ def configured_default_agent_warning(
             repo_root=repo_root,
         )
     except FileNotFoundError:
-        if builtin_profile:
-            return (
-                f"Configured {config_key} '{configured_profile}' is unavailable locally; "
-                f"Meridian will use builtin default '{builtin_profile}' until you update it."
-            )
-        return f"Configured {config_key} '{configured_profile}' is unavailable locally."
+        return _default_agent_missing_warning(
+            configured_profile=configured_profile,
+            builtin_profile=builtin_profile,
+            config_key=config_key,
+        )
 
     return None
 

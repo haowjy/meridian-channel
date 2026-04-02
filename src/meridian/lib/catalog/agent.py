@@ -220,4 +220,16 @@ def load_agent_profile(
         if profile.path.stem == normalized or profile.name == normalized:
             return profile
 
-    raise FileNotFoundError(f"Agent profile '{name}' not found in repo-local .agents.")
+    expected_path = Path(".agents") / "agents" / f"{normalized}.md"
+    raise FileNotFoundError(
+        "\n".join(
+            (
+                f"Agent '{normalized}' not found.",
+                "",
+                f"Expected: {expected_path.as_posix()}",
+                "",
+                "Run `meridian mars sync` to populate your agents directory, "
+                "or see README.md for manual setup.",
+            )
+        )
+    )

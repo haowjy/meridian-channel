@@ -21,6 +21,7 @@ from meridian.lib.launch.prompt import (
 )
 from meridian.lib.launch.reference import load_reference_files, parse_template_assignments
 from meridian.lib.launch.resolve import (
+    format_missing_skills_warning,
     resolve_policies,
     resolve_profile_path,
     resolve_skill_paths,
@@ -314,7 +315,7 @@ def build_create_payload(
         resolved_continue_fork = False
 
     missing_skills_warning = (
-        f"Skipped unavailable skills: {', '.join(resolved_skills.missing_skills)}."
+        format_missing_skills_warning(resolved_skills.missing_skills)
         if resolved_skills.missing_skills
         else None
     )

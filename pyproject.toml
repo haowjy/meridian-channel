@@ -20,6 +20,7 @@ classifiers = [
 dependencies = [
   "coolname>=4.0.0",
   "cyclopts>=3.0",
+  # mars-agents>=0.1.0 — required once published to PyPI; provides `mars` binary
   "mcp>=1.0",
   "pydantic>=2.12",
   "pydantic-settings>=2.13",
