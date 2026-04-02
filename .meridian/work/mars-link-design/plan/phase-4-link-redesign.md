@@ -61,6 +61,11 @@ pub fn run(args: &LinkArgs, ctx: &MarsContext, json: bool) -> Result<i32, MarsEr
     let target_name = normalize_link_target(&args.target)?;
     let target_dir = ctx.project_root.join(&target_name);
 
+    // Acquire sync lock for the entire operation (scan + act + persist)
+    // Prevents races with concurrent mars sync or mars link
+    let lock_path = ctx.managed_root.join(".mars").join("sync.lock");
+    let _sync_lock = crate::fs::FileLock::acquire(&lock_path)?;
+
     // Create target directory if needed
     std::fs::create_dir_all(&target_dir)?;
 
@@ -138,11 +143,13 @@ pub fn run(args: &LinkArgs, ctx: &MarsContext, json: bool) -> Result<i32, MarsEr
         }
     }
 
-    // Persist link in config (under sync lock)
-    crate::sync::mutate_config(
-        &ctx.managed_root,
-        &crate::sync::ConfigMutation::SetLink { target: target_name.clone() },
-    )?;
+    // Persist link in config (already under sync lock from above)
+    // Load config, add link, save — all within the existing lock scope
+    let mut config = crate::config::load(&ctx.managed_root)?;
+    if !config.settings.links.contains(&target_name) {
+        config.settings.links.push(target_name.clone());
+        crate::config::save(&ctx.managed_root, &config)?;
+    }
 
     // Output
     // ... print success/info/json
@@ -165,10 +172,20 @@ fn scan_link_target(
 
     // Check if it's a symlink
     if let Ok(actual_target) = link_path.read_link() {
-        if actual_target == *expected_symlink_target {
-            return ScanResult::AlreadyLinked;
+        // Use canonicalize for comparison — textually different but semantically
+        // identical paths (e.g., ../.agents/agents vs ../.agents/./agents) should match.
+        // Both must succeed for AlreadyLinked.
+        let actual_resolved = link_path.parent()
+            .map(|p| p.join(&actual_target))
+            .and_then(|p| p.canonicalize().ok());
+        let expected_resolved = link_path.parent()
+            .map(|p| p.join(expected_symlink_target))
+            .and_then(|p| p.canonicalize().ok());
+
+        match (actual_resolved, expected_resolved) {
+            (Some(a), Some(b)) if a == b => return ScanResult::AlreadyLinked,
+            _ => return ScanResult::ForeignSymlink { target: actual_target },
         }
-        return ScanResult::ForeignSymlink { target: actual_target };
     }
 
     // It's a real directory — scan recursively
@@ -187,16 +204,31 @@ fn scan_dir_recursive(target_subdir: &Path, managed_subdir: &Path) -> ScanResult
     for entry in walkdir::WalkDir::new(target_subdir)
         .into_iter()
         .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
     {
+        let ft = entry.file_type();
+        if ft.is_dir() {
+            continue; // Directories are structural, handled during cleanup
+        }
+
         let relative = entry.path().strip_prefix(target_subdir).unwrap();
+
+        // Non-regular files (symlinks, fifos, sockets) → treat as conflict
+        if !ft.is_file() {
+            conflicts.push(ConflictInfo {
+                relative_path: relative.to_path_buf(),
+                target_hash: format!("<non-regular: {:?}>", ft),
+                managed_hash: String::new(),
+            });
+            continue;
+        }
+
         let managed_path = managed_subdir.join(relative);
 
         if !managed_path.exists() {
             // Unique file — can be moved
             files_to_move.push(relative.to_path_buf());
-        } else {
-            // Both exist — compare content
+        } else if managed_path.is_file() {
+            // Both exist as files — compare content
             let target_hash = hash_file(entry.path());
             let managed_hash = hash_file(&managed_path);
             if target_hash != managed_hash {
@@ -206,7 +238,14 @@ fn scan_dir_recursive(target_subdir: &Path, managed_subdir: &Path) -> ScanResult
                     managed_hash,
                 });
             }
-            // If hashes match, file is identical — skip (will be removed with dir)
+            // If hashes match, file is identical — skip
+        } else {
+            // Type mismatch (file in target, dir in managed or vice versa)
+            conflicts.push(ConflictInfo {
+                relative_path: relative.to_path_buf(),
+                target_hash: "file".to_string(),
+                managed_hash: "directory".to_string(),
+            });
         }
     }
 
@@ -227,7 +266,7 @@ fn merge_and_link(
     managed_subdir: &Path, // e.g. .agents/agents/
     files_to_move: &[PathBuf],
 ) -> Result<(), MarsError> {
-    // Move unique files into managed root
+    // Move unique files into managed root (copy+delete for cross-fs safety)
     for relative in files_to_move {
         let src = link_path.join(relative);
         let dst = managed_subdir.join(relative);
@@ -237,7 +276,6 @@ fn merge_and_link(
             std::fs::create_dir_all(parent)?;
         }
 
-        // Use copy+delete instead of rename to handle cross-filesystem
         std::fs::copy(&src, &dst).map_err(|e| MarsError::Link {
             target: link_path.display().to_string(),
             message: format!("failed to copy {}: {e}", relative.display()),
@@ -245,14 +283,41 @@ fn merge_and_link(
         std::fs::remove_file(&src)?;
     }
 
-    // Remove the now-empty directory tree
-    std::fs::remove_dir_all(link_path).map_err(|e| MarsError::Link {
-        target: link_path.display().to_string(),
-        message: format!("failed to remove directory after merge: {e}"),
-    })?;
+    // Remove remaining files (identical copies we skipped during scan)
+    // and clean up directory tree bottom-up
+    remove_dir_contents_and_tree(link_path)?;
 
     // Create symlink
     create_symlink(link_path, link_target)
+}
+
+/// Remove all remaining files in a directory, then remove empty dirs bottom-up.
+/// Uses remove_dir (not remove_dir_all) so non-empty dirs fail safely.
+fn remove_dir_contents_and_tree(dir: &Path) -> Result<(), MarsError> {
+    // First, remove all regular files
+    for entry in walkdir::WalkDir::new(dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+    {
+        std::fs::remove_file(entry.path())?;
+    }
+
+    // Then, remove empty directories bottom-up (deepest first)
+    let mut dirs: Vec<_> = walkdir::WalkDir::new(dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_dir())
+        .map(|e| e.into_path())
+        .collect();
+    dirs.sort_by(|a, b| b.cmp(a)); // Reverse order = deepest first
+
+    for d in dirs {
+        // remove_dir fails if non-empty — that's the safety net
+        let _ = std::fs::remove_dir(&d);
+    }
+
+    Ok(())
 }
 ```
 

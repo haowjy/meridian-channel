@@ -24,19 +24,37 @@ pub enum ConfigMutation {
     ClearLink { target: String },
 }
 
-/// Apply a config mutation under sync lock, without running the full sync pipeline.
-/// Used for settings changes (links) that don't require resolution/installation.
-pub fn mutate_config(root: &Path, mutation: &ConfigMutation) -> Result<(), MarsError> {
+/// Link-specific config mutations. Separate type to enforce that only
+/// link operations use the lightweight (no-sync) mutation path.
+pub enum LinkMutation {
+    Set { target: String },
+    Clear { target: String },
+}
+
+/// Apply a link mutation under sync lock, without running the full sync pipeline.
+/// Only for settings.links changes — use sync::execute for source mutations.
+pub fn mutate_link_config(root: &Path, mutation: &LinkMutation) -> Result<(), MarsError> {
     let lock_path = root.join(".mars").join("sync.lock");
     let _sync_lock = crate::fs::FileLock::acquire(&lock_path)?;
 
     let mut config = crate::config::load(root)?;
-    apply_mutation(&mut config, mutation)?;
+    match mutation {
+        LinkMutation::Set { target } => {
+            if !config.settings.links.contains(target) {
+                config.settings.links.push(target.clone());
+            }
+        }
+        LinkMutation::Clear { target } => {
+            config.settings.links.retain(|l| l != target);
+        }
+    }
     crate::config::save(root, &config)?;
 
     Ok(())
 }
 ```
+
+**Design note**: `LinkMutation` is separate from `ConfigMutation` to provide compile-time enforcement. A generic `mutate_config(&ConfigMutation)` would let callers accidentally bypass the sync pipeline for mutations that need it (reviewer finding p667/F1).
 
 ## Changes
 
@@ -69,26 +87,26 @@ pub fn mutate_config(root: &Path, mutation: &ConfigMutation) -> Result<(), MarsE
    }
    ```
 
-4. Add public `mutate_config()` function (see interface contract above).
+4. Add public `LinkMutation` enum and `mutate_link_config()` function (see interface contract above).
 
 ### cli/link.rs
 
 1. Delete `persist_link()` function (lines 160-167)
 2. Delete `remove_link()` function (lines 170-174)
-3. Update `run()` to call `sync::mutate_config()` instead of `persist_link()`
-4. Update `unlink()` to call `sync::mutate_config()` instead of `remove_link()`
+3. Update `run()` to call `sync::mutate_link_config()` instead of `persist_link()`
+4. Update `unlink()` to call `sync::mutate_link_config()` instead of `remove_link()`
 
 ```rust
 // In run(), after creating symlinks:
-crate::sync::mutate_config(
+crate::sync::mutate_link_config(
     &ctx.managed_root,
-    &ConfigMutation::SetLink { target: args.target.clone() },
+    &LinkMutation::Set { target: args.target.clone() },
 )?;
 
 // In unlink(), after removing symlinks:
-crate::sync::mutate_config(
+crate::sync::mutate_link_config(
     &ctx.managed_root,
-    &ConfigMutation::ClearLink { target: target_name.to_string() },
+    &LinkMutation::Clear { target: target_name.to_string() },
 )?;
 ```
 
@@ -102,10 +120,10 @@ crate::sync::mutate_config(
 
 - [ ] `cargo build` succeeds
 - [ ] `cargo test` passes
-- [ ] New test: `mutate_config` with `SetLink` adds to settings.links under lock
-- [ ] New test: `mutate_config` with `SetLink` is idempotent (adding twice = one entry)
-- [ ] New test: `mutate_config` with `ClearLink` removes from settings.links
-- [ ] New test: `apply_mutation` handles SetLink/ClearLink correctly
+- [ ] New test: `mutate_link_config` with `LinkMutation::Set` adds to settings.links under lock
+- [ ] New test: `mutate_link_config` with `LinkMutation::Set` is idempotent (adding twice = one entry)
+- [ ] New test: `mutate_link_config` with `LinkMutation::Clear` removes from settings.links
+- [ ] New test: `apply_mutation` handles SetLink/ClearLink correctly within sync pipeline
 - [ ] `persist_link` and `remove_link` functions no longer exist in link.rs
 
 ## Patterns to Follow

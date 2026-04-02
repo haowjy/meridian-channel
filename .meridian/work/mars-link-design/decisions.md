@@ -52,6 +52,41 @@
 - Always error — forces users to run `mars link` separately, making `--link` useless on established projects
 - Re-initialize (overwrite) — destroys existing config
 
+## D7: Hold sync.lock for entire link operation (post-review)
+
+**Context**: Reviewers p668, p669, and p667 all flagged that scan-then-act without locking allows race conditions — a concurrent `mars sync` could create files in the managed root between scan and act, and `rename()` would overwrite them.
+
+**Decision**: Hold `.mars/sync.lock` for the entire link operation: scan + act + config persist. This is the simplest correct approach and matches the sync pipeline's pattern of holding the lock start-to-end.
+
+**Alternatives rejected**:
+- Lock only during act phase — scan results could be stale
+- Per-file revalidation before move — complex, doesn't protect against all races
+- No locking (document acceptable races) — violates the project's crash-only design principle
+
+## D8: Type-safe LinkMutation instead of generic mutate_config (post-review)
+
+**Context**: Reviewer p667 flagged that `mutate_config(&ConfigMutation)` accepts any variant, allowing callers to accidentally bypass the full sync pipeline for mutations that need it.
+
+**Decision**: Separate `LinkMutation` enum with only `Set`/`Clear` variants. Compile-time enforcement that only link operations use the lightweight path.
+
+## D9: Copy+delete instead of rename for merge (post-review)
+
+**Context**: Reviewer p668 flagged that `rename()` fails with `EXDEV` across filesystems, and the "idempotent re-run" claim doesn't hold for repeatable failures.
+
+**Decision**: Use `copy + remove_file` instead of `rename`. Works across filesystems. The scan phase already verified safety, so destination either doesn't exist or has identical content.
+
+## D10: Strict canonicalize comparison (post-review)
+
+**Context**: Reviewers p668 and p667 both flagged that `canonicalize().ok() == canonicalize().ok()` treats two failures as equal — a broken foreign symlink would be removed if the expected path is also inaccessible.
+
+**Decision**: Only match when both sides canonicalize successfully. `(Ok(a), Ok(b)) => a == b`, anything else → false.
+
+## D11: Non-regular file entries treated as conflicts (post-review)
+
+**Context**: Reviewers p668 and p667 flagged that symlinks and special files inside target dirs have no defined handling. `remove_dir_all` after scanning only files would destroy them silently.
+
+**Decision**: During scan, any entry that is not a regular file and not a directory is treated as a conflict. Empty directories are ignored during scan and cleaned up bottom-up during act (using `remove_dir`, not `remove_dir_all`).
+
 ## D6: Unlink verifies symlink target before removing
 
 **Context**: Current unlink removes any symlink without checking what it points to.

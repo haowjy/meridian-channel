@@ -73,31 +73,44 @@ fn persist_link_config(ctx: &MarsContext, target: &str) -> Result<(), MarsError>
 
 Running the entire sync pipeline (resolve, fetch, diff, apply) just to add a line to `settings.links` is wasteful. The sync pipeline is designed for source management, not settings mutations.
 
-**Better approach**: Extract a lightweight `config_mutate_under_lock` function that:
-1. Acquires sync.lock
-2. Loads config
-3. Applies the mutation
-4. Saves config
-5. Releases lock
-
-This is the minimal subset of `sync::execute` that link needs.
+**Better approach**: Extract a type-safe `mutate_link_config` function that only accepts link mutations. This prevents accidentally passing `UpsertSource` (which needs the full sync pipeline) through the lightweight path.
 
 ```rust
-/// Apply a config mutation under sync lock, without running the full sync pipeline.
-/// Used for settings changes (links) that don't require resolution/installation.
-pub fn mutate_config(root: &Path, mutation: &ConfigMutation) -> Result<(), MarsError> {
+/// Link-specific config mutations. Separate type from ConfigMutation
+/// to enforce that only link operations use the lightweight mutation path.
+pub enum LinkMutation {
+    /// Add a link target to settings.links (idempotent).
+    Set { target: String },
+    /// Remove a link target from settings.links.
+    Clear { target: String },
+}
+
+/// Apply a link mutation under sync lock, without running the full sync pipeline.
+/// Only for settings.links changes that don't require resolution/installation.
+pub fn mutate_link_config(root: &Path, mutation: &LinkMutation) -> Result<(), MarsError> {
     let lock_path = root.join(".mars").join("sync.lock");
     let _sync_lock = crate::fs::FileLock::acquire(&lock_path)?;
 
     let mut config = crate::config::load(root)?;
-    apply_mutation(&mut config, mutation)?;
+    match mutation {
+        LinkMutation::Set { target } => {
+            if !config.settings.links.contains(target) {
+                config.settings.links.push(target.clone());
+            }
+        }
+        LinkMutation::Clear { target } => {
+            config.settings.links.retain(|l| l != target);
+        }
+    }
     crate::config::save(root, &config)?;
 
     Ok(())
 }
 ```
 
-This reuses the existing `apply_mutation` function and lock infrastructure, but skips the sync pipeline's resolution/installation stages. The `ConfigMutation` enum still provides the single point of truth for all config changes.
+**Why a separate enum**: Reviewer feedback identified that a generic `mutate_config(root, &ConfigMutation)` function accepts any mutation variant — a caller could accidentally pass `UpsertSource` which needs the full sync pipeline's resolution stages. The separate `LinkMutation` type makes this a compile-time error.
+
+The `ConfigMutation` enum in `sync/mod.rs` still gains `SetLink`/`ClearLink` variants for use within the full sync pipeline (e.g., if `mars sync` needs to reconcile links). Both paths share the same lock and atomic save.
 
 ## Link String Normalization
 

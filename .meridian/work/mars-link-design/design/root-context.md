@@ -28,15 +28,22 @@ impl MarsContext {
     /// Build from a managed root path. Enforces the invariant that
     /// managed_root must have a parent (i.e., is always a subdirectory).
     pub fn new(managed_root: PathBuf) -> Result<Self, MarsError> {
-        let project_root = managed_root.parent()
+        // Canonicalize to resolve relative paths and symlinks
+        let canonical = if managed_root.exists() {
+            managed_root.canonicalize().unwrap_or(managed_root.clone())
+        } else {
+            managed_root.clone()
+        };
+        let project_root = canonical.parent()
             .ok_or_else(|| MarsError::Config(ConfigError::Invalid {
                 message: format!(
-                    "managed root {} has no parent directory",
+                    "managed root {} has no parent directory — the managed root must be \
+                     a subdirectory (e.g., /project/.agents, not /project)",
                     managed_root.display()
                 ),
             }))?
             .to_path_buf();
-        Ok(MarsContext { managed_root, project_root })
+        Ok(MarsContext { managed_root: canonical, project_root })
     }
 }
 ```

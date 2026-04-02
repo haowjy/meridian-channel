@@ -12,7 +12,9 @@ mars link <DIR> [--force] [--unlink]
 
 ## Conflict Resolution Algorithm
 
-The core safety property: **if any conflict exists, zero filesystem mutations occur.** The algorithm is scan-then-act with two distinct phases.
+The core safety property: **if any conflict is detected during scan, zero filesystem mutations occur.** After entering the act phase, partial progress on IO error is acceptable and recoverable by re-run. The algorithm is scan-then-act with two distinct phases.
+
+**Locking**: The entire link operation (scan + act + config persist) runs under `.mars/sync.lock`. This prevents races with concurrent `mars sync` or `mars link` operations that could create files in the managed root between scan and act.
 
 ### Phase 1: Scan (read-only)
 
@@ -22,7 +24,7 @@ For each subdirectory to link (`agents/`, `skills/`):
 enum ScanResult {
     /// Nothing at the link path — create symlink
     Empty,
-    /// Already a symlink pointing to our managed root
+    /// Already a symlink pointing to our managed root (verified via canonicalize, not raw path equality)
     AlreadyLinked,
     /// Symlink pointing somewhere else
     ForeignSymlink { target: PathBuf },
@@ -42,13 +44,17 @@ struct ConflictInfo {
 }
 ```
 
-For each file in the target's subdir (e.g. `.claude/agents/reviewer.md`):
-1. Does the same relative path exist in the managed root (e.g. `.agents/agents/reviewer.md`)?
-2. If no → file is unique, can be moved (mergeable)
-3. If yes, are contents identical? → skip (already present)
-4. If yes but different content → **conflict**
+For each entry in the target's subdir (e.g. `.claude/agents/reviewer.md`):
+1. **Non-regular entries** (symlinks within the dir, sockets, etc.) → **conflict** — don't follow or move them
+2. Does the same relative path exist in the managed root (e.g. `.agents/agents/reviewer.md`)?
+3. If no → file is unique, can be moved (mergeable)
+4. If yes, are contents identical? → skip (already present)
+5. If yes but different content → **conflict**
+6. **Type mismatch** (file in target, directory in managed or vice versa) → **conflict**
 
 This uses the existing `crate::hash` module for content comparison — same hash function used by the sync pipeline for checksum verification.
+
+**Scan policy**: Walk with `walkdir`, filter to regular files only (`entry.file_type().is_file()`). If any entry is NOT a regular file and NOT a directory, treat as conflict (refuse to move symlinks, fifos, etc.). Empty directories are ignored during scan and cleaned up recursively during act.
 
 ### Phase 2: Act (all-or-nothing)
 
@@ -57,7 +63,7 @@ After scanning ALL subdirs, check results:
 ```
 if any ScanResult is ConflictedDir or ForeignSymlink:
     print all conflicts
-    return Error (exit 1, zero mutations)
+    return Error (exit 2, zero mutations)
 
 for each subdir:
     match scan_result:
@@ -74,15 +80,17 @@ persist link in settings
 
 When moving files from target dir to managed root (MergeableDir case):
 
-1. Move each file: `rename(target_dir/agents/foo.md, managed_root/agents/foo.md)`
-2. Verify target subdir is empty after moves
-3. Remove empty target subdir
+1. Create parent directories in managed root for each file to move
+2. Copy each file: `copy(target_dir/agents/foo.md, managed_root/agents/foo.md)` then `remove_file(source)`
+3. Remove empty directories bottom-up (use `remove_dir`, not `remove_dir_all`, to fail safely if non-empty)
 4. Create symlink
 
-If any move fails mid-way, we're in a partially-moved state. This is acceptable because:
+**Copy+delete instead of rename**: `rename()` fails with `EXDEV` across filesystems. `copy+delete` works everywhere. The scan phase already verified no conflicts exist, so the copy destination doesn't exist (unique files) or has identical content (skip).
+
+If any copy/delete fails mid-way, we're in a partially-moved state. This is acceptable because:
 - Files that moved are now in the managed root (correct final location)
 - Files that didn't move are still in the target dir (still accessible)
-- Re-running `mars link` will continue where it left off (idempotent scan)
+- Re-running `mars link` will re-scan and continue from the current state
 
 The scan phase prevents the dangerous case (overwriting different content) — once we're in the act phase, we know every move is safe.
 
@@ -136,7 +144,13 @@ fn unlink(ctx: &MarsContext, target_name: &str, target_dir: &Path, json: bool) -
             let resolved = target_dir.join(&link_target);
             let expected = ctx.managed_root.join(subdir);
 
-            if resolved.canonicalize().ok() == expected.canonicalize().ok() {
+            // Both must canonicalize successfully AND match.
+            // If either fails, treat as "unknown" and don't remove.
+            let matches = match (resolved.canonicalize(), expected.canonicalize()) {
+                (Ok(a), Ok(b)) => a == b,
+                _ => false, // Don't treat two failures as equal
+            };
+            if matches {
                 std::fs::remove_file(&link_path)?;
                 removed += 1;
             } else {
@@ -189,11 +203,14 @@ hint: resolve conflicts manually, then retry `mars link .claude`
 hint: or use `mars link .claude --force` to replace with symlinks (data loss)
 ```
 
+**JSON mode contract**: When `--json` is set, stdout contains only JSON. Conflict details are part of the JSON payload, not ad-hoc stderr printing. Human-readable diagnostics only go to stderr when `--json` is NOT set.
+
 JSON output includes structured conflict data:
 
 ```json
 {
     "ok": false,
+    "error": "conflicts found",
     "conflicts": [
         {
             "path": "agents/reviewer.md",

@@ -54,6 +54,13 @@ fn validate_target(target: &str) -> Result<(), MarsError> {
             ),
         }));
     }
+    if target == "." || target == ".." || target.is_empty() {
+        return Err(MarsError::Config(ConfigError::Invalid {
+            message: format!(
+                "`{target}` is not a valid target name — use a directory name like `.agents` or `.claude`."
+            ),
+        }));
+    }
     Ok(())
 }
 ```
@@ -75,13 +82,12 @@ pub fn run(args: &InitArgs, explicit_root: Option<&Path>, json: bool) -> Result<
     // 2. Idempotency check
     let config_path = managed_root.join("agents.toml");
     if config_path.exists() {
-        if json {
-            output::print_json(&serde_json::json!({
-                "ok": true,
-                "path": managed_root.to_string_lossy(),
-                "already_initialized": true,
-            }));
-        } else {
+        // Already initialized — reconcile required structure
+        // (.mars/ may have been deleted, .gitignore may be missing)
+        std::fs::create_dir_all(managed_root.join(".mars"))?;
+        add_to_gitignore(&managed_root)?;
+
+        if !json {
             output::print_info(&format!(
                 "{} already initialized",
                 managed_root.display()
