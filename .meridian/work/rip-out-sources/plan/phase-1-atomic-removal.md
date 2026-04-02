@@ -44,7 +44,11 @@ Delete `src/meridian/lib/install/`, `src/meridian/cli/install_cmd.py`, all impor
 
 ### 5. Delete install tests
 - Delete entire `tests/lib/install/` directory (6 test files + `__init__.py`)
-- In `tests/ops/test_spawn_prepare_fork.py`: remove the `monkeypatch` of `meridian.lib.ops.spawn.prepare.ensure_bootstrap_ready` (line 18) and update the test to work without it
+- Fix `tests/ops/test_spawn_prepare_fork.py`:
+  - Remove the `monkeypatch` of `meridian.lib.ops.spawn.prepare.ensure_bootstrap_ready` (line 18)
+  - The test currently exercises fork materialization in an empty `tmp_path` — the monkeypatch is what let it skip agent resolution. Without it, the test needs a minimal `.agents/agents/` fixture.
+  - Concrete fix: create a minimal agent profile file under `tmp_path/.agents/agents/__meridian-subagent.md` (or whatever agent the test references) so `build_create_payload()` can resolve the agent without bootstrap.
+  - Also: the test instantiates `ResolvedSkills(skill_sources={})` at line 32 — this field gets removed in Phase 2b. For now, keep the field; Phase 2b will update this test when it removes the field.
 
 ### 6. Delete install smoke test
 - Delete `tests/smoke/install/install-cycle.md` (entire file — tests `meridian sources install/update/uninstall/status`)

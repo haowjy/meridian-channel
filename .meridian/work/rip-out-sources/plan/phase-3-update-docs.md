@@ -1,13 +1,14 @@
 # Phase 3: Update ALL Documentation
 
 ## Scope
-Update all user-facing and developer docs to reflect that meridian no longer manages `.agents/`. Recommend mars + symlinks. Remove all references to `meridian sources`, `agents.toml`, `agents.lock`, and auto-install bootstrap.
+Update all user-facing and developer docs to reflect that meridian no longer manages `.agents/`. Mars is now a bundled PyPI dependency — `uv tool install meridian-channel` installs both. Remove all references to `meridian sources`, `agents.toml`, `agents.lock`, and auto-install bootstrap.
 
 ## Files
 
 ### `README.md`
-- Update install section to show mars as recommended setup
-- Add alternative manual setup path (symlinks, git clone)
+- Update install section: `uv tool install meridian-channel` now installs both meridian + mars
+- Show project setup flow: `mars init` → `mars add` → `mars sync`
+- Add alternative manual setup path (symlinks, git clone) for users who don't want mars
 - Remove any `meridian sources` references
 - Keep `meridian doctor` and `meridian --version` verification steps
 
@@ -38,27 +39,35 @@ Update all user-facing and developer docs to reflect that meridian no longer man
 #### `tests/smoke/install/install-cycle.md`
 - Already deleted in Phase 1
 
-#### `tests/smoke/output-formats.md`
-- Line 22: `meridian sources install` setup line — rewrite to assume `.agents/` is pre-populated
+#### Smoke tests that use `meridian sources install` as setup
 
-#### `tests/smoke/spawn/dry-run.md`
-- Line 23: `meridian sources install` setup — rewrite
+The following smoke tests create scratch repos and install agents via `meridian sources install`. Replace with **direct file writes** to populate `.agents/` — this keeps tests hermetic and CI-friendly without depending on mars or any external tool.
 
-#### `tests/smoke/spawn/skill-injection.md`
-- Line 35: `meridian sources install` setup — rewrite
+Use the pattern from `tests/smoke/spawn/context-from.md` (line 16) which already writes agent profiles directly via `mkdir -p` + `cat >`. Alternatively, use helpers from `tests/helpers/fixtures.py` (lines 12, 29).
 
-#### `tests/smoke/fork.md`
-- Line 27: `meridian sources install` setup — rewrite
+Concrete replacement pattern:
+```bash
+# Before (old):
+uv run meridian sources install "$SMOKE_SOURCE" --name smoke >/dev/null 2>&1
 
-#### `tests/smoke/spawn/error-paths.md`
-- Line 22: `meridian sources install` setup — rewrite
+# After (new):
+mkdir -p .agents/agents .agents/skills
+cat > .agents/agents/__meridian-subagent.md << 'AGENT'
+---
+model: sonnet
+---
+You are a test agent.
+AGENT
+```
 
-#### `tests/smoke/spawn/lifecycle.md`
-- Line 22: `meridian sources install` setup — rewrite
-
-#### `tests/smoke/adversarial.md`
-- Line 22: `meridian sources install` setup — rewrite
-- Lines 108-120: `sources install`/`uninstall` loop stress test — delete
+Files to update:
+- `tests/smoke/output-formats.md` (line 22)
+- `tests/smoke/spawn/dry-run.md` (line 23)
+- `tests/smoke/spawn/skill-injection.md` (line 35)
+- `tests/smoke/fork.md` (line 27)
+- `tests/smoke/spawn/error-paths.md` (line 22)
+- `tests/smoke/spawn/lifecycle.md` (line 22)
+- `tests/smoke/adversarial.md` (line 22 + delete lines 108-120 sources loop stress test)
 
 ## Verification
 - Read through all modified docs for consistency
