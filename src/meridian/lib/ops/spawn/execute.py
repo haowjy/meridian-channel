@@ -516,7 +516,7 @@ def execute_spawn_background(
 ) -> SpawnActionOutput:
     resolved_context = runtime_context(ctx)
     if payload.stream:
-        logger.warning("--stream is ignored with --background; output goes to spawn log files.")
+        logger.warning("--stream requires --foreground; output goes to spawn log files.")
     context = _init_spawn(
         payload=payload,
         prepared=prepared,

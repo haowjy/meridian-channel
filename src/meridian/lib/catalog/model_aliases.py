@@ -48,7 +48,8 @@ _FALLBACK_ALIASES: dict[str, str] = {
 
 _BUILTIN_DESCRIPTIONS: dict[str, str] = {
     "claude-opus-4-6": (
-        "Strong long-term vision and best orchestrator. Creative but can hallucinate or over-engineer."
+        "Strong long-term vision and best orchestrator."
+        " Creative but can hallucinate or over-engineer."
         " Best for orchestration, frontend implementation, architecture, and design exploration."
         " Not recommended for backend implementation or precise technical review."
     ),

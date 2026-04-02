@@ -98,6 +98,7 @@ def test_spawn_continue_passes_resume_details_in_session_dto_fields(
     assert result.status == "dry-run"
     assert result.command == "spawn.continue"
     assert captured_input is not None
+    assert captured_input.background is True
 
     # Session DTO carries the canonical continuation payload.
     assert captured_input.session.harness_session_id == "session-21"
@@ -108,3 +109,41 @@ def test_spawn_continue_passes_resume_details_in_session_dto_fields(
     assert captured_input.session.continue_chat_id == "c-seed"
     assert captured_input.session.forked_from_chat_id == "c-seed"
     assert captured_input.session.source_execution_cwd == "/tmp/source-cwd"
+
+
+def test_spawn_continue_respects_explicit_foreground_request(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    state_root = _state_root(repo_root)
+    _seed_spawn(state_root, spawn_id="p22", harness_session_id="session-22")
+
+    captured_input: SpawnCreateInput | None = None
+
+    def _fake_spawn_create_sync(
+        payload: SpawnCreateInput,
+        ctx=None,
+        *,
+        sink=None,
+    ) -> SpawnActionOutput:
+        _ = (ctx, sink)
+        nonlocal captured_input
+        captured_input = payload
+        return SpawnActionOutput(command="spawn.create", status="dry-run")
+
+    monkeypatch.setattr(spawn_api, "spawn_create_sync", _fake_spawn_create_sync)
+
+    result = spawn_api.spawn_continue_sync(
+        SpawnContinueInput(
+            spawn_id="p22",
+            prompt="follow-up prompt",
+            background=False,
+            repo_root=repo_root.as_posix(),
+        )
+    )
+
+    assert result.status == "dry-run"
+    assert captured_input is not None
+    assert captured_input.background is False

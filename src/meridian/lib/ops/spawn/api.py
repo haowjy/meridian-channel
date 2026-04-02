@@ -667,6 +667,7 @@ def spawn_continue_sync(
         repo_root=payload.repo_root,
         dry_run=payload.dry_run,
         timeout=payload.timeout,
+        background=payload.background,
         session=SessionContinuation(
             harness_session_id=resolved_reference.harness_session_id,
             continue_harness=resolved_reference.harness,

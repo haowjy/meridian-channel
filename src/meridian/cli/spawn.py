@@ -139,11 +139,11 @@ def _spawn_create(
             name="--stream", help="Stream raw harness output to terminal (debug only).", show=False
         ),
     ] = False,
-    background: Annotated[
+    foreground: Annotated[
         bool,
         Parameter(
-            name="--background",
-            help="Run in background and return immediately with spawn ID.",
+            name="--foreground",
+            help="Run in foreground and block until completion.",
         ),
     ] = False,
     timeout: Annotated[
@@ -265,7 +265,7 @@ def _spawn_create(
                 verbose=verbose,
                 quiet=quiet,
                 stream=stream,
-                background=background,
+                background=not foreground,
                 timeout=timeout,
                 approval=resolved_approval,
                 autocompact=autocompact,
@@ -297,6 +297,7 @@ def _spawn_create(
                 skills=parsed_skills,
                 dry_run=dry_run,
                 timeout=timeout,
+                background=not foreground,
                 passthrough_args=passthrough,
                 approval=resolved_approval,
             ),
@@ -318,7 +319,7 @@ def _spawn_create(
                 verbose=verbose,
                 quiet=quiet,
                 stream=stream,
-                background=background,
+                background=not foreground,
                 timeout=timeout,
                 approval=resolved_approval,
                 autocompact=autocompact,

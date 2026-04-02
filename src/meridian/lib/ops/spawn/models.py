@@ -36,7 +36,7 @@ class SpawnCreateInput(BaseModel):
     verbose: bool = False
     quiet: bool = False
     stream: bool = False
-    background: bool = False
+    background: bool = True
     repo_root: str | None = None
     timeout: float | None = None
     approval: str | None = None
@@ -392,6 +392,7 @@ class SpawnContinueInput(BaseModel):
     fork: bool = False
     dry_run: bool = False
     timeout: float | None = None
+    background: bool = True
     repo_root: str | None = None
     passthrough_args: tuple[str, ...] = ()
     approval: str | None = None

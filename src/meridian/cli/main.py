@@ -427,7 +427,7 @@ spawn_app = App(
     name="spawn",
     help=(
         "Run subagents with a model and prompt.\n"
-        "Runs in foreground by default. Use --background for async."
+        "Runs in background by default. Use --foreground to block."
     ),
     help_epilogue=(
         "Examples:\n\n"
