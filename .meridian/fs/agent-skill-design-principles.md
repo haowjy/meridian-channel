@@ -12,6 +12,8 @@ The boundary: if it runs independently and produces output, it's an agent. If it
 
 Getting this wrong in either direction is costly. A skill where an agent belongs forces the consuming agent to absorb all the complexity — decision-making, artifact production, error handling — instead of delegating to an independent process. The consumer becomes a god-object. An agent where a skill belongs spawns an entire process (context window, model call, token budget) just to deliver reference knowledge that could be injected in 200 lines — expensive, slow, and the knowledge can't be shared across agents.
 
+A skill should have multiple consumers — if only one agent loads it, the knowledge belongs in that agent's body. Splitting a single agent's guidance across its body and a dedicated skill just creates two places to maintain with no reuse benefit. Extract into a skill when a second agent needs the same knowledge.
+
 ## No Role Identity
 
 Don't assign personas like "you are a senior engineer" or "you are a technical PM." Research (PRISM, arxiv:2603.18507) shows that persona prompting activates instruction-following mechanisms that interfere with knowledge retrieval and reasoning accuracy. On discriminative tasks (judgment calls, factual recall, code reasoning), every persona variant reduced accuracy.
