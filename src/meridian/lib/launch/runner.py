@@ -8,7 +8,7 @@ import time
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import structlog
 from pydantic import BaseModel, ConfigDict
@@ -156,6 +156,103 @@ def ensure_claude_session_accessible(
                 os.symlink(source_file, target_file)
         except OSError:
             pass  # Best effort.
+
+
+def _dedupe_nonempty(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for raw_value in values:
+        value = raw_value.strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        deduped.append(value)
+    return deduped
+
+
+def _split_csv_entries(value: str) -> list[str]:
+    return [entry.strip() for entry in value.split(",") if entry.strip()]
+
+
+def _read_parent_claude_permissions(execution_cwd: Path) -> tuple[list[str], list[str]]:
+    additional_directories: list[str] = []
+    allowed_tools: list[str] = []
+
+    settings_dir = execution_cwd / ".claude"
+    settings_files = (
+        settings_dir / "settings.json",
+        settings_dir / "settings.local.json",
+    )
+
+    for settings_path in settings_files:
+        if not settings_path.exists():
+            continue
+
+        try:
+            raw_payload = json.loads(settings_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            logger.warning(
+                "Failed to parse parent Claude settings while forwarding child permissions",
+                path=str(settings_path),
+            )
+            continue
+
+        if not isinstance(raw_payload, dict):
+            continue
+        payload = cast("dict[str, object]", raw_payload)
+        raw_permissions = payload.get("permissions")
+        if not isinstance(raw_permissions, dict):
+            continue
+        permissions = cast("dict[str, object]", raw_permissions)
+
+        raw_additional_directories = permissions.get("additionalDirectories")
+        if isinstance(raw_additional_directories, list):
+            for directory in cast("list[object]", raw_additional_directories):
+                if isinstance(directory, str):
+                    additional_directories.append(directory)
+
+        raw_allowed_tools = permissions.get("allow")
+        if isinstance(raw_allowed_tools, list):
+            for tool in cast("list[object]", raw_allowed_tools):
+                if isinstance(tool, str):
+                    allowed_tools.append(tool)
+
+    return _dedupe_nonempty(additional_directories), _dedupe_nonempty(allowed_tools)
+
+
+def _merge_allowed_tools_flag(
+    command: tuple[str, ...], additional_allowed_tools: list[str]
+) -> tuple[str, ...]:
+    if not additional_allowed_tools:
+        return command
+
+    existing_allowed_tools: list[str] = []
+    merged_command: list[str] = []
+    index = 0
+
+    while index < len(command):
+        arg = command[index]
+        if arg == "--allowedTools":
+            if index + 1 < len(command):
+                existing_allowed_tools.extend(_split_csv_entries(command[index + 1]))
+                index += 2
+                continue
+            index += 1
+            continue
+        if arg.startswith("--allowedTools="):
+            existing_allowed_tools.extend(_split_csv_entries(arg.split("=", 1)[1]))
+            index += 1
+            continue
+        merged_command.append(arg)
+        index += 1
+
+    combined_allowed_tools = _dedupe_nonempty(
+        existing_allowed_tools + additional_allowed_tools
+    )
+    if not combined_allowed_tools:
+        return tuple(merged_command)
+    merged_command.extend(("--allowedTools", ",".join(combined_allowed_tools)))
+    return tuple(merged_command)
 
 
 def _read_captured_output(path: Path) -> bytes:
@@ -695,6 +792,18 @@ async def execute_with_finalization(
                 child_cwd = resolved_cwd
                 child_cwd.mkdir(parents=True, exist_ok=True)
                 command = (*command, "--add-dir", str(execution_cwd))
+                if harness.id == HarnessId.CLAUDE:
+                    parent_additional_directories, parent_allowed_tools = (
+                        _read_parent_claude_permissions(execution_cwd)
+                    )
+                    for additional_directory in parent_additional_directories:
+                        command = (*command, "--add-dir", additional_directory)
+                    # TODO: Consider using --settings <json> to forward the
+                    # entire settings file instead of decomposing into
+                    # individual flags. This would be simpler but needs
+                    # testing for merge behavior with multiple --settings
+                    # flags.
+                    command = _merge_allowed_tools_flag(command, parent_allowed_tools)
             # Record the actual execution CWD on the spawn record (authoritative).
             # Mirrors execute.py pre-compute; both sites must stay in sync.
             spawn_store.update_spawn(
