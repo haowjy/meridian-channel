@@ -1,64 +1,40 @@
-# Phase 3: Sync Pipeline Reorder (F12)
+# Phase 3: Sync Crash Tolerance (F12)
 
 ## Scope
 
-Move the config save in `src/sync/mod.rs` from before apply (step 15) to after lock write (step 17→18), making crash during apply recoverable by re-running the same command.
+Make the sync pipeline tolerant of partial state from a prior crash, WITHOUT reordering the config/apply/lock steps.
+
+The original design proposed moving config save to after apply. **This was rejected by review** — `mars sync` runs with `mutation: None`, so it can't replay the original mutation if config isn't saved. The current order (save config first) is correct.
+
+The fix: make `check_unmanaged_collisions` tolerant of partially-installed files from a prior crash. When a planned install targets a file that already exists on disk with the same content, it's a partial prior install — skip the collision error.
 
 ## Files to Modify
 
-### `src/sync/mod.rs` — `execute()`
+### `src/sync/target.rs` — `check_unmanaged_collisions()`
 
-Move the config save block (currently between steps 15-16) to after the lock write (after step 17):
+Find the collision check where a planned install would overwrite a file on disk that isn't tracked in the lock. Add a hash comparison:
 
-**Current order (lines ~208-234):**
-```
-Step 15: save config/local (if mutation + not dry_run)
-Step 16: apply::execute
-Step 17: lock::write
-```
-
-**New order:**
-```
-Step 16: apply::execute
-Step 17: lock::write
-Step 18: save config/local (if mutation + not dry_run)
-```
-
-The code block to move is:
 ```rust
-// This block moves from before apply to after lock write:
-if has_mutation && !request.options.dry_run {
-    match request.mutation {
-        Some(ConfigMutation::SetOverride { .. } | ConfigMutation::ClearOverride { .. }) => {
-            crate::config::save_local(root, &local)?;
-        }
-        Some(
-            ConfigMutation::UpsertSource { .. }
-            | ConfigMutation::RemoveSource { .. }
-            | ConfigMutation::SetRename { .. }
-            | ConfigMutation::SetLink { .. }
-            | ConfigMutation::ClearLink { .. },
-        ) => {
-            crate::config::save(root, &config)?;
-        }
-        None => {}
-    }
+// When file exists on disk but not in lock, and we plan to install it:
+// Check if the existing file matches what we'd install
+let disk_hash = crate::hash::compute_hash(&disk_path, item_kind).ok();
+let planned_hash = Some(&planned_item.checksum);
+if disk_hash.as_ref() == Some(planned_hash) {
+    // Content matches — this is a partial prior install, safe to overwrite
+    continue;
 }
+// Otherwise: genuine unmanaged collision, error as before
 ```
 
-**Important: the `request.mutation` match needs to handle the borrow correctly.** The `request` is consumed partially by the time we reach the new position. Check that `request.mutation` is still accessible — it may need to be moved to a local variable before the apply call.
-
-Actually, looking at the code: `request.mutation` is a field on `&SyncRequest`. The `apply::execute` takes `&sync_plan` and `&request.options`, not consuming `request`. So `request.mutation` is still accessible after apply. No ownership issue.
+**Note:** The exact API for accessing `planned_item.checksum` needs to be verified against the actual `TargetItem` struct. The coder should inspect `src/sync/target.rs` to find the right field names.
 
 ## Dependencies
 
-- Independent of Phase 1 and Phase 2
-- Can run in parallel with them
+- Independent of Phase 1, 2, 4, and 5.
 
 ## Verification Criteria
 
 - [ ] `cargo test` passes
 - [ ] `cargo clippy --all-targets --all-features` clean
-- [ ] Existing `lock_written_after_apply` test still passes
-- [ ] `mars add` followed by `mars sync` still works (the mutation is still applied, just saved later)
-- [ ] Verify: config file is updated after a successful `mars add <source>` (not before apply)
+- [ ] Add test: simulate partial install (file on disk, not in lock, same content as planned) → sync succeeds without collision error
+- [ ] Add test: genuine unmanaged file (different content) → sync still errors

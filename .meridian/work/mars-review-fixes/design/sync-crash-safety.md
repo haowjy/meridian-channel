@@ -22,68 +22,45 @@ Step 16: Apply plan (install/remove)     ← crash here = disk partial, lock sta
 Step 17: Write lock                      ← only reached on success
 ```
 
-### Design: Save Config and Lock Together After Apply
+### Design: Keep Current Order, But Handle Partial State on Recovery
 
-Reorder so config, lock, and disk are consistent at every crash point:
+**The original proposal (move config save after apply) was rejected by review.** The reviewer correctly identified that `mars sync` runs with `mutation: None` — it doesn't replay the original mutation. After a crash where lock was updated but config wasn't, `mars sync` would see lock items not in config and treat them as orphans.
 
-```
-Step 15: (removed — config NOT saved yet)
-Step 16: Apply plan (install/remove)
-Step 17: Write lock
-Step 18: Save config (if mutation)       ← NEW position
-```
+The current order (config first, then apply, then lock) is actually the safer of the two:
+- Config saved → crash during apply → `mars sync` re-resolves from new config, re-applies. **This converges** because the new config is the source of truth, and sync re-derives the full plan.
+- The only issue is that partially-installed files (on disk but not in lock) may trigger unmanaged-collision detection.
 
-**Crash analysis:**
+**Fix: Make unmanaged-collision detection tolerant of partially-installed state.**
 
-| Crash point | Config | Lock | Disk | Recovery |
-|---|---|---|---|---|
-| During apply (step 16) | old | old | partial | Next `sync` re-runs same mutation → converges |
-| After lock, before config (step 17-18) | old | new | new | Next `sync` reads old config + new lock. If mutation was `add`, the lock has the new source but config doesn't — `mars sync` re-adds it. If `remove`, lock lacks it, config still has it — `mars sync` removes again. Both converge. |
-| After config (step 18) | new | new | new | Clean |
+In `src/sync/target.rs`, the `check_unmanaged_collisions` function blocks sync when a planned install would overwrite a file that exists on disk but isn't in the lock. After a crash, this is exactly the state: files from the interrupted apply are on disk, not in lock.
 
-**Wait — is "old config + new lock" safe?**
-
-Yes, because the sync pipeline's first step is "apply mutation to config." If config still has the old state, the mutation replays:
-- **Add source X**: Config already lacks X (old), mutation adds it, resolver resolves, diff finds items already on disk (from the successful apply), diff is empty or skip-only, lock is re-written identically. Converges.
-- **Remove source X**: Config still has X (old), mutation removes it, resolver builds state without X, diff finds X's items on disk and in lock, plans removal, applies, writes new lock. Converges.
-
-**Alternative considered: journaled approach (write intent file, apply, commit).**
-
-This is more complex and unnecessary. The key insight is that the sync pipeline is already idempotent — re-running it with the same mutation converges to the same state. The only thing that breaks idempotency is saving config early (making the mutation disappear before apply completes). Moving config save to after apply restores idempotency.
-
-### Implementation
-
-In `src/sync/mod.rs`, move the config save block (currently step 15) to after the lock write (currently step 17):
+The fix: when the file on disk matches the content we're about to install (same hash), skip the collision error — it's a partially-completed prior install, not an unmanaged user file.
 
 ```rust
-// Step 16: Apply plan.
-let applied = apply::execute(root, &sync_plan, &request.options, &cache_bases_dir)?;
-
-// Step 17: Write lock file.
-if !request.options.dry_run {
-    let new_lock = crate::lock::build(&graph, &applied, &old_lock)?;
-    crate::lock::write(root, &new_lock)?;
+// In check_unmanaged_collisions, when file exists on disk but not in lock:
+// Check if disk content matches what we'd install
+if disk_hash == planned_hash {
+    // Partial prior install — safe to overwrite
+    continue;
 }
-
-// Step 18: Persist config mutation (after apply+lock so crash leaves old config).
-if has_mutation && !request.options.dry_run {
-    match request.mutation {
-        Some(ConfigMutation::SetOverride { .. } | ConfigMutation::ClearOverride { .. }) => {
-            crate::config::save_local(root, &local)?;
-        }
-        Some(
-            ConfigMutation::UpsertSource { .. }
-            | ConfigMutation::RemoveSource { .. }
-            | ConfigMutation::SetRename { .. }
-            | ConfigMutation::SetLink { .. }
-            | ConfigMutation::ClearLink { .. },
-        ) => {
-            crate::config::save(root, &config)?;
-        }
-        None => {}
-    }
-}
+// Otherwise: genuine unmanaged collision, error as before
 ```
+
+This is the minimal change that makes the existing pipeline crash-safe without reordering.
+
+### Alternative Considered: Reorder Config Save to After Apply
+
+Moving config save to after apply+lock was the initial design. **Rejected** because:
+- `mars sync` (the recovery path) runs with `mutation: None` — it reads config as-is
+- If lock was written but config wasn't, lock contains items that config doesn't request → sync computes removal of those items, undoing the successful apply
+- This creates a *worse* recovery model than the current order
+
+### Alternative Considered: Journal File
+
+Write a `sync.intent` file before apply, delete it after config+lock are written. On startup, detect the intent file and replay. **Rejected** because:
+- Adds new infrastructure (intent file format, replay logic, cleanup)
+- The partial-install tolerance fix achieves the same result with ~10 lines of code
+- Mars already has the idempotency property — we just need to stop blocking the re-sync
 
 ## F13: atomic_install_dir Gap
 
@@ -114,8 +91,11 @@ pub fn atomic_install_dir(src: &Path, dest: &Path) -> Result<(), MarsError> {
 
     if dest.exists() {
         // Rename old to .old (atomic — old is still accessible)
-        let old_path = dest.with_extension("old");
-        // Clean up any stale .old from a prior crash
+        let old_path = parent.join(format!(
+            ".{}.old",
+            dest.file_name().unwrap_or_default().to_string_lossy()
+        ));
+        // Clean up stale .old from a prior crash
         if old_path.exists() {
             fs::remove_dir_all(&old_path)?;
         }
@@ -127,7 +107,7 @@ pub fn atomic_install_dir(src: &Path, dest: &Path) -> Result<(), MarsError> {
             let _ = fs::remove_dir_all(&tmp_path);
             return Err(e.into());
         }
-        // Clean up old
+        // Clean up old (non-critical — stale .old is harmless)
         let _ = fs::remove_dir_all(&old_path);
     } else {
         fs::rename(&tmp_path, dest)?;
@@ -141,24 +121,20 @@ pub fn atomic_install_dir(src: &Path, dest: &Path) -> Result<(), MarsError> {
 
 | Crash point | State | Recovery |
 |---|---|---|
-| Before rename-to-old | `dest` intact, `tmp` exists | `tmp` is orphaned in parent dir, cleaned up by OS temp cleanup or next install |
-| After rename-to-old, before rename-new | `dest.old` exists, `dest` gone, `tmp` exists | Next `mars sync` detects missing dest, reinstalls. `dest.old` is stale but harmless. Startup cleanup (optional) can detect and restore `.old` files. |
-| After rename-new, before cleanup | `dest` new, `dest.old` stale | `.old` is cleaned up on next install of the same dest, or by the cleanup at the start of the function. |
+| Before rename-to-old | `dest` intact, `tmp` exists | `tmp` is orphaned; cleaned on next install or by OS |
+| After rename-to-old, before rename-new | `dest.old` exists, `dest` gone, `tmp` exists | `mars sync` detects missing dest, reinstalls. `.old` cleaned on next install of same dest. |
+| After rename-new, before cleanup | `dest` new, `dest.old` stale | `.old` cleaned on next install |
 
-The gap between rename-to-old and rename-new still exists but is much smaller (two renames vs. a recursive delete + rename), and recovery is straightforward — the `.old` sentinel makes the state diagnosable.
-
-**Startup cleanup (optional enhancement):**
-
-Add a check at the top of `atomic_install_dir` (already shown above — the `if old_path.exists()` cleanup). This handles stale `.old` dirs from prior crashes.
+**Note on the remaining gap:** A crash between rename-to-old and rename-new still leaves `dest` absent. This window is ~microseconds (two renames) compared to the old window of recursive-delete-then-rename. The `.old` sentinel makes the state diagnosable, and `mars sync` recovers by reinstalling. The design does NOT claim to eliminate the gap entirely — it shrinks it from a potentially long `remove_dir_all` to a single `rename` syscall.
 
 ## Files to Modify
 
-- `src/sync/mod.rs` — reorder steps 15-17 to 16-17-18, ~20 lines moved
+- `src/sync/target.rs` — partial-install tolerance in `check_unmanaged_collisions`, ~10 lines
 - `src/fs/mod.rs` — rewrite `atomic_install_dir` with rename-old pattern, ~25 lines
 
 ## Verification
 
 - `cargo test` passes (including existing `atomic_install_dir` tests)
-- `lock_written_after_apply` test still passes
 - Add test: verify `.old` cleanup when stale `.old` exists
-- Add test: verify dest is never missing (old renamed before new placed)
+- Add test: unmanaged collision skipped when disk content matches planned install
+- `mars add` followed by kill during apply, then `mars sync` → recovers cleanly

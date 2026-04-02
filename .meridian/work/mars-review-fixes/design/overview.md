@@ -23,9 +23,9 @@ The review uncovered safety bugs (symlink canonicalization, path containment), r
 
 2. **Symlink containment validates managed_root ⊂ project boundary** — adds a post-canonicalize check in `MarsContext::new` and symlink-aware scanning in check/doctor. See [symlink-containment.md](symlink-containment.md).
 
-3. **Sync saves config+lock after apply, not before** — reorders the sync pipeline so crash during apply leaves old config/lock intact. See [sync-crash-safety.md](sync-crash-safety.md).
+3. **Sync keeps current order, adds collision tolerance** — the current config-first order is correct for recovery. The fix makes `check_unmanaged_collisions` hash-aware so partial prior installs don't block re-sync. See [sync-crash-safety.md](sync-crash-safety.md).
 
-4. **atomic_install_dir uses rename-old-then-rename-new** — eliminates the gap where the destination doesn't exist. See [sync-crash-safety.md](sync-crash-safety.md).
+4. **atomic_install_dir uses rename-old-then-rename-new** — shrinks the gap from a potentially long `remove_dir_all` to a single `rename` syscall. See [sync-crash-safety.md](sync-crash-safety.md).
 
 5. **Content-addressed cache entries are immutable** — archive cache already uses `{url}_{sha}` naming, making entries immutable after creation. Git clone cache needs per-entry flock. See [cache-locking.md](cache-locking.md).
 

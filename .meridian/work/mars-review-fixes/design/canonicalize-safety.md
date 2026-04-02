@@ -32,7 +32,9 @@ if resolved_canon != expected_canon {
 }
 ```
 
-This is the bug. If both `resolved` and `expected` fail to canonicalize (e.g., broken symlink pointing nowhere, AND the managed subdir doesn't exist yet), `None != None` is `false`, so the check passes silently. A broken symlink gets reported as healthy.
+This is the bug. If both `resolved` and `expected` fail to canonicalize (e.g., broken symlink pointing nowhere, AND the managed subdir doesn't exist yet), `None != None` is `false`, so the "wrong target" check passes silently.
+
+**Partial mitigation:** The code below this comparison checks `!link_path.exists()` and reports broken symlinks. So a completely broken symlink IS caught by the exists check. However, the canonicalize comparison still gives a misleading pass — it treats "both paths unresolvable" as "they match," which is semantically wrong. The fix ensures the comparison correctly reports "can't verify this points to the right place" rather than silently passing.
 
 **`src/cli/link.rs` — `unlink()`** (line ~530):
 The unlink function was already fixed in a prior commit to use the safe pattern:
