@@ -16,14 +16,14 @@ Used by 8 tests but not production code. Production path goes through `build_wit
 
 | Test | Current call | Migration |
 |---|---|---|
-| `test_build_single_source` (line 789) | `build(&graph, &config)` | `build_with_collisions(&graph, &config)` → use `.0` for target |
-| `test_build_with_filter_all` (line 814) | `build(&graph, &config)` | Same |
-| `test_build_with_include_agents` (line 1015) | `build(&graph, &config)` | Same |
-| `test_build_with_include_skills` (line 1034) | `build(&graph, &config)` | Same |
-| `test_build_with_include_agents_resolves_skill_deps` (line 1046) | `build(&graph, &config)` | Same |
-| `test_build_with_exclude` (line 1062) | `build(&graph, &config)` | Same |
-| `test_build_with_rename_agent` (line 1087) | `build(&graph, &config)` | Same |
-| `test_build_with_rename_skill` (line 1109) | `build(&graph, &config)` | Same |
+| `build_single_source_no_filter` (line 789) | `build(&graph, &config)` | `build_with_collisions(&graph, &config)` → use `.0` for target |
+| unnamed rename test (line 814) | `build(&graph, &config)` | Same |
+| `build_with_agents_filter` (line 1015) | `build(&graph, &config)` | Same |
+| `build_with_exclude_filter` (line 1034) | `build(&graph, &config)` | Same |
+| `build_target_items_have_correct_hashes` (line 1046) | `build(&graph, &config)` | Same |
+| `unmanaged_disk_path_collision_errors` (line 1062) | `build(&graph, &config)` | Same |
+| `unmanaged_collision_skipped_when_hash_matches` (line 1087) | `build(&graph, &config)` | Same |
+| `unmanaged_collision_still_errors_on_different_content` (line 1109) | `build(&graph, &config)` | Same |
 
 The migration is mechanical: `build(g, c)` → `build_with_collisions(g, c).unwrap().0`. These tests use single sources, so no collisions — the `.1` (rename actions) will be empty, which is fine.
 

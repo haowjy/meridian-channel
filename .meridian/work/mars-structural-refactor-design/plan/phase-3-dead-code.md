@@ -20,14 +20,14 @@ let (target, renames) = build_with_collisions(&graph, &config).unwrap();
 ```
 
 Tests affected (all in `src/sync/target.rs` mod tests):
-- `test_build_single_source`
-- `test_build_with_filter_all`
-- `test_build_with_include_agents`
-- `test_build_with_include_skills`
-- `test_build_with_include_agents_resolves_skill_deps`
-- `test_build_with_exclude`
-- `test_build_with_rename_agent`
-- `test_build_with_rename_skill`
+- `build_single_source_no_filter` (line 789)
+- unnamed rename mapping test (line 814)
+- `build_with_agents_filter` test (line 1015)
+- `build_with_exclude_filter` (line 1034)
+- `build_target_items_have_correct_hashes` (line 1046)
+- `unmanaged_disk_path_collision_errors` (line 1062)
+- `unmanaged_collision_skipped_when_hash_matches` (line 1087)
+- `unmanaged_collision_still_errors_on_different_content` (line 1109)
 
 For each, also add `assert!(renames.is_empty())` to verify no spurious collisions.
 
