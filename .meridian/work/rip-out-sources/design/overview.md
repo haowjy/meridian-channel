@@ -8,13 +8,13 @@ Meridian becomes purely a coordination layer. It reads `.agents/` but never writ
 
 ## Design Principles
 
-1. **Mars is a bundled dependency.** Mars-agents publishes platform-specific wheels to PyPI via maturin (`bindings = "bin"`). Meridian-channel declares `mars-agents` as a dependency. `uv tool install meridian-channel` installs both — `mars` and `meridian` end up in the same `bin/`. One install command gets everything.
+1. **Mars is a required dependency.** Mars-agents publishes platform-specific wheels to PyPI via maturin (`bindings = "bin"`). Meridian-channel declares `mars-agents` as a required dependency. `uv tool install meridian-channel` installs both — `mars` and `meridian` end up in the same `bin/`. One install command gets everything.
 
 2. **Meridian is mars-unaware at runtime for the launch path.** The spawn/launch/session machinery reads `.agents/` — it doesn't import mars, call mars, or check if mars is on PATH. The `.agents/` directory is the contract.
 
-3. **Error messages CAN reference mars.** Since mars is a bundled dep (not an external tool the user might not have), error messages like "Run `mars sync` to populate .agents/" are helpful, not presumptuous. This is like pip suggesting `pip install X` — it knows pip is available.
+3. **Error messages CAN reference mars.** Since mars is a bundled required dep (not an external tool the user might not have), error messages like "Run `meridian mars sync` to populate .agents/" are helpful, not presumptuous. This is like pip suggesting `pip install X` — it knows pip is available.
 
-4. **No auto-install.** If `meridian spawn -a coder` can't find the agent, it errors clearly. No silent git clones. But the error can suggest `mars sync`.
+4. **No auto-install.** If `meridian spawn -a coder` can't find the agent, it errors clearly. No silent git clones. But the error can suggest `meridian mars sync`.
 
 5. **Clean break.** No migration path from `agents.toml`/`agents.lock`. Users who upgrade delete the old files. Mars has its own config (`mars.toml`/`mars.lock`).
 
@@ -63,6 +63,9 @@ Remove the `ensure_bootstrap_ready()` call chain. The launch path becomes:
 
 The `provenance` lookups (which source installed this agent/skill) also go away — they read `agents.lock` which no longer exists.
 
+### CLI passthrough (`src/meridian/cli/main.py`)
+Add `meridian mars ...` as a thin passthrough command that shells out to `mars` with forwarded arguments. This keeps mars workflows discoverable from the Meridian CLI without coupling launch/runtime behavior to mars internals.
+
 ### README.md
 New install section:
 
@@ -74,12 +77,12 @@ uv tool install meridian-channel   # installs both meridian + mars
 ## Set up your project
 
 cd your-project
-mars init                          # scaffold mars.toml
-mars add @haowjy/meridian-base     # add base agents
-mars sync                          # populate .agents/
+meridian mars init                 # scaffold mars.toml
+meridian mars add @haowjy/meridian-base  # add base agents
+meridian mars sync                 # populate .agents/
 
 # Optional: link .agents/ into .claude/ for Claude Code
-mars link .claude
+meridian mars link .claude
 
 ## Alternative: manual setup (without mars)
 # Copy or symlink agents directly into .agents/
@@ -118,7 +121,7 @@ These appear in: `launch/types.py`, `launch/resolve.py`, `launch/plan.py`, `laun
 ## Error UX (reviewer finding)
 
 After removing auto-install, missing agents produce confusing errors about builtin defaults (`__meridian-subagent`). Since mars is now a bundled dependency, errors can reference it directly. Improve:
-- Missing agent error: show expected path + suggest `mars sync` + point to README
+- Missing agent error: show expected path + suggest `meridian mars sync` + point to README
 - Missing skills warning: make it louder with expected paths (keep as warning, not fatal — degraded is better than blocked)
 - Doctor: warn when default agent profile doesn't exist on disk (even if it's the builtin default name)
 

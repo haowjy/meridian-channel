@@ -23,6 +23,10 @@ Remove install-related paths from `StatePaths` and clean the gitignore template.
 ### `src/meridian/lib/ops/config.py`
 - In `ensure_state_bootstrap_sync()`, remove `state.agents_cache_dir` from `bootstrap_dirs` tuple
 
+### `.meridian/.gitignore` (checked-in file)
+- Manually remove existing `!agents.toml` and `!agents.lock` lines from the checked-in file.
+- Rationale: `ensure_gitignore()` appends/strips based on template content; it does not reliably clean stale tracked lines already present on disk.
+
 ## Verification
 - `uv run ruff check .`
 - `uv run pyright`

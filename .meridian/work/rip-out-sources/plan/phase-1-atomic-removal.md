@@ -1,5 +1,8 @@
 # Phase 1: Atomic Removal — Install Module, Callers, CLI, and Tests
 
+## Atomic commit rule (overrides general guidance)
+All 6 steps in this phase are one atomic commit. Do NOT checkpoint between steps — intermediate states have broken imports and failing type checks. This phase explicitly overrides the general AGENTS/CLAUDE commit-per-step guidance.
+
 ## Why atomic
 Phase 1 (old) deleted `lib/install/` and Phase 2 (old) removed its callers. Between phases, dangling imports break pyright/ruff/runtime. All three reviewers flagged this. Merge into one atomic phase.
 

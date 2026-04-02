@@ -1,76 +1,93 @@
 # Phase 2b: Remove Provenance/Bootstrap Schema Fields
 
 ## Scope
-Remove dead `agent_source`, `skill_sources`, `bootstrap_required_items`, `bootstrap_missing_items` fields from all runtime models, stores, and plumbing. These were populated by the install engine (deleted in Phase 1); with it gone, they're always empty/None.
+Remove dead `agent_source`, `skill_sources`, `bootstrap_required_items`, `bootstrap_missing_items` fields from all runtime models, stores, and plumbing. These fields were populated by the install engine (deleted in Phase 1); with that engine gone, these fields are always empty/None.
 
-Per CLAUDE.md: "No backwards compatibility needed — completely change the schema to get it right."
+Per AGENTS/CLAUDE guidance for this workstream: no backwards compatibility needed for schema cleanup.
 
-Note: existing JSONL event files with these fields will parse fine — `SpawnStartEvent` and `SessionStartEvent` use `extra="ignore"` in their Pydantic config, so unknown fields are silently dropped.
+Existing JSONL event files that still contain these keys remain readable because `SpawnStartEvent` and `SessionStartEvent` parse with `extra="ignore"`.
 
-## IMPORTANT: Do NOT delete `_empty_template_vars` factory
-In `ops/spawn/models.py`, the `_empty_template_vars()` factory (line 12) is shared between `skill_sources` AND `template_vars`. After removing `skill_sources`, it still serves `template_vars`. Keep it.
+## IMPORTANT: Keep `_empty_template_vars` factory
+In `ops/spawn/models.py`, `_empty_template_vars()` is shared by removed provenance fields and still-used `template_vars`. Remove provenance fields only; keep the factory for `template_vars` defaults.
 
 ## Files
 
 ### `src/meridian/lib/launch/types.py`
-- Remove fields from `PrimarySessionMetadata` (lines 106-111):
-  - `agent_source: str | None = None`
-  - `skill_sources: dict[str, str]`
-  - `bootstrap_required_items: tuple[str, ...]`
-  - `bootstrap_missing_items: tuple[str, ...]`
+- In `PrimarySessionMetadata`, remove fields:
+  - `agent_source`
+  - `skill_sources`
+  - `bootstrap_required_items`
+  - `bootstrap_missing_items`
 
 ### `src/meridian/lib/launch/resolve.py`
-- Remove `skill_sources` field from `ResolvedSkills` dataclass (line 66) — dead code, computed but never consumed downstream
-- Remove `skill_sources = { ... }` computation block (lines 132-134)
-- Remove `skill_sources=skill_sources` from return statement (line 138)
+- In `ResolvedSkills`, remove the `skill_sources` dataclass field.
+- In `resolve_skills_for_run()`, remove the local `skill_sources = {...}` computation block.
+- Update the `ResolvedSkills(...)` return construction to stop passing `skill_sources`.
 
 ### `src/meridian/lib/launch/plan.py`
-- Remove parameters from `_build_session_metadata()`: `profile_source`, `skill_sources`, `bootstrap_required_items`, `bootstrap_missing_items` (lines 105-107)
-- Remove corresponding assignments in the function body (lines 114-119)
+- In `_build_session_metadata(...)`, remove parameters:
+  - `profile_source`
+  - `skill_sources`
+  - `bootstrap_required_items`
+  - `bootstrap_missing_items`
+- In the metadata object construction inside `_build_session_metadata(...)`, remove assignment of those fields.
 
 ### `src/meridian/lib/launch/session_scope.py`
-- Remove parameters: `agent_source`, `skill_sources`, `bootstrap_required_items`, `bootstrap_missing_items` (lines 34-39)
-- Remove corresponding assignments (lines 55-60)
+- In session scope builders/constructors, remove parameters:
+  - `agent_source`
+  - `skill_sources`
+  - `bootstrap_required_items`
+  - `bootstrap_missing_items`
+- Remove corresponding assignments when creating session metadata/state payloads.
 
 ### `src/meridian/lib/launch/process.py`
-- Remove passthrough of these 4 fields (lines 306-311, 337-342)
+- Remove all passthrough of the four removed fields when invoking session/runner/build helpers.
 
 ### `src/meridian/lib/launch/runner.py`
-- Remove passthrough (lines 722-727)
+- Remove passthrough of the four removed fields in launch runner handoffs.
 
 ### `src/meridian/lib/ops/spawn/models.py`
-- Remove fields from `SpawnActionOutput` (lines 66-71)
-- Remove wire serialization logic for these fields (lines 111-122)
+- In `SpawnActionOutput`, remove fields:
+  - `agent_source`
+  - `skill_sources`
+  - `bootstrap_required_items`
+  - `bootstrap_missing_items`
+- Remove wire serialization/output mapping for those fields.
 
 ### `src/meridian/lib/ops/spawn/plan.py`
-- Remove fields (lines 51-54)
+- Remove the four removed fields from spawn planning models that mirror launch metadata.
 
 ### `src/meridian/lib/ops/spawn/api.py`
-- Remove passthrough (lines 105-110)
+- Remove passthrough of the four removed fields in API-layer spawn model conversions.
 
 ### `src/meridian/lib/ops/spawn/prepare.py`
-- Remove passthrough of these fields where they were fed from the now-deleted provenance/bootstrap calls (lines 380-383 already cleared in Phase 1, but verify no remnants)
+- Verify no residual passthrough remains for the four removed fields in spawn preparation output after Phase 1 deleted provenance/bootstrap resolution.
 
 ### `src/meridian/lib/ops/spawn/execute.py`
-- Remove passthrough in all places (~28 references across lines 234-239, 291-302, 332-337, 350-355, 421-424, 463-468, 756-761)
+- Remove all passthrough and serialization of the four removed fields in execution and persistence paths.
 
 ### `src/meridian/lib/state/session_store.py`
-- Remove fields from `SessionRecord` (lines 30-35)
-- Remove fields from `SessionStartEvent` (lines 56-61)
-- Remove from `_apply_start()` materialization (lines 122-127)
-- Remove parameters from `start_session()` (lines 332-337)
-- Remove from event construction (lines 361-366)
+- In `SessionRecord`, remove fields:
+  - `agent_source`
+  - `skill_sources`
+  - `bootstrap_required_items`
+  - `bootstrap_missing_items`
+- In `SessionStartEvent`, remove the same four fields.
+- In `_apply_start()` materialization logic, remove assignment of those fields.
+- In `start_session(...)`, remove these parameters and stop including them in event construction.
 
 ### `src/meridian/lib/state/spawn_store.py`
-- Remove fields from `SpawnRecord` (lines 72-77)
-- Remove fields from `SpawnStartEvent` (lines 110-115)
-- Remove parameters from `start_spawn()` (lines 187-192)
-- Remove from event construction (lines 222-227)
-- Remove from resume defaults (lines 362-367)
-- Remove from `_apply_start_event()` materialization (lines 418-436)
+- In `SpawnRecord`, remove fields:
+  - `agent_source`
+  - `skill_sources`
+  - `bootstrap_required_items`
+  - `bootstrap_missing_items`
+- In `SpawnStartEvent`, remove the same four fields.
+- In `start_spawn(...)`, remove these parameters and stop including them in event construction.
+- In resume defaults and `_apply_start_event()` materialization, remove assignment/default handling for these fields.
 
 ### `tests/ops/test_spawn_prepare_fork.py`
-- Remove `ResolvedSkills(skill_sources={})` — update to match new `ResolvedSkills` signature (field was removed from dataclass above)
+- Update `ResolvedSkills(...)` test fixture construction to match the new signature (remove `skill_sources={}` argument).
 
 ## Verification
 - `uv run ruff check .`

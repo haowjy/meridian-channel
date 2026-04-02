@@ -1,9 +1,11 @@
 # Phase 4: Improve Error UX for Missing Agents/Skills
 
-Can run in parallel with Phase 3 (zero file overlap).
+Can run in parallel with Phase 3 (zero file overlap; Phase 4 does not edit `AGENTS.md`).
 
 ## Scope
-After removing auto-install, users who haven't set up `.agents/` will hit errors. Make those errors helpful. Since mars is now a bundled PyPI dependency, error messages CAN reference `mars sync` — it's like pip suggesting `pip install X`.
+After removing auto-install, users who haven't set up `.agents/` will hit errors. Make those errors helpful. Since mars is now a required bundled dependency, error messages should reference `meridian mars sync`.
+
+Also add a thin `meridian mars` passthrough command in the Meridian CLI so mars flows stay discoverable from the Meridian entry point.
 
 ## Changes
 
@@ -17,7 +19,7 @@ Agent 'coder' not found.
 
 Expected: .agents/agents/coder.md
 
-Run `mars sync` to populate your agents directory, or see README.md for manual setup.
+Run `meridian mars sync` to populate your agents directory, or see README.md for manual setup.
 ```
 
 ### Louder missing-skills warning
@@ -30,7 +32,7 @@ Run `mars sync` to populate your agents directory, or see README.md for manual s
 Warning: Skipped unavailable skills: context-handoffs, review
 Expected: .agents/skills/context-handoffs/SKILL.md
          .agents/skills/review/SKILL.md
-Run `mars sync` to install missing skills.
+Run `meridian mars sync` to install missing skills.
 ```
 
 ### Doctor default-agent warning
@@ -38,15 +40,28 @@ Run `mars sync` to install missing skills.
 #### `src/meridian/lib/launch/default_agent_policy.py`
 - Around line 19: `configured_default_agent_warning()` skips validation when agent equals builtin default. After bootstrap removal, the builtin defaults (`__meridian-orchestrator`, `__meridian-subagent`) may not exist on disk.
 - Add a check: if the default agent profile file doesn't exist on disk, warn regardless of whether it's the builtin default name.
-- Suggest `mars sync` in the warning.
+- Suggest `meridian mars sync` in the warning.
 
 #### `src/meridian/lib/ops/diag.py`
 - Around line 96: ensure `configured_default_agent_warning()` usage properly warns when default agents are missing.
 
-### Git submodule note in docs
+### Doctor warning for legacy install artifacts
 
-#### `AGENTS.md`
-- Note that `meridian-base/` and `meridian-dev-workflow/` submodules are source repos for agent packages, not directly consumed by meridian at runtime. They exist for development and mars package publishing.
+#### `src/meridian/lib/ops/diag.py`
+- Add a doctor check for legacy install files left behind from pre-mars versions:
+  - `.meridian/agents.toml`
+  - `.meridian/agents.lock`
+  - `.meridian/cache/agents/`
+- Emit warning text that these are legacy meridian install artifacts and are safe to delete.
+
+### `meridian mars` passthrough command
+
+#### `src/meridian/cli/main.py`
+- Add a new `mars` subcommand that forwards all args directly to the `mars` binary:
+  - Thin shell-out only (roughly ~20 lines)
+  - Implementation shape: `subprocess.run(["mars"] + args, check=False)` and exit with the child status code
+- Keep command behavior intentionally minimal: no local parsing/translation of mars flags.
+- Update CLI help text to include `mars`.
 
 ### pyproject.toml dependency
 
@@ -60,11 +75,10 @@ dependencies = [
 ]
 ```
 
-Note: mars-agents won't be on PyPI yet when we first land this. Use an optional dependency group initially if needed, and promote to required once mars-agents publishes its first release.
-
 ## Verification
 - `uv run ruff check .`
 - `uv run pyright`
 - `uv run meridian doctor` in a repo with no `.agents/` — should warn about missing default agent
 - `uv run meridian spawn -a nonexistent --dry-run -p "test"` — should show helpful error with mars suggestion
 - `uv run meridian spawn -a coder --dry-run -p "test"` with agent but missing skills — should show warning with paths
+- `uv run meridian mars --help` — passthrough executes mars from meridian CLI entry point

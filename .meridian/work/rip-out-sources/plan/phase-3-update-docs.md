@@ -7,24 +7,33 @@ Update all user-facing and developer docs to reflect that meridian no longer man
 
 ### `README.md`
 - Update install section: `uv tool install meridian-channel` now installs both meridian + mars
-- Show project setup flow: `mars init` → `mars add` → `mars sync`
+- Show project setup flow: `meridian mars init` → `meridian mars add` → `meridian mars sync`
 - Add alternative manual setup path (symlinks, git clone) for users who don't want mars
 - Remove any `meridian sources` references
 - Keep `meridian doctor` and `meridian --version` verification steps
 
 ### `AGENTS.md` (source of truth; `CLAUDE.md` is symlink to it)
 - Remove references to `meridian sources update`, `meridian sources install`
-- Update "Editing Agents & Skills" section: remove the submodule workflow that runs `meridian sources update --force`. Replace with guidance on editing via mars source repos or direct `.agents/` edits.
+- Update "Editing Agents & Skills" section with canonical workflow:
+  - Edit in source repos/submodules
+  - Run `meridian mars sync` to regenerate `.agents/`
+  - Do not present direct `.agents/` edits as the default workflow (they are overwritten on next sync)
+- Add explicit guardrail note: direct `.agents/` edits are for one-off local testing only and are expected to be overwritten by `meridian mars sync`.
+- Add note that `meridian-base/` and `meridian-dev-workflow/` submodules are source repos for package development/publishing, not runtime load paths consumed directly by meridian.
 - Remove `agents.toml`/`agents.lock` references
 - Add "Upgrading" note: safe to delete `.meridian/agents.toml`, `.meridian/agents.local.toml`, `.meridian/agents.lock`, `.meridian/cache/agents/`
 
 ### `INSTALL.md`
 - Lines 60+: "Install Agent & Skill Sources" section is entirely `meridian sources ...` commands — rewrite to use mars
-- Lines 73+: `meridian sources install @haowjy/meridian-base` → `mars add ...` + `mars sync`
+- Lines 73+: `meridian sources install @haowjy/meridian-base` → `meridian mars add ...` + `meridian mars sync`
 - Lines 123+: `meridian sources list` → remove or replace
 
 ### `docs/configuration.md`
 - Lines 29-31: repo layout still lists `.meridian/agents.toml`, `.meridian/agents.local.toml`, `.meridian/agents.lock` — remove these entries
+
+### `meridian-base/README.md`
+- Update language that still claims meridian auto-bootstraps missing agents.
+- Replace setup commands with `meridian mars ...` flow (`meridian mars init`, `meridian mars add`, `meridian mars sync`).
 
 ### Smoke tests — remove `sources` references
 
@@ -72,4 +81,4 @@ Files to update:
 ## Verification
 - Read through all modified docs for consistency
 - No broken references to removed commands
-- `grep -r "sources" README.md INSTALL.md AGENTS.md docs/ tests/smoke/` — only contextual uses remain (not `meridian sources`)
+- `grep -r "sources" README.md INSTALL.md AGENTS.md docs/ tests/smoke/ meridian-base/README.md` — only contextual uses remain (not `meridian sources`)
