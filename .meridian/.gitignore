@@ -4,9 +4,7 @@
 # Track .gitignore itself
 !.gitignore
 
-# Track manifest and lock (committed for reproducible installs)
-!agents.toml
-!agents.lock
+# Track project config
 !config.toml
 !models.toml
 

@@ -21,10 +21,6 @@ _GITIGNORE_CONTENT = (
     "!config.toml\n"
     "!models.toml\n"
     "\n"
-    "# Track shared install manifest and lock\n"
-    "!agents.toml\n"
-    "!agents.lock\n"
-    "\n"
     "# Track shared repo state\n"
     "!fs/\n"
     "!fs/**\n"
@@ -37,8 +33,6 @@ _REQUIRED_GITIGNORE_LINES = (
     "!.gitignore",
     "!config.toml",
     "!models.toml",
-    "!agents.toml",
-    "!agents.lock",
     "!fs/",
     "!fs/**",
     "!work/",
@@ -105,10 +99,6 @@ class StatePaths(BaseModel):
     artifacts_dir: Path
     spawns_dir: Path
     cache_dir: Path
-    agents_manifest_path: Path
-    agents_local_manifest_path: Path
-    agents_lock_path: Path
-    agents_cache_dir: Path
     config_path: Path
     models_path: Path
 
@@ -135,10 +125,6 @@ def resolve_state_paths(repo_root: Path) -> StatePaths:
         artifacts_dir=root_dir / "artifacts",
         spawns_dir=root_dir / "spawns",
         cache_dir=root_dir / "cache",
-        agents_manifest_path=root_dir / "agents.toml",
-        agents_local_manifest_path=root_dir / "agents.local.toml",
-        agents_lock_path=root_dir / "agents.lock",
-        agents_cache_dir=root_dir / "cache" / "agents",
         config_path=root_dir / "config.toml",
         models_path=root_dir / "models.toml",
     )

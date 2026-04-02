@@ -707,7 +707,6 @@ def ensure_state_bootstrap_sync(repo_root: Path) -> ConfigInitOutput:
         state.root_dir,
         state.artifacts_dir,
         state.cache_dir,
-        state.agents_cache_dir,
         state.spawns_dir,
         state.root_dir / "fs",
         state.root_dir / "work",
