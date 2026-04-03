@@ -120,6 +120,18 @@ main() {
   local branch
   branch="$(require_branch)"
 
+  # Pre-release checks
+  printf 'Running pre-release checks...\n'
+  printf '  ruff... '
+  uv run ruff check . >/dev/null 2>&1 || die "ruff check failed — fix lint errors first"
+  printf 'pass\n'
+  printf '  pyright... '
+  uv run pyright >/dev/null 2>&1 || die "pyright failed — fix type errors first"
+  printf 'pass\n'
+  printf '  tests... '
+  uv run pytest-llm >/dev/null 2>&1 || die "tests failed — fix failing tests first"
+  printf 'pass\n'
+
   local current_version
   current_version="$(read_current_version)"
 
