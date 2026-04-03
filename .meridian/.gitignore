@@ -15,3 +15,6 @@
 !work/**
 !work-archive/
 !work-archive/**
+# Added by Meridian to keep required project state tracked
+!agents.toml
+!agents.lock

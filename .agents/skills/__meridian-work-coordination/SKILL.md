@@ -1,11 +1,11 @@
 ---
 name: __meridian-work-coordination
-description: Meridian work lifecycle and artifact placement for orchestrators. Use this whenever you need to create, switch, update, or complete a work item, or decide where work-scoped notes versus broader shared docs belong.
+description: Meridian work lifecycle and artifact placement. Use this whenever you need to create, switch, update, or complete a work item, or decide where work-scoped notes versus broader shared docs belong.
 ---
 
 # Work Coordination
 
-The orchestrator owns work state — subagents should not mutate it unless explicitly instructed.
+The orchestrator owns work state — subagents should not mutate it unless explicitly instructed, because concurrent mutations from multiple spawns create race conditions and inconsistent status.
 
 If meaningful repo work is about to start, create or attach to a work item:
 
@@ -40,9 +40,9 @@ meridian work delete old-item --force    # remove even if it has artifacts
 
 ## Artifact Placement
 
-**`$MERIDIAN_WORK_DIR`** — what you're actively working on right now. Scoped to the current work item and archived when the work completes. Examples: design docs, planning notes, implementation notes.
+**`$MERIDIAN_WORK_DIR`** — scoped to the current work item. Archived when the work completes.
 
-**`$MERIDIAN_FS_DIR`** — long-lived reference material that helps humans and agents quickly get up to speed. Persists across work items. Examples: architecture overviews, codebase guides, API conventions, onboarding context.
+**`$MERIDIAN_FS_DIR`** — long-lived reference material. Persists across work items.
 
 Rule of thumb: if it helps *this* work item, use `$MERIDIAN_WORK_DIR`. If it helps *any* task understand the project, use `$MERIDIAN_FS_DIR`.
 

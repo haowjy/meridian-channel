@@ -42,16 +42,17 @@ NEVER REVERT CHANGES — always assume it's someone else's work.
 
 ### Editing Agents & Skills
 
-`meridian-base/` and `meridian-dev-workflow/` are source repos used for package development and publishing. Meridian runtime loads from `.agents/` after mars materializes it.
+**NEVER edit `.agents/` directly** — it is generated output, overwritten by `meridian mars sync`. Edit the source submodules instead:
+
+- **`meridian-base/`** — core agents, skills, and spawn infrastructure (e.g. `__meridian-spawn`, `__meridian-subagent`)
+- **`meridian-dev-workflow/`** — dev orchestration agents and skills (e.g. `dev-orchestrator`, `reviewer`, `coder`, `agent-staffing`)
 
 Canonical workflow:
 
-1. Edit in the source repo/submodule (e.g. `meridian-dev-workflow/agents/reviewer.md`)
+1. Edit in the source submodule (e.g. `meridian-base/skills/__meridian-spawn/SKILL.md`)
 2. Commit and push the source repo change
 3. Update package refs if needed with `meridian mars add ...`
 4. Run `meridian mars sync` to regenerate `.agents/`
-
-Guardrail: direct `.agents/` edits are for one-off local testing only and are expected to be overwritten by `meridian mars sync`.
 
 ### Upgrading from Legacy Sources State
 

@@ -697,6 +697,23 @@ def _scaffold_template() -> str:
     return "\n".join(lines)
 
 
+def _ensure_mars_init(repo_root: Path) -> None:
+    """Run ``mars init`` if no mars.toml exists yet, scaffolding an empty managed root."""
+    import contextlib
+    import subprocess
+
+    mars_toml = repo_root / "mars.toml"
+    if mars_toml.exists():
+        return
+    with contextlib.suppress(FileNotFoundError):
+        subprocess.run(
+            ["mars", "init", "--json"],
+            cwd=str(repo_root),
+            check=False,
+            capture_output=True,
+        )
+
+
 def ensure_state_bootstrap_sync(repo_root: Path) -> ConfigInitOutput:
     """Ensure first-run state exists and scaffold project config when missing."""
 
@@ -716,6 +733,7 @@ def ensure_state_bootstrap_sync(repo_root: Path) -> ConfigInitOutput:
     for dir_path in bootstrap_dirs:
         dir_path.mkdir(parents=True, exist_ok=True)
     ensure_gitignore(repo_root)
+    _ensure_mars_init(repo_root)
 
     path = _config_path(repo_root)
     if path.exists():

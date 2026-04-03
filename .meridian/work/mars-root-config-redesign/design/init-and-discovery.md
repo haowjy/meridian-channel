@@ -55,8 +55,8 @@ mars init [TARGET] [--root DIR] [--link DIR...]
 2. Determine `target`: argument → `settings.managed_root` from existing config → `.agents`
 3. Validate target is a simple directory name
 4. Check existing `mars.toml`:
-   - None: create with `[sources]\n`
-   - Has `[sources]`: already initialized (idempotent)
+   - None: create with `[dependencies]\n`
+   - Has `[dependencies]`: already initialized (idempotent)
    - Has `[package]` only: **error** — refuse to mutate
 5. If target ≠ `.agents`, write `[settings]\nmanaged_root = "<target>"`
 6. Create managed dir + `.mars/` inside it
@@ -81,8 +81,8 @@ No changes to the core algorithm — it's correct:
 
 ### `is_consumer_config` Simplification
 
-Old: scan for `INIT_MARKER` comment OR check for `[sources]` key.
-New: parse TOML, check `table.contains_key("sources")`. One path, no comment scanning.
+Old: scan for `INIT_MARKER` comment OR check for `[dependencies]` key.
+New: parse TOML, check `table.contains_key("dependencies")`. One path, no comment scanning.
 
 ### Canonicalization Fix
 

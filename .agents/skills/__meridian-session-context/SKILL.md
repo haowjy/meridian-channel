@@ -3,7 +3,7 @@ name: __meridian-session-context
 description: Session context mining via meridian CLI. Reading transcripts, searching decisions, and discovering sessions per work item. Use when you need historical context from parent sessions, prior spawns, or related work items.
 ---
 
-# __meridian-session-context
+# Session Context
 
 Use `meridian` session commands to mine historical context quickly.
 

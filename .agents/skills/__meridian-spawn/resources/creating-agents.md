@@ -25,7 +25,7 @@ tools: [Bash(git diff *), Bash(git log *), Bash(git show *)]
 sandbox: read-only
 ---
 
-You are a code reviewer. Focus on:
+Focus on:
 
 - Correctness — does the code do what it claims?
 - Simplicity — is there unnecessary complexity?
@@ -46,8 +46,8 @@ tools: [Bash, Write, Edit]
 sandbox: workspace-write
 ---
 
-You are an implementation agent. Execute the task described in your prompt.
-Run tests and type checks after making changes. Commit after each passing step.
+Execute the task described in your prompt. Run tests and type checks after
+making changes. Commit after each passing step.
 ```
 
 ## Frontmatter Fields
@@ -71,7 +71,7 @@ mcp-tools: [fetch, filesystem]
 
 ## Body
 
-The markdown body below the frontmatter is the agent's system prompt — instructions, persona, constraints. Keep it focused on what the agent should do and how it should report results.
+The markdown body below the frontmatter is the agent's system prompt. Describe behaviors directly — what the agent should do, how it should report results, and what constraints it operates under. Avoid assigning roles or personas ("You are a..."); the frontmatter already identifies the agent's purpose, so the body should focus on actionable instructions and reasoning.
 
 ## Usage
 
@@ -83,19 +83,19 @@ meridian spawn -a reviewer -p "Review the auth changes"
 meridian spawn -a reviewer -m sonnet -p "Quick review"
 
 # List available profiles
-meridian sources list   # shows installed agents and skills
+mars list               # shows installed agents and skills
 ```
 
 ## Search Paths
 
 At runtime, Meridian reads agent profiles from `.agents/agents/` only.
 
-Bundled agents are installed/bootstrapped into that directory (for example via auto-bootstrap or `meridian sources update`), so they appear as normal local profiles.
+Bundled agents are installed/bootstrapped into that directory (for example via `mars sync`), so they appear as normal local profiles.
 
 ## Tips
 
-- **One role per profile.** A reviewer shouldn't also be an implementer. Keep agents focused.
-- **Model choice matters.** Strong reasoning models (opus, gpt-5.4) for review and architecture. Fast models (codex, sonnet) for implementation and bulk work.
+- **One role per profile.** Mixing review and implementation in one agent creates conflicts of interest and bloats the system prompt, diluting both sets of instructions.
+- **Model choice matters.** Match model strength to task value — strong reasoning models for review and architecture, fast models for implementation and bulk work. Run `meridian models list` for current options.
 - **Permissions scope risk.** Use `read-only` for analysis, `workspace-write` for implementation, `full-access` only when needed.
 - **Tools enable `-p` mode.** Without `tools:`, Claude agents can't use permission-required tools (Bash, Write, Edit, WebSearch, etc.) in non-interactive mode. Only list tools that need permission — Read, Glob, Grep, and Agent are always available.
 - **Skills are optional.** Most task agents don't need skills — they get their instructions from the prompt. Skills are for agents that need to coordinate (orchestrators) or follow specific workflows.

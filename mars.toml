@@ -1,12 +1,13 @@
-[sources.meridian-base]
+[dependencies.meridian-base]
 url = "https://github.com/haowjy/meridian-base"
 
-[sources.meridian-dev-workflow]
+[dependencies.meridian-dev-workflow]
 path = "./meridian-dev-workflow"
 
-[sources.anthropic-skills]
+[dependencies.anthropic-skills]
 url = "https://github.com/anthropics/skills"
 skills = ["frontend-design"]
 
 [settings]
+managed_root = ".agents"
 links = [".claude"]

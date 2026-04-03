@@ -2,17 +2,17 @@
 
 ## Problem
 
-A project like meridian-channel is both a **package** (has `agents/`, `skills/` at repo root) and a **consumer** (pulls external packages via `[sources]`). The harness only reads from `.agents/`, so the project's own agents/skills are invisible unless manually copied.
+A project like meridian-channel is both a **package** (has `agents/`, `skills/` at repo root) and a **consumer** (pulls external packages via `[dependencies]`). The harness only reads from `.agents/`, so the project's own agents/skills are invisible unless manually copied.
 
 Goal: `mars sync` should make local package items visible in `.agents/` via symlinks, so edits to the source files are immediately reflected without re-syncing.
 
 ## Design: Synthetic `_self` Source
 
-**Decision: Local package items are injected as a synthetic source during sync, not stored in `[sources]`.**
+**Decision: Local package items are injected as a synthetic source during sync, not stored in `[dependencies]`.**
 
 ### Why Not a User-Visible Source?
 
-Considered: add `[sources._self]` or `[sources.self] path = "."` to `mars.toml`. Rejected because:
+Considered: add `[dependencies._self]` or `[sources.self] path = "."` to `mars.toml`. Rejected because:
 
 1. **Circular reference** — the project's `mars.toml` would reference itself as a source. The resolver would try to read the manifest of "." and find... the same `mars.toml`, creating a confusing loop.
 2. **User confusion** — users would see `_self` in `mars list` alongside real sources, wonder what it is, and potentially try to remove/modify it.
@@ -168,7 +168,7 @@ Add `pathdiff` to `Cargo.toml` dependencies, or inline the ~10-line implementati
 
 ```
 # Project structure
-mars.toml          # has [package] + [sources]
+mars.toml          # has [package] + [dependencies]
 agents/
   my-agent.md
 skills/

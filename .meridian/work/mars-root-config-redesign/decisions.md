@@ -1,8 +1,8 @@
 # Decision Log
 
-## D1: `[sources]` as sole consumer marker (no init comment)
+## D1: `[dependencies]` as sole consumer marker (no init comment)
 
-**Choice:** Delete `INIT_MARKER`. A `mars.toml` is consumer config iff it has `[sources]`.
+**Choice:** Delete `INIT_MARKER`. A `mars.toml` is consumer config iff it has `[dependencies]`.
 
 **Why:** The marker doesn't survive `config::save()` (serde drops TOML comments). Every `mars add`/`mars link`/`mars rename` does load→mutate→save, silently stripping the marker. Two detection codepaths (marker OR sources vs marker AND sources) were already inconsistent. All four reviewers flagged this.
 
@@ -36,13 +36,13 @@
 
 **Rejected:** Keep cwd default with a warning. Users ignore warnings, and the resulting broken state (config in wrong place) is hard to diagnose.
 
-## D5: `[dependencies]` and `[sources]` remain separate
+## D5: Unified `[dependencies]` (replaces `[sources]` and old `[dependencies]`)
 
-**Choice:** Keep both sections with their current semantics.
+**Choice:** Single `[dependencies]` section for both "what gets installed locally" and "what downstream consumers inherit." Replaces both the old `[sources]` (consumer) and `[dependencies]` (manifest) sections.
 
-**Why:** They serve different roles. `[dependencies]` is a package manifest concern (transitive resolution for downstream consumers). `[sources]` is a consumer concern (flat installation into managed dir). A project like meridian-channel can be both a package and a consumer — unifying would conflate "what I export" with "what I install locally."
+**Why:** Every other package manager does this — Cargo, npm, pip/uv all use one section. `cargo add foo` both installs locally AND declares the transitive dependency. The resolver handles the distinction internally. Having two sections (`[sources]` vs `[dependencies]`) with overlapping fields confused the model without adding real value.
 
-**Rejected:** Unify into one section. Would require distinguishing "install this" from "declare dependency on this" within the same table, adding flags or conventions that are more complex than just having two sections.
+**Rejected (original design):** Keep `[sources]` and `[dependencies]` separate with different semantics. This was the initial design choice, but it doesn't match any established package manager convention and forces users to understand an artificial distinction.
 
 ## D6: Skills get directory-level symlinks, agents get file-level
 
@@ -75,3 +75,11 @@
 **Choice:** Use relative symlinks (`../../agents/my-agent.md`) instead of absolute paths.
 
 **Why:** Relative symlinks survive repo moves/renames. Absolute symlinks break when the repo is moved to a different directory. This is standard practice (npm's `link`, Cargo's path dependencies all deal with this).
+
+## D10: Unify `[sources]` and `[dependencies]` into single `[dependencies]`
+
+**Choice:** Remove `[sources]` entirely. `[dependencies]` is the sole section for declaring what packages to install/depend on. Consumer detection becomes: mars.toml has `[dependencies]` key.
+
+**Why:** Cargo, npm, pip/uv all use one section. The two-section model (`[sources]` for local install, `[dependencies]` for transitive resolution) doesn't match any established convention and forces users to learn an artificial distinction. The resolver can handle both roles from one declaration internally.
+
+**Impact:** Config struct drops `sources` field, gains unified `dependencies` with all fields from both `SourceEntry` and `DepSpec`. `mars init` creates empty `[dependencies]`. `mars add` writes to `[dependencies]`. All user-facing "source" terminology becomes "dependency." Lock file `[sources.*]` entries rename to `[dependencies.*]` for consistency.

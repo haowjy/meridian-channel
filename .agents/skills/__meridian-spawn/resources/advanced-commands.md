@@ -11,7 +11,7 @@ meridian spawn --continue SPAWN_ID -p "Follow up instruction"
 meridian spawn --continue SPAWN_ID --fork -p "Try alternate approach"
 ```
 
-`--continue` reuses the harness session (conversation history preserved). `--fork` branches from the same session but creates a new spawn ID.
+`--continue` reuses the harness session (conversation history preserved) — use it for follow-ups where you want the agent to build on what it already did. `--fork` branches from the same session but creates a new spawn ID — use it when you want to explore an alternative direction while preserving the original trajectory as a fallback.
 
 ## Cancel
 
@@ -23,12 +23,14 @@ Sends SIGINT to the harness process. The spawn finalizes with exit code 130.
 
 ## Stats
 
+Check cost, token usage, and duration across spawns — useful for tracking budget, comparing model costs, or identifying spawns that took unexpectedly long:
+
 ```bash
 meridian spawn stats
 meridian spawn stats --session ID
 ```
 
-Aggregate cost, token, and duration stats across spawns. Use `--session` to scope to a specific coordination session.
+Use `--session` to scope to a specific coordination session.
 
 ## Spawn Show Flags
 
@@ -96,24 +98,15 @@ Flags:
 - `--sandbox read-only|workspace-write|unrestricted` — filesystem sandbox tier
 - `--approval default|confirm|auto|yolo` — tool approval mode
 
-## Background Flag (manual polling)
+## Foreground Flag (blocking)
 
-If your harness doesn't support background execution or parallel tool calls, you can use `--background` to launch spawns without blocking:
+Spawns run in the background by default. Use `--foreground` when you need the spawn to block — typically when the result feeds directly into your next action and there's nothing useful to do while waiting:
 
 ```bash
-meridian spawn --background -a agent -p "task description"
-# → returns immediately: {"spawn_id": "p107", "status": "running"}
-
-meridian spawn wait p107
-# → blocks until done, returns terminal status only
-
-# Multiple spawns in parallel
-meridian spawn --background -a agent -p "Step A" --desc "Step A"
-meridian spawn --background -a agent -p "Step B" --desc "Step B"
-# Read spawn_ids from JSON results, then wait for both
-meridian spawn wait p108 p109
+meridian spawn --foreground -a agent -p "task description"
+# → blocks until complete, returns terminal status
 ```
 
-Most harnesses (Claude Code, Codex, etc.) have built-in background execution that notifies you per-spawn as each completes. Prefer that over `--background` + `spawn wait`.
+This is rarely needed. The default background behavior with `spawn wait` handles most cases, including parallel spawns.
 
 For stuck spawns, logs, or low-level state inspection, see `debugging.md`.
