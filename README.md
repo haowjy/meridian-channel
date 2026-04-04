@@ -52,6 +52,14 @@ If the session gets compacted or resumed later, the state is still there.
 **The human doesn't run these commands.** The agent does — meridian is the CLI
 that agents use to coordinate other agents.
 
+## Agent Packages
+
+[**meridian-dev-workflow**](https://github.com/haowjy/meridian-dev-workflow) — A full dev team: architects, coders, reviewers, testers, researchers, documenters, and the orchestrators that coordinate them. Includes skills for design methodology, implementation planning, code review, and structural hygiene. This is what most users want.
+
+[**meridian-base**](https://github.com/haowjy/meridian-base) — Core coordination primitives: the base orchestrator, subagent, and skills for spawning, state tracking, and session context. Included as a dependency of meridian-dev-workflow.
+
+Packages are managed by [**mars**](https://github.com/haowjy/mars-agents), an agent package manager that installs agent profiles and skills from git sources into your project's `.agents/` directory.
+
 ## Install
 
 ```bash
