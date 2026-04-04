@@ -7,47 +7,45 @@ description: Agent package management via the mars CLI. Use when installing, upd
 
 Mars manages `.agents/` directories — installing agent profiles and skills from git repos and local paths, tracking ownership in `mars.lock`, and linking managed content into tool directories like `.claude/`.
 
-Install: `cargo install mars-agents`
+Bundled with meridian — use `meridian mars` subcommands.
 
 ## Quick Start
 
 ```bash
-mars init                              # scaffold .agents/mars.toml
-mars add haowjy/meridian-base         # add a source (GitHub shorthand)
-mars add ./local-agents                # add a local path source
-mars sync                              # resolve + install to match config
-mars list                              # show installed agents/skills
+meridian mars add haowjy/meridian-base     # add a source (GitHub shorthand)
+meridian mars add ./local-agents            # add a local path source
+meridian mars sync                          # resolve + install to match config
+meridian mars list                          # show installed agents/skills
 ```
 
 ## Commands
 
 | Command | Purpose |
 |---|---|
-| `mars init` | Scaffold `mars.toml` at project root. |
-| `mars add <source>` | Add source (GitHub shorthand, URL, SSH, local path), then sync. |
-| `mars remove <source>` | Remove source, prune managed files. |
-| `mars sync` | Resolve + install. `--force` overwrites local changes. `--diff` previews. `--frozen` errors if lock would change (CI). |
-| `mars upgrade [sources]` | Fetch latest versions, sync. |
-| `mars outdated` | Show available updates without applying. |
-| `mars list` | Catalog: `name: description` grouped by AGENTS/SKILLS. `--status` for checksums. |
-| `mars why <name>` | Show which source provides an item. |
-| `mars rename <from> <to>` | Add rename rule, sync to apply. |
-| `mars override <source> --path <PATH>` | Local dev override in `mars.local.toml`. |
-| `mars link <target>` | Symlink agents/skills into tool dir (e.g. `.claude/`). `--unlink` to remove. |
-| `mars check [path]` | Validate source package (publisher CI). |
-| `mars doctor` | Validate installed state (config, lock, files, links, deps). |
-| `mars repair` | Force rebuild from sources. |
-| `mars cache clean` | Remove cached archives and git clones. |
+| `meridian mars add <source>` | Add source (GitHub shorthand, URL, SSH, local path), then sync. |
+| `meridian mars remove <source>` | Remove source, prune managed files. |
+| `meridian mars sync` | Resolve + install. `--force` overwrites local changes. `--diff` previews. `--frozen` errors if lock would change (CI). |
+| `meridian mars upgrade [sources]` | Fetch latest versions, sync. |
+| `meridian mars outdated` | Show available updates without applying. |
+| `meridian mars list` | Catalog: `name: description` grouped by AGENTS/SKILLS. `--status` for checksums. |
+| `meridian mars why <name>` | Show which source provides an item. |
+| `meridian mars rename <from> <to>` | Add rename rule, sync to apply. |
+| `meridian mars override <source> --path <PATH>` | Local dev override in `mars.local.toml`. |
+| `meridian mars link <target>` | Symlink agents/skills into tool dir (e.g. `.claude/`). `--unlink` to remove. |
+| `meridian mars check [path]` | Validate source package (publisher CI). |
+| `meridian mars doctor` | Validate installed state (config, lock, files, links, deps). |
+| `meridian mars repair` | Force rebuild from sources. |
+| `meridian mars cache clean` | Remove cached archives and git clones. |
 
 ## Source Addressing
 
 ```bash
-mars add haowjy/meridian-base              # GitHub shorthand
-mars add github.com/org/repo@v1.0          # Domain with version
-mars add https://github.com/org/repo.git   # Full HTTPS URL
-mars add git@github.com:org/repo.git       # SSH URL
-mars add ./local-agents                     # Local path
-mars add ../sibling-repo                    # Relative path
+meridian mars add haowjy/meridian-base              # GitHub shorthand
+meridian mars add github.com/org/repo@v1.0          # Domain with version
+meridian mars add https://github.com/org/repo.git   # Full HTTPS URL
+meridian mars add git@github.com:org/repo.git       # SSH URL
+meridian mars add ./local-agents                     # Local path
+meridian mars add ../sibling-repo                    # Relative path
 ```
 
 ## State Files
@@ -63,10 +61,10 @@ Read [`resources/mars-toml-reference.md`](resources/mars-toml-reference.md) for 
 ## After Cloning a Repo
 
 ```bash
-mars sync          # install everything from mars.lock
-mars doctor        # verify state is healthy
+meridian mars sync          # install everything from mars.lock
+meridian mars doctor        # verify state is healthy
 ```
 
 ## Drift Detection
 
-`mars list --status` compares lock checksums vs on-disk state. `mars doctor` runs full health checks including link integrity and dependency validation.
+`meridian mars list --status` compares lock checksums vs on-disk state. `meridian mars doctor` runs full health checks including link integrity and dependency validation.
