@@ -41,7 +41,7 @@ meridian spawn show SPAWN_ID --include-files  # include file metadata
 
 ## Reports
 
-Foreground `spawn` and `spawn wait` return status only. Use `spawn show` (report included by default) or `spawn report` subcommands for report management:
+`spawn` returns status when complete. Use `spawn show` (report included by default) or `spawn report` subcommands for report management:
 
 ```bash
 # View status + report together
@@ -98,15 +98,24 @@ Flags:
 - `--sandbox read-only|workspace-write|unrestricted` — filesystem sandbox tier
 - `--approval default|confirm|auto|yolo` — tool approval mode
 
-## Foreground Flag (blocking)
+## Background Flag (manual polling)
 
-Spawns run in the background by default. Use `--foreground` when you need the spawn to block — typically when the result feeds directly into your next action and there's nothing useful to do while waiting:
+If your harness doesn't support background execution or parallel tool calls, you can use `--background` to launch spawns without blocking:
 
 ```bash
-meridian spawn --foreground -a agent -p "task description"
-# → blocks until complete, returns terminal status
+meridian spawn --background -a agent -p "task description"
+# → returns immediately: {"spawn_id": "p107", "status": "running"}
+
+meridian spawn wait p107
+# → blocks until done, returns status + full report
+
+# Multiple spawns in parallel
+meridian spawn --background -a agent -p "Step A" --desc "Step A"
+meridian spawn --background -a agent -p "Step B" --desc "Step B"
+# Read spawn_ids from JSON results, then wait for both
+meridian spawn wait p108 p109
 ```
 
-This is rarely needed. The default background behavior with `spawn wait` handles most cases, including parallel spawns.
+Most harnesses have built-in background execution that handles per-spawn notification natively. Prefer that over `--background` + `spawn wait`.
 
 For stuck spawns, logs, or low-level state inspection, see `debugging.md`.

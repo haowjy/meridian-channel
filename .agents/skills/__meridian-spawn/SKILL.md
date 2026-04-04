@@ -13,22 +13,15 @@ description: >
 
 All CLI output is JSON in agent mode — parse `spawn_id` and `status` programmatically from responses.
 
-Spawns run in the **background** by default — the command returns immediately with a `spawn_id`.
-
-**After you `meridian spawn` all the subagents, you MUST `meridian spawn wait` in the same turn before responding to the user.** Do not reply with "I'll let you know when it's done" and leave the user to ask — that's spawn-and-forget. Wait for results, then relay them.
+Spawns run in the **foreground** by default — the command blocks until the spawn completes, then returns the result.
 
 ```bash
 meridian spawn -a agent -p "task description"
-# → returns immediately: {"spawn_id": "p107", "status": "running"}
-
-meridian spawn wait p107
-# → blocks until done, returns terminal status
+# → blocks until done, returns terminal status with spawn_id
 
 meridian spawn show p107
-# → full report + metadata
+# → full report + metadata (re-inspect a past spawn)
 ```
-
-Use `--foreground` when you need to block — see [`resources/advanced-commands.md`](resources/advanced-commands.md) for details.
 
 ## Spawning
 
@@ -82,15 +75,13 @@ For work item lifecycle (creating, switching, updating, completing, and dashboar
 
 ## Parallel Spawns
 
-Since spawns run in the background by default, launching multiple spawns is straightforward — each returns immediately, then you wait for all of them:
+Use your harness's native background execution to run multiple spawns concurrently. Each spawn runs in foreground (blocking), but your harness runs them in parallel:
 
 ```bash
+# Launch these concurrently using your harness's background/parallel execution
 meridian spawn -a agent -p "Step A" --desc "Step A"
 meridian spawn -a agent -p "Step B" --desc "Step B"
-# → both return immediately with spawn_ids
-
-meridian spawn wait p108 p109
-# → blocks until both complete
+# Each blocks until its spawn completes, then returns results.
 ```
 
 ## Checking Status
@@ -101,7 +92,9 @@ Track spawns by their ID. For situational awareness, use the work dashboard — 
 meridian work
 ```
 
-Stuck spawns auto-recover: if a spawn's process dies or goes stale, the next read (`show`, `wait`) detects it and marks it failed. No manual cleanup needed — just check the status and move on.
+Stuck spawns auto-recover: if a spawn's process dies or goes stale, the next read (`show`) detects it and marks it failed. No manual cleanup needed — just check the status and move on.
+
+To reattach to a spawn still running from a previous session, use `meridian spawn wait <spawn_id>`.
 
 To see what a spawn spawned, use `spawn children`:
 
@@ -113,7 +106,7 @@ meridian spawn children p107   # list direct children of p107
 
 ## When a Spawn Fails
 
-If `spawn wait` returns `"status": "failed"`, read the report via `spawn show SPAWN_ID` first — it usually contains the error or the agent's last output. For deeper investigation, see [`resources/debugging.md`](resources/debugging.md) for log inspection.
+If a spawn returns `"status": "failed"`, read the report via `spawn show SPAWN_ID` — it usually contains the error or the agent's last output. For deeper investigation, see [`resources/debugging.md`](resources/debugging.md) for log inspection.
 
 ## Shared Filesystem
 

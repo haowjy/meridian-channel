@@ -53,9 +53,10 @@ Spawn design-orchestrator with conversation context and relevant artifacts. Be s
 meridian spawn -a design-orchestrator --from $MERIDIAN_CHAT_ID \
   -p "Design [feature]. Key constraints: [X, Y]. Explore [specific tradeoffs]." \
   -f src/relevant/file.py -f $MERIDIAN_WORK_DIR/requirements.md
-# → returns spawn_id, then:
-meridian spawn wait <spawn_id>
+# → blocks until done, returns terminal status
+
 meridian spawn show <spawn_id>
+# → full report + metadata
 ```
 
 When design-orchestrator reports back with design docs and a decision log, read them yourself before presenting to the user. Your job is to translate between the design and what the user cares about — highlight tradeoffs, explain key decisions in plain terms, flag anything that doesn't match the user's stated intent. If the user wants changes, spawn another design-orchestrator round with scoped feedback rather than vague "make it better."
@@ -83,9 +84,10 @@ meridian spawn -a impl-orchestrator \
   -f $MERIDIAN_WORK_DIR/plan/overview.md \
   -f $MERIDIAN_WORK_DIR/plan/phase-1.md \
   -f $MERIDIAN_WORK_DIR/plan/phase-2.md
-# → returns spawn_id, then:
-meridian spawn wait <spawn_id>
+# → blocks until done, returns terminal status
+
 meridian spawn show <spawn_id>
+# → full report + metadata
 ```
 
 When impl-orchestrator reports back, relay results to the user. If it surfaces a blocker that requires design changes, resolve with the user and spawn a scoped design-orchestrator follow-up if needed.
