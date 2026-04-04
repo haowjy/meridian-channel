@@ -61,28 +61,16 @@ This creates `.meridian/` with baseline config.
 
 Ask the user: `Would you like to install the dev workflow agents and skills? This gives you a full dev team — coder, reviewers, testers, researcher, documenter — with structured workflow skills.`
 
-Initialize mars config in the project:
+If yes, add the dev workflow package (includes core primitives as a dependency):
 
 ```bash
-meridian mars init
+meridian mars add haowjy/meridian-dev-workflow
 ```
 
-If yes, add the dev workflow package:
+If they only want the core coordination primitives (without the dev team):
 
 ```bash
-meridian mars add @haowjy/meridian-dev-workflow
-```
-
-If they only want the core coordination primitives (without the dev team), add base only:
-
-```bash
-meridian mars add @haowjy/meridian-base
-```
-
-Sync packages into `.agents/`:
-
-```bash
-meridian mars sync
+meridian mars add haowjy/meridian-base
 ```
 
 ## Step 4: Claude Code Symlinks (Optional)

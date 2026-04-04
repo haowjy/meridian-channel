@@ -69,16 +69,13 @@ meridian doctor
 
 ```bash
 cd your-project
-meridian mars init
-meridian mars add @haowjy/meridian-base
-meridian mars sync
+meridian mars add haowjy/meridian-dev-workflow
 ```
 
-Optional dev workflow package:
+This installs the full dev team (coder, reviewers, testers, architect, etc.) plus core coordination primitives. For just the core primitives:
 
 ```bash
-meridian mars add @haowjy/meridian-dev-workflow
-meridian mars sync
+meridian mars add haowjy/meridian-base
 ```
 
 ### Alternative: manual setup (without mars)
