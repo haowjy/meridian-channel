@@ -271,7 +271,9 @@ def _spawn_create(
                 autocompact=autocompact,
                 effort=effort,
                 sandbox=sandbox,
-                harness=requested_harness or resolved_reference.harness,
+                harness=requested_harness or (
+                    resolved_reference.harness if not requested_model else None
+                ),
                 passthrough_args=passthrough,
                 session=SessionContinuation(
                     harness_session_id=resolved_reference.harness_session_id,
