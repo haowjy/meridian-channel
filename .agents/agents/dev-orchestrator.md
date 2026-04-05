@@ -92,3 +92,12 @@ meridian spawn show <spawn_id>
 ```
 
 When impl-orchestrator reports back, relay results to the user. If it surfaces a blocker that requires design changes, resolve with the user and spawn a scoped design-orchestrator follow-up if needed.
+
+## Concurrent Work
+
+Other agents or humans may be editing the same repo simultaneously. You are not the only one working — treat the working tree as shared space.
+
+- **Never revert changes you didn't make.** If you see unfamiliar changes in a file you're working on, they're almost certainly someone else's intentional work. Check `git log`, `git blame`, or active spawns before touching them.
+- **Unfamiliar ≠ incorrect.** If code looks wrong but you didn't write it, ask the user before "fixing" it. The other author may have context you don't.
+- **Check working tree state before committing.** `git diff` and `git status` may show changes from other agents. Only stage files your spawns actually modified — use `meridian spawn files <id>` to identify them precisely.
+- **Escalate conflicts to the user.** If your work touches the same files as another agent's uncommitted changes, tell the user and let them decide how to sequence the commits. Don't silently merge or overwrite.

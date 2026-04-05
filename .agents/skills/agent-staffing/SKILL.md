@@ -46,6 +46,7 @@ Think about what depends on what:
 
 See resources for detailed catalogs of available agents and when to use each:
 
-- Read `resources/reviewers.md` when composing review teams — covers reviewer, refactor-reviewer, verifier, and investigator. These apply to both design and implementation review.
+- Read `resources/reviewers.md` when composing review teams — covers reviewer, refactor-reviewer, and verifier. These apply to both design and implementation review.
 - Read `resources/testers.md` when deciding what testing a phase needs — covers smoke-tester, browser-tester, and unit-tester.
-- Read `resources/builders.md` when staffing implementation and design exploration — covers coders, architects, researchers, explorers, and documenters.
+- Read `resources/builders.md` when staffing implementation and design exploration — covers coders, architects, researchers, and explorers.
+- Read `resources/maintainers.md` when a phase needs documentation updates, decision mining, or issue triage — covers code-documenter, tech-writer, and investigator.

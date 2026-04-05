@@ -6,8 +6,8 @@ commit = "98669c11ca63e9c81c11501e1437e5c47b556621"
 
 [dependencies.meridian-base]
 url = "https://github.com/haowjy/meridian-base"
-version = "v0.0.5"
-commit = "8ede3e6b0851027877e6755da86cc5b22481b97a"
+version = "v0.0.9"
+commit = "fd0d79b85c256e64060edc59523ae24338798dc1"
 
 [dependencies.meridian-dev-workflow]
 path = "/home/jimyao/gitrepos/meridian-channel/meridian-dev-workflow"
@@ -15,9 +15,9 @@ path = "/home/jimyao/gitrepos/meridian-channel/meridian-dev-workflow"
 [items."agents/__meridian-orchestrator.md"]
 source = "meridian-base"
 kind = "agent"
-version = "v0.0.5"
-source_checksum = "sha256:1fc9ed52303dbb00676bccafe85bea94cc0c7ddb9caf52a41063b374807d0e8a"
-installed_checksum = "sha256:1fc9ed52303dbb00676bccafe85bea94cc0c7ddb9caf52a41063b374807d0e8a"
+version = "v0.0.7"
+source_checksum = "sha256:6d28d20d5669a673d4c4e464bbc4903478a0d011b0730cd2723c306016ca6d23"
+installed_checksum = "sha256:6d28d20d5669a673d4c4e464bbc4903478a0d011b0730cd2723c306016ca6d23"
 dest_path = "agents/__meridian-orchestrator.md"
 
 [items."agents/__meridian-subagent.md"]
@@ -42,6 +42,13 @@ source_checksum = "sha256:f47556b60c5824c380a1b6452018cacf20e9c4003a979eceb56dab
 installed_checksum = "sha256:f47556b60c5824c380a1b6452018cacf20e9c4003a979eceb56dab7ff4d92963"
 dest_path = "agents/browser-tester.md"
 
+[items."agents/code-documenter.md"]
+source = "meridian-dev-workflow"
+kind = "agent"
+source_checksum = "sha256:b2a718643eb13af37ba55bbb002f219b908eea96fd3d6168aae450ddccf553d8"
+installed_checksum = "sha256:b2a718643eb13af37ba55bbb002f219b908eea96fd3d6168aae450ddccf553d8"
+dest_path = "agents/code-documenter.md"
+
 [items."agents/coder.md"]
 source = "meridian-dev-workflow"
 kind = "agent"
@@ -52,23 +59,16 @@ dest_path = "agents/coder.md"
 [items."agents/design-orchestrator.md"]
 source = "meridian-dev-workflow"
 kind = "agent"
-source_checksum = "sha256:aa27773319edc6e1c152bed8e1b634ccdb0d4f13c678d581bb3e46ba7c71e08d"
-installed_checksum = "sha256:aa27773319edc6e1c152bed8e1b634ccdb0d4f13c678d581bb3e46ba7c71e08d"
+source_checksum = "sha256:34d2c8ed62d6f69e166362c02b491d2d71899660dc2f4c9fa9ecab49e894fa88"
+installed_checksum = "sha256:34d2c8ed62d6f69e166362c02b491d2d71899660dc2f4c9fa9ecab49e894fa88"
 dest_path = "agents/design-orchestrator.md"
 
 [items."agents/dev-orchestrator.md"]
 source = "meridian-dev-workflow"
 kind = "agent"
-source_checksum = "sha256:231b3242ebd8e47b6f8d73c1cdbc1d21bfef67e2dd8f9ab58ca825c4ebef52ad"
-installed_checksum = "sha256:231b3242ebd8e47b6f8d73c1cdbc1d21bfef67e2dd8f9ab58ca825c4ebef52ad"
+source_checksum = "sha256:b2e36bab58c53d2502575b46ee0c4aa33d6558ef391e46698e7b22bd6dcda59d"
+installed_checksum = "sha256:b2e36bab58c53d2502575b46ee0c4aa33d6558ef391e46698e7b22bd6dcda59d"
 dest_path = "agents/dev-orchestrator.md"
-
-[items."agents/documenter.md"]
-source = "meridian-dev-workflow"
-kind = "agent"
-source_checksum = "sha256:e893c4cef8d3b84d82ecd5efee43ddc2fa3ce379cb4a1d02983eed8ee61e6efd"
-installed_checksum = "sha256:e893c4cef8d3b84d82ecd5efee43ddc2fa3ce379cb4a1d02983eed8ee61e6efd"
-dest_path = "agents/documenter.md"
 
 [items."agents/explorer.md"]
 source = "meridian-dev-workflow"
@@ -94,8 +94,8 @@ dest_path = "agents/frontend-designer.md"
 [items."agents/impl-orchestrator.md"]
 source = "meridian-dev-workflow"
 kind = "agent"
-source_checksum = "sha256:fefc8ad4f7cee0fea124d8860fe0d34821643057d6167e9849c07d0a8f9bc5b1"
-installed_checksum = "sha256:fefc8ad4f7cee0fea124d8860fe0d34821643057d6167e9849c07d0a8f9bc5b1"
+source_checksum = "sha256:3c32aa2a91c98fa39f4367c6323baa1daa33ba284e3fd7a5e07da2d9ab51fe28"
+installed_checksum = "sha256:3c32aa2a91c98fa39f4367c6323baa1daa33ba284e3fd7a5e07da2d9ab51fe28"
 dest_path = "agents/impl-orchestrator.md"
 
 [items."agents/investigator.md"]
@@ -140,6 +140,13 @@ source_checksum = "sha256:2802569a64ba9b74f2da9c0eba4811377fb6726881590a4f4744db
 installed_checksum = "sha256:2802569a64ba9b74f2da9c0eba4811377fb6726881590a4f4744dbe6938a00af"
 dest_path = "agents/smoke-tester.md"
 
+[items."agents/tech-writer.md"]
+source = "meridian-dev-workflow"
+kind = "agent"
+source_checksum = "sha256:e7db9a9d8ab8ba001b5d3ede763f0af3e3ef5fc554d640ea9ea888e881f7347b"
+installed_checksum = "sha256:e7db9a9d8ab8ba001b5d3ede763f0af3e3ef5fc554d640ea9ea888e881f7347b"
+dest_path = "agents/tech-writer.md"
+
 [items."agents/unit-tester.md"]
 source = "meridian-dev-workflow"
 kind = "agent"
@@ -181,17 +188,17 @@ dest_path = "skills/__meridian-privilege-escalation"
 [items."skills/__meridian-session-context"]
 source = "meridian-base"
 kind = "skill"
-version = "v0.0.5"
-source_checksum = "sha256:59b5bee8715fe2f6be60ca20401ff82c5c01d4f51e0b4aaa4c30d14a7df29b32"
-installed_checksum = "sha256:59b5bee8715fe2f6be60ca20401ff82c5c01d4f51e0b4aaa4c30d14a7df29b32"
+version = "v0.0.9"
+source_checksum = "sha256:dd63724aa3717404dff5d0a56c2bcc005fecef233931f179ec71646cee034f59"
+installed_checksum = "sha256:dd63724aa3717404dff5d0a56c2bcc005fecef233931f179ec71646cee034f59"
 dest_path = "skills/__meridian-session-context"
 
 [items."skills/__meridian-spawn"]
 source = "meridian-base"
 kind = "skill"
-version = "v0.0.5"
-source_checksum = "sha256:e604ccd6213ee52e19346ab3707da1094c46c05957c89ec22a024eb003e1180d"
-installed_checksum = "sha256:e604ccd6213ee52e19346ab3707da1094c46c05957c89ec22a024eb003e1180d"
+version = "v0.0.9"
+source_checksum = "sha256:ddd9a97618f0112b478179b55208506d497a44c07637f0d278fd7dbcf89b809e"
+installed_checksum = "sha256:ddd9a97618f0112b478179b55208506d497a44c07637f0d278fd7dbcf89b809e"
 dest_path = "skills/__meridian-spawn"
 
 [items."skills/__meridian-work-coordination"]
@@ -205,8 +212,8 @@ dest_path = "skills/__meridian-work-coordination"
 [items."skills/agent-staffing"]
 source = "meridian-dev-workflow"
 kind = "skill"
-source_checksum = "sha256:d19db72f44d7cda2ca3a5a7434c5ade5ff1c12ff9fd32a7bd74bb7e963f9e2dc"
-installed_checksum = "sha256:d19db72f44d7cda2ca3a5a7434c5ade5ff1c12ff9fd32a7bd74bb7e963f9e2dc"
+source_checksum = "sha256:97f271401b0d00c4b68fbb4242c91caa070b0e67e94ce0fb61b1c722075f89f3"
+installed_checksum = "sha256:97f271401b0d00c4b68fbb4242c91caa070b0e67e94ce0fb61b1c722075f89f3"
 dest_path = "skills/agent-staffing"
 
 [items."skills/architecture"]
