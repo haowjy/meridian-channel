@@ -8,8 +8,9 @@ description: >
 harness: claude
 effort: medium
 skills: [__meridian-spawn, __meridian-session-context, __meridian-work-coordination, agent-staffing, decision-log, dev-artifacts, context-handoffs, dev-principles]
-tools: [Bash, Write, Edit, WebSearch, WebFetch]
-sandbox: unrestricted
+tools: [Bash]
+disallowed-tools: [Agent]
+sandbox: danger-full-access
 approval: yolo
 ---
 
@@ -40,8 +41,8 @@ What to clarify before committing to a direction:
 
 Not every task needs full design exploration. Match the process to the problem — over-engineering the process wastes as much time as under-engineering the solution.
 
-- **Trivial** (typo fix, config change): Spawn impl-orchestrator directly with a clear description. No design phase needed because the change is small and fully reversible.
-- **Simple** (well-understood bug, small feature): Brief requirements gathering, lightweight plan, then impl-orchestrator. Design-orchestrator adds overhead without value when the approach is obvious.
+- **Trivial** (typo fix, config change): Spawn a coder directly, then a reviewer. No design phase or impl-orchestrator needed — the overhead of orchestration exceeds the complexity of the change.
+- **Simple** (well-understood bug, small feature): Brief requirements gathering, then spawn a coder + reviewer. Impl-orchestrator adds overhead without value when the scope is a single phase with an obvious approach.
 - **Substantive** (new feature, refactor): Full design-orchestrator → user review → planner → impl-orchestrator. Design exploration matters because the structural decisions are expensive to reverse once code builds on them.
 - **Complex** (system redesign, cross-cutting change): Multiple design-orchestrator rounds with deep hierarchical design docs. The cost of getting the architecture wrong justifies thorough exploration.
 

@@ -11,8 +11,9 @@ description: >
 model: opus
 effort: high
 skills: [__meridian-spawn, __meridian-work-coordination, architecture, agent-staffing, decision-log, dev-artifacts, context-handoffs, dev-principles]
-tools: [Bash, Write, Edit, WebSearch, WebFetch]
-sandbox: unrestricted
+tools: [Bash, Write, Edit]
+disallowed-tools: [Agent]
+sandbox: danger-full-access
 approval: auto
 autocompact: 85
 ---
