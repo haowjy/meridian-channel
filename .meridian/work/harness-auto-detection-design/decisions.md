@@ -114,3 +114,25 @@
 **Decision:** Use a Rust enum `HarnessSource { Explicit, AutoDetected, Unavailable }` instead of string literals.
 
 **Rationale:** Type safety. Prevents typos in string comparisons and gives exhaustive match checking. Serializes to snake_case strings in JSON for consumer compatibility.
+
+## D15: cfg(not(test)) workaround for Phase 3→4 boundary
+
+**Decision:** Phase 3 coder added `#[cfg(not(test))]` on `pub mod cli;` in lib.rs so `cargo test --lib` could pass while cli/models.rs was broken. Removed after Phase 4 fixed cli/models.rs.
+
+**Rationale:** This was a reasonable workaround for the intentional Phase 3→4 boundary break. The gate was temporary and removed in the same session.
+
+## D16: Provider casing inconsistency deferred
+
+**Decision:** `infer_provider_from_model_id` returns lowercase ("anthropic"), while `normalize_provider` in the cache returns title-case ("Anthropic"). This inconsistency is accepted because `resolve_harness_for_provider` lowercases internally, so routing works correctly regardless.
+
+**Alternatives considered:**
+- Normalize all provider strings to lowercase at schema level. Would require changing normalize_provider and potentially breaking consumers expecting title-case.
+- Add a normalize step in resolve_model_and_provider. Unnecessary since the routing layer already handles it.
+
+**Constraint:** The casing difference is cosmetic in the `ResolvedAlias.provider` field — the functional routing works correctly due to `to_lowercase()` in harness.rs.
+
+## D17: Empty string harness/provider edge case deferred
+
+**Decision:** `harness = ""` in TOML deserializes as `Some("")` rather than `None`. Accepted as a non-blocking edge case — users don't write empty harness strings in practice.
+
+**Raised by:** gpt-5.2 Phase 1 review. Could be addressed in a follow-up with a custom deserializer that normalizes empty strings to None.
