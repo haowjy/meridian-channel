@@ -26,9 +26,13 @@ Make harness selection automatic by default, explicit when needed:
 
 ## Key Design Decisions
 
-See [decisions.md](../decisions.md) for the full log. Summary:
+See [decisions.md](../decisions.md) for the full log (D1–D14). Summary:
 
-- Provider→harness preference table is **hardcoded in mars** with a mars.toml `[harness]` override section. Rationale: the table changes rarely, and hardcoding keeps it inspectable without config files.
-- Harness detection uses **`which` per invocation** with no caching. Rationale: it's ~2ms per binary check, there are only 4 harnesses, and caching creates staleness bugs.
-- Pinned aliases without a provider infer provider from model ID patterns as a best-effort fallback.
-- Meridian's existing `model_policy.py` routing is **unchanged** — it already handles the case where mars returns no harness.
+- Provider→harness preference table is **hardcoded in mars**, no mars.toml override in v1. Users set `harness` per-alias if they need a specific one. (D1, D9)
+- Harness detection uses **`which` per invocation** with no caching — ~8ms total, negligible. (D2)
+- `ModelSpec::Pinned` gains **`provider: Option<String>`** so harness routing doesn't rely solely on model ID prefix inference. (D10)
+- Explicit harness values are **validated for installation** — reported as unavailable if binary not found. (D11)
+- Meridian **keeps null-harness aliases** (doesn't skip them) — its own `model_policy.py` routing is the authoritative fallback. (D12)
+- `resolve_all` **encapsulates** harness detection internally — callers pass only `aliases` + `cache`. (D13)
+- `HarnessSource` is an **enum** (`Explicit | AutoDetected | Unavailable`), not a string. (D14)
+- `mars harness list` command **deferred** to follow-up. (D8)

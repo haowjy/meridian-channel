@@ -29,6 +29,8 @@ pub fn detect_installed_harnesses() -> HashSet<String> {
 
 **Dependency:** Add the [`which`](https://crates.io/crates/which) crate to mars-agents. It's a small, well-maintained crate that handles cross-platform binary lookup (Windows `where`, Unix `which`).
 
+**Error handling:** If `which` returns an unexpected error (not "not found"), log at debug level and treat as not installed. Don't crash on permission errors or broken symlinks.
+
 ## Provider-to-Harness Preference Table
 
 Each provider has an ordered preference list of harnesses. Mars tries them in order and picks the first one that's installed.
@@ -49,7 +51,7 @@ const PROVIDER_HARNESS_PREFERENCES: &[(&str, &[&str])] = &[
 
 **Resolution algorithm:**
 
-```
+```rust
 fn resolve_harness_for_provider(provider: &str, installed: &HashSet<String>) -> Option<String> {
     // 1. Look up preference list for this provider (case-insensitive)
     // 2. Return first harness in the list that's in `installed`
@@ -57,39 +59,22 @@ fn resolve_harness_for_provider(provider: &str, installed: &HashSet<String>) -> 
 }
 ```
 
-## mars.toml Override
+**No mars.toml override for v1.** The hardcoded table is sufficient. Users who need a specific harness can use the explicit `harness` field on individual aliases. A `[harness.preferences]` config section is deferred until there's demonstrated need. (See decisions.md D9.)
 
-Users can override the default preference table in mars.toml:
+## Explicit Harness Validation
 
-```toml
-[harness]
-# Override which binary maps to which harness name
-# (for when someone has a non-standard binary name)
-# NOT for changing preference order — that's the provider table above.
+When an alias has `harness = "claude"` set explicitly:
+- Mars **validates the harness is installed** before reporting it as resolved.
+- If not installed, the alias is reported with `harness_available: false` and a message saying which binary is needed.
+- This prevents the confusing case where `mars models list` shows a harness that can't actually run.
 
-[harness.preferences]
-# Override the preference order for a provider
-anthropic = ["opencode", "claude"]  # prefer opencode over claude
-openai = ["opencode"]               # never use codex
-```
-
-This is stored in a new `HarnessConfig` struct:
-
-```rust
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-pub struct HarnessConfig {
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub preferences: IndexMap<String, Vec<String>>,
-}
-```
-
-The merge: mars.toml preferences override the hardcoded defaults per-provider. Providers not mentioned in mars.toml use the defaults.
+Exception: `mars models resolve --json` always includes the alias with full metadata (including the explicit harness), because consumers may need the info even if the harness isn't locally installed (e.g., for remote execution).
 
 ## When No Harness is Available
 
 If a model alias can't resolve to any installed harness:
-- `mars models list` **omits** it (user can't run it anyway)
-- `mars models resolve <alias>` returns an error with a message like: `"No installed harness supports provider 'Anthropic'. Install one of: claude, opencode, gemini"`
-- The JSON output includes `"harness": null` with an `"error"` field
+- `mars models list` **omits** it by default (user can't run it). `--all` includes it with `—` marker.
+- `mars models resolve <alias> --json` returns the alias with `"harness": null` and an `"error"` field listing candidate harnesses.
+- The JSON always includes `"harness_candidates"` — the list of harnesses that *would* work if installed.
 
 This lets meridian distinguish "alias resolved but no harness" from "unknown alias" and give appropriate user-facing messages.

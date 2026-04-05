@@ -56,12 +56,61 @@
 
 **Rationale:** Meridian already handles the case where mars doesn't provide a harness — the `AliasEntry.harness` property falls back to pattern-based routing. Mars adding auto-detection improves the mars-side experience but doesn't change meridian's resolution path. Keeping meridian's routing as a fallback also means meridian still works if mars is unavailable or returns partial data.
 
-## D8: New `mars harness list` command
+## D8: Defer `mars harness list` command
 
-**Decision:** Add a simple diagnostic command showing detected harnesses and their installation status.
+**Decision:** Defer the `mars harness list` diagnostic command to a follow-up. The `mars models resolve` output already includes `harness_candidates` which covers the main debugging need.
+
+**Rationale:** Reduces initial implementation scope. The resolve command's `harness_candidates` field + `harness_source` enum already tell users why their alias can't find a harness. A dedicated command can be added later if there's demand.
+
+## D9: Drop HarnessConfig / [harness.preferences] from v1
+
+**Decision:** No mars.toml section for overriding provider-to-harness preferences in v1. The hardcoded preference table is sufficient.
 
 **Alternatives rejected:**
-- **Only expose through `mars models list --verbose`:** Users debugging "why doesn't my alias work?" shouldn't need to parse model list output to find harness info.
-- **Skip it — let users run `which` themselves:** Users shouldn't need to know the binary names for each harness.
+- **`[harness.preferences]` in mars.toml:** Premature — users who need a specific harness can already use the explicit `harness` field on individual aliases. A global preference override adds config surface for a problem nobody has yet.
 
-**Constraint:** Must be simple — just a list of harness names, binary names, and installed/not-found status.
+**Rationale (from review):** The explicit `harness` field on aliases already covers the "I want a specific harness" use case. Global preference overrides would only matter when a user wants a non-default harness for ALL models from a provider — a rare enough scenario to not justify the config complexity.
+
+## D10: Add `provider: Option<String>` to Pinned aliases
+
+**Decision:** The `ModelSpec::Pinned` variant gains an optional `provider` field, used for harness routing when `harness` is omitted.
+
+**Alternatives rejected:**
+- **Rely solely on `infer_provider_from_model_id()` prefix matching:** Not reliable enough for all model IDs. Custom or future model IDs may not follow known prefix patterns.
+- **Require provider for all harnessless aliases:** Would break existing pinned aliases that only specify `model`.
+
+**Resolution order for pinned alias provider:** explicit `provider` field → `infer_provider_from_model_id()` → `None` (meridian routing fallback).
+
+## D11: Validate explicit harness installation
+
+**Decision:** When an alias has an explicit `harness` field, mars validates the binary is installed and reports `harness_source: "unavailable"` if not.
+
+**Alternatives rejected:**
+- **Trust explicit harness unconditionally (v1 design):** Confusing — `mars models list` shows a harness that can't actually run, giving users false confidence.
+- **Error and refuse to show the alias:** Too strict — the alias is valid configuration, the harness is just not installed on this machine.
+
+**Approach:** Report the alias with its explicit harness but flag it as unavailable. `mars models list` (default) hides it; `--all` shows it. `resolve --json` includes it with the error.
+
+## D12: Keep null-harness aliases in meridian (don't skip)
+
+**Decision:** Meridian does NOT skip aliases where mars reports `harness: null`. They flow through to meridian's own `model_policy.py` routing as a fallback.
+
+**Alternatives rejected:**
+- **Skip null-harness aliases (v1 design):** Would break `meridian spawn -m opus` when mars can't detect a harness. The alias is valid — it resolved to a model ID — the harness just couldn't be auto-detected from the mars side.
+
+**Rationale (from review):** Mars harness detection and meridian's harness routing are independent systems. Mars auto-detection is an improvement to the mars standalone experience, not a gate for meridian. Meridian's routing handles edge cases (direct API harness, environment differences) that mars can't detect.
+
+## D13: Encapsulate harness detection inside resolve_all
+
+**Decision:** `resolve_all` signature stays at 2 params (`aliases`, `cache`). Harness detection is called internally, not passed as a parameter.
+
+**Alternatives rejected:**
+- **Pass `installed_harnesses` and `harness_preferences` as params (v1 design):** Leaks implementation details into the public API. Callers shouldn't need to know about harness detection internals.
+
+**Approach:** `resolve_all` calls `detect_installed_harnesses()` once internally and uses the result for all aliases. This keeps the API surface simple while allowing the implementation to change (e.g., adding caching later) without breaking callers.
+
+## D14: HarnessSource as enum, not string
+
+**Decision:** Use a Rust enum `HarnessSource { Explicit, AutoDetected, Unavailable }` instead of string literals.
+
+**Rationale:** Type safety. Prevents typos in string comparisons and gives exhaustive match checking. Serializes to snake_case strings in JSON for consumer compatibility.
