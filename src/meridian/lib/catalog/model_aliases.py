@@ -160,7 +160,7 @@ def _mars_list_to_entries(aliases_list: list[dict[str, object]]) -> list[AliasEn
         if not isinstance(name, str) or not name.strip():
             continue
 
-        resolved_model = item.get("resolved_model")
+        resolved_model = item.get("model_id") or item.get("resolved_model")
         harness = item.get("harness")
         description = item.get("description")
 
@@ -243,7 +243,7 @@ def load_mars_descriptions(repo_root: Path | None = None) -> dict[str, str]:
     mars_list = _run_mars_models_list(repo_root)
     if mars_list is not None:
         for item in mars_list:
-            resolved_model = item.get("resolved_model")
+            resolved_model = item.get("model_id") or item.get("resolved_model")
             description = item.get("description")
             if (
                 isinstance(resolved_model, str)
