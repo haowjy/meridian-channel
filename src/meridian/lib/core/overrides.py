@@ -64,6 +64,7 @@ class RuntimeOverrides(BaseModel):
 
     model: str | None = None
     harness: str | None = None
+    agent: str | None = None
     effort: str | None = None
     sandbox: str | None = None
     approval: str | None = None
@@ -127,6 +128,7 @@ class RuntimeOverrides(BaseModel):
         return cls(
             model=_read_env_string("MERIDIAN_MODEL"),
             harness=_read_env_string("MERIDIAN_HARNESS"),
+            agent=_read_env_string("MERIDIAN_AGENT"),
             effort=_read_env_string("MERIDIAN_EFFORT"),
             sandbox=_read_env_string("MERIDIAN_SANDBOX"),
             approval=_read_env_string("MERIDIAN_APPROVAL"),
@@ -149,6 +151,7 @@ class RuntimeOverrides(BaseModel):
         return cls(
             model=_normalize_optional_string(profile.model),
             harness=_normalize_optional_string(profile.harness),
+            # Profile selection is the agent; it does not override itself.
             effort=_normalize_optional_string(profile.effort),
             sandbox=_normalize_optional_string(profile.sandbox),
             approval=_normalize_optional_string(profile.approval),
@@ -163,6 +166,7 @@ class RuntimeOverrides(BaseModel):
         return cls(
             model=primary.model,
             harness=primary.harness,
+            agent=primary.agent,
             effort=primary.effort,
             sandbox=primary.sandbox,
             approval=primary.approval,
@@ -175,6 +179,7 @@ class RuntimeOverrides(BaseModel):
         return cls(
             model=_normalize_optional_string(payload.model),
             harness=_normalize_optional_string(payload.harness),
+            agent=_normalize_optional_string(payload.agent),
             effort=_normalize_optional_string(payload.effort),
             sandbox=_normalize_optional_string(payload.sandbox),
             approval=_normalize_optional_string(payload.approval),
@@ -187,6 +192,7 @@ class RuntimeOverrides(BaseModel):
         return cls(
             model=_normalize_optional_string(request.model),
             harness=_normalize_optional_string(request.harness),
+            agent=_normalize_optional_string(request.agent),
             effort=_normalize_optional_string(request.effort),
             sandbox=_normalize_optional_string(request.sandbox),
             approval=request.approval if request.approval != "default" else None,
