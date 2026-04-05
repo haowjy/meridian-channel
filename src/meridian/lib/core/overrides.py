@@ -175,6 +175,22 @@ class RuntimeOverrides(BaseModel):
         )
 
     @classmethod
+    def from_spawn_config(cls, config: MeridianConfig | None) -> RuntimeOverrides:
+        """Build overrides from spawn-level config defaults.
+
+        Unlike from_config() which reads config.primary.*, this reads
+        config.default_* fields used for spawned subagents.
+        """
+
+        if config is None:
+            return cls()
+        return cls(
+            model=_normalize_optional_string(config.default_model) or None,
+            harness=_normalize_optional_string(config.default_harness) or None,
+            agent=_normalize_optional_string(config.default_agent) or None,
+        )
+
+    @classmethod
     def from_spawn_input(cls, payload: SpawnCreateInput) -> RuntimeOverrides:
         return cls(
             model=_normalize_optional_string(payload.model),
