@@ -85,15 +85,19 @@ def resolve_agent_profile_with_builtin_fallback(
         except FileNotFoundError:
             fallback_profile = builtin_default.strip()
             if fallback_profile and fallback_profile != configured_profile:
-                return (
-                    load_agent_profile(
-                        fallback_profile,
-                        repo_root=repo_root,
-                    ),
-                    "Configured default agent "
-                    f"'{configured_profile}' is unavailable; using builtin default "
-                    f"'{fallback_profile}'.",
-                )
-            raise
+                try:
+                    return (
+                        load_agent_profile(
+                            fallback_profile,
+                            repo_root=repo_root,
+                        ),
+                        "Configured default agent "
+                        f"'{configured_profile}' is unavailable; using builtin default "
+                        f"'{fallback_profile}'.",
+                    )
+                except FileNotFoundError:
+                    pass
+            # No agent profiles available — run as plain session
+            return None, None
 
     return None, None
