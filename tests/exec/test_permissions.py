@@ -117,20 +117,24 @@ def test_codex_uses_exact_sandbox_from_profile(
     assert resolver.resolve_flags(HarnessId.CODEX) == ["--sandbox", sandbox]
 
 
-def test_allowed_tools_take_precedence_over_disallowed_tools(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    with caplog.at_level("WARNING"):
-        config, resolver = resolve_permission_pipeline(
-            sandbox="workspace-write",
-            allowed_tools=("Read",),
-            disallowed_tools=("Read", "Write"),
-        )
+def test_combined_allowlist_and_denylist_emits_both_flags() -> None:
+    config, resolver = resolve_permission_pipeline(
+        sandbox="workspace-write",
+        allowed_tools=("Bash",),
+        disallowed_tools=("Agent",),
+    )
 
     assert isinstance(resolver, CombinedToolsResolver)
+
+    # Claude: both flags emitted
+    claude_flags = resolver.resolve_flags(HarnessId.CLAUDE)
+    assert "--allowedTools" in claude_flags
+    assert "--disallowedTools" in claude_flags
+    assert claude_flags == ["--allowedTools", "Bash", "--disallowedTools", "Agent"]
+
+    # OpenCode: allowlist takes precedence for permission override
     assert config.opencode_permission_override is not None
-    assert json.loads(config.opencode_permission_override) == {"*": "deny", "read": "allow"}
-    assert "Both tools (allowlist) and disallowed-tools (denylist) are set" in caplog.text
+    assert json.loads(config.opencode_permission_override) == {"*": "deny", "bash": "allow"}
 
 
 def test_sanitize_child_env_filters_parent_secrets_and_keeps_explicit_overrides() -> None:

@@ -153,7 +153,8 @@ class ExplicitToolsResolver(BaseModel):
 
         # Claude: emit explicit allowedTools list.
         if harness_id == HarnessId.CLAUDE:
-            return ["--allowedTools", ",".join(self.allowed_tools)]
+            filtered = [t for t in self.allowed_tools if t.strip()]
+            return ["--allowedTools", ",".join(filtered)] if filtered else []
 
         # OpenCode allows per-tool permissions through OPENCODE_PERMISSION env,
         # not run CLI flags. resolve_permission_pipeline wires that env payload.
@@ -185,7 +186,8 @@ class DisallowedToolsResolver(BaseModel):
 
         # Claude: emit explicit disallowedTools list.
         if harness_id == HarnessId.CLAUDE:
-            return ["--disallowedTools", ",".join(self.disallowed_tools)]
+            filtered = [t for t in self.disallowed_tools if t.strip()]
+            return ["--disallowedTools", ",".join(filtered)] if filtered else []
 
         # OpenCode allows per-tool permissions through OPENCODE_PERMISSION env,
         # not run CLI flags. resolve_permission_pipeline wires that env payload.
@@ -205,11 +207,22 @@ class CombinedToolsResolver(BaseModel):
     denylist: DisallowedToolsResolver | None = None
 
     def resolve_flags(self, harness_id: HarnessId) -> list[str]:
+        # Codex only supports coarse --sandbox, not per-tool lists.
+        # Emit sandbox once from whichever resolver has a fallback config,
+        # rather than duplicating it from both.
+        if harness_id == HarnessId.CODEX:
+            if self.allowlist is not None:
+                return self.allowlist.resolve_flags(harness_id)
+            if self.denylist is not None:
+                return self.denylist.resolve_flags(harness_id)
+            return []
+
+        flags: list[str] = []
         if self.allowlist is not None:
-            return self.allowlist.resolve_flags(harness_id)
+            flags.extend(self.allowlist.resolve_flags(harness_id))
         if self.denylist is not None:
-            return self.denylist.resolve_flags(harness_id)
-        return []
+            flags.extend(self.denylist.resolve_flags(harness_id))
+        return flags
 
     def opencode_permission_json(self) -> str | None:
         if self.allowlist is not None:
@@ -274,11 +287,6 @@ def resolve_permission_pipeline(
     ),
 ]:
     config = build_permission_config(sandbox, approval=approval)
-    if allowed_tools and disallowed_tools:
-        logger.warning(
-            "Both tools (allowlist) and disallowed-tools (denylist) are set; "
-            "using allowlist and ignoring denylist."
-        )
     resolver = build_permission_resolver(
         allowed_tools=allowed_tools,
         disallowed_tools=disallowed_tools,
