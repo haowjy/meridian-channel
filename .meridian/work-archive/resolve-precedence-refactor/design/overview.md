@@ -95,8 +95,37 @@ Currently `config.default_model` is applied as a post-hoc fallback after harness
 ### Approval "default" sentinel
 `from_launch_request` currently maps `approval="default"` to `None`, making it invisible. **Deferred** — fixing requires changing the CLI argument parser default, which is outside scope. See decision D4.
 
+### Harness and model are independent fields
+
+**Correction from user review**: The original design assumed `-m` should override the harness. That's wrong. Harness and model resolve independently through the precedence chain. Harness derivation from model is a **fallback** that only kicks in when no layer specifies a harness at all.
+
+The resolution is simple:
+```
+harness = first_non_none(subcommand, profile.harness, config.harness) or derive_from(resolved_model) or default
+model   = first_non_none(cli.model, env.model, profile.model, config.model) or default_for(harness)
+```
+
+Then validate compatibility — if the combination is truly impossible (e.g., running a model on a harness that doesn't support its provider), error. But many "mismatched" combinations are valid (e.g., sonnet on opencode works fine — opencode supports anthropic models).
+
+Examples:
+- `meridian codex -m sonnet` → explicit harness via subcommand + explicit model → respect both, validate compat
+- `meridian spawn -a reviewer -m sonnet` (profile has `harness: opencode`) → profile harness + CLI model → try sonnet on opencode
+- `meridian spawn -m sonnet` (no harness anywhere) → derive harness from model → claude
+
+This means `derive_harness()` does NOT need to be layer-aware. Standard first-non-None resolution works for harness, with model-derived harness as the final fallback.
+
+### Remove `--harness` flag from spawn
+
+The `--harness` flag on `meridian spawn` is redundant with harness subcommands (`meridian codex`, `meridian claude`, `meridian opencode`). Two ways to set the same thing is confusing. Remove it.
+
+Harness is set by:
+1. Subcommand (`meridian codex`) — explicit user intent, always wins
+2. Profile — respected unless incompatible with resolved model
+3. Derived from model — fallback when nothing else specifies harness
+4. Config default
+
 ### Harness-model compatibility validation
-Currently scattered across resolution. In the new design, validation happens exactly once in `derive_harness()`, after both model and harness are resolved. If both are explicitly set and incompatible, error. If only model is set, derive harness. If only harness is set, no validation needed (model may come from harness default).
+Validation happens once, after both harness and model are independently resolved. If the combination is truly incompatible (harness doesn't support the model's provider at all), error with a clear message. Many cross-provider combinations work (opencode supports multiple providers) — don't over-restrict.
 
 ## What This Doesn't Change
 
@@ -108,10 +137,11 @@ Currently scattered across resolution. In the new design, validation happens exa
 
 ## Migration
 
-This is internal refactoring. No config format changes, no CLI flag changes, no profile format changes. Existing tests should pass (or fail in ways that reveal they were testing buggy behavior). New tests should verify:
+This is internal refactoring with one CLI-facing change: removal of `--harness` flag from `meridian spawn`. No config format changes, no profile format changes. Existing tests should pass (or fail in ways that reveal they were testing buggy behavior). New tests should verify:
 
-1. `-m sonnet` on a codex-profiled agent derives claude harness (not codex)
-2. `config.primary.model` actually takes effect when no CLI/env/profile model is set
-3. `config.primary.agent` participates in agent resolution
-4. `--approval default` overrides profile approval
-5. Config default harness is used when no model or harness is specified anywhere
+1. `-m sonnet` on an opencode-profiled agent runs sonnet on opencode (not claude)
+2. `meridian codex -m sonnet` respects both explicit harness and model
+3. `-m sonnet` with no harness anywhere derives claude harness
+4. `config.primary.model` actually takes effect when no CLI/env/profile model is set
+5. `config.primary.agent` participates in agent resolution
+6. Config default harness is used when no model or harness is specified anywhere

@@ -37,23 +37,21 @@ plan.py:
   # Step 2: Build layer tuple in precedence order
   layers = (cli_overrides, env_overrides, profile_overrides, config_overrides)
   
-  # Step 3: Derive harness by scanning layers (layer-aware, not merged)
-  # Note: derive_harness() handles model alias resolution internally
-  # when it encounters a model in a layer — it calls route_model() which
-  # resolves aliases. This means alias resolution happens at derivation
-  # time, not as a separate pre-pass.
-  harness_id = derive_harness(
-      layers=layers,
-      config=config,
-      harness_registry=harness_registry,
-      repo_root=repo_root,
-      default_harness=config.default_harness,
-  )
-  
-  # Step 4: Resolve scalar fields via standard merge (effort, sandbox, etc.)
+  # Step 3: Resolve ALL fields via standard merge (model, harness, effort, etc.)
   resolved = resolve(*layers)
   
-  # Step 5: Resolve final model (apply harness-specific defaults + alias resolution)
+  # Step 4: Harness fallback — derive from model only if no layer set harness
+  if resolved.harness:
+      harness_id = HarnessId(resolved.harness)
+  elif resolved.model:
+      harness_id = derive_harness_from_model(resolved.model, repo_root=repo_root)
+  else:
+      harness_id = HarnessId(config.default_harness or "claude")
+  
+  # Step 5: Validate harness-model compatibility
+  validate_harness_model_compat(harness_id, resolved.model, harness_registry)
+  
+  # Step 6: Resolve final model (apply harness-specific defaults if no model set)
   final_model = resolve_final_model(
       layer_model=resolved.model,
       harness_id=harness_id,
@@ -61,7 +59,7 @@ plan.py:
       repo_root=repo_root,
   )
   
-  # Step 6: Resolve adapter, skills, build ResolvedPolicies
+  # Step 7: Resolve adapter, skills, build ResolvedPolicies
   adapter = harness_registry.get_subprocess_harness(harness_id)
   ...
 ```
@@ -86,62 +84,41 @@ def resolve(*layers: RuntimeOverrides) -> RuntimeOverrides:
     return RuntimeOverrides.model_validate(resolved)
 ```
 
-Already generic. Works for any field on RuntimeOverrides.
+Already generic. Works for any field on RuntimeOverrides, including harness.
 
-### `derive_harness()` (resolve.py) — New function, LAYER-AWARE
+### Harness resolution — independent field, not derived from model
 
-**Critical design point**: This function scans layers directly, NOT the pre-merged
-resolved output. The pre-merged output loses which layer contributed model vs harness,
-which breaks the "derived fields inherit source precedence" invariant.
+**Correction from user review**: Harness and model are independent fields. Both
+resolve via standard first-non-None across layers. Harness derivation from model
+is a **fallback** only when no layer specifies a harness at all.
 
 ```python
-def derive_harness(
-    *,
-    layers: tuple[RuntimeOverrides, ...],
-    config: MeridianConfig,
-    harness_registry: HarnessRegistry,
-    repo_root: Path,
-    default_harness: str = "claude",
-) -> tuple[HarnessId, str]:
-    """Derive final harness by scanning layers in precedence order.
-    
-    Scans layers from highest to lowest precedence. At each layer:
-    - If the layer specifies harness: return that harness immediately.
-    - If the layer specifies model (but no harness): derive harness from 
-      model via route_model() and return immediately.
-    - If the layer specifies neither: continue to next layer.
-    
-    If no layer specifies either: return config.default_harness or builtin.
-    
-    This ensures a CLI model (-m sonnet) derives 'claude' harness and wins
-    over a profile's explicit harness: codex, because the CLI layer is scanned
-    first. The derived harness inherits the precedence of the model that
-    produced it.
-    
-    Returns (harness_id, resolved_model_or_empty).
-    """
-    for layer in layers:
-        harness = (layer.harness or "").strip()
-        model = (layer.model or "").strip()
-        if harness:
-            # This layer explicitly sets harness — use it
-            return HarnessId(harness), model
-        if model:
-            # This layer sets model but not harness — derive harness from model
-            routed = _route_harness_for_model(model, repo_root=repo_root)
-            return routed, model
-    # No layer set either — use configured default
-    return HarnessId(default_harness or "claude"), ""
+resolved = resolve(*layers)
+# resolved.harness and resolved.model are independently resolved
+
+if not resolved.harness and resolved.model:
+    # No layer set harness — derive from model as fallback
+    resolved_harness = derive_harness_from_model(resolved.model, repo_root=repo_root)
+elif not resolved.harness:
+    resolved_harness = HarnessId(default_harness or "claude")
+else:
+    resolved_harness = HarnessId(resolved.harness)
+
+# Validate compatibility — error only if truly impossible
+validate_harness_model_compat(resolved_harness, resolved.model, harness_registry)
 ```
 
-This replaces lines 199-256 of resolve.py — the entire ad-hoc if/elif chain.
+This is simpler than the layer-aware scan. No special scanning logic needed —
+`resolve()` already handles precedence correctly for all fields. The only addition
+is the fallback derivation when harness is absent.
 
-**Why layer-aware, not merged**: If CLI sets `-m sonnet` and profile sets
-`harness: codex`, a merged resolve() produces `model="sonnet", harness="codex"`.
-derive_harness would see "both set" and either error (current bug) or pick one
-arbitrarily. By scanning layers, we see CLI has model (higher precedence) before
-profile has harness (lower precedence), so we derive from model. The invariant
-is structurally enforced.
+**Why this works**: `meridian spawn -a reviewer -m sonnet` where the profile has
+`harness: opencode` resolves to `model=sonnet, harness=opencode`. That's correct —
+opencode can run anthropic models. The combination is validated, not overridden.
+
+**Why the layer-aware scan was wrong**: It assumed `-m sonnet` should override the
+profile's harness. But the user only overrode the model, not the harness. The profile
+author chose opencode for a reason — maybe they want multi-provider support. Respect it.
 
 ### `resolve_final_model()` (resolve.py) — New function
 
@@ -184,12 +161,19 @@ Or alternatively, keep the `overrides` parameter but require callers to pass the
 
 ## RuntimeOverrides Changes
 
-### Add `agent` field
+### Add `agent` field, remove `--harness` CLI flag
+
+Remove the `--harness` flag from `meridian spawn` CLI. Harness is set via:
+- Subcommand (`meridian codex`) → sets harness in `LaunchRequest`
+- Profile `harness:` field → sets harness in `from_agent_profile()`
+- Config `primary.harness` / `default_harness` → sets harness in `from_config()`
+
+The `harness` field stays on `RuntimeOverrides` (profiles and config still set it). Only the CLI flag goes away.
 
 ```python
 class RuntimeOverrides(BaseModel):
     model: str | None = None
-    harness: str | None = None
+    harness: str | None = None    # still used by profiles/config/subcommands
     agent: str | None = None      # <-- NEW
     effort: str | None = None
     sandbox: str | None = None
@@ -225,7 +209,7 @@ If changing the CLI default isn't feasible (backwards compat), keep the current 
 
 ## Derivation Order
 
-Three phases, with harness derivation scanning layers directly:
+Three phases, standard first-non-None for all fields:
 
 ```
 Phase 1: Resolve agent, load profile
@@ -234,23 +218,23 @@ Phase 1: Resolve agent, load profile
   - profile_overrides = RuntimeOverrides.from_agent_profile(profile)
   - layers = (cli, env, profile, config)  -- in strict precedence order
 
-Phase 2: derive_harness(layers=layers, ...)  -- LAYER-AWARE scan
-  - For each layer in precedence order:
-    - If layer.harness: return that harness
-    - If layer.model: derive harness from model, return
-    - Else: continue
-  - Fallback: config.default_harness
+Phase 2: Resolve all fields + harness fallback
+  - resolved = resolve(*layers)  -- standard first-non-None for ALL fields
+  - if resolved.harness: use it (from subcommand, profile, or config)
+  - elif resolved.model: derive harness from model
+  - else: config.default_harness
+  - validate_harness_model_compat()
 
 Phase 3: resolve_final_model(layer_model=resolved.model, harness_id, config)
   - If layer_model set: resolve alias, done
   - If not: config.default_model_for_harness(harness_id) || config.default_model || ""
 ```
 
-Phase 2 is the critical change. By scanning layers instead of using merged output:
-- CLI `-m sonnet` derives claude harness, beats profile's `harness: codex` (CLI layer scanned first)
-- Profile `harness: codex` beats config model (profile layer scanned before config)
-- Config `primary.model` participates (config layer is in the stack)
-- No circular dependency: harness derivation reads layers directly, model defaults come after
+This is simpler than layer-aware scanning because harness and model are independent:
+- `meridian codex -m sonnet` → harness=codex (subcommand), model=sonnet → validate compat
+- `-a reviewer -m sonnet` (profile: harness=opencode) → harness=opencode (profile), model=sonnet (CLI) → valid
+- `-m sonnet` (no harness anywhere) → derive claude from model → valid
+- Config `primary.model` participates because config is in the layer stack
 
 ## Caller Impact
 
