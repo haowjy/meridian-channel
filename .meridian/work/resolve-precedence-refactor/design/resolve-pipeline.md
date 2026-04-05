@@ -38,7 +38,11 @@ plan.py:
   layers = (cli_overrides, env_overrides, profile_overrides, config_overrides)
   
   # Step 3: Derive harness by scanning layers (layer-aware, not merged)
-  harness_id, _ = derive_harness(
+  # Note: derive_harness() handles model alias resolution internally
+  # when it encounters a model in a layer — it calls route_model() which
+  # resolves aliases. This means alias resolution happens at derivation
+  # time, not as a separate pre-pass.
+  harness_id = derive_harness(
       layers=layers,
       config=config,
       harness_registry=harness_registry,
@@ -49,7 +53,7 @@ plan.py:
   # Step 4: Resolve scalar fields via standard merge (effort, sandbox, etc.)
   resolved = resolve(*layers)
   
-  # Step 5: Resolve final model (apply harness-specific defaults if needed)
+  # Step 5: Resolve final model (apply harness-specific defaults + alias resolution)
   final_model = resolve_final_model(
       layer_model=resolved.model,
       harness_id=harness_id,
@@ -290,13 +294,11 @@ Add `RuntimeOverrides.from_spawn_config(config)` that reads:
 ## Edge Cases
 
 ### Model alias resolution timing
-`resolve_model()` (catalog lookup) currently happens inside `resolve_policies()`. It should happen in `resolve_final_model()` — after all layers are merged but before harness derivation uses the model. Actually, harness derivation needs the resolved model to route correctly, so alias resolution must happen between Phase 1 and Phase 2.
+Model aliases are resolved at two points:
+1. **Inside `derive_harness()`** — when a layer's model is used for harness routing, `route_model()` resolves the alias to determine the correct harness. This happens per-layer as each model is encountered.
+2. **Inside `resolve_final_model()`** — the final model string is alias-resolved via `resolve_model()` catalog lookup before being returned.
 
-Revised order:
-1. `resolve(cli, env, profile, config)` → raw resolved
-2. Resolve model alias: `resolved.model` → canonical model ID
-3. `derive_harness(canonical_model, resolved.harness, ...)` → harness_id  
-4. `resolve_final_model(canonical_model, harness_id, ...)` → final model (fills defaults)
+This means alias resolution is encapsulated in the derivation functions, not exposed as a separate step in the caller. Config validators in settings.py also normalize model aliases at load time, so `config.primary.model` is typically already canonical.
 
 ### Profile with harness but no model
 A profile specifying `harness: codex` but no model should use the codex harness and let the codex adapter pick its default model. The new design handles this: `resolved.harness = "codex"`, `resolved.model = None`, derivation keeps codex, final model comes from `config.default_model_for_harness("codex")`.
