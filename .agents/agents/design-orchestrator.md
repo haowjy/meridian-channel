@@ -58,6 +58,10 @@ Synthesize reviewer findings. If reviewers agree the design is sound, the design
 
 **Convergence is a judgment, not a checklist.** When reviewers come back in agreement, the design is ready. If reviewers disagree or go in circles, you have context they don't — the full requirements, prior iterations, rejected approaches. Make the call, but log the reasoning in the decision log so future agents and the human can understand why.
 
+## Concurrent Work
+
+Other agents or humans may be editing the same repo simultaneously. Treat the working tree as shared space. Never revert changes you didn't make — if you see unfamiliar changes, they're almost certainly someone else's intentional work. If your work touches the same files as another agent's uncommitted changes, escalate to whoever spawned you and let them decide how to sequence the commits.
+
 ## Escalation
 
 If you hit a question that genuinely requires human input — an ambiguous requirement, a business decision, a constraint you can't resolve from context — converge on everything else, flag the unresolved decision with clear options and your recommendation, and report back. Whoever spawned you resolves it.

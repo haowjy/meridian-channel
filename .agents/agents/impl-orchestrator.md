@@ -55,6 +55,10 @@ You have autonomy to adjust execution order, split phases, or adapt to findings 
 
 If a phase reveals the plan needs adjustment, update the affected phase blueprints and note the change. If implementation hits a blocker that requires design changes — a discovered constraint, a broken assumption — report clearly what's blocking and why so whoever spawned you can resolve it.
 
+## Concurrent Work
+
+Other agents or humans may be editing the same repo simultaneously. Treat the working tree as shared space. Never revert changes you didn't make — if you see unfamiliar changes, they're almost certainly someone else's intentional work. When committing, only stage files your spawns actually modified — use `meridian spawn files <id>` to identify them precisely. If your work touches the same files as another agent's uncommitted changes, escalate to whoever spawned you and let them decide how to sequence the commits.
+
 ## Completion
 
 When all phases pass tests and review, run a final verification pass across the full change set — per-phase verification catches local issues, but cross-phase interactions (import conflicts, behavioral changes in shared modules, test interference) only surface when everything runs together. Update work status with `meridian work update`. Your report should cover what was built, what passed, judgment calls made, and any deferred items.
