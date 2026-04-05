@@ -9,7 +9,6 @@ build/
 .ruff_cache/
 
 scratch/
-uv.lock
 tmp/
 
 .orchestrate/
