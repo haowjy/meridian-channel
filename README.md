@@ -1,9 +1,9 @@
 # meridian
 
-[![PyPI](https://img.shields.io/pypi/v/meridian-channel)](https://pypi.org/project/meridian-channel/)
-[![Python](https://img.shields.io/pypi/pyversions/meridian-channel)](https://pypi.org/project/meridian-channel/)
-[![License](https://img.shields.io/github/license/haowjy/meridian-channel)](LICENSE)
-[![CI](https://github.com/haowjy/meridian-channel/actions/workflows/meridian-ci.yml/badge.svg)](https://github.com/haowjy/meridian-channel/actions)
+[PyPI](https://pypi.org/project/meridian-channel/)
+[Python](https://pypi.org/project/meridian-channel/)
+[License](LICENSE)
+[CI](https://github.com/haowjy/meridian-channel/actions)
 
 > **Alpha** — API may change between releases.
 
@@ -54,11 +54,11 @@ that agents use to coordinate other agents.
 
 ## Agent Packages
 
-[**meridian-dev-workflow**](https://github.com/haowjy/meridian-dev-workflow) — A full dev team: architects, coders, reviewers, testers, researchers, documenters, and the orchestrators that coordinate them. Includes skills for design methodology, implementation planning, code review, and structural hygiene. This is what most users want.
+**[meridian-dev-workflow](https://github.com/haowjy/meridian-dev-workflow)** — A full dev team: architects, coders, reviewers, testers, researchers, documenters, and the orchestrators that coordinate them. Includes skills for design methodology, implementation planning, code review, and structural hygiene. This is what most users want.
 
-[**meridian-base**](https://github.com/haowjy/meridian-base) — Core coordination primitives: the base orchestrator, subagent, and skills for spawning, state tracking, and session context. Included as a dependency of meridian-dev-workflow.
+**[meridian-base](https://github.com/haowjy/meridian-base)** — Core coordination primitives: the base orchestrator, subagent, and skills for spawning, state tracking, and session context. Included as a dependency of meridian-dev-workflow.
 
-Packages are managed by [**mars**](https://github.com/haowjy/mars-agents), an agent package manager that installs agent profiles and skills from git sources into your project's `.agents/` directory.
+Packages are managed by **[mars](https://github.com/haowjy/mars-agents)**, an agent package manager that installs agent profiles and skills from git sources into your project's `.agents/` directory.
 
 ## Install
 
@@ -73,8 +73,7 @@ meridian --version
 meridian doctor
 ```
 
-<details>
-<summary>Alternative install methods</summary>
+Alternative install methods
 
 ```bash
 pipx install meridian-channel    # if you prefer pipx
@@ -98,7 +97,7 @@ uv run meridian --help
 
 If `meridian` is not on your PATH: `uv tool update-shell`
 
-</details>
+
 
 ## Set Up a Project
 
@@ -132,11 +131,13 @@ supported).
 
 You need at least one harness CLI installed and authenticated:
 
-| Harness | Model prefixes | Install |
-|---|---|---|
-| Claude Code | `claude-*`, `sonnet*`, `opus*` | [docs.anthropic.com](https://docs.anthropic.com/en/docs/claude-code) |
-| Codex CLI | `gpt-*`, `codex*`, `o3*`, `o4*` | [github.com/openai/codex](https://github.com/openai/codex) |
-| OpenCode | anything else | [opencode.ai](https://opencode.ai) |
+
+| Harness     | Model prefixes                  | Install                                                              |
+| ----------- | ------------------------------- | -------------------------------------------------------------------- |
+| Claude Code | `claude-`*, `sonnet*`, `opus*`  | [docs.anthropic.com](https://docs.anthropic.com/en/docs/claude-code) |
+| Codex CLI   | `gpt-*`, `codex*`, `o3*`, `o4*` | [github.com/openai/codex](https://github.com/openai/codex)           |
+| OpenCode    | anything else                   | [opencode.ai](https://opencode.ai)                                   |
+
 
 Claude and Codex are the most exercised paths today. OpenCode has adapter
 support but lighter day-to-day coverage.
@@ -208,48 +209,58 @@ graph TB
     Claude & Codex & OpenCode -->|"meridian CLI"| State
 ```
 
+
+
 ## Commands
 
 **Spawning & monitoring:**
 
-| Command | Description |
-|---|---|
-| `meridian` | Launch the primary agent session |
-| `meridian spawn -a AGENT -p "task"` | Delegate work to a routed model |
-| `meridian spawn list` | See running and recent spawns |
-| `meridian spawn wait ID` | Block until a spawn completes |
-| `meridian spawn show ID` | Read a spawn's report |
-| `meridian spawn --continue ID -p "more"` | Continue a prior spawn |
-| `meridian spawn --from ID -p "next"` | Start new spawn with prior context |
+
+| Command                                  | Description                        |
+| ---------------------------------------- | ---------------------------------- |
+| `meridian`                               | Launch the primary agent session   |
+| `meridian spawn -a AGENT -p "task"`      | Delegate work to a routed model    |
+| `meridian spawn list`                    | See running and recent spawns      |
+| `meridian spawn wait ID`                 | Block until a spawn completes      |
+| `meridian spawn show ID`                 | Read a spawn's report              |
+| `meridian spawn --continue ID -p "more"` | Continue a prior spawn             |
+| `meridian spawn --from ID -p "next"`     | Start new spawn with prior context |
+
 
 **Reports & sessions:**
 
-| Command | Description |
-|---|---|
-| `meridian report search "query"` | Search across all spawn reports |
-| `meridian session search "query"` | Search session transcripts |
+
+| Command                           | Description                     |
+| --------------------------------- | ------------------------------- |
+| `meridian report search "query"`  | Search across all spawn reports |
+| `meridian session search "query"` | Search session transcripts      |
+
 
 **Configuration & diagnostics:**
 
-| Command | Description |
-|---|---|
-| `meridian init [--link DIR]` | Initialize project (`.meridian/`, `mars.toml`, optional tool linking) |
-| `meridian config show` | Show resolved config and bootstrap `.meridian/` on first run |
-| `meridian config set KEY VALUE` | Set a config value |
-| `meridian models config show` | Show `.meridian/models.toml` policy overrides |
-| `meridian models list` | Inspect the model catalog |
-| `meridian doctor` | Run diagnostics |
-| `meridian serve` | Start the MCP server |
+
+| Command                         | Description                                                           |
+| ------------------------------- | --------------------------------------------------------------------- |
+| `meridian init [--link DIR]`    | Initialize project (`.meridian/`, `mars.toml`, optional tool linking) |
+| `meridian config show`          | Show resolved config and bootstrap `.meridian/` on first run          |
+| `meridian config set KEY VALUE` | Set a config value                                                    |
+| `meridian models config show`   | Show `.meridian/models.toml` policy overrides                         |
+| `meridian models list`          | Inspect the model catalog                                             |
+| `meridian doctor`               | Run diagnostics                                                       |
+| `meridian serve`                | Start the MCP server                                                  |
+
 
 **Package management (mars):**
 
-| Command | Description |
-|---|---|
-| `meridian mars add SOURCE` | Add an agent/skill package source |
-| `meridian mars sync` | Resolve and install packages into `.agents/` |
-| `meridian mars link DIR` | Symlink `.agents/` into a tool directory |
-| `meridian mars list` | Show installed agents and skills |
-| `meridian mars upgrade` | Fetch latest versions and sync |
+
+| Command                    | Description                                  |
+| -------------------------- | -------------------------------------------- |
+| `meridian mars add SOURCE` | Add an agent/skill package source            |
+| `meridian mars sync`       | Resolve and install packages into `.agents/` |
+| `meridian mars link DIR`   | Symlink `.agents/` into a tool directory     |
+| `meridian mars list`       | Show installed agents and skills             |
+| `meridian mars upgrade`    | Fetch latest versions and sync               |
+
 
 ## State Layout
 
@@ -279,9 +290,9 @@ mid-spawn, the next read detects and reports the orphaned state.
 
 ## Troubleshooting
 
-**`meridian` not found** — Run `uv tool update-shell` and restart your shell.
+`**meridian` not found** — Run `uv tool update-shell` and restart your shell.
 
-**`meridian doctor` reports missing harnesses** — Install and authenticate at
+`**meridian doctor` reports missing harnesses** — Install and authenticate at
 least one harness CLI (see Prerequisites).
 
 **Model routes to wrong harness** — Check `meridian models list` and

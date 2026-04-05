@@ -54,7 +54,7 @@ pub struct PlannedState {
     pub plan: SyncPlan,
 }
 
-/// Phase 5: Applied results (content written to .mars/content/).
+/// Phase 5: Applied results (content written to .mars/).
 pub struct AppliedState {
     pub planned: PlannedState,
     pub applied: ApplyResult,
@@ -82,9 +82,9 @@ pub fn execute(ctx: &MarsContext, request: &SyncRequest) -> Result<SyncReport, M
         check_frozen_gate(&planned)?;  // borrow is fine for read-only check
     }
     
-    let applied = apply_plan(ctx, planned, request)?;          // writes to .mars/content/
+    let applied = apply_plan(ctx, planned, request)?;          // writes to .mars/
     
-    // Phase B: sync all managed targets from .mars/content/
+    // Phase B: sync all managed targets from .mars/
     // let synced = sync_managed_targets(ctx, applied, request)?;
     
     let report = finalize(ctx, applied, request)?;             // applied moved in
@@ -93,7 +93,7 @@ pub fn execute(ctx: &MarsContext, request: &SyncRequest) -> Result<SyncReport, M
 }
 ```
 
-Each phase function is independently testable. Extension points insert as new phases. Notably, the Phase B target sync phase inserts between `apply_plan` (which writes to `.mars/content/`) and `finalize`:
+Each phase function is independently testable. Extension points insert as new phases. Notably, the Phase B target sync phase inserts between `apply_plan` (which writes to `.mars/`) and `finalize`:
 
 ```rust
 // Phase B: after apply_plan writes canonical content, sync all targets
@@ -126,8 +126,8 @@ Note: `ctx` and `request` are borrowed — they're read-only context that doesn'
 | Steps 8-11 (target, collisions, rewrites, validation) | `build_target()` | Discovery, filtering, collision detection |
 | Steps 12-13c (diff, plan, _self injection) | `create_plan()` | _self handled inside target building, not here (see A2) |
 | Step 14 (frozen gate) | `check_frozen_gate()` | Standalone check between plan and apply |
-| Steps 15-16 (persist config, apply) | `apply_plan()` | Config persistence + apply to `.mars/content/` |
-| (new) | `sync_managed_targets()` | Copy from `.mars/content/` to all configured targets |
+| Steps 15-16 (persist config, apply) | `apply_plan()` | Config persistence + apply to `.mars/` |
+| (new) | `sync_managed_targets()` | Copy from `.mars/` to all configured targets |
 | Step 17 (write lock) | `finalize()` | Lock rebuild + report construction |
 
 ### Nesting vs Flattening
@@ -225,7 +225,7 @@ fn build_target(ctx: &MarsContext, resolved: ResolvedState, request: &SyncReques
 **Key change from review feedback**: local packages use the *same* `discover_source()` function as dependency sources. This means when Phase B adds new item kinds with new `DiscoveryConvention` entries, local packages automatically discover them too — no separate `discover_local_items` to update.
 
 Only two things remain local-specific:
-1. **Materialization strategy** — local items use `Symlink` in `.mars/content/` (so edits propagate without re-running sync). When targets are synced from `.mars/content/`, the symlink is followed and the content is copied to the target.
+1. **Materialization strategy** — local items use `Symlink` in `.mars/` (so edits propagate without re-running sync). When targets are synced from `.mars/`, the symlink is followed and the content is copied to the target.
 2. **Shadow precedence** — local items always win over dependency items (with warning)
 
 The shadow check and unmanaged collision avoidance remain in `build_target`, but they operate on the same `TargetItem` type as dependency items.
@@ -242,10 +242,10 @@ pub struct TargetItem {
     pub source_hash: ContentHash,
     pub is_flat_skill: bool,
     pub rewritten_content: Option<String>,
-    pub materialization: Materialization,  // how to apply this item to .mars/content/
+    pub materialization: Materialization,  // how to apply this item to .mars/
 }
 
-/// How an item should be materialized in the canonical store (.mars/content/).
+/// How an item should be materialized in the canonical store (.mars/).
 pub enum Materialization {
     /// Copy source content to destination (standard for dependency items).
     Copy,
@@ -254,7 +254,7 @@ pub enum Materialization {
 }
 ```
 
-Note: `Materialization` describes how content reaches `.mars/content/` (the canonical store). The subsequent target sync phase always *copies* from `.mars/content/` to targets, following symlinks as needed. This means local package edits propagate to targets on the next `mars sync` without needing to re-resolve.
+Note: `Materialization` describes how content reaches `.mars/` (the canonical store). The subsequent target sync phase always *copies* from `.mars/` to targets, following symlinks as needed. This means local package edits propagate to targets on the next `mars sync` without needing to re-resolve.
 
 Now the diff/plan pipeline handles local items uniformly — `PlannedAction::Symlink` is generated from `Materialization::Symlink` during plan creation, not injected afterward.
 
@@ -372,7 +372,7 @@ pub fn load_manifest(source_root: &Path) -> Result<(Option<Manifest>, Vec<Diagno
 - Atomic file operations (copy, move, symlink)
 - Cleanup (removing old content)
 
-This duplication will drift on atomicity guarantees, diagnostics, force semantics, and safety fixes. With the `.mars/` canonical store model, reconciliation becomes even more critical — it's used for both writing to `.mars/content/` AND copying from `.mars/content/` to all managed targets.
+This duplication will drift on atomicity guarantees, diagnostics, force semantics, and safety fixes. With the `.mars/` canonical store model, reconciliation becomes even more critical — it's used for both writing to `.mars/` AND copying from `.mars/` to all managed targets.
 
 ### Design
 
@@ -428,7 +428,7 @@ pub enum DesiredState {
     CopyFile { source: PathBuf, hash: ContentHash },
     /// Copy a directory tree from source to destination.
     CopyDir { source: PathBuf, hash: ContentHash },
-    /// Create symlink to target (only used for local items in .mars/content/).
+    /// Create symlink to target (only used for local items in .mars/).
     Symlink { target: PathBuf },
     /// Remove whatever is there.
     Absent,
@@ -454,9 +454,9 @@ pub fn reconcile_one(
 pub fn scan_destination(path: &Path) -> DestinationState;
 ```
 
-**Content apply** (to `.mars/content/`) uses `reconcile_one` for each planned action. Dependency items use `CopyFile`/`CopyDir`; local items use `Symlink`.
+**Content apply** (to `.mars/`) uses `reconcile_one` for each planned action. Dependency items use `CopyFile`/`CopyDir`; local items use `Symlink`.
 
-**Target sync** (from `.mars/content/` to managed targets) uses `reconcile_one` with `CopyFile`/`CopyDir` for every item — always copying, even for items that are symlinks in `.mars/content/` (the copy follows the symlink). This is the key mechanism that makes local package edits propagate: `.mars/content/agents/foo.md` is a symlink → target sync copies the symlink target's content to `.claude/agents/foo.md`.
+**Target sync** (from `.mars/` to managed targets) uses `reconcile_one` with `CopyFile`/`CopyDir` for every item — always copying, even for items that are symlinks in `.mars/` (the copy follows the symlink). This is the key mechanism that makes local package edits propagate: `.mars/agents/foo.md` is a symlink → target sync copies the symlink target's content to `.claude/agents/foo.md`.
 
 **Link** uses the Layer 1 atomic fs ops directly. Link's "merge unique files into managed root" algorithm is genuinely different from sync's item-level reconciliation — it scans a target directory for user files, moves non-conflicting files into the managed root, and replaces the directory with a symlink. This remains link-specific logic, but it uses the shared atomic primitives (`atomic_copy_file`, `safe_remove`, `content_hash`) instead of duplicating them.
 

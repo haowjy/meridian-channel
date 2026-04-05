@@ -9,4 +9,4 @@ url = "https://github.com/anthropics/skills"
 skills = ["frontend-design"]
 
 [settings]
-managed_root = ".agents"
+targets = [".agents", ".claude"]

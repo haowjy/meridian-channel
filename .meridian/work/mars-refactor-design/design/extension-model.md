@@ -117,7 +117,7 @@ The category is determined during discovery by checking (requires both harness I
 Rules materialize differently per category:
 - **Shared rules** → copied to all targets' `rules/` directory (e.g., `.claude/rules/general.md`, `.agents/rules/general.md`)
 - **Per-harness rules** → copied only to the matching target's `rules/` directory (e.g., `rules/claude/review.md` → `.claude/rules/review.md`)
-- **Per-model rules** → copied to `.mars/content/rules/` for meridian to read at spawn time. NOT materialized to targets (the consuming system applies them dynamically based on active model).
+- **Per-model rules** → copied to `.mars/rules/` for meridian to read at spawn time. NOT materialized to targets (the consuming system applies them dynamically based on active model).
 
 **Why renamed from "soul"?** "Soul" implies identity and personality — OpenClaw's Soul.md is about who the AI is. What we're building is operational instructions: coding style rules, harness-specific behavior, model-specific thinking patterns. "Rule" matches Claude Code's existing `.claude/rules/` convention and accurately describes the content's purpose.
 
@@ -184,7 +184,7 @@ pub fn conventions() -> Vec<DiscoveryConvention> {
 Content items (agents, skills, rule files) are materialized by copying files to the canonical store. Capability items are materialized differently — they generate config fragments that merge into runtime-specific config files.
 
 ```rust
-/// How an item kind is materialized into the canonical store (.mars/content/).
+/// How an item kind is materialized into the canonical store (.mars/).
 pub enum MaterializationStrategy {
     /// Copy source content directly (agents, skills, hooks).
     ContentCopy,
@@ -216,7 +216,7 @@ impl ItemKind {
 
 ### Destination Path Convention
 
-Each kind has a deterministic destination path in `.mars/content/`:
+Each kind has a deterministic destination path in `.mars/`:
 
 ```rust
 impl ItemKind {
@@ -390,7 +390,7 @@ pub struct VariantSource {
 }
 ```
 
-**Canonical store gets the default version**. `.mars/content/` always contains the default (non-variant) content. Variants are resolved and applied only when syncing managed targets.
+**Canonical store gets the default version**. `.mars/` always contains the default (non-variant) content. Variants are resolved and applied only when syncing managed targets.
 
 **Lock tracking**: Variants are tracked in the lock alongside the base item:
 
@@ -425,7 +425,7 @@ The prior design had `.agents/` as the managed root — the centralized source o
 
 ### Reframing
 
-**`.mars/content/` is the canonical content store.** ALL target directories — `.agents/`, `.claude/`, `.codex/`, `.cursor/` — are managed outputs that mars materializes content INTO. No target is special. `.agents/` is simply the default target for harnesses that don't have their own directory convention.
+**`.mars/` is the canonical content store.** ALL target directories — `.agents/`, `.claude/`, `.codex/`, `.cursor/` — are managed outputs that mars materializes content INTO. No target is special. `.agents/` is simply the default target for harnesses that don't have their own directory convention.
 
 ### Design
 
@@ -448,7 +448,7 @@ project/
     models-cache.json         # model metadata cache
   .agents/                    # managed target (default)
   .claude/                    # managed target
-    agents/                   # copied from .mars/content/ (with variants resolved)
+    agents/                   # copied from .mars/ (with variants resolved)
     skills/
     rules/                    # shared rules + claude-specific rules merged
   .cursor/                    # managed target
@@ -459,7 +459,7 @@ project/
 **ManagedTarget:**
 
 ```rust
-/// A directory that mars manages — materialized from .mars/content/ with target-specific content.
+/// A directory that mars manages — materialized from .mars/ with target-specific content.
 pub struct ManagedTarget {
     /// Target directory path relative to project root (e.g. ".claude", ".agents").
     pub path: String,
@@ -502,7 +502,7 @@ impl AdapterKind {
 
 **Copy-based materialization — always copy, never symlink to targets:**
 
-All content is COPIED from `.mars/content/` to targets. Reasons:
+All content is COPIED from `.mars/` to targets. Reasons:
 - **Windows**: symlinks need admin/developer mode
 - **Git**: symlinks are finicky across platforms
 - **Atomicity**: copy + tmp+rename is simpler for crash safety
@@ -513,7 +513,7 @@ All content is COPIED from `.mars/content/` to targets. Reasons:
 
 ```toml
 [settings]
-# Managed targets — mars copies content from .mars/content/ into these
+# Managed targets — mars copies content from .mars/ into these
 targets = ['.claude', '.codex']
 
 # Optional: also generate .agents/ (default target)
@@ -533,12 +533,12 @@ Backwards compatibility: the existing `links = [".claude"]` syntax is supported 
 ```
 mars sync
   → Phase A pipeline (load → resolve → discover → target → diff → plan)
-  → apply_plan: write resolved content to .mars/content/
+  → apply_plan: write resolved content to .mars/
   → sync_managed_targets: for each configured target:
-      1. Content sync: copy items from .mars/content/, substituting variants
+      1. Content sync: copy items from .mars/, substituting variants
       2. Rule routing: shared rules to all targets, per-harness rules to matching target only
       3. Capability cross-compilation: merge config fragments into target-native configs
-      4. Orphan cleanup: remove files in target that are no longer in .mars/content/
+      4. Orphan cleanup: remove files in target that are no longer in .mars/
   → finalize: write lock, build report
 ```
 
@@ -546,7 +546,7 @@ mars sync
 
 ```rust
 fn sync_target_content(
-    content_root: &Path,        // .mars/content/
+    content_root: &Path,        // .mars/
     target: &ManagedTarget,
     items: &[TargetItem],
 ) -> Result<Vec<ReconcileOutcome>, MarsError> {
@@ -563,7 +563,7 @@ fn sync_target_content(
             if let Some(category) = &item.rule_category {
                 match category {
                     RuleCategory::Harness { harness_id } if harness_id != &target.harness_id => continue,
-                    RuleCategory::Model { .. } => continue,  // model rules stay in .mars/content/
+                    RuleCategory::Model { .. } => continue,  // model rules stay in .mars/
                     _ => {}  // shared rules go to all targets
                 }
             }
@@ -593,11 +593,11 @@ fn sync_target_content(
 }
 ```
 
-**Per-harness rule path remapping:** When per-harness rules are materialized to their matching target, the harness subdirectory is flattened. Example: `rules/claude/review.md` in `.mars/content/` → `.claude/rules/review.md` in the target (not `.claude/rules/claude/review.md`). This matches Claude Code's native `.claude/rules/` convention.
+**Per-harness rule path remapping:** When per-harness rules are materialized to their matching target, the harness subdirectory is flattened. Example: `rules/claude/review.md` in `.mars/` → `.claude/rules/review.md` in the target (not `.claude/rules/claude/review.md`). This matches Claude Code's native `.claude/rules/` convention.
 
-**First-run adoption:** When a target directory has existing content not yet managed by mars, mars scans for conflicts, offers to merge unique user files into `.mars/content/`, and then takes ownership. This is the legacy link adoption behavior, preserved for migration.
+**First-run adoption:** When a target directory has existing content not yet managed by mars, mars scans for conflicts, offers to merge unique user files into `.mars/`, and then takes ownership. This is the legacy link adoption behavior, preserved for migration.
 
-**Orphan cleanup:** When items are removed from `.mars/content/`, the corresponding files in all managed targets are also removed. The reconcile layer handles this by comparing each target directory against the expected item set for that target.
+**Orphan cleanup:** When items are removed from `.mars/`, the corresponding files in all managed targets are also removed. The reconcile layer handles this by comparing each target directory against the expected item set for that target.
 
 ### Relationship to A4 (Shared Reconciliation)
 
@@ -608,19 +608,19 @@ Managed target sync uses the same reconciliation primitives from A4:
 
 ### Failure Semantics and Crash Safety
 
-Target sync happens **after** content apply to `.mars/content/` and **before** lock write:
+Target sync happens **after** content apply to `.mars/` and **before** lock write:
 
-1. **Content is applied first** — `.mars/content/` is in a consistent state
+1. **Content is applied first** — `.mars/` is in a consistent state
 2. **Managed targets are synced** — content + capabilities written to targets
 3. **Lock is written** — records what was installed
 
 If target sync fails:
-- `.mars/content/` is already correct
-- **Lock IS still written** — the lock records what's in `.mars/content/`, which is the source of truth. Target sync state is tracked separately.
+- `.mars/` is already correct
+- **Lock IS still written** — the lock records what's in `.mars/`, which is the source of truth. Target sync state is tracked separately.
 - Managed targets may be partially updated — each item is atomic (tmp+rename) but the full target sync is not transactional
 - Re-running `mars sync` converges: content diffs as unchanged, targets get re-synced
 
-**Error handling**: Target sync errors are **non-fatal by default**. Content sync to `.mars/content/` is the primary value; target sync is additive. The lock always reflects the `.mars/content/` state regardless of target sync outcome. Target sync status is reported in `SyncReport.target_outcomes` so the CLI can display which targets succeeded/failed. Opt-in `--strict` makes target sync failures fatal.
+**Error handling**: Target sync errors are **non-fatal by default**. Content sync to `.mars/` is the primary value; target sync is additive. The lock always reflects the `.mars/` state regardless of target sync outcome. Target sync status is reported in `SyncReport.target_outcomes` so the CLI can display which targets succeeded/failed. Opt-in `--strict` makes target sync failures fatal.
 
 ---
 
@@ -1060,7 +1060,7 @@ sandbox_mode = "network-disabled"
 
 Permission policies are config fragments. During managed target sync, each adapter cross-compiles permissions into the target's native config format:
 
-1. **Canonical store**: copied to `.mars/content/permissions/` as-is
+1. **Canonical store**: copied to `.mars/permissions/` as-is
 2. **Claude target**: adapter merges into `.claude/settings.json` permissions section
 3. **Cursor target**: adapter generates `.cursor/rules/` entries for permission guidance
 4. **Generic target**: copied as-is to target's `permissions/` directory
@@ -1276,7 +1276,7 @@ Managed target sync runs as a phase after `apply_plan`:
 ```rust
 pub fn execute(ctx: &MarsContext, request: &SyncRequest) -> Result<SyncReport, MarsError> {
     // ... existing phases ...
-    let applied = apply_plan(ctx, planned, request)?;     // writes to .mars/content/
+    let applied = apply_plan(ctx, planned, request)?;     // writes to .mars/
     
     // New phase: sync all managed targets (content copy + capability cross-compilation)
     let synced = sync_managed_targets(ctx, applied, request)?;

@@ -40,7 +40,7 @@ models.rs → fetch/cache (standalone, not integrated into pipeline)
 ```
 mars.toml → Config → resolve → discover (all kinds + variants) → TargetState → diff → SyncPlan
                ↑          ↑          ↑                                                      ↓
-          [models]    merge models   model aliases                                 apply → .mars/content/
+          [models]    merge models   model aliases                                 apply → .mars/
           (per-dep)   from dep tree  inform rule                                          (canonical store)
                ↓      + builtins     discovery                                              ↓
         models cache                                                              sync all managed targets
@@ -56,7 +56,7 @@ mars.toml → Config → resolve → discover (all kinds + variants) → TargetS
 ```
 
 **Key changes**:
-- **`.mars/content/` is the canonical store** — all resolved content lives here. Every target directory is a managed output, including `.agents/`
+- **`.mars/` is the canonical store** — all resolved content lives here. Every target directory is a managed output, including `.agents/`
 - Pipeline decomposed into typed phases with explicit handoff structs
 - `_self`/local-package is a first-class `SourceOrigin::Local` that participates in discovery/diff/plan like any other source
 - DependencyEntry split into `InstallDep` (consumer) and `ManifestDep` (package export)
@@ -64,7 +64,7 @@ mars.toml → Config → resolve → discover (all kinds + variants) → TargetS
 - ItemKind extensible for new item types including Rule files
 - Per-kind materializers handle different apply semantics (file copy vs config merge)
 - Harness-specific variant resolution during discovery
-- **All targets are managed** — `.agents/`, `.claude/`, `.cursor/` are all materialized from `.mars/content/` via copy
+- **All targets are managed** — `.agents/`, `.claude/`, `.cursor/` are all materialized from `.mars/` via copy
 - **Runtime adapters are cross-compilers** — map universal package features to harness-native equivalents, emit diagnostics for unsupported features, honor harness-specific schema extensions
 - **Model catalog integrated into pipeline** — `[models]` sections merge from dependency tree during `resolve_graph()` using same precedence as other config; auto-resolve aliases match against `.mars/models-cache.json`; merged aliases inform rule discovery (per-model rules)
 - **Copy, not symlink** for all target materialization — Windows compatibility, git friendliness, crash safety via tmp+rename
@@ -75,26 +75,19 @@ mars.toml → Config → resolve → discover (all kinds + variants) → TargetS
 project/
   mars.toml                   # package config — committed
   mars.lock                   # lock file — committed
-  .mars/                      # canonical content store — gitignored
-    content/                  # all resolved package content
-      agents/
-      skills/
-      rules/                  # shared rules
-      rules/claude/           # harness-specific rules
-      rules/opus.md           # per-model rules
-      permissions/
-      tools/
-      mcp/
-      hooks/
-    models-cache.json         # model metadata cache — gitignored
+  .mars/                      # canonical content store — should be gitignored
+    agents/                   # resolved agents
+    skills/                   # resolved skills
+    cache/
+      bases/                  # merge base cache (existing)
+    models-cache.json         # model metadata cache
   .agents/                    # managed target (default for generic harnesses)
   .claude/                    # managed target (Claude Code)
-    rules/                    # rules materialized into Claude's native convention
   .codex/                     # managed target (Codex)
   .cursor/                    # managed target (Cursor)
 ```
 
-`.mars/` is entirely gitignored — it's derived state regenerated from `mars.toml` + `mars.lock` + sources. `mars.toml` and `mars.lock` live at project root and are committed.
+`.mars/` is derived state — regenerated from `mars.toml` + `mars.lock` + sources. Should be gitignored (like `node_modules/`). Mars does NOT auto-edit `.gitignore` — users add `.mars/` themselves. `mars doctor` warns if `.mars/` is not ignored. `mars.toml` and `mars.lock` live at project root and are committed.
 
 ## Subsystem Designs
 
@@ -117,14 +110,18 @@ Recorded in [decisions.md](../decisions.md) as they were made during design.
 4. **A4: Shared reconciliation** — extract reconciliation layer from sync apply and link. Can parallel with A2/A3.
 5. **A5: Structured diagnostics** — return `Diagnostic` values from library layers. Can run last (lowest risk, widest touch).
 
-Phase B requires A1 (typed phases) and A2 (first-class LocalPackage). Phase B items are ordered by dependency:
+Phase B requires A1 (typed phases) and A2 (first-class LocalPackage). **This refactor ships A1-A5, B3, and B4.** B1, B2, B5-B8 are future work that the refactored pipeline enables.
 
-6. **B4: Model catalog integration** — two-mode ModelAlias (pinned + auto-resolve), builtin aliases, dependency-tree merge in `resolve_graph()`, cache lifecycle. **Must run before B1** because rule discovery needs the merged model alias set. Depends on A1 (pipeline phases) and A3 (manifest extension).
-7. **B1: Generalized item kinds + rule files** — extensible `ItemKind`, per-kind discovery (including `Rule` kind with per-harness and per-model subtypes), per-kind materializers. **Depends on B4** — per-model rule classification requires the merged model alias set.
-8. **B2: Harness-specific variants** — variant resolution in discovery, variant-aware target building. Depends on B1 (discovery conventions).
-8. **B3: `.mars/` canonical store + managed target sync** — `.mars/content/` becomes the canonical content store. All target directories (`.agents/`, `.claude/`, `.cursor/`) are managed outputs materialized via copy. Content sync + capability cross-compilation into targets. Depends on B1 (new item kinds to materialize) and benefits from B2 (variant-resolved content for targets). **This is the architectural pivot** — the pipeline's apply phase writes to `.mars/content/`, and a new target sync phase materializes to all configured targets.
-9. **B4: Model catalog integration** — `[models]` config with pinned and auto-resolve alias modes, builtin aliases, dependency-tree merge (same precedence as other config sections), models cache in `.mars/`. **Depends on A1** (pipeline phases for merge insertion) **and A3** (manifest extension for model exports). **Must complete before B1** — rule discovery needs the merged model alias set to classify per-model rules.
-10. **B5-B8: Capability items** — Permission sync, tool distribution, MCP integration, hook distribution (in priority order). Depend on B1 + B3.
+**Ships with this refactor:**
+
+6. **B3: `.mars/` canonical store + managed target sync** — `.mars/` becomes the canonical content store (`.mars/agents/`, `.mars/skills/`). All target directories (`.agents/`, `.claude/`, `.cursor/`) are managed outputs materialized via copy. **This is the architectural pivot** — the pipeline's apply phase writes to `.mars/`, and a new target sync phase copies to all configured targets.
+7. **B4: Model catalog integration** — two-mode ModelAlias (pinned + auto-resolve), builtin aliases, dependency-tree merge in `resolve_graph()`, cache lifecycle, CLI (refresh/list/resolve/alias). Depends on A1 (pipeline phases) and A3 (manifest extension).
+
+**Future work (enabled by this refactor):**
+
+- **B1: Generalized item kinds + rule files** — extensible `ItemKind`, per-kind discovery, per-kind materializers. Depends on B4 (per-model rule classification needs merged aliases).
+- **B2: Harness-specific variants** — variant resolution in discovery, variant-aware target building. Depends on B1.
+- **B5-B8: Capability items** — Permission sync, tool distribution, MCP integration, hook distribution. Depend on B1 + B3.
 
 ## Constraints
 
@@ -135,4 +132,4 @@ Phase B requires A1 (typed phases) and A2 (first-class LocalPackage). Phase B it
 - **~5k LOC budget for Phase A**: The refactor should not significantly increase total LOC. Prefer restructuring over adding. Phase B will add net new code but should stay lean.
 - **Model catalog ships with everything**: No partial releases — model catalog, pipeline decomposition, and extension model ship together. Model config merge uses the same dependency-tree precedence as other config sections.
 - **Copy, not symlink for targets**: All content materialized to targets via copy (not symlink). Reasons: Windows symlinks need admin/developer mode, git symlink handling is finicky, copy + tmp+rename is simpler for crash safety, no broken links if `.mars/` is rebuilt.
-- **`.mars/` is derived state**: Entirely gitignored, regenerated from mars.toml + mars.lock + sources. Only mars.toml and mars.lock are committed.
+- **`.mars/` is derived state**: Should be gitignored by the user (mars does NOT auto-edit `.gitignore`). `mars doctor` warns if `.mars/` is not ignored. Regenerated from mars.toml + mars.lock + sources. Only mars.toml and mars.lock are committed.

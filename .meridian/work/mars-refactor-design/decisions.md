@@ -224,13 +224,13 @@
 
 **Reasoning**: Each harness has genuinely different capabilities: Claude Code has hooks in settings.json and native MCP transport; Cursor has .mdc rule files with frontmatter file patterns; Codex has its own sandbox model and AGENTS.md conventions. A format translator can't handle this — it's not just "same data, different syntax." The adapter needs to understand what the harness can and can't do, use the harness-specific schema extensions when available, and emit clear diagnostics when a feature has no equivalent ("hooks have no Cursor equivalent — skipping"). This is cross-compilation: same source semantics, different target capabilities. The adapter is the authoritative source of "what does this harness support."
 
-## D29: .mars/ is entirely gitignored — derived state only
+## D29: .mars/ is derived state — user gitignores it, mars doesn't auto-edit
 
-**Choice**: `.mars/` directory is completely gitignored. It contains only derived state: resolved content in `content/` and the model cache in `models-cache.json`. `mars.toml` and `mars.lock` live at project root and are committed.
+**Choice**: `.mars/` contains only derived state. Users should add `.mars/` to `.gitignore` themselves. Mars does NOT auto-edit `.gitignore`. `mars doctor` warns if `.mars/` is not gitignored.
 
-**Rejected**: (a) Committing `.mars/content/` (tracking resolved content in git). (b) Putting mars.lock inside `.mars/` and committing it selectively. (c) Committing models-cache.json.
+**Rejected**: (a) Mars auto-adding `.mars/` to `.gitignore` on init. (b) Committing `.mars/` content. (c) Putting mars.lock inside `.mars/`.
 
-**Reasoning**: `.mars/content/` is fully derived from `mars.toml` + `mars.lock` + source repos — same as `node_modules` is derived from `package.json` + `package-lock.json`. Committing it would duplicate the lock file's information in actual files, create merge conflicts on every sync, and bloat the repo. Keeping `mars.lock` at project root (not inside `.mars/`) makes it visible alongside `mars.toml` and avoids selective gitignore complexity. Models cache is network-fetched ephemeral data that shouldn't be committed. The clean model: `mars.toml` and `mars.lock` are the committed authority; `mars sync` regenerates everything else.
+**Reasoning**: npm doesn't auto-gitignore `node_modules/`, cargo doesn't auto-gitignore `target/`. Auto-editing `.gitignore` is presumptuous — users manage their own ignore files. `mars doctor` provides a diagnostic warning as a safety net. `.mars/` is fully derived from `mars.toml` + `mars.lock` + source repos. `mars.toml` and `mars.lock` stay at project root and are committed.
 
 ## D30: settings.targets controls which targets exist; .agents/ is default when targets is omitted (unchanged)
 
