@@ -10,58 +10,56 @@
 
 ## D2: Keep DEFAULT_HARNESS_PATTERNS as hardcoded fallback
 
-**Decision:** `DEFAULT_HARNESS_PATTERNS` stays in `model_policy.py` as a last-resort fallback when mars is unavailable or doesn't recognize a model.
+**Decision:** `DEFAULT_HARNESS_PATTERNS` stays in `model_policy.py` as a last-resort fallback when mars doesn't recognize a model (raw model IDs).
 
-**Why:** Mars may not be installed (fresh repo, CI environments). A user typing `meridian spawn -m claude-opus-4-6` should still work without mars — the pattern `claude-*` → claude harness is obvious and stable. Removing the fallback would make mars a hard dependency.
+**Why:** Raw model IDs like `claude-opus-4-6` aren't in mars's alias registry. Pattern matching `claude-*` → claude harness is obvious and stable for these cases.
 
-**Rejected:** Making mars a hard dependency. Meridian should degrade gracefully. Also rejected: keeping user-configurable harness_patterns in models.toml — that config belongs in mars.toml now.
+**Rejected:** Making all model IDs go through mars aliases. Would require mars to know every possible model ID, which is impractical.
 
 ## D3: Remove `[harness_patterns]` from models.toml
 
 **Decision:** The `[harness_patterns]` section in `.meridian/models.toml` is removed. Users who customized harness→model mappings should move that config to `mars.toml [models]` as explicit aliases with harness fields.
 
-**Why:** Two config locations for the same concern (model→harness mapping) is confusing. Mars's alias system is strictly more expressive — it supports pinned aliases, auto-resolve with patterns, provider inference, and installed CLI detection. Meridian's glob patterns are a subset of that functionality.
+**Why:** Two config locations for the same concern (model→harness mapping) is confusing. Mars's alias system is strictly more expressive.
 
-**Constraint discovered:** Some users may have customized harness_patterns. A deprecation warning on first load is needed for migration.
+**Constraint discovered:** Some users may have customized harness_patterns. A deprecation warning on first load is needed for migration (deferred to separate PR).
 
 ## D4: Trust mars's harness field directly
 
 **Decision:** When mars resolves an alias, its `harness` field is used directly without re-validating against meridian's pattern table. The `_resolve_alias_harness()` function is removed.
 
-**Why:** Re-routing after mars already resolved is the core of the redundancy problem. Mars's harness determination is more sophisticated (provider preference tables + installed CLI detection) than meridian's glob patterns. Double-routing can only disagree, never improve.
-
-**Risk:** If mars returns a harness that meridian doesn't have a registered adapter for, the spawn fails. This is the correct behavior — it means the harness binary exists (mars detected it) but meridian doesn't have an adapter. That's an integration gap to fix in meridian, not a reason to override mars.
+**Why:** Re-routing after mars already resolved is the core of the redundancy problem. Mars's harness determination is more sophisticated (provider preference tables + installed CLI detection) than meridian's glob patterns.
 
 ## D5: `resolve_model()` becomes the single entry point
 
 **Decision:** All callers go through `resolve_model()` which tries mars first, then pattern fallback. The separate `route_model()` function is removed from the public API.
 
-**Why:** Having both `resolve_model()` and `route_model()` with different behaviors and fallback chains is the root cause of the inconsistency. A single function with a clear fallback chain (mars → patterns) is simpler to reason about and test.
+**Why:** Having both `resolve_model()` and `route_model()` with different behaviors and fallback chains is the root cause of the inconsistency.
 
-## D6: Three-step fallback chain (post-review)
+## D6: Two-step resolution, mars is required (revised post-user-feedback)
 
-**Decision:** `resolve_model()` uses a three-step fallback: (1) `mars models resolve` CLI, (2) `.mars/models-merged.json` cached aliases, (3) `DEFAULT_HARNESS_PATTERNS` pattern matching.
+**Decision:** `resolve_model()` uses a two-step resolution: (1) `mars models resolve` CLI, (2) `DEFAULT_HARNESS_PATTERNS` for raw model IDs only. Mars being unavailable is a hard error, not a fallback trigger.
 
-**Why:** Reviewers (p950, p952) identified that the initial design skipped step 2, which would regress `-m opus` in environments where mars is not installed but `.mars/models-merged.json` exists (e.g., after `mars sync` was run but mars binary was later removed). The existing `_read_mars_merged_file()` function already handles this path.
+**Why:** Mars is bundled with meridian — it's always present. Removing the cached fallback simplifies the resolution chain and eliminates a code path that masks real errors.
 
-**Rejected:** Two-step fallback (mars → patterns). Would break pinned alias resolution when mars binary is absent.
+**Implementation note (post-review):** `_run_mars_models_resolve()` raises `RuntimeError` for mars-binary-missing and subprocess-crash cases. Only exit code 1 (unknown alias) returns `None` for pattern fallback. Three reviewers converged on this being a blocking issue in the initial implementation — the fix distinguishes failure modes instead of returning `None` for all of them.
 
 ## D7: `harness_source=unavailable` is a hard error (post-review)
 
 **Decision:** When mars resolves a model but reports `harness_source: "unavailable"`, meridian raises a ValueError with an actionable message including `harness_candidates`.
 
-**Why:** Reviewer p952 identified that silently falling back to pattern matching when mars explicitly signals "no installed harness" would yield confusing downstream errors — the pattern match would pick a harness family that also isn't installed.
-
-**Rejected:** Silent fallback with warning. The user needs to install a harness; falling through to patterns just delays the same error.
+**Why:** Silently falling back to pattern matching when mars explicitly signals "no installed harness" would yield confusing downstream errors.
 
 ## D8: `_PROVIDER_TO_HARNESS` stays — it's discovery, not routing (post-review)
 
-**Decision:** The `_PROVIDER_TO_HARNESS` dict in `models.py` is NOT removed. It's used by the models.dev discovery pipeline (`_parse_model_row()`, `_parse_models_payload()`) to convert raw API data into `DiscoveredModel` entries for `meridian models list`.
-
-**Why:** Reviewer p951 identified that the initial removal map conflated two distinct uses of provider→harness mapping: routing (being delegated to mars) and discovery/display (staying in meridian). Removing it would break `fetch_models_dev()` and `refresh_models_cache()`.
+**Decision:** The `_PROVIDER_TO_HARNESS` dict in `models.py` is NOT removed. It's used by the models.dev discovery pipeline.
 
 ## D9: `match_pattern()` and `SpawnMode` stay — shared utilities (post-review)
 
-**Decision:** `match_pattern()` stays because it's used by model visibility (`is_default_visible_model()`). `SpawnMode` stays because it's used by `HarnessRegistry.route()` for direct mode.
+**Decision:** `match_pattern()` stays (used by model visibility). `SpawnMode` stays (used by HarnessRegistry.route()).
 
-**Why:** Reviewers p951 and p952 both identified these as shared utilities incorrectly marked for removal. Only the config-driven routing plumbing is removed.
+## D10: Defer models_config.py harness_patterns cleanup (impl-time)
+
+**Decision:** `models_config.py` still accepts `harness_patterns.*` config keys. Cleanup deferred to a separate PR.
+
+**Why:** Reviewers (opus) correctly identified this as stale code that lets users set config that has no effect. However, the fix requires changes to `models_config.py` which is outside the scope of this plan's removal map and would need its own review. The behavioral impact is low — the config writes to models.toml but nothing reads the section anymore. Fixing it in a separate focused PR avoids scope creep.
