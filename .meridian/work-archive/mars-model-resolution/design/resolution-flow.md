@@ -16,7 +16,9 @@ User: -m some-new-model
   → route_model("some-new-model") → no pattern match → ValueError
 ```
 
-## New Flow — Three-Step Fallback
+## New Flow — Mars as Authority
+
+Mars is always present (bundled with meridian). No offline/cached fallback needed.
 
 ```
 User: -m opus
@@ -25,29 +27,25 @@ User: -m opus
   → AliasEntry(model_id="claude-opus-4-6", resolved_harness=CLAUDE)
 ```
 
-When mars binary is unavailable (not installed, timeout, crash):
+When model isn't a mars alias (raw model ID):
 ```
-User: -m opus (mars unavailable)
-  Step 1: mars models resolve → fails
-  Step 2: _read_mars_merged_file() → finds "opus" → pinned alias with model_id + optional harness
-  → AliasEntry(model_id="claude-opus-4-6", resolved_harness=CLAUDE or None)
-  → If resolved_harness is None, pattern_fallback_harness("claude-opus-4-6") → CLAUDE
-```
-
-When mars is unavailable AND model isn't a known alias:
-```
-User: -m claude-opus-4-6 (mars unavailable, not in merged file)
-  Step 1: mars models resolve → fails
-  Step 2: merged file lookup → not found
-  Step 3: pattern_fallback_harness("claude-opus-4-6") → matches "claude-*" → CLAUDE
+User: -m claude-opus-4-6
+  Step 1: mars models resolve → exit 1 (unknown alias)
+  Step 2: pattern_fallback_harness("claude-opus-4-6") → matches "claude-*" → CLAUDE
 ```
 
 When nothing matches:
 ```
-User: -m some-unknown-model (mars unavailable, no alias, no pattern match)
-  Step 1: mars → fails
-  Step 2: merged file → not found
-  Step 3: pattern_fallback_harness → no match → ValueError
+User: -m some-unknown-model
+  Step 1: mars → exit 1
+  Step 2: pattern_fallback_harness → no match → ValueError
+```
+
+When mars itself errors (binary broken, unexpected failure):
+```
+User: -m opus (mars broken)
+  Step 1: mars → subprocess error
+  → Real error: "Mars model resolution failed. Run 'meridian doctor' to diagnose."
 ```
 
 ## `resolve_model()` — The Core Change
@@ -81,7 +79,6 @@ def resolve_model(name_or_alias: str, repo_root: Path | None = None) -> AliasEnt
         harness = mars_result.get("harness")
         harness_source = mars_result.get("harness_source", "")
         if isinstance(model_id, str) and model_id.strip():
-            # Mars found the model. Handle harness availability.
             resolved_harness: HarnessId | None = None
             if isinstance(harness, str) and harness.strip():
                 try:
@@ -90,9 +87,6 @@ def resolve_model(name_or_alias: str, repo_root: Path | None = None) -> AliasEnt
                     pass  # Unknown harness string → treat as None, fall through
 
             if harness_source == "unavailable":
-                # Mars knows the model but no harness is installed.
-                # Hard error regardless of whether mars returned a harness string —
-                # an unavailable harness won't work even if named.
                 candidates = mars_result.get("harness_candidates", [])
                 raise ValueError(
                     f"No installed harness for model '{normalized}'. "
@@ -110,19 +104,7 @@ def resolve_model(name_or_alias: str, repo_root: Path | None = None) -> AliasEnt
                 description=str(mars_result.get("description", "") or "") or None,
             )
 
-    # Step 2: Mars unavailable — try cached merged aliases
-    merged = _read_mars_merged_file(repo_root)
-    if merged:
-        entries = _mars_merged_to_entries(merged)
-        match = load_alias_by_name(normalized, entries)
-        if match is not None:
-            if match.resolved_harness is None:
-                # Cached alias without harness → pattern fallback for harness
-                resolved = pattern_fallback_harness(str(match.model_id))
-                match = match.model_copy(update={"resolved_harness": resolved})
-            return match
-
-    # Step 3: Raw model ID → pattern-based harness fallback
+    # Step 2: Raw model ID → pattern-based harness fallback
     resolved_harness = pattern_fallback_harness(normalized)
     return AliasEntry(alias="", model_id=ModelId(normalized), resolved_harness=resolved_harness)
 ```
@@ -165,34 +147,26 @@ def resolve_harness(*, model, harness_override, harness_registry, repo_root) -> 
 The precedence algorithm in `resolve_policies()` doesn't change. It still:
 1. Merges layers (CLI > env > profile > config)
 2. If harness is set explicitly, uses it
-3. If only model is set, derives harness from model (now via mars → cached alias → pattern)
+3. If only model is set, derives harness from model (now via mars → pattern)
 4. If model is set at higher precedence than harness, model-derived harness wins
 
-The only change is *how* harness is derived from model — three-step fallback instead of pattern-only.
+The only change is *how* harness is derived from model — mars first, pattern fallback for raw IDs.
 
 ## `harness: null` / Unavailable Handling
 
 When mars resolves a model but signals `harness_source: "unavailable"`:
 
-**Behavior:** Hard error with actionable message. If mars knows the model exists but has no installed harness for it, the user needs to install a harness, not silently fall through to pattern matching (which would pick a harness family that isn't installed either).
+**Behavior:** Hard error with actionable message. If mars knows the model exists but has no installed harness for it, the user needs to install a harness.
 
 **Error format:** `"No installed harness for model 'opus'. Install one of: claude, opencode"`
 
-This is distinct from mars being *unavailable* (binary not found / timeout), where fallback to cached aliases and patterns is correct.
-
-## `mars models resolve` Input Semantics
-
-`mars models resolve` accepts alias names. When given a name not in the alias registry, it returns exit code 1. This is correct — meridian's fallback chain handles unknown inputs via steps 2 and 3.
-
-Direct model IDs (e.g., `claude-opus-4-6`) may or may not be in mars's alias registry. If not, they fall through to pattern matching, which is the right behavior — mars doesn't need to echo back direct model IDs.
-
 ## Error Handling Summary
 
-| Scenario | Step 1 (mars resolve) | Step 2 (cached aliases) | Step 3 (patterns) | Result |
-|---|---|---|---|---|
-| Known alias, harness installed | Returns model_id + harness | — | — | Success |
-| Known alias, no harness installed | Returns model_id, harness_source=unavailable | — | — | **Hard error** with candidates |
-| Known alias, mars unavailable | Fails | Found in merged file | — | Success |
-| Unknown alias, known model pattern, mars unavailable | Fails | Not found | Pattern match | Success |
-| Unknown input everywhere | Fails | Not found | No match | ValueError |
-| Mars returns unknown HarnessId string | harness parse fails | — | Pattern fallback | Success |
+| Scenario | Step 1 (mars resolve) | Step 2 (patterns) | Result |
+|---|---|---|---|
+| Known alias, harness installed | Returns model_id + harness | — | Success |
+| Known alias, no harness installed | Returns model_id, harness_source=unavailable | — | **Hard error** with candidates |
+| Raw model ID, pattern matches | Exit 1 | Pattern match | Success |
+| Unknown input everywhere | Exit 1 | No match | ValueError |
+| Mars binary broken | Subprocess error | — | **Hard error**: run meridian doctor |
+| Mars returns unknown HarnessId string | harness parse fails | Pattern fallback | Success |
