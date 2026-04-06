@@ -20,17 +20,18 @@
 
 4. update_session_work_id() if work_id set
 
-5. _run_primary_process()
-   - PTY mode (if stdin is a tty): _copy_primary_pty_output()
-   - Pipe mode (non-interactive): uses runner.spawn_and_stream() async
+5. _run_primary_process_with_capture()
+   - PTY mode (if stdin is a tty): pty.fork() + _copy_primary_pty_output()
+   - Pipe mode (non-interactive): subprocess.Popen (no runner.py involved)
    - threaded_heartbeat_scope() active throughout (30s interval)
 
-6. enrich_finalize() [extract.py]
-   - Extracts usage, session ID, report from output artifacts
+6. Finalization (inline, no enrich_finalize)
+   - has_durable_report_completion() checks if report.md exists with completion marker
+   - resolve_execution_terminal_state() maps exit code + report presence → status
+   - extract_latest_session_id() discovers harness session post-launch
+   - spawn_store.finalize_spawn() → terminal state
 
-7. spawn_store.finalize_spawn() → terminal state
-
-8. stop_session() [session_store]
+7. stop_session() [session_store]
 ```
 
 ## Primary PTY Mode
@@ -42,6 +43,8 @@ When running with a real terminal (`os.isatty(stdin)`), `process.py` spawns the 
 Window resize signals (`SIGWINCH`) are forwarded via `_install_winsize_forwarding()`.  
 The parent stdin is set to raw mode for the duration.  
 Output is written to `.meridian/spawns/<id>/output.jsonl`.
+
+**Note:** The primary path does NOT call `enrich_finalize()`. That pipeline (usage extraction, session ID extraction, report fallback) is exclusive to the spawn/subagent path in `runner.py`. The primary path finalizes from exit code + durable report checks directly in `process.py`.
 
 ## Async Subprocess Execution (runner.py)
 

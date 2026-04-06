@@ -24,7 +24,7 @@ Note: Codex uses `codex exec` for non-interactive runs and positional prompt mod
 
 ## Capabilities
 
-`supports_stream_events`, `supports_session_resume`, `supports_session_fork`, `supports_primary_launch` all enabled. No native skills, no native agents, no programmatic tools, no stdin prompt.
+`supports_stream_events`, `supports_session_resume`, `supports_session_fork`, `supports_primary_launch`, `supports_stdin_prompt`, `supports_native_skills` all enabled. No native agents, no programmatic tools.
 
 ## Session Handling
 

@@ -37,7 +37,9 @@ Rationale: a spawn that succeeded shouldn't be retroactively marked failed becau
 ## Spawn Statuses
 
 Active: `queued`, `running`
-Terminal: `succeeded`, `failed`, `cancelled`, `timeout`
+Terminal: `succeeded`, `failed`, `cancelled`
+
+There is no `timeout` status. Timeouts result in `failed` status with a timeout-related failure reason.
 
 ## Reaper (`reaper.py`)
 

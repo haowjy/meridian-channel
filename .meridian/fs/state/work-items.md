@@ -64,7 +64,9 @@ Work items transition through:
 - `open` → scratch dir under `.meridian/work/<id>/`
 - `done` → scratch dir moves to `.meridian/work-archive/<id>/`
 
-`done` also updates all child spawn `work_id` fields and detaches active sessions from the work item.
+`archive_work_item()` only moves the scratch dir and flips status to `done`. It does NOT update child spawn `work_id` fields or detach active sessions. `work_done_sync()` checks for active attachments (sessions and running spawns) and returns a warning if any exist, but takes no action to detach them.
+
+Note: `work_rename_sync()` does update child spawn `work_id` fields and session attachments — but that's the rename path, not the done path.
 
 `reopen` moves the scratch dir back to `work/`.
 

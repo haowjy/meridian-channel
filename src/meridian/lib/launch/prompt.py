@@ -28,7 +28,7 @@ _CANONICAL_REPORT_BLOCK_RE = re.compile(
       as\s+your\s+final\s+action,\s+create\s+the\s+run\s+report\s+with\s+meridian\.?
     )
     [^\n]*\n+
-    (?:Run\s+`?meridian\s+report\s+create\s+--stdin`?[^\n]*\n+)?
+    (?:Run\s+`?meridian\s+(?:spawn\s+)?report\s+create\s+--stdin`?[^\n]*\n+)?
     (?:(?:Keep\s+the\s+report\s+concise\.|Include:|Be\s+thorough:)[^\n]*\n+)?
     (?:Use\s+plain\s+markdown\.[^\n]*\n*)?
     """
@@ -45,7 +45,7 @@ _REPORT_LINE_RE = re.compile(
       |
       write\s+your\s+report\s+to:\s*`?[^`\n]+`?\s*
       |
-      run\s+`?meridian\s+report\s+create\s+--stdin`?[^\n]*
+      run\s+`?meridian\s+(?:spawn\s+)?report\s+create\s+--stdin`?[^\n]*
       |
       use\s+plain\s+markdown\.[^\n]*
     )
@@ -105,10 +105,10 @@ def build_report_instruction() -> str:
     return (
         "# Report\n\n"
         "**IMPORTANT - As your final action, create the run report with Meridian.**\n\n"
-        "Run `meridian report create --stdin` and provide a plain markdown report via stdin.\n\n"
+        "Run `meridian spawn report create --stdin` and provide a plain markdown report via stdin.\n\n"
         "Include: what was done, key decisions made, files created/modified, "
         "verification results, and any issues or blockers.\n\n"
-        "If `meridian report create` is unavailable or fails, provide the same markdown "
+        "If `meridian spawn report create` is unavailable or fails, provide the same markdown "
         "as your final assistant message so fallback extraction can persist the report."
     )
 

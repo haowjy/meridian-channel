@@ -33,10 +33,10 @@ Each adapter declares its feature flags via `HarnessCapabilities`:
 | Flag | Claude | Codex | OpenCode | Direct |
 |------|--------|-------|----------|--------|
 | `supports_stream_events` | ✓ | ✓ | ✓ | ✗ |
-| `supports_stdin_prompt` | ✓ | ✗ | ✓ | — |
+| `supports_stdin_prompt` | ✓ | ✓ | ✓ | — |
 | `supports_session_resume` | ✓ | ✓ | ✓ | ✗ |
 | `supports_session_fork` | ✓ | ✓ | ✓ | ✗ |
-| `supports_native_skills` | ✓ | ✗ | ✓ | ✗ |
+| `supports_native_skills` | ✓ | ✓ | ✓ | ✗ |
 | `supports_native_agents` | ✓ | ✗ | ✗ | ✗ |
 | `supports_programmatic_tools` | ✗ | ✗ | ✗ | ✓ |
 | `supports_primary_launch` | ✓ | ✓ | ✓ | ✗ |

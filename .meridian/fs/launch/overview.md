@@ -13,21 +13,29 @@
    - Build command via adapter.build_command()
    - Result: ResolvedPrimaryLaunchPlan
 
-2. run_harness_process()             [process.py]
+2a. run_harness_process()            [process.py] — PRIMARY PATH
    - Allocate session (session_store)
    - Register spawn as queued → started (spawn_store)
    - Write PID file, attach to work item
-   - For primary CLI: spawn_and_stream() via PTY or pipe
-   - For subagent spawns: spawn_and_stream() async [runner.py]
+   - _run_primary_process_with_capture() via PTY or subprocess.Popen
    - Heartbeat loop active throughout execution
+   - On exit: resolve_execution_terminal_state() from exit code +
+     has_durable_report_completion() check (no enrich_finalize)
+   - extract_latest_session_id() for harness session persistence
+   - Finalize spawn state (succeeded / failed / cancelled)
+
+2b. spawn_and_stream()               [runner.py] — SPAWN/SUBAGENT PATH
+   - Async subprocess execution with stdout/stderr capture
+   - Heartbeat loop, report watchdog, stdin feeding
    - On exit: enrich_finalize() extracts report, usage, session ID
    - Finalize spawn state (succeeded / failed / cancelled)
 
-3. enrich_finalize()                 [extract.py]
+3. enrich_finalize()                 [extract.py] — SPAWN PATH ONLY
    - adapter.extract_usage() → TokenUsage
    - adapter.extract_session_id() → harness session ID
    - extract_or_fallback_report() [report.py] → report text
    - Persist report.md atomically
+   - NOT used on the primary launch path
 ```
 
 ## Entry Point
