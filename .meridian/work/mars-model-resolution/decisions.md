@@ -37,3 +37,31 @@
 **Decision:** All callers go through `resolve_model()` which tries mars first, then pattern fallback. The separate `route_model()` function is removed from the public API.
 
 **Why:** Having both `resolve_model()` and `route_model()` with different behaviors and fallback chains is the root cause of the inconsistency. A single function with a clear fallback chain (mars → patterns) is simpler to reason about and test.
+
+## D6: Three-step fallback chain (post-review)
+
+**Decision:** `resolve_model()` uses a three-step fallback: (1) `mars models resolve` CLI, (2) `.mars/models-merged.json` cached aliases, (3) `DEFAULT_HARNESS_PATTERNS` pattern matching.
+
+**Why:** Reviewers (p950, p952) identified that the initial design skipped step 2, which would regress `-m opus` in environments where mars is not installed but `.mars/models-merged.json` exists (e.g., after `mars sync` was run but mars binary was later removed). The existing `_read_mars_merged_file()` function already handles this path.
+
+**Rejected:** Two-step fallback (mars → patterns). Would break pinned alias resolution when mars binary is absent.
+
+## D7: `harness_source=unavailable` is a hard error (post-review)
+
+**Decision:** When mars resolves a model but reports `harness_source: "unavailable"`, meridian raises a ValueError with an actionable message including `harness_candidates`.
+
+**Why:** Reviewer p952 identified that silently falling back to pattern matching when mars explicitly signals "no installed harness" would yield confusing downstream errors — the pattern match would pick a harness family that also isn't installed.
+
+**Rejected:** Silent fallback with warning. The user needs to install a harness; falling through to patterns just delays the same error.
+
+## D8: `_PROVIDER_TO_HARNESS` stays — it's discovery, not routing (post-review)
+
+**Decision:** The `_PROVIDER_TO_HARNESS` dict in `models.py` is NOT removed. It's used by the models.dev discovery pipeline (`_parse_model_row()`, `_parse_models_payload()`) to convert raw API data into `DiscoveredModel` entries for `meridian models list`.
+
+**Why:** Reviewer p951 identified that the initial removal map conflated two distinct uses of provider→harness mapping: routing (being delegated to mars) and discovery/display (staying in meridian). Removing it would break `fetch_models_dev()` and `refresh_models_cache()`.
+
+## D9: `match_pattern()` and `SpawnMode` stay — shared utilities (post-review)
+
+**Decision:** `match_pattern()` stays because it's used by model visibility (`is_default_visible_model()`). `SpawnMode` stays because it's used by `HarnessRegistry.route()` for direct mode.
+
+**Why:** Reviewers p951 and p952 both identified these as shared utilities incorrectly marked for removal. Only the config-driven routing plumbing is removed.

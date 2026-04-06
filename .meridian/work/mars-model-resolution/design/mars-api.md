@@ -56,6 +56,25 @@ def _run_mars_models_resolve(name: str, repo_root: Path | None = None) -> dict[s
         return None
 ```
 
+## Input Semantics
+
+`mars models resolve` accepts **alias names only** (e.g., `opus`, `sonnet`, `codex`). When given a name not in the alias registry, it returns exit code 1 with an error JSON:
+
+```json
+{"error": "unknown alias: some-name"}
+```
+
+Direct model IDs (e.g., `claude-opus-4-6`) are not handled by mars resolve — they fall through to meridian's pattern fallback. This is intentional: mars owns alias→model mapping; meridian owns raw-model-ID→harness via hardcoded patterns.
+
+## Error Cases and Exit Codes
+
+| Scenario | Exit code | Output |
+|---|---|---|
+| Alias found, harness installed | 0 | Full resolved JSON |
+| Alias found, no harness installed | 0 | JSON with `harness_source: "unavailable"`, `harness: null` or explicit |
+| Alias found, no models cache | 0 (pinned) / 1 (auto-resolve) | JSON or error |
+| Unknown alias | 1 | `{"error": "unknown alias: ..."}` |
+
 ## What Mars Does NOT Own
 
 Mars does not know about:
