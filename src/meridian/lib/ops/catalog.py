@@ -17,7 +17,7 @@ from meridian.lib.catalog.models import (
     load_merged_aliases,
     load_model_visibility,
     refresh_models_cache,
-    route_model,
+    resolve_model,
 )
 from meridian.lib.config.settings import resolve_repo_root
 from meridian.lib.core.types import HarnessId, ModelId
@@ -216,7 +216,7 @@ def _build_catalog_model(
     pinned: bool = False,
 ) -> CatalogModel:
     try:
-        harness = route_model(model_id, repo_root=repo_root).harness_id
+        harness = resolve_model(model_id, repo_root=repo_root).harness
     except ValueError:
         if discovered is not None:
             harness = discovered.harness

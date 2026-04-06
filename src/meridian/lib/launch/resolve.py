@@ -6,7 +6,6 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.catalog.agent import AgentProfile, load_agent_profile
-from meridian.lib.catalog.models import route_model
 from meridian.lib.catalog.skill import SkillRegistry
 from meridian.lib.config.settings import MeridianConfig
 from meridian.lib.core.domain import SkillContent
@@ -140,16 +139,10 @@ def resolve_harness(
     harness_registry: HarnessRegistry,
     repo_root: Path,
 ) -> HarnessId:
-    warning: str | None = None
     from meridian.lib.catalog.models import resolve_model
 
-    try:
-        resolved = resolve_model(str(model), repo_root=repo_root)
-        routed_harness_id = resolved.harness
-    except ValueError:
-        decision = route_model(str(model), mode="harness", repo_root=repo_root)
-        routed_harness_id = decision.harness_id
-        warning = decision.warning
+    resolved = resolve_model(str(model), repo_root=repo_root)
+    routed_harness_id = resolved.harness
     supported_primary_harnesses = tuple(
         harness_id
         for harness_id in harness_registry.ids()
@@ -172,8 +165,6 @@ def resolve_harness(
             f"Harness '{override_harness}' is incompatible with model '{model}' "
             f"(routes to '{routed_harness_id}')."
         )
-        if warning:
-            message = f"{message} {warning}"
         raise ValueError(message)
     return override_harness
 
@@ -183,12 +174,8 @@ def _derive_harness_from_model(model_str: str, *, repo_root: Path) -> HarnessId:
 
     from meridian.lib.catalog.models import resolve_model as resolve_model_entry
 
-    try:
-        resolved = resolve_model_entry(model_str, repo_root=repo_root)
-        return resolved.harness
-    except ValueError:
-        decision = route_model(model_str, mode="harness", repo_root=repo_root)
-        return decision.harness_id
+    resolved = resolve_model_entry(model_str, repo_root=repo_root)
+    return resolved.harness
 
 
 def _resolve_final_model(

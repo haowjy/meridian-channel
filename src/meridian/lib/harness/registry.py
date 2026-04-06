@@ -5,7 +5,6 @@ from typing import Literal, Self, cast, overload
 
 from pydantic import BaseModel, ConfigDict, PrivateAttr
 
-from meridian.lib.catalog.models import route_model
 from meridian.lib.core.types import HarnessId
 from meridian.lib.harness.adapter import (
     ConversationExtractingHarness,
@@ -106,8 +105,7 @@ class HarnessRegistry(BaseModel):
             resolved = resolve_model(model, repo_root=repo_root)
             return self.get_subprocess_harness(resolved.harness), None
 
-        decision = route_model(model=model, mode=mode)
-        return self.get_in_process_harness(decision.harness_id), decision.warning
+        return self.get_in_process_harness(HarnessId.DIRECT), None
 
 
 _default_registry: HarnessRegistry | None = None
