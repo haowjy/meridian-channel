@@ -13,15 +13,6 @@ from meridian.lib.core.types import HarnessId
 SpawnMode = Literal["harness", "direct"]
 
 
-class RoutingDecision(BaseModel):
-    """Routing result for a model selection request."""
-
-    model_config = ConfigDict(frozen=True)
-
-    harness_id: HarnessId
-    warning: str | None = None
-
-
 class ModelVisibilityConfig(BaseModel):
     """Default-list visibility policy for `meridian models list`."""
 
@@ -55,44 +46,6 @@ def match_pattern(pattern: str, value: str) -> bool:
     return fnmatch.fnmatchcase(value, pattern)
 
 
-def coerce_pattern_list(raw_value: object, *, source: str) -> tuple[str, ...]:
-    if not isinstance(raw_value, list):
-        raise ValueError(f"Invalid value for '{source}': expected array of strings.")
-    patterns: list[str] = []
-    for raw_pattern in cast("list[object]", raw_value):
-        if not isinstance(raw_pattern, str):
-            raise ValueError(f"Invalid value for '{source}': expected array of strings.")
-        pattern = raw_pattern.strip()
-        if not pattern:
-            raise ValueError(f"Invalid value for '{source}': empty pattern.")
-        patterns.append(pattern)
-    return tuple(patterns)
-
-
-def coerce_harness_patterns(raw_section: object) -> dict[HarnessId, tuple[str, ...]]:
-    if raw_section is None:
-        return {}
-    if not isinstance(raw_section, dict):
-        raise ValueError("Invalid value for 'harness_patterns': expected table.")
-
-    patterns_by_harness: dict[HarnessId, tuple[str, ...]] = {}
-    for raw_harness, raw_patterns in cast("dict[object, object]", raw_section).items():
-        if not isinstance(raw_harness, str):
-            raise ValueError("Invalid value for 'harness_patterns': expected harness keys.")
-        harness_name = raw_harness.strip()
-        try:
-            harness = HarnessId(harness_name)
-        except ValueError as exc:
-            raise ValueError(
-                f"Invalid harness_patterns key '{raw_harness}'. "
-                f"Expected one of: {', '.join(str(item) for item in HarnessId)}."
-            ) from exc
-        patterns_by_harness[harness] = coerce_pattern_list(
-            raw_patterns, source=f"harness_patterns.{harness_name}"
-        )
-    return patterns_by_harness
-
-
 def coerce_model_visibility(raw_section: object) -> dict[str, object]:
     if raw_section is None:
         return {}
@@ -102,7 +55,7 @@ def coerce_model_visibility(raw_section: object) -> dict[str, object]:
     values: dict[str, object] = {}
     for key, value in cast("dict[str, object]", raw_section).items():
         if key in {"include", "exclude"}:
-            values[key] = coerce_pattern_list(value, source=f"model_visibility.{key}")
+            values[key] = _coerce_pattern_tuple(value, source=f"model_visibility.{key}")
             continue
         if key == "max_input_cost":
             values[key] = _coerce_optional_float(value, source=f"model_visibility.{key}")
@@ -115,15 +68,6 @@ def coerce_model_visibility(raw_section: object) -> dict[str, object]:
             continue
         raise ValueError(f"Invalid value for 'model_visibility.{key}': unsupported key.")
     return values
-
-
-def merge_harness_patterns(
-    user_patterns: dict[HarnessId, tuple[str, ...]] | None = None,
-) -> dict[HarnessId, tuple[str, ...]]:
-    patterns = dict(DEFAULT_HARNESS_PATTERNS)
-    if user_patterns:
-        patterns.update(user_patterns)
-    return patterns
 
 
 def merge_model_visibility(overrides: dict[str, object] | None = None) -> ModelVisibilityConfig:
@@ -154,35 +98,6 @@ def pattern_fallback_harness(model: str) -> HarnessId:
             f"Model '{model}' matches multiple harness patterns: {joined}."
         )
     raise ValueError(f"Unknown model '{model}'. No harness pattern matches.")
-
-
-def route_model_with_patterns(
-    model: str,
-    *,
-    patterns_by_harness: dict[HarnessId, tuple[str, ...]],
-    mode: SpawnMode = "harness",
-) -> RoutingDecision:
-    normalized = model.strip()
-    if mode == "direct":
-        return RoutingDecision(harness_id=HarnessId.DIRECT)
-
-    matched_harnesses = [
-        harness
-        for harness, patterns in patterns_by_harness.items()
-        if any(match_pattern(pattern, normalized) for pattern in patterns)
-    ]
-    if len(matched_harnesses) == 1:
-        return RoutingDecision(harness_id=matched_harnesses[0])
-    if len(matched_harnesses) > 1:
-        joined = ", ".join(str(harness) for harness in matched_harnesses)
-        raise ValueError(
-            f"Model '{model}' matches multiple harness_patterns entries: {joined}. "
-            "Update .meridian/models.toml to disambiguate."
-        )
-
-    raise ValueError(
-        f"Unknown model family '{model}'. Configure harness_patterns in .meridian/models.toml."
-    )
 
 
 def is_default_visible_model(
@@ -281,6 +196,20 @@ def _coerce_bool(value: object, *, source: str) -> bool:
     if not isinstance(value, bool):
         raise ValueError(f"Invalid value for '{source}': expected bool.")
     return value
+
+
+def _coerce_pattern_tuple(raw_value: object, *, source: str) -> tuple[str, ...]:
+    if not isinstance(raw_value, list):
+        raise ValueError(f"Invalid value for '{source}': expected array of strings.")
+    patterns: list[str] = []
+    for raw_pattern in cast("list[object]", raw_value):
+        if not isinstance(raw_pattern, str):
+            raise ValueError(f"Invalid value for '{source}': expected array of strings.")
+        pattern = raw_pattern.strip()
+        if not pattern:
+            raise ValueError(f"Invalid value for '{source}': empty pattern.")
+        patterns.append(pattern)
+    return tuple(patterns)
 
 
 def _model_lineage(model_id: str) -> str | None:

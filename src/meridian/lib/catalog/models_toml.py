@@ -7,8 +7,7 @@ import tomllib
 from pathlib import Path
 from typing import cast
 
-from meridian.lib.catalog.model_policy import DEFAULT_HARNESS_PATTERNS, DEFAULT_MODEL_VISIBILITY
-from meridian.lib.core.types import HarnessId
+from meridian.lib.catalog.model_policy import DEFAULT_MODEL_VISIBILITY
 from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.paths import resolve_state_paths
 
@@ -52,11 +51,6 @@ def scaffold_models_toml() -> str:
         '# [models."gpt-5.4-mini"]              # key is model ID when no model_id field',
         '# description = "Quick and cheap for simple tasks."',
         '# pinned = true                         # always show regardless of filters',
-        "",
-        "# [harness_patterns]",
-        f"# claude = {_toml_literal(DEFAULT_HARNESS_PATTERNS[HarnessId.CLAUDE])}",
-        f"# codex = {_toml_literal(DEFAULT_HARNESS_PATTERNS[HarnessId.CODEX])}",
-        f"# opencode = {_toml_literal(DEFAULT_HARNESS_PATTERNS[HarnessId.OPENCODE])}",
         "",
         "# [model_visibility]",
         "# include = []",
@@ -103,15 +97,6 @@ def render_models_toml(payload: dict[str, object]) -> str:
             lines.append(f"[models.{json.dumps(key)}]")
             for field in sorted(entry):
                 lines.append(f"{field} = {_toml_literal(entry[field])}")
-
-    harness_patterns = payload.get("harness_patterns")
-    if isinstance(harness_patterns, dict) and harness_patterns:
-        if lines:
-            lines.append("")
-        lines.append("[harness_patterns]")
-        patterns_dict = cast("dict[str, object]", harness_patterns)
-        for harness in sorted(patterns_dict):
-            lines.append(f"{harness} = {_toml_literal(patterns_dict[harness])}")
 
     model_visibility = payload.get("model_visibility")
     if isinstance(model_visibility, dict) and model_visibility:

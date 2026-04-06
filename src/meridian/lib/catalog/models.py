@@ -23,16 +23,12 @@ from meridian.lib.catalog.model_policy import (
     DEFAULT_HARNESS_PATTERNS,
     DEFAULT_MODEL_VISIBILITY,
     ModelVisibilityConfig,
-    RoutingDecision,
     SpawnMode,
-    coerce_harness_patterns,
     coerce_model_visibility,
     compute_superseded_ids,
     is_default_visible_model,
-    merge_harness_patterns,
     merge_model_visibility,
     pattern_fallback_harness,
-    route_model_with_patterns,
 )
 from meridian.lib.catalog.models_toml import (
     catalog_path as _catalog_path,
@@ -49,34 +45,6 @@ from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.paths import resolve_cache_dir
 
 logger = logging.getLogger(__name__)
-
-
-def load_harness_patterns(repo_root: Path | None = None) -> dict[HarnessId, tuple[str, ...]]:
-    if repo_root is None:
-        return merge_harness_patterns()
-
-    path = _catalog_path(resolve_repo_root(repo_root))
-    if not path.is_file():
-        return merge_harness_patterns()
-
-    payload = load_models_file_payload(path)
-    return merge_harness_patterns(coerce_harness_patterns(payload.get("harness_patterns")))
-
-
-def route_model(
-    model: str,
-    mode: SpawnMode = "harness",
-    *,
-    repo_root: Path | None = None,
-) -> RoutingDecision:
-    """Route a model ID to the corresponding harness family."""
-
-    return route_model_with_patterns(
-        model,
-        patterns_by_harness=load_harness_patterns(repo_root=repo_root),
-        mode=mode,
-    )
-
 
 def load_model_visibility(repo_root: Path | None = None) -> ModelVisibilityConfig:
     if repo_root is None:
@@ -612,27 +580,21 @@ __all__ = [
     "AliasEntry",
     "DiscoveredModel",
     "ModelVisibilityConfig",
-    "RoutingDecision",
     "SpawnMode",
-    "coerce_harness_patterns",
     "coerce_model_visibility",
     "compute_superseded_ids",
     "ensure_models_config",
     "fetch_models_dev",
     "is_default_visible_model",
     "load_discovered_models",
-    "load_harness_patterns",
     "load_mars_aliases",
     "load_mars_descriptions",
     "load_merged_aliases",
     "load_model_visibility",
-    "merge_harness_patterns",
     "merge_model_visibility",
     "refresh_models_cache",
     "render_models_toml",
     "resolve_alias",
     "resolve_model",
-    "route_model",
-    "route_model_with_patterns",
     "scaffold_models_toml",
 ]
