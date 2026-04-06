@@ -130,6 +130,35 @@ def _run_mars_models_list(repo_root: Path | None = None) -> list[dict[str, objec
     return cast("list[dict[str, object]]", aliases)
 
 
+def _run_mars_models_resolve(  # pyright: ignore[reportUnusedFunction]
+    name: str,
+    repo_root: Path | None = None,
+) -> dict[str, object] | None:
+    """Call ``mars models resolve <name> --json`` and return the resolved entry.
+
+    Returns None when mars binary is unavailable, the command fails,
+    or the alias is unknown (exit code 1). The caller distinguishes
+    "mars doesn't know this alias" from "mars is broken" by checking
+    whether the mars binary exists separately.
+    """
+    mars_bin = _resolve_mars_binary()
+    if mars_bin is None:
+        return None
+    cmd = [mars_bin, "models", "resolve", name, "--json"]
+    if repo_root is not None:
+        cmd.extend(["--root", str(repo_root)])
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        return json.loads(result.stdout)
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+
 def _read_mars_merged_file(repo_root: Path | None = None) -> dict[str, object]:
     """Read ``.mars/models-merged.json`` directly (dep-only aliases).
 

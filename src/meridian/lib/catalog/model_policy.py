@@ -132,6 +132,30 @@ def merge_model_visibility(overrides: dict[str, object] | None = None) -> ModelV
     return DEFAULT_MODEL_VISIBILITY.model_copy(update=overrides)
 
 
+def pattern_fallback_harness(model: str) -> HarnessId:
+    """Route a raw model ID to a harness using DEFAULT_HARNESS_PATTERNS only.
+
+    Used when mars doesn't recognize the input (not an alias) and we need
+    to infer the harness from the model ID string pattern.
+
+    Raises ValueError if no pattern matches.
+    """
+    normalized = model.strip()
+    matched_harnesses = [
+        harness
+        for harness, patterns in DEFAULT_HARNESS_PATTERNS.items()
+        if any(match_pattern(pattern, normalized) for pattern in patterns)
+    ]
+    if len(matched_harnesses) == 1:
+        return matched_harnesses[0]
+    if len(matched_harnesses) > 1:
+        joined = ", ".join(str(h) for h in matched_harnesses)
+        raise ValueError(
+            f"Model '{model}' matches multiple harness patterns: {joined}."
+        )
+    raise ValueError(f"Unknown model '{model}'. No harness pattern matches.")
+
+
 def route_model_with_patterns(
     model: str,
     *,
