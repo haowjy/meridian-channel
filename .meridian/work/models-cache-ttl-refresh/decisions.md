@@ -145,6 +145,40 @@ the serde field defaults. Any site that constructs via
 
 ---
 
+## D9: Convergence call after review round 2
+
+**Date:** 2026-04-06 (design)
+**Context:** Reviewer p1008 returned "still needs changes" on round 2,
+flagging four lingering inconsistencies between the decisions and the
+docs:
+1. Overview said `MARS_OFFLINE` coerces *every* `ensure_fresh` call
+   (contradicting Force-ignores-offline).
+2. `call-sites.md` opening sentence still mentioned a "lock primitive
+   directly" path for `mars models refresh`.
+3. Phase 1 still listed the rejected `derive(Default)` option as
+   acceptable.
+4. Phase 6 set list timeout to 30s while design said 60s for both.
+5. Phase 4 still referenced the rejected `ensure_fresh_with` seam.
+
+**Decision:** Apply all five fixes (mechanical wording sync — none
+change architecture or interface). Treat the design as converged after
+round 2 instead of running a third full review pass. The remaining
+findings are lint-level, not architectural; another full reviewer pass
+would consume time without uncovering new substance.
+
+**Why no round 3 review:** The issues p1008 surfaced were stale text
+in already-decided locations, not new design questions. The fix is
+deterministic and inspectable in a single pass. Per orchestrator
+guidance, "convergence is a judgment, not a checklist" — running
+another reviewer to confirm five copy-edits is over-rotation.
+
+**Risk if wrong:** The implementer reads a stale paragraph and
+implements something inconsistent with decisions.md. Mitigation: each
+phase blueprint links to decisions.md, and phase-2's review (per
+staffing.md) will catch architectural drift before it ships.
+
+---
+
 ## D8: "Add then spawn" success criterion resolved via existing `mars add` sync
 
 **Date:** 2026-04-06 (design)
