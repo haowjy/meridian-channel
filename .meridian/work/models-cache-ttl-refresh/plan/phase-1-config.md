@@ -33,14 +33,30 @@ with a custom default of 24 hours.
     }
     ```
 
-3. `Default for Settings` needs adjusting if derived: switch from
-   `#[derive(Default)]` to a manual impl, or introduce `#[serde(default)]`
-   on the helper so `Default::default()` still produces `0` for this
-   field while serde uses `24` for missing TOML keys. The manual `Default`
-   impl is cleaner — `Settings::default()` should construct with
-   `models_cache_ttl_hours: 24` to match serde, ensuring code paths that
-   synthesize a `Settings` (e.g. test fixtures) get the same default as
-   TOML-loaded configs.
+3. **Switch `Settings` from `#[derive(Default)]` to a manual `Default`
+   impl.** This is mandatory, not optional — see decisions.md D7 and
+   `design/configuration.md`. The manual impl must set
+   `models_cache_ttl_hours: 24` so that any path constructing
+   `Settings::default()` (test fixtures, missing `[settings]` table in
+   TOML) yields the same default as a serde-deserialized config with
+   only that field omitted. Example:
+
+   ```rust
+   impl Default for Settings {
+       fn default() -> Self {
+           Self {
+               managed_root: None,
+               targets: None,
+               model_visibility: ModelVisibility::default(),
+               models_cache_ttl_hours: 24,
+           }
+       }
+   }
+   ```
+
+   The serde field-level `#[serde(default = "default_models_cache_ttl_hours")]`
+   stays for the case where the user provides `[settings]` but omits the
+   field. Both paths must yield 24.
 
 4. Update any test fixtures that construct `Settings { ... }` literally to
    include the new field (the existing `Settings::default()` based ones

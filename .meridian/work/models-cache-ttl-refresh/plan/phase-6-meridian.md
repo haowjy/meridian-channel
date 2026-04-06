@@ -24,17 +24,14 @@ subprocess timeout to accommodate a cold fetch.
 ## Implementation
 
 ```python
-# In run_mars_models_resolve (launch-critical: spawn fails on timeout):
-# 60s accommodates a cold `ensure_fresh(Auto)` fetch inside mars. Mars
-# itself caps the HTTP request at 15s + 15s, so a legitimate fetch is
-# well under this budget; the extra headroom absorbs first-boot
-# disk-cache warmups and slow DNS.
+# Both _run_mars_models_list and run_mars_models_resolve raise the
+# subprocess timeout from 10s → 60s. Mars itself caps the HTTP request
+# at 15s connect + 15s read inside fetch_models, so a worst-case cold
+# fetch fits comfortably; the extra headroom absorbs first-boot DNS
+# and slow disks. The same number is used for both calls because both
+# can trigger ensure_fresh(Auto) on a cold cache and we want symmetric
+# behavior.
 result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-
-# In _run_mars_models_list (UI-only path, not launch-critical):
-# 30s — same refresh path but this is only used by `meridian models
-# list` / agent-inspection UIs where the user can retry manually.
-result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 ```
 
 No structural changes, no new functions, no new config knobs.

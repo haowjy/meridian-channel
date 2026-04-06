@@ -120,9 +120,11 @@ Wire into `SyncRequest::options` in `cli/sync.rs::run`.
 - `SyncArgs` parser test for `--no-refresh-models`.
 - A `SyncOptions` construction test ensuring the field defaults to
   `false` in the obvious constructor path.
-- An integration-style test for the sync pipeline that sets a test
-  fetcher (if the phase-2 `ensure_fresh_with` seam is used, point sync
-  at a test context). Otherwise rely on phase-5 smoke tests.
+- An integration test for the sync pipeline using the `MARS_MODELS_API_URL`
+  + `httpmock` seam introduced in phase 2: stand up a stub server, run
+  `mars sync --force` against a temp project, assert the cache file
+  exists with non-empty `models` after sync. Same scenario with the
+  stub returning 500 → sync still exits 0, diag warning recorded.
 
 ## Guard Rails
 

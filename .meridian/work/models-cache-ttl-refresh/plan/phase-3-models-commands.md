@@ -8,8 +8,8 @@
 ## Goal
 
 Route `mars models list` and `mars models resolve` through
-`ensure_fresh(Auto)`. Keep `mars models refresh` on its current direct
-path (see `design/call-sites.md` §4).
+`ensure_fresh(Auto)`. **Do not touch `run_refresh` in this phase** —
+phase 2 fully owns the rewrite of `run_refresh` to `ensure_fresh(Force)`.
 
 ## Files
 

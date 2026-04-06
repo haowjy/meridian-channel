@@ -68,8 +68,10 @@ models_cache_ttl_hours = 24   # default; 0 = always refresh on read
 
 Environment and flags:
 
-- `MARS_OFFLINE=1` — coerce every `ensure_fresh` call on this process to
-  `Offline`, regardless of the mode the caller asked for.
+- `MARS_OFFLINE=1` — coerce `ensure_fresh(Auto)` calls on this process
+  to `Offline`. **Force mode is not affected** (see ensure-fresh.md
+  §"MARS_OFFLINE Coercion") so `mars models refresh` still works
+  inside an offline-flagged shell.
 - `--no-refresh-models` — CLI flag on `mars sync`, `mars models list`,
   `mars models resolve`. Same effect as `MARS_OFFLINE=1` but scoped to one
   invocation. Not exposed on `mars models refresh` (that command is explicitly

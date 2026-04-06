@@ -1,8 +1,9 @@
 # Call Sites
 
-Every consumer that reads the models cache either calls `ensure_fresh` or
-(in the case of `mars models refresh`) uses the same lock primitive directly.
-No consumer keeps its own freshness decision.
+Every consumer that reads the models cache calls `ensure_fresh`. There
+are no exceptions: `mars sync`, `mars models list`, `mars models
+resolve`, and `mars models refresh` all route through the same helper.
+The mode (`Auto` / `Force`) varies; the path does not.
 
 ## 1. `mars sync` — `src/sync/mod.rs`
 
