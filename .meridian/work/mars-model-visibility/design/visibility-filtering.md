@@ -41,43 +41,70 @@ pub struct Config {
 }
 ```
 
-This needs to accommodate both alias definitions (`[models.opus]`) and the visibility sub-table (`[models.visibility]`). Two approaches:
+This needs to accommodate both alias definitions (`[models.opus]`) and the visibility sub-table (`[models.visibility]`). 
 
-**Chosen: Custom deserialization.** Implement a custom deserializer for the models field that:
-1. Deserializes the TOML table
-2. Extracts the `visibility` key into `VisibilityConfig` if present
-3. Deserializes remaining keys as `ModelAlias` entries
+**Chosen approach:** Custom `#[serde(deserialize_with)]` on a models field that splits `visibility` from alias entries. This follows the same pattern as the existing `RawModelAlias` intermediate deserialization in `src/models/mod.rs`.
 
-This keeps the `Config` struct clean:
+The `Config` struct becomes:
 ```rust
 pub struct Config {
     pub package: Option<PackageInfo>,
     pub dependencies: IndexMap<SourceName, Dependency>,
     pub settings: Settings,
+    #[serde(default, deserialize_with = "deserialize_models_section")]
     pub models: IndexMap<String, ModelAlias>,
-    #[serde(default)]
+    #[serde(skip)]
     pub models_visibility: Option<VisibilityConfig>,
 }
 ```
 
-**Alternative considered:** A wrapper `ModelsSection` struct with `#[serde(flatten)]`. This is cleaner conceptually but `#[serde(flatten)]` with mixed typed/untyped keys in TOML has edge cases. The custom deserializer is more explicit and avoids serde flatten pitfalls.
-
-**Simplest alternative (recommended):** Since `visibility` is not a valid model alias name (it would conflict), we can use a simpler approach — deserialize as `IndexMap<String, toml::Value>`, pop the `visibility` key, deserialize the rest as aliases. This avoids a full custom Deserialize impl while staying straightforward:
-
+The custom deserializer:
 ```rust
-// In Config, change models to a raw intermediate during deser:
-fn deserialize_models_section(table: &toml::Value) -> (IndexMap<String, ModelAlias>, Option<VisibilityConfig>) {
-    let map = table.as_table().unwrap_or(/* empty */);
-    let visibility = map.get("visibility")
-        .and_then(|v| VisibilityConfig::deserialize(v).ok());
-    let aliases = map.iter()
-        .filter(|(k, _)| *k != "visibility")
-        .map(|(k, v)| (k.clone(), ModelAlias::deserialize(v)))
-        // collect, handle errors
-        ;
-    (aliases, visibility)
+/// Deserialize [models] table, extracting the `visibility` sub-key separately.
+/// All other keys are deserialized as ModelAlias entries.
+fn deserialize_models_section<'de, D>(
+    deserializer: D,
+) -> Result<IndexMap<String, ModelAlias>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let mut table: IndexMap<String, toml::Value> = IndexMap::deserialize(deserializer)?;
+    // Remove visibility — it's handled separately in a post-deser pass
+    table.remove("visibility");
+    let mut aliases = IndexMap::new();
+    for (key, value) in table {
+        let alias: ModelAlias = ModelAlias::deserialize(value).map_err(serde::de::Error::custom)?;
+        aliases.insert(key, alias);
+    }
+    Ok(aliases)
 }
 ```
+
+The `visibility` field is populated in a post-deserialization pass within `config::load()`:
+```rust
+pub fn load(root: &Path) -> Result<Config, MarsError> {
+    let content = std::fs::read_to_string(root.join("mars.toml"))?;
+    let mut config: Config = toml::from_str(&content)?;
+    
+    // Extract visibility from raw TOML (skipped by serde)
+    let raw: toml::Value = toml::from_str(&content)?;
+    if let Some(models_table) = raw.get("models") {
+        if let Some(vis_value) = models_table.get("visibility") {
+            let vis: VisibilityConfig = vis_value.clone().try_into()
+                .map_err(|e| MarsError::Config(format!("invalid [models.visibility]: {e}")))?;
+            vis.validate()?;
+            config.models_visibility = Some(vis);
+        }
+    }
+    
+    // ... existing migration, validation ...
+    Ok(config)
+}
+```
+
+**Why not `#[serde(flatten)]`:** Mixed typed and untyped keys under flatten with the `toml` crate has known edge cases — tagged enum variants can fail to deserialize when flattened alongside a catch-all map. The explicit extract-then-parse approach is more reliable.
+
+**Reserved name:** `run_alias()` must reject "visibility" as an alias name since it would collide with the config sub-table.
 
 ### Validation
 
@@ -110,20 +137,15 @@ Located in `src/models/mod.rs`, reusing existing `glob_match()`:
 /// - `exclude` patterns: remove aliases where any pattern matches
 /// - No config (both None): return all aliases unchanged
 pub fn filter_by_visibility(
-    aliases: IndexMap<String, ResolvedAlias>,
+    mut aliases: IndexMap<String, ResolvedAlias>,
     visibility: &VisibilityConfig,
 ) -> IndexMap<String, ResolvedAlias> {
     if let Some(includes) = &visibility.include {
-        aliases.into_iter()
-            .filter(|(name, _)| includes.iter().any(|p| glob_match(p, name)))
-            .collect()
+        aliases.retain(|name, _| includes.iter().any(|p| glob_match(p, name)));
     } else if let Some(excludes) = &visibility.exclude {
-        aliases.into_iter()
-            .filter(|(name, _)| !excludes.iter().any(|p| glob_match(p, name)))
-            .collect()
-    } else {
-        aliases // no filtering
+        aliases.retain(|name, _| !excludes.iter().any(|p| glob_match(p, name)));
     }
+    aliases
 }
 ```
 
@@ -143,61 +165,78 @@ pub struct ListArgs {
     #[arg(long)]
     all: bool,
     /// Only show aliases matching these patterns (overrides config).
-    #[arg(long, value_delimiter = ',')]
+    #[arg(long, value_delimiter = ',', conflicts_with = "exclude")]
     include: Option<Vec<String>>,
     /// Hide aliases matching these patterns (overrides config).
-    #[arg(long, value_delimiter = ',')]
+    #[arg(long, value_delimiter = ',', conflicts_with = "include")]
     exclude: Option<Vec<String>>,
 }
 ```
 
-CLI validation: error if both `--include` and `--exclude` are passed.
+Mutual exclusivity is enforced by clap's `conflicts_with` — clap emits the error before `run_list()` is called.
 
 ### run_list() changes
 
+**Critical: config errors must propagate.** The existing code swallows config load errors via `.ok()` and `if let Ok(...)`. For visibility validation to surface errors (e.g., both include and exclude set), `run_list()` must propagate config load results. Refactor `load_merged_aliases` to return visibility alongside aliases:
+
+```rust
+struct MergedModels {
+    aliases: IndexMap<String, ModelAlias>,
+    visibility: Option<VisibilityConfig>,
+}
+
+fn load_merged_aliases(ctx: &MarsContext) -> Result<MergedModels, MarsError> {
+    let mut merged = models::builtin_aliases();
+    
+    // Layer dep aliases (existing logic)
+    // ...
+    
+    // Layer consumer config — propagate errors, don't swallow
+    let visibility = if let Ok(config) = crate::config::load(&ctx.project_root) {
+        for (name, alias) in &config.models {
+            merged.insert(name.clone(), alias.clone());
+        }
+        config.models_visibility
+    } else {
+        None
+    };
+    
+    Ok(MergedModels { aliases: merged, visibility })
+}
+```
+
+Then in `run_list()`:
+
 ```rust
 fn run_list(args: &ListArgs, ctx: &MarsContext, json: bool) -> Result<i32, MarsError> {
-    // ... existing load + merge + resolve ...
+    let mars = mars_dir(ctx);
+    let cache = models::read_cache(&mars)?;
+    let merged_models = load_merged_aliases(ctx)?;
+    let resolved = models::resolve_all(&merged_models.aliases, &cache);
 
     // Build effective visibility: CLI overrides config entirely
     let visibility = if args.include.is_some() || args.exclude.is_some() {
-        // CLI provided — validate mutual exclusivity
-        if args.include.is_some() && args.exclude.is_some() {
-            return Err(MarsError::Config(
-                "cannot use both --include and --exclude".into()
-            ));
-        }
         VisibilityConfig {
             include: args.include.clone(),
             exclude: args.exclude.clone(),
         }
     } else {
-        // Fall back to config
-        load_visibility_config(ctx)
+        merged_models.visibility.unwrap_or_default()
     };
 
-    // Apply visibility filter
+    // Apply visibility filter (mutates in place via retain)
     let filtered = models::filter_by_visibility(resolved, &visibility);
 
     // ... existing table/json output using `filtered` instead of `resolved` ...
 }
 ```
 
-### load_visibility_config helper
-
-```rust
-fn load_visibility_config(ctx: &MarsContext) -> VisibilityConfig {
-    crate::config::load(&ctx.project_root)
-        .ok()
-        .and_then(|c| c.models_visibility)
-        .unwrap_or_default()
-}
-```
+Note: CLI mutual exclusivity is enforced by clap's `conflicts_with` (see ListArgs above), so no runtime check needed in `run_list()`.
 
 ## 4. What Does NOT Change
 
 - `run_resolve()` — no visibility filtering, hidden aliases still resolve
-- `run_alias()` — adding an alias is unaffected by visibility
+- `run_alias()` — adding an alias is unaffected by visibility, but must reject "visibility" as an alias name
 - `run_refresh()` — cache fetching is unaffected
 - `FilterConfig` — dep-level filtering is a separate concern
 - `Manifest` struct — lock file doesn't store visibility

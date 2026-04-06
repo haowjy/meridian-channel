@@ -32,6 +32,6 @@ Three changes, each detailed in [visibility-filtering.md](visibility-filtering.m
 
 | File | Change |
 |---|---|
-| `src/config/mod.rs` | Add `ModelsSection`, `VisibilityConfig` structs; update `Config.models` field type; add validation |
+| `src/config/mod.rs` | Add `VisibilityConfig` struct; add custom deserializer for `[models]` table to extract `visibility` key; add validation; populate `Config.models_visibility` in `load()` |
 | `src/models/mod.rs` | Add `filter_by_visibility()` function |
-| `src/cli/models.rs` | Add `--include`/`--exclude` to `ListArgs`; apply filter in `run_list()` |
+| `src/cli/models.rs` | Add `--include`/`--exclude` to `ListArgs` with `conflicts_with`; refactor `load_merged_aliases` to return visibility; apply filter in `run_list()`; reject "visibility" as alias name in `run_alias()` |

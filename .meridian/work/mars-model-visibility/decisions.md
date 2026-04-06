@@ -21,13 +21,14 @@
 
 ## D3: Place `visibility` inside existing `[models]` table, not as a top-level section
 
-**Decision:** Use `[models.visibility]` in mars.toml, parsed as a field on `Config` alongside the existing `models: IndexMap<String, ModelAlias>`.
+**Decision:** Use `[models.visibility]` in mars.toml. Parse via custom `deserialize_with` on the models field that strips the `visibility` key before deserializing remaining keys as `ModelAlias` entries. Populate `Config.models_visibility` in a post-deserialization pass within `config::load()`.
 
-**Reasoning:** Visibility filtering is scoped to models — it makes semantic sense as a sub-table of `[models]`. However, TOML parsing creates a tension: `[models]` currently deserializes as `IndexMap<String, ModelAlias>`, and adding a `visibility` key would require distinguishing it from model alias entries.
+**Reasoning:** Visibility filtering is scoped to models — it makes semantic sense as a sub-table of `[models]`. TOML parsing creates a tension: `[models]` currently deserializes as `IndexMap<String, ModelAlias>`, and adding a `visibility` key would collide. The custom deserializer approach is explicit and avoids serde flatten edge cases with mixed typed/untyped keys. The name "visibility" is reserved and cannot be used as an alias name.
 
-**Resolution:** Wrap the models section in a `ModelsSection` struct that has both `visibility: Option<VisibilityConfig>` and `#[serde(flatten)]` for the alias map. This keeps the TOML schema clean (`[models.visibility]` sits naturally next to `[models.opus]`) while giving us a typed struct.
-
-**Rejected:** Top-level `[visibility]` — unclear what it filters without the `models.` prefix, and breaks the organizational principle of grouping related config.
+**Rejected:**
+- Top-level `[visibility]` — unclear what it filters without the `models.` prefix.
+- `#[serde(flatten)]` wrapper struct — known edge cases with TOML crate when mixing typed fields and catch-all maps.
+- Full custom `Deserialize` impl on `Config` — overkill; `deserialize_with` on the single field is sufficient.
 
 ## D4: CLI flags override config entirely, not merge
 
@@ -41,7 +42,15 @@
 
 **Reasoning:** The filtering logic is model-domain logic (glob matching against alias names), not CLI formatting logic. Placing it in `models/mod.rs` makes it testable without CLI scaffolding and reusable if other commands need the same filter (e.g., a future `models export`).
 
-## D6: Validate include/exclude mutual exclusivity at config load time
+## D6: Return visibility from load_merged_aliases to avoid double config parse
+
+**Decision:** Refactor `load_merged_aliases()` in `src/cli/models.rs` to return a `MergedModels` struct containing both the alias map and the visibility config, instead of parsing config separately for visibility.
+
+**Reasoning:** The existing `load_merged_aliases()` already calls `config::load()`. Adding a separate `load_visibility_config()` helper would parse the config file a second time. Returning both from the same load is simpler and ensures config validation errors (including visibility validation) propagate through the same path.
+
+**Constraint discovered:** The existing code swallows `config::load()` errors via `.ok()` and `if let Ok(...)`. For visibility validation to surface errors (e.g., both include and exclude set), the config load result must propagate. This is a pre-existing design gap that visibility filtering exposes — config errors should not be silently dropped.
+
+## D7: Validate include/exclude mutual exclusivity at config load time
 
 **Decision:** Validate that `include` and `exclude` are mutually exclusive in `VisibilityConfig::validate()`, called during config loading — not deferred to command execution.
 
