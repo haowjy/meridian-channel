@@ -89,9 +89,10 @@ def resolve_model(name_or_alias: str, repo_root: Path | None = None) -> AliasEnt
                 except ValueError:
                     pass  # Unknown harness string → treat as None, fall through
 
-            if resolved_harness is None and harness_source == "unavailable":
+            if harness_source == "unavailable":
                 # Mars knows the model but no harness is installed.
-                # Surface actionable error with candidates.
+                # Hard error regardless of whether mars returned a harness string —
+                # an unavailable harness won't work even if named.
                 candidates = mars_result.get("harness_candidates", [])
                 raise ValueError(
                     f"No installed harness for model '{normalized}'. "

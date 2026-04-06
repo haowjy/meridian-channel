@@ -71,7 +71,7 @@ Direct model IDs (e.g., `claude-opus-4-6`) are not handled by mars resolve — t
 | Scenario | Exit code | Output |
 |---|---|---|
 | Alias found, harness installed | 0 | Full resolved JSON |
-| Alias found, no harness installed | 0 | JSON with `harness_source: "unavailable"`, `harness: null` or explicit |
+| Alias found, no harness installed | 0 | JSON with `harness_source: "unavailable"`. `harness` may be null or contain the preferred-but-uninstalled harness name. Meridian treats `harness_source=unavailable` as a hard error regardless. |
 | Alias found, no models cache | 0 (pinned) / 1 (auto-resolve) | JSON or error |
 | Unknown alias | 1 | `{"error": "unknown alias: ..."}` |
 
