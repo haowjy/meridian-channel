@@ -1,0 +1,122 @@
+# `__meridian-cli` Skill — Body Outline
+
+## Purpose
+
+One singular skill in meridian-base that teaches an agent **how to learn meridian** rather than re-documenting it. The agent walks away knowing:
+
+1. The mental model — what meridian is, what it isn't, how state flows.
+2. Where the CLI surfaces live and how to ask `--help` for any of them.
+3. The principles `--help` cannot teach — JSON-output discipline, files-as-authority, idempotency, crash-only design, parent-session inheritance, config precedence.
+4. The shape of the most common failure modes, with pointers (not procedures) for diagnosis.
+
+It does **not** redocument flag tables, command lists, or examples that `--help` can produce on demand. Every reference section ends with a `meridian <thing> --help` or `mars <thing> --help` pointer instead.
+
+## Frontmatter
+
+```yaml
+---
+name: __meridian-cli
+description: "Mental model and principles for the meridian and mars CLIs. Use when an agent needs to discover what meridian can do, learn a subcommand, diagnose a failure, or understand why meridian behaves the way it does. Points at `meridian --help` and `mars --help` as the canonical reference rather than duplicating them."
+---
+```
+
+## Section Outline (target ≤ 180 lines)
+
+### 1. What meridian is
+
+Two paragraphs. Meridian is a thin coordination layer for multi-agent systems — not a runtime, not a database, not a workflow engine. It launches subagents through harness adapters (Claude, Codex, OpenCode), persists their state as JSONL events under `.meridian/`, and exposes that state through one CLI.
+
+State on disk is the source of truth. If `cat spawns.jsonl | jq` doesn't show it, it doesn't exist. There is no daemon, no service, no in-memory cache that outlives the CLI process.
+
+### 2. The CLI surface, by command group
+
+A single small table with one row per top-level command group, each row pointing at `meridian <group> --help` or `mars <group> --help`. No flag enumeration. Roughly:
+
+| Command group | What it covers | Where to learn more |
+|---|---|---|
+| `meridian spawn` | Create, wait, list, show, log, cancel, stats, reports for subagent runs | `meridian spawn --help` |
+| `meridian work` | Work item lifecycle, dashboard, session listing | `meridian work --help` |
+| `meridian session` | Read and search harness session transcripts | `meridian session --help` |
+| `meridian models` | Model catalog and routing guidance | `meridian models list` |
+| `meridian config` | Resolved config inspection and overrides | `meridian config --help` |
+| `meridian doctor` | Health check, orphan reconciliation | `meridian doctor --help` |
+| `meridian mars ...` | Bundled mars CLI for `.agents/` package management | `meridian mars --help` and `mars --help` |
+
+### 3. Principles `--help` can't teach
+
+Short subsections, each one paragraph, no command tables.
+
+**JSON output discipline.** Every meridian command emits structured JSON in agent mode. Parse `spawn_id` and `status` programmatically — never scrape human prose. `--format text` exists for human terminals, not for agents.
+
+**Files as authority.** All state lives under `.meridian/` as JSONL events plus per-spawn artifact directories. There are no databases or services. If you can't see it on disk, it isn't there. Never edit `spawns.jsonl` or `sessions.jsonl` by hand — atomic writes assume an exclusive writer.
+
+**Idempotent operations.** `meridian mars sync`, `meridian doctor`, and the read-side reconcilers all converge on correct state when re-run. If a spawn dies mid-execution, the next read-path command notices and marks it failed. Recovery is startup, not a separate code path.
+
+**Config precedence.** CLI flag → `MERIDIAN_*` env var → agent profile YAML → project config → user config → harness default. **Each resolved field is evaluated independently** — a CLI `-m` override forces the harness to be derived from that model, not from the profile's harness. This catches a real class of bugs where an override "wins" partially.
+
+**Parent session inheritance.** `$MERIDIAN_CHAT_ID` is inherited from the spawning session, so `meridian session log` and `meridian session search` read the parent's transcript by default — not the spawn's own (which is usually empty). This is the primary way a spawn recovers context from the conversation that launched it.
+
+**Crash-only design.** No graceful shutdown. Atomic tmp+rename writes. Truncation-tolerant reads. The reaper runs on every read-path command. Designs that assume a "shutdown" hook will not survive contact with a SIGKILL.
+
+### 4. Mars in one section
+
+One paragraph: mars is the bundled package manager that materializes `.agents/` from sources declared in `mars.toml`. Meridian shells out to it via `meridian mars ...`. State files: `mars.toml` (committed, hand-edited), `mars.lock` (committed, generated), `mars.local.toml` (gitignored, local overrides). Drift detection lives in `meridian mars list --status` and `meridian mars doctor`. Never edit `.agents/` directly — it is regenerated by `meridian mars sync`.
+
+End the section with a single pointer: `meridian mars --help` for the full command surface. No command table.
+
+### 5. Diagnostics in one section
+
+A short failure-mode table — only the patterns that aren't obvious from reading the spawn's own JSON output. This is the durable content from the old `__meridian-diagnostics` skill, slimmed.
+
+| Symptom | Likely cause | First move |
+|---|---|---|
+| `orphan_run` / `orphan_stale_harness` in show output | Harness died without finalizing | Auto-recovered on next read; relaunch |
+| Exit 127 / 2 with empty report | Harness binary not on `$PATH` | `which claude` / `which codex`; install if missing |
+| Exit 143 / 137 | SIGTERM / SIGKILL — process killed externally | Check `dmesg` for OOM; otherwise treat as failed and retry |
+| Model error in `stderr.log` | API rejected the model | `meridian models list`; check API keys |
+| Spawn directory missing | Crash during launch | Relaunch — state is recoverable |
+
+The debugging sequence is one bullet list of pointers, not a procedure: `meridian spawn show` → `meridian spawn log` → `meridian session log` → `meridian doctor` → raw `spawns.jsonl` with `jq` as last resort. Each item is one line with the command name; no flag tables.
+
+### 6. Sessions in one section
+
+Two short paragraphs — the durable content from the CLI half of `__meridian-session-context`:
+
+`meridian session log <ref>` reads a session transcript. `<ref>` accepts a chat id (`c123`), spawn id (`p123`), or harness session id. Defaults to the latest compaction segment. `meridian session search <query> <ref>` runs a case-insensitive text search across all segments and emits navigation hints to jump to surrounding context.
+
+`meridian work sessions <work_id>` lists every session that has touched a work item. Use `--all` to include archived sessions. Combined with parent-session inheritance, this is enough to walk an entire work item's conversation history.
+
+End with: see `meridian session --help` and `meridian work sessions --help` for flag details.
+
+### 7. Environment variables (one short table)
+
+Only the variables an agent will actually need to read or set:
+
+| Variable | Purpose |
+|---|---|
+| `MERIDIAN_STATE_ROOT` | Override `.meridian/` location |
+| `MERIDIAN_DEPTH` | Spawn nesting depth (>0 = inside a spawn) |
+| `MERIDIAN_FS_DIR` | Shared long-lived filesystem directory |
+| `MERIDIAN_WORK_DIR` | Active work item scratch directory |
+| `MERIDIAN_CHAT_ID` | Inherited parent session id (see "parent session inheritance" above) |
+
+### 8. Where to go next
+
+Three pointers:
+
+- For delegation patterns and model selection, load `__meridian-spawn`.
+- For work item lifecycle and artifact placement, load `__meridian-work-coordination`.
+- For escalating tool permissions when a spawn hits capability limits, load `__meridian-privilege-escalation`.
+
+## Style Constraints
+
+- No role identity ("You are…").
+- No imperative sequences ("First do X, then Y") unless the order is technically required.
+- No model names hardcoded.
+- No agent names from any layer (no `@reviewer`, no `@explorer`, no `@dev-orchestrator`). The skill is layer-zero.
+- No prose that re-states what `--help` already says clearly. If a section feels like "the table from `--help` but in markdown", delete it and replace with a pointer.
+- ≤ 180 lines including frontmatter and the section headings above. The point of consolidation is fewer lines, not the same lines in fewer files.
+
+## What Goes in `resources/` (if anything)
+
+Nothing in v1. The whole skill is meant to be small. If a future addition needs depth (e.g. a long-form architecture overview), it goes under `resources/` and the SKILL body links to it — but resources are not part of the consolidation deliverable.
