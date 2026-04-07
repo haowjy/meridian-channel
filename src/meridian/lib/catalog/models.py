@@ -15,7 +15,6 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from meridian.lib.catalog.model_aliases import (
     AliasEntry,
-    load_alias_by_name,
     load_mars_aliases,
     load_mars_descriptions,
     run_mars_models_resolve,
@@ -40,15 +39,6 @@ def load_merged_aliases(repo_root: Path | None = None) -> list[AliasEntry]:
     """Load model aliases from mars packages."""
     resolved_root = resolve_repo_root(repo_root) if repo_root is not None else None
     return load_mars_aliases(resolved_root)
-
-
-def resolve_alias(name: str, repo_root: Path | None = None) -> ModelId | None:
-    """Resolve one alias to a model identifier."""
-
-    resolved = load_alias_by_name(name, load_merged_aliases(repo_root=repo_root))
-    if resolved is None:
-        return None
-    return resolved.model_id
 
 
 def resolve_model(name_or_alias: str, repo_root: Path | None = None) -> AliasEntry:
@@ -562,6 +552,5 @@ __all__ = [
     "load_mars_descriptions",
     "load_merged_aliases",
     "refresh_models_cache",
-    "resolve_alias",
     "resolve_model",
 ]

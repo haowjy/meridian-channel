@@ -13,10 +13,8 @@ from meridian.lib.catalog.model_aliases import (
     _mars_list_to_entries,
     _mars_merged_to_entries,
     entry,
-    load_alias_by_name,
     load_mars_aliases,
     load_mars_descriptions,
-    merge_alias_entries,
     run_mars_models_resolve,
 )
 
@@ -115,43 +113,6 @@ class TestMarsMergedToEntries:
         }
         entries = _mars_merged_to_entries(merged)
         assert len(entries) == 0
-
-
-# --- merge_alias_entries ---
-
-
-class TestMergeAliasEntries:
-    def test_later_lists_override(self) -> None:
-        first = [entry(alias="opus", model_id="old-opus")]
-        second = [entry(alias="opus", model_id="new-opus")]
-        merged = merge_alias_entries(first, second)
-        assert len(merged) == 1
-        assert merged[0].model_id == "new-opus"
-
-    def test_merges_multiple_lists(self) -> None:
-        a = [entry(alias="opus", model_id="m1")]
-        b = [entry(alias="sonnet", model_id="m2")]
-        merged = merge_alias_entries(a, b)
-        assert len(merged) == 2
-
-
-# --- load_alias_by_name ---
-
-
-class TestLoadAliasByName:
-    def test_found(self) -> None:
-        aliases = [entry(alias="opus", model_id="claude-opus-4-6")]
-        result = load_alias_by_name("opus", aliases)
-        assert result is not None
-        assert result.model_id == "claude-opus-4-6"
-
-    def test_not_found(self) -> None:
-        aliases = [entry(alias="opus", model_id="claude-opus-4-6")]
-        assert load_alias_by_name("haiku", aliases) is None
-
-    def test_empty_name(self) -> None:
-        aliases = [entry(alias="opus", model_id="claude-opus-4-6")]
-        assert load_alias_by_name("", aliases) is None
 
 
 # --- run_mars_models_resolve ---

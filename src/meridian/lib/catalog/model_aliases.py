@@ -358,23 +358,3 @@ def load_mars_descriptions(repo_root: Path | None = None) -> dict[str, str]:
             descriptions[model_id.strip()] = description.strip()
 
     return descriptions
-
-
-def merge_alias_entries(
-    *alias_lists: list[AliasEntry],
-) -> list[AliasEntry]:
-    merged: dict[str, AliasEntry] = {}
-    for alias_list in alias_lists:
-        for item in alias_list:
-            merged[item.alias] = item
-    return [merged[key] for key in sorted(merged)]
-
-
-def load_alias_by_name(name: str, aliases: list[AliasEntry]) -> AliasEntry | None:
-    normalized = name.strip()
-    if not normalized:
-        return None
-    for alias_entry in aliases:
-        if alias_entry.alias == normalized:
-            return alias_entry
-    return None
