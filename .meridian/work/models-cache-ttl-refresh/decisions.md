@@ -358,3 +358,42 @@ Three small fixes to apply alongside the blocking ones:
 - JSON mode: include a 'cache_warning' field in the response (success or error branches), mirroring the pattern used by list/resolve success JSON.
 
 'mars models refresh' additionally returns a non-zero-ish status in JSON ('cache_warning' present) so automation can detect the degraded state.
+
+---
+
+## D20: P5 hermeticity — clear MARS_CACHE_DIR in subprocess helpers
+
+**Date:** 2026-04-06 (impl, P5 review round 1)
+**Context:** P5 reviewer p1048 caught that the integration-test helpers configure_assert_cmd / configure_std_cmd isolated HOME and XDG_* but did not touch MARS_CACHE_DIR, which mars-agents' src/source/mod.rs prefers over HOME for global cache discovery. If a test runner happened to inherit MARS_CACHE_DIR from the host shell, sync tests could escape the temp sandbox.
+
+**Decision:** Both helpers now env_remove("MARS_CACHE_DIR") on every spawned mars subprocess, so tests are hermetic regardless of host-shell state.
+
+---
+
+## D21: P5 coverage — Scenario F rewritten to actually exercise Req 1; Scenario H added for Req 2
+
+**Date:** 2026-04-06 (impl, P5 review round 1)
+**Context:** P5 reviewer p1047 (gpt-5.2) noted the original Scenario F asserted only file existence after 'mars sync --force' on a fresh empty project — it didn't model the actual failure mode (dependency-provided alias + cold cache → resolve fails). Requirements 1 and 2 were not really being exercised.
+
+**Decision:** Scenario F was rewritten to:
+1. create a local-source 'package' dir with mars.toml [package] + [models.test-alias],
+2. mars init the test project,
+3. mars add the local source,
+4. mars sync --force,
+5. mars models resolve test-alias against the stub catalog and assert success,
+6. assert .mars/models-merged.json contains test-alias.
+
+Plus new Scenario H ("add immediately resolve without explicit sync") covers Req 2 by running mars add (which internally syncs), then immediately resolve, with one fetch hit asserted.
+
+The original concurrency scenario was renamed to scenario_i_concurrent_processes_fetch_once (the J reordering followed). All scenarios now have stronger assertions (cached model id present in list output, no cache file on failure paths, JSON parsing of concurrent stdout).
+
+---
+
+## D22: P6 timeout rationale corrected — mars caps each HTTP phase, not total
+
+**Date:** 2026-04-06 (impl, P6 review round 1)
+**Context:** P6 reviewer p1051 caught that the meridian-side timeout comment said mars HTTP is '~30s max (15s connect + 15s read)', which is wrong — mars actually configures three independent 15-second phases (timeout_connect + timeout_recv_response + timeout_recv_body), so worst-case is closer to 45s.
+
+**Decision:** Comment in both _run_mars_models_list and run_mars_models_resolve corrected to mention all three phases. The 60s subprocess timeout is unchanged — it still leaves headroom over the corrected 45s ceiling, plus DNS / disk / process startup.
+
+Smoke doc Case 5 also fixed to use the concrete .mars/models-cache.json path instead of an undefined mars_dir variable, with a stat-based mtime hint for the human tester.
