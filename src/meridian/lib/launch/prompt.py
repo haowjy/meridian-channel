@@ -105,7 +105,8 @@ def build_report_instruction() -> str:
     return (
         "# Report\n\n"
         "**IMPORTANT - As your final action, create the run report with Meridian.**\n\n"
-        "Run `meridian spawn report create --stdin` and provide a plain markdown report via stdin.\n\n"
+        "Run `meridian spawn report create --stdin` and provide a plain markdown report "
+        "via stdin.\n\n"
         "Include: what was done, key decisions made, files created/modified, "
         "verification results, and any issues or blockers.\n\n"
         "If `meridian spawn report create` is unavailable or fails, provide the same markdown "
