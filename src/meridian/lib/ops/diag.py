@@ -98,12 +98,30 @@ def _legacy_install_artifacts_warning(repo_root: Path) -> str | None:
 
 
 def _format_outdated_dependencies_warning(availability: UpgradeAvailability) -> str:
-    noun = "dependency update" if availability.count == 1 else "dependency updates"
-    names = ", ".join(availability.names)
-    return (
-        f"{availability.count} {noun} available ({names}). "
-        "Run `meridian mars outdated` to see details."
-    )
+    lines: list[str] = []
+    if availability.within_constraint:
+        within_count = len(availability.within_constraint)
+        within_noun = "dependency update" if within_count == 1 else "dependency updates"
+        within_names = ", ".join(availability.within_constraint)
+        prefix = "" if not lines else "      "
+        lines.append(
+            f"{prefix}{within_count} {within_noun} available within your pinned "
+            f"constraint: {within_names}."
+        )
+        lines.append("      Run `meridian mars upgrade` to apply.")
+    if availability.beyond_constraint:
+        beyond_count = len(availability.beyond_constraint)
+        beyond_noun = "version" if beyond_count == 1 else "versions"
+        beyond_names = ", ".join(availability.beyond_constraint)
+        prefix = "" if not lines else "      "
+        lines.append(
+            f"{prefix}{beyond_count} newer {beyond_noun} available beyond your pinned "
+            f"constraint: {beyond_names}."
+        )
+        lines.append(
+            "      Edit mars.toml to bump the version, then run `meridian mars sync`."
+        )
+    return "\n".join(lines)
 
 
 def doctor_sync(payload: DoctorInput) -> DoctorOutput:

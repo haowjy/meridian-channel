@@ -17,8 +17,20 @@ class UpgradeAvailability(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    count: int
-    names: tuple[str, ...] = ()
+    within_constraint: tuple[str, ...] = ()
+    beyond_constraint: tuple[str, ...] = ()
+
+    @property
+    def count(self) -> int:
+        return len(self.within_constraint) + len(self.beyond_constraint)
+
+    @property
+    def is_empty(self) -> bool:
+        return self.count == 0
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        return self.within_constraint + self.beyond_constraint
 
 
 def resolve_mars_executable() -> str | None:
@@ -42,11 +54,12 @@ def _is_head_constraint(value: object) -> bool:
 
 
 def check_upgrade_availability(repo_root: Path | None = None) -> UpgradeAvailability | None:
-    """Return updateable dependency names from ``mars outdated --json``.
+    """Classify dependency upgrades from ``mars outdated --json``.
 
     Returns ``None`` when the check cannot be completed (missing binary, command
     failure, malformed JSON, timeout). HEAD-constrained rows are ignored because
-    they track moving refs and would produce noisy perpetual updates.
+    they track moving refs and would produce noisy perpetual updates. Up-to-date
+    rows are ignored, and malformed rows are skipped.
     """
 
     executable = resolve_mars_executable()
@@ -79,7 +92,8 @@ def check_upgrade_availability(repo_root: Path | None = None) -> UpgradeAvailabi
     if not isinstance(payload, list):
         return None
 
-    names: list[str] = []
+    within_constraint: list[str] = []
+    beyond_constraint: list[str] = []
     seen: set[str] = set()
     for row_obj in cast("list[object]", payload):
         if not isinstance(row_obj, dict):
@@ -96,29 +110,63 @@ def check_upgrade_availability(repo_root: Path | None = None) -> UpgradeAvailabi
 
         locked = row.get("locked")
         updateable = row.get("updateable")
-        if not isinstance(locked, str) or not isinstance(updateable, str):
+        latest = row.get("latest")
+        if (
+            not isinstance(locked, str)
+            or not isinstance(updateable, str)
+            or not isinstance(latest, str)
+        ):
             continue
-        if locked.strip() == updateable.strip():
+        locked_s = locked.strip()
+        updateable_s = updateable.strip()
+        latest_s = latest.strip()
+        if not locked_s or not updateable_s or not latest_s:
             continue
         if normalized_source in seen:
             continue
-        seen.add(normalized_source)
-        names.append(normalized_source)
+        if locked_s != updateable_s:
+            seen.add(normalized_source)
+            within_constraint.append(normalized_source)
+            continue
+        # Intentionally use normalized string equality, not semver ordering.
+        # Rare lockfiles manually moved ahead of upstream may emit a noisy hint.
+        if locked_s != latest_s:
+            seen.add(normalized_source)
+            beyond_constraint.append(normalized_source)
 
-    return UpgradeAvailability(count=len(names), names=tuple(names))
-
-
-def format_upgrade_hint_lines(availability: UpgradeAvailability) -> tuple[str, str]:
-    """Render the 2-line post-sync upgrade hint."""
-
-    noun = "update" if availability.count == 1 else "updates"
-    deps = ", ".join(availability.names)
-    line1 = f"hint: {availability.count} {noun} available ({deps})."
-    line2 = (
-        "      Run `meridian mars outdated` to see details, or "
-        "`meridian mars upgrade` to apply."
+    return UpgradeAvailability(
+        within_constraint=tuple(within_constraint),
+        beyond_constraint=tuple(beyond_constraint),
     )
-    return line1, line2
+
+
+def format_upgrade_hint_lines(availability: UpgradeAvailability) -> tuple[str, ...]:
+    """Render post-sync upgrade hints grouped by available action."""
+
+    lines: list[str] = []
+    if availability.within_constraint:
+        within_count = len(availability.within_constraint)
+        within_noun = "update" if within_count == 1 else "updates"
+        within_deps = ", ".join(availability.within_constraint)
+        prefix = "hint: " if not lines else "      "
+        lines.append(
+            f"{prefix}{within_count} {within_noun} available within your pinned "
+            f"constraint: {within_deps}."
+        )
+        lines.append("      Run `meridian mars upgrade` to apply.")
+    if availability.beyond_constraint:
+        beyond_count = len(availability.beyond_constraint)
+        beyond_noun = "version" if beyond_count == 1 else "versions"
+        beyond_deps = ", ".join(availability.beyond_constraint)
+        prefix = "hint: " if not lines else "      "
+        lines.append(
+            f"{prefix}{beyond_count} newer {beyond_noun} available beyond your pinned "
+            f"constraint: {beyond_deps}."
+        )
+        lines.append(
+            "      Edit mars.toml to bump the version, then run `meridian mars sync`."
+        )
+    return tuple(lines)
 
 
 __all__ = [

@@ -57,7 +57,108 @@ def test_resolve_mars_executable_uses_symlink_parent_not_resolved_parent(
     assert resolved == str(tool_bin / "mars")
 
 
-def test_run_mars_passthrough_sync_prints_upgrade_hint_in_text_mode(
+def test_run_mars_passthrough_sync_detects_exact_pin_beyond_constraint_in_text_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(cli_main, "_resolve_mars_executable", lambda: "/usr/bin/mars")
+    monkeypatch.setattr(mars_ops, "resolve_mars_executable", lambda: "/usr/bin/mars")
+    outdated_payload = [
+        {
+            "source": "meridian-base",
+            "locked": "v0.0.11",
+            "constraint": "v0.0.11",
+            "updateable": "v0.0.11",
+            "latest": "v0.0.12",
+        }
+    ]
+
+    def _fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if len(command) >= 2 and command[1] == "outdated":
+            return subprocess.CompletedProcess(
+                args=command,
+                returncode=0,
+                stdout=json.dumps(outdated_payload),
+                stderr="",
+            )
+        assert "sync" in command
+        assert "capture_output" not in kwargs
+        assert "text" not in kwargs
+        print("sync output")
+        return subprocess.CompletedProcess(
+            args=command,
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    monkeypatch.setattr(cli_main.subprocess, "run", _fake_run)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main._run_mars_passthrough(["sync"])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "sync output\n" in captured.out
+    assert (
+        "hint: 1 newer version available beyond your pinned constraint: meridian-base."
+        in captured.out
+    )
+    assert (
+        "Edit mars.toml to bump the version, then run `meridian mars sync`." in captured.out
+    )
+
+
+def test_run_mars_passthrough_sync_detects_exact_pin_beyond_constraint_in_json_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(cli_main, "_resolve_mars_executable", lambda: "/usr/bin/mars")
+    monkeypatch.setattr(mars_ops, "resolve_mars_executable", lambda: "/usr/bin/mars")
+    outdated_payload = [
+        {
+            "source": "meridian-base",
+            "locked": "v0.0.11",
+            "constraint": "v0.0.11",
+            "updateable": "v0.0.11",
+            "latest": "v0.0.12",
+        }
+    ]
+
+    def _fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if len(command) >= 2 and command[1] == "outdated":
+            return subprocess.CompletedProcess(
+                args=command,
+                returncode=0,
+                stdout=json.dumps(outdated_payload),
+                stderr="",
+            )
+        assert "sync" in command
+        assert kwargs.get("capture_output") is True
+        assert kwargs.get("text") is True
+        return subprocess.CompletedProcess(
+            args=command,
+            returncode=0,
+            stdout='{"ok": true}\n',
+            stderr="",
+        )
+
+    monkeypatch.setattr(cli_main.subprocess, "run", _fake_run)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main._run_mars_passthrough(["sync"], output_format="json")
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["ok"] is True
+    assert payload["upgrade_hint"] == {
+        "within_constraint": [],
+        "beyond_constraint": ["meridian-base"],
+    }
+
+
+def test_run_mars_passthrough_sync_prints_within_constraint_hint_in_text_mode(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -66,8 +167,7 @@ def test_run_mars_passthrough_sync_prints_upgrade_hint_in_text_mode(
         cli_main,
         "check_upgrade_availability",
         lambda *_args, **_kwargs: mars_ops.UpgradeAvailability(
-            count=2,
-            names=("meridian-base", "meridian-dev-workflow"),
+            within_constraint=("meridian-base",),
         ),
     )
 
@@ -90,10 +190,92 @@ def test_run_mars_passthrough_sync_prints_upgrade_hint_in_text_mode(
     assert exc_info.value.code == 0
     captured = capsys.readouterr()
     assert "sync output\n" in captured.out
-    assert "hint: 2 updates available (meridian-base, meridian-dev-workflow)." in captured.out
+    assert "hint: 1 update available within your pinned constraint: meridian-base." in captured.out
+    assert "Run `meridian mars upgrade` to apply." in captured.out
+
+
+def test_run_mars_passthrough_sync_prints_beyond_constraint_hint_in_text_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(cli_main, "_resolve_mars_executable", lambda: "/usr/bin/mars")
+    monkeypatch.setattr(
+        cli_main,
+        "check_upgrade_availability",
+        lambda *_args, **_kwargs: mars_ops.UpgradeAvailability(
+            beyond_constraint=("meridian-base",),
+        ),
+    )
+
+    def _fake_run(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert "capture_output" not in kwargs
+        assert "text" not in kwargs
+        print("sync output")
+        return subprocess.CompletedProcess(
+            args=["/usr/bin/mars", "sync"],
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    monkeypatch.setattr(cli_main.subprocess, "run", _fake_run)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main._run_mars_passthrough(["sync"])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "sync output\n" in captured.out
     assert (
-        "Run `meridian mars outdated` to see details, or `meridian mars upgrade` to apply."
+        "hint: 1 newer version available beyond your pinned constraint: meridian-base."
         in captured.out
+    )
+    assert (
+        "Edit mars.toml to bump the version, then run `meridian mars sync`." in captured.out
+    )
+
+
+def test_run_mars_passthrough_sync_prints_both_upgrade_categories_in_text_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(cli_main, "_resolve_mars_executable", lambda: "/usr/bin/mars")
+    monkeypatch.setattr(
+        cli_main,
+        "check_upgrade_availability",
+        lambda *_args, **_kwargs: mars_ops.UpgradeAvailability(
+            within_constraint=("foo", "bar"),
+            beyond_constraint=("meridian-base",),
+        ),
+    )
+
+    def _fake_run(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert "capture_output" not in kwargs
+        assert "text" not in kwargs
+        print("sync output")
+        return subprocess.CompletedProcess(
+            args=["/usr/bin/mars", "sync"],
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    monkeypatch.setattr(cli_main.subprocess, "run", _fake_run)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main._run_mars_passthrough(["sync"])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "sync output\n" in captured.out
+    assert "hint: 2 updates available within your pinned constraint: foo, bar." in captured.out
+    assert "Run `meridian mars upgrade` to apply." in captured.out
+    assert (
+        "1 newer version available beyond your pinned constraint: meridian-base."
+        in captured.out
+    )
+    assert (
+        "Edit mars.toml to bump the version, then run `meridian mars sync`." in captured.out
     )
 
 
@@ -106,8 +288,8 @@ def test_run_mars_passthrough_sync_injects_upgrade_hint_in_json_mode(
         cli_main,
         "check_upgrade_availability",
         lambda *_args, **_kwargs: mars_ops.UpgradeAvailability(
-            count=1,
-            names=("meridian-base",),
+            within_constraint=("foo", "bar"),
+            beyond_constraint=("meridian-base",),
         ),
     )
     commands: list[list[str]] = []
@@ -136,8 +318,8 @@ def test_run_mars_passthrough_sync_injects_upgrade_hint_in_json_mode(
     payload = json.loads(captured.out)
     assert payload["ok"] is True
     assert payload["upgrade_hint"] == {
-        "count": 1,
-        "names": ["meridian-base"],
+        "within_constraint": ["foo", "bar"],
+        "beyond_constraint": ["meridian-base"],
     }
 
 

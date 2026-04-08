@@ -537,8 +537,8 @@ def _mars_subcommand(args: Sequence[str]) -> str | None:
 def _inject_upgrade_hint_into_sync_json(
     raw_stdout: str,
     *,
-    count: int,
-    names: tuple[str, ...],
+    within_constraint: tuple[str, ...],
+    beyond_constraint: tuple[str, ...],
 ) -> str:
     stripped = raw_stdout.strip()
     if not stripped:
@@ -549,7 +549,10 @@ def _inject_upgrade_hint_into_sync_json(
         return raw_stdout
     if not isinstance(parsed, dict):
         return raw_stdout
-    parsed["upgrade_hint"] = {"count": count, "names": list(names)}
+    parsed["upgrade_hint"] = {
+        "within_constraint": list(within_constraint),
+        "beyond_constraint": list(beyond_constraint),
+    }
     rendered = json.dumps(parsed)
     if raw_stdout.endswith("\n"):
         rendered += "\n"
@@ -620,8 +623,8 @@ def _run_mars_passthrough(
         if upgrades is not None and upgrades.count > 0 and stdout_text.strip():
             stdout_text = _inject_upgrade_hint_into_sync_json(
                 stdout_text,
-                count=upgrades.count,
-                names=upgrades.names,
+                within_constraint=upgrades.within_constraint,
+                beyond_constraint=upgrades.beyond_constraint,
             )
         if stdout_text:
             sys.stdout.write(stdout_text)
@@ -629,9 +632,8 @@ def _run_mars_passthrough(
             sys.stderr.write(stderr_text)
 
     if not wants_json and upgrades is not None and upgrades.count > 0:
-        line1, line2 = format_upgrade_hint_lines(upgrades)
-        print(line1)
-        print(line2)
+        for line in format_upgrade_hint_lines(upgrades):
+            print(line)
 
     raise SystemExit(result.returncode)
 
