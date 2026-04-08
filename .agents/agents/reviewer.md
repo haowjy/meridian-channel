@@ -3,7 +3,7 @@ name: reviewer
 description: General code reviewer — spawn with `meridian spawn -a reviewer`, passing artifacts with -f (design docs, phase specs, code context) or --from for session context. Specify a focus area in the prompt (SOLID, security, correctness, testing, design alignment) for targeted review, or leave unspecified for broad review. Reports findings with severity, doesn't edit.
 model: gpt
 effort: high
-skills: [review, decision-log, context-handoffs]
+skills: [meridian-cli, review, decision-log, context-handoffs]
 tools: [Bash(meridian spawn show *), Bash(meridian session *), Bash(meridian work show *), Bash(meridian spawn report *), Bash(git diff *), Bash(git log *), Bash(git show *), Bash(git status *)]
 sandbox: read-only
 ---

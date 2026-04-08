@@ -94,7 +94,13 @@ def _spawn_create(
         tuple[str, ...],
         Parameter(
             name=["--from"],
-            help="Include context (report, files) from a prior spawn or session (repeatable).",
+            help=(
+                "Inherit context from a prior spawn or session.\n"
+                "Pulls in the prior spawn's report and any files it\n"
+                "touched. Repeatable. Use when the new spawn needs\n"
+                "the reasoning from a prior conversation, not just\n"
+                "its artifacts."
+            ),
             negative_iterable=(),
         ),
     ] = (),

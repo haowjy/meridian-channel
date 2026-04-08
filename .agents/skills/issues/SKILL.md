@@ -5,7 +5,7 @@ description: Mirror local tracking artifacts to GitHub Issues for team visibilit
 
 # Issue Tracking
 
-This skill assumes `/__meridian-work-coordination` already defines work ownership and artifact placement. Spawn reports and work-scoped notes are the source of truth. GitHub Issues are a visibility layer — they give the team searchability, linkability, and a shared view of what was found during agent work.
+This skill assumes `/meridian-work-coordination` already defines work ownership and artifact placement. Spawn reports and work-scoped notes are the source of truth. GitHub Issues are a visibility layer — they give the team searchability, linkability, and a shared view of what was found during agent work.
 
 If `gh` is unavailable, everything works fine with local tracking only. No errors, no warnings. Issues are a bonus, not a requirement.
 
@@ -31,7 +31,7 @@ Create an issue when you find something worth tracking that you can't or shouldn
 
 **Deferred design decision** — A decision came up that needs more context or broader input before it can be made. You picked a reasonable default and moved on, but the real decision is still open.
 
-**Review finding (deferred)** — A reviewer flagged something HIGH or MEDIUM severity but agreed it's not blocking the current work. File it so it gets addressed in a future pass.
+**Review finding (deferred)** — A @reviewer flagged something HIGH or MEDIUM severity but agreed it's not blocking the current work. File it so it gets addressed in a future pass.
 
 ### Quick Decision Rule
 
@@ -91,7 +91,7 @@ EOF
 
 ## Proactive Mining
 
-Focused implementers and reviewers produce better primary work when they are not splitting attention to hunt backlog items. A dedicated mining pass at natural breakpoints keeps both outcomes higher quality: the main phase stays focused, and backlog capture gets a fresh, deliberate pass.
+Focused implementers and @reviewers produce better primary work when they are not splitting attention to hunt backlog items. A dedicated mining pass at natural breakpoints keeps both outcomes higher quality: the main phase stays focused, and backlog capture gets a fresh, deliberate pass.
 
 If you have access to conversation history, use it to mine deferred items that are easy to lose: "come back to this" notes, TODOs discussed but not executed, and alternatives rejected for now but worth revisiting later.
 

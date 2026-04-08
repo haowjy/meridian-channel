@@ -7,7 +7,7 @@ description: Break design docs into executable implementation phases with focuse
 
 The plan is a delta, not a restatement of the full system. Design docs describe the target state; the plan describes what changes from current code to reach it.
 
-The central idea is focused blueprints. Don't hand a coder the full design tree and expect it to extract what matters — coders do better with phase-specific context that includes only the interfaces, constraints, and verification criteria needed for that phase.
+The central idea is focused blueprints. Don't hand a @coder the full design tree and expect it to extract what matters — @coders do better with phase-specific context that includes only the interfaces, constraints, and verification criteria needed for that phase.
 
 See `/dev-artifacts` for where blueprints, status tracking, and decision logs go.
 
@@ -18,9 +18,9 @@ Break the design into phases. Each phase becomes a unit of work — small enough
 A good phase is:
 
 - **Independently testable.** When it's done, you can verify it works without waiting for later phases. This is the most important property — if you can't test it, you can't gate it.
-- **Bounded to specific files.** The coder knows exactly what to touch and what not to touch.
-- **Right-sized.** If you're not confident a single coder can complete it in one session, split it.
-- **Self-contained.** The coder shouldn't need to understand unrelated subsystems.
+- **Bounded to specific files.** The @coder knows exactly what to touch and what not to touch.
+- **Right-sized.** If you're not confident a single @coder can complete it in one session, split it.
+- **Self-contained.** The @coder shouldn't need to understand unrelated subsystems.
 
 Break along natural seams: data model first, then the layer that uses it, then the layer that uses that. If a design resists clean decomposition — everything depends on everything — that usually means tight coupling in the design itself. Find the narrowest interface between the parts and cut there.
 
@@ -38,11 +38,11 @@ Round 3: Phase 4                    (needs Phase 2 and Phase 3)
 
 ## Writing Blueprints
 
-Each blueprint gives the coder everything it needs, and nothing it doesn't. It should be self-contained enough that the coder does not need to mine the full design doc.
+Each blueprint gives the @coder everything it needs, and nothing it doesn't. It should be self-contained enough that the @coder does not need to mine the full design doc.
 
 **Include:** scope and intent (what to build and why), files to modify (exact files with notes on expected changes), dependencies and interface contracts (paste signatures directly — don't force cross-referencing), patterns to follow (point to one concrete existing file), constraints and boundaries (what's explicitly out of scope), and verification criteria (concrete checks that gate completion, including design conformance).
 
-**Exclude:** design rationale that doesn't change implementation behavior, plans for later phases, broad context that doesn't affect current decisions. The test: if removing a sentence wouldn't change what the coder builds, it doesn't belong.
+**Exclude:** design rationale that doesn't change implementation behavior, plans for later phases, broad context that doesn't affect current decisions. The test: if removing a sentence wouldn't change what the @coder builds, it doesn't belong.
 
 ### Example
 

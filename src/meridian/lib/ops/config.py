@@ -808,13 +808,13 @@ def config_show_sync(payload: ConfigShowInput) -> ConfigShowOutput:
         configured_default_agent_warning(
             repo_root=repo_root,
             configured_agent=resolved_config.primary_agent,
-            builtin_default="__meridian-orchestrator",
+            builtin_default="meridian-default-orchestrator",
             config_key="defaults.primary_agent",
         ),
         configured_default_agent_warning(
             repo_root=repo_root,
             configured_agent=resolved_config.default_agent,
-            builtin_default="__meridian-subagent",
+            builtin_default="meridian-subagent",
             config_key="defaults.agent",
         ),
     )

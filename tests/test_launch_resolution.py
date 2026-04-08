@@ -24,7 +24,7 @@ def _write_minimal_mars_config(repo_root: Path) -> None:
 
 def test_resolve_policies_treats_config_agent_as_configured_default(tmp_path: Path) -> None:
     _write_minimal_mars_config(tmp_path)
-    write_agent(tmp_path, name="__meridian-subagent", model="gpt-5.4")
+    write_agent(tmp_path, name="meridian-subagent", model="gpt-5.4")
 
     policies = resolve_policies(
         repo_root=tmp_path,
@@ -32,12 +32,12 @@ def test_resolve_policies_treats_config_agent_as_configured_default(tmp_path: Pa
         config_overrides=RuntimeOverrides(agent="missing-config-agent"),
         config=MeridianConfig(),
         harness_registry=get_default_harness_registry(),
-        builtin_default_agent="__meridian-subagent",
+        builtin_default_agent="meridian-subagent",
         configured_default_harness="codex",
     )
 
     assert policies.profile is not None
-    assert policies.profile.name == "__meridian-subagent"
+    assert policies.profile.name == "meridian-subagent"
     assert policies.warning is not None
     assert "missing-config-agent" in policies.warning
 

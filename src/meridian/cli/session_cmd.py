@@ -111,6 +111,23 @@ def register_session_commands(app: App, emit: Emitter) -> tuple[set[str], dict[s
         app,
         group="session",
         handlers=handlers,
+        command_help_epilogues={
+            "session.log": (
+                "Examples:\n\n"
+                "  meridian session log c123\n\n"
+                "  meridian session log c123 -n 20\n\n"
+                "  meridian session log p107 -c 1 --offset 5\n\n"
+                "  meridian session log c123 -c 0 -n 0    # latest segment, all messages\n\n"
+                "  meridian session log c123 -c 2          # older segment "
+                "(higher numbers walk backward)\n"
+            ),
+            "session.search": (
+                "Example:\n\n"
+                "  meridian session search \"auth bug\" c123\n\n"
+                "Search is case-insensitive. Output includes navigation hints, for example:\n\n"
+                "  Navigate: meridian session log c123 -c 0 --offset 37 --last 10\n"
+            ),
+        },
         emit=emit,
         default_handler=None,
     )

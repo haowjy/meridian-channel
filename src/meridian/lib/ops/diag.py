@@ -120,7 +120,7 @@ def doctor_sync(payload: DoctorInput) -> DoctorOutput:
     default_agent_warning = configured_default_agent_warning(
         repo_root=runtime.repo_root,
         configured_agent=runtime.config.primary_agent,
-        builtin_default="__meridian-orchestrator",
+        builtin_default="meridian-default-orchestrator",
         config_key="defaults.primary_agent",
     )
     if default_agent_warning is not None:
@@ -128,7 +128,7 @@ def doctor_sync(payload: DoctorInput) -> DoctorOutput:
     subagent_warning = configured_default_agent_warning(
         repo_root=runtime.repo_root,
         configured_agent=runtime.config.default_agent,
-        builtin_default="__meridian-subagent",
+        builtin_default="meridian-subagent",
         config_key="defaults.agent",
     )
     if subagent_warning is not None:

@@ -686,8 +686,8 @@ class MeridianConfig(BaseSettings):
     kill_grace_minutes: float = 2.0 / 60.0
     guardrail_timeout_minutes: float = 0.5
     wait_timeout_minutes: float = 30.0
-    primary_agent: str = "__meridian-orchestrator"
-    default_agent: str = "__meridian-subagent"
+    primary_agent: str = "meridian-default-orchestrator"
+    default_agent: str = "meridian-subagent"
     default_model: str = ""
     default_harness: str = "codex"
 

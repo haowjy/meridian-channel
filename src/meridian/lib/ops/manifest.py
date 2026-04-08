@@ -287,7 +287,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
     ),
     _spec(
         name="doctor",
-        description="Spawn diagnostics checks.",
+        description="Health check and orphan reconciliation.",
         handler=doctor,
         sync_handler=doctor_sync,
         input_type=DoctorInput,
@@ -353,10 +353,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
     ),
     _spec(
         name="session.log",
-        description=(
-            "Show readable messages from a harness session JSONL, "
-            "with compaction segment selection."
-        ),
+        description="Show readable messages from a harness session JSONL.",
         handler=session_log,
         sync_handler=session_log_sync,
         input_type=SessionLogInput,
@@ -368,10 +365,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
     ),
     _spec(
         name="session.search",
-        description=(
-            "Search a session transcript across all compaction segments "
-            "for case-insensitive text matches."
-        ),
+        description="Search a session transcript for case-insensitive text matches.",
         handler=session_search,
         sync_handler=session_search_sync,
         input_type=SessionSearchInput,

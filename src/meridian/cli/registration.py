@@ -61,6 +61,7 @@ def register_manifest_cli_group(
     *,
     group: str,
     handlers: dict[str, HandlerFactory] | None = None,
+    command_help_epilogues: dict[str, str] | None = None,
     emit: Callable[[Any], None] | None = None,
     default_handler: Callable[..., None] | None = None,
 ) -> tuple[set[str], dict[str, str]]:
@@ -74,6 +75,7 @@ def register_manifest_cli_group(
     registered: set[str] = set()
     descriptions: dict[str, str] = {}
     resolved_handlers = handlers or {}
+    resolved_epilogues = command_help_epilogues or {}
 
     for op in get_operations_for_surface("cli"):
         if op.cli_group != group:
@@ -94,7 +96,16 @@ def register_manifest_cli_group(
             raise ValueError(f"No CLI handler registered for operation {op.name}")
 
         handler.__name__ = f"cmd_{op.cli_group}_{op.cli_name}"
-        app.command(handler, name=op.cli_name, help=op.description)
+        help_epilogue = resolved_epilogues.get(op.name)
+        if help_epilogue is None:
+            app.command(handler, name=op.cli_name, help=op.description)
+        else:
+            app.command(
+                handler,
+                name=op.cli_name,
+                help=op.description,
+                help_epilogue=help_epilogue,
+            )
         registered.add(f"{op.cli_group}.{op.cli_name}")
         descriptions[op.name] = op.description
 

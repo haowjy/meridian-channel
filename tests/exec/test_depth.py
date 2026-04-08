@@ -250,9 +250,9 @@ def test_recursive_spawn_blocks_before_creating_third_level(
     # Pre-install dummy agent so bootstrap doesn't scan the real submodule tree
     agents_dir = repo_root / ".agents" / "agents"
     agents_dir.mkdir(parents=True, exist_ok=True)
-    (agents_dir / "__meridian-subagent.md").write_text(
+    (agents_dir / "meridian-subagent.md").write_text(
         "---\n"
-        "name: __meridian-subagent\n"
+        "name: meridian-subagent\n"
         "description: dummy\n"
         "model: gpt-5.3-codex\n"
         "---\n"

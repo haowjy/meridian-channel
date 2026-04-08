@@ -71,8 +71,8 @@ Scaffolded but not exposed via `config set` shorthand keys:
 ```toml
 [defaults]
 max_depth = 4
-primary_agent = "__meridian-orchestrator"
-agent = "__meridian-subagent"
+primary_agent = "meridian-default-orchestrator"
+agent = "meridian-subagent"
 model = "gpt-5.3-codex"
 
 [harness]

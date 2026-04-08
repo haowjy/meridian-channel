@@ -5,11 +5,19 @@ description: Engineering principles LLM agents systematically violate — refact
 
 # Refactor Early, Refactor Continuously
 
-- Run `refactor-reviewer` at every phase boundary, not only when things feel wrong.
-- Act on refactor findings in the current phase; do not defer structural fixes.
+- Run @refactor-reviewer in design review and again in the final end-to-end implementation review loop.
+- Act on refactor findings in the active loop; do not defer structural fixes once surfaced.
 - Perform preparatory refactoring before feature work; make the change easy, then make the easy change.
 - Keep refactoring and feature commits separate; do not wear both hats in one commit.
 - Treat declining refactor rates as a primary risk signal: refactored lines dropped from 24% to 9.5% in AI-assisted workflows.
+
+# Edge-Case Thinking
+
+- Treat edge cases, failure modes, and boundary conditions as first-class requirements, not test afterthoughts.
+- Require design artifacts to enumerate edge cases explicitly before implementation starts.
+- Before each implementation phase, identify additional edge cases not covered in the design and pass them to testers.
+- Testers must generate independent edge cases beyond the @coder's stated scenarios.
+- Consider "works on happy path" an incomplete result, not a passing result.
 
 # Abstraction Judgment
 
@@ -57,17 +65,17 @@ Treat each signal as an immediate action trigger, not backlog material:
 
 Orchestrators coordinate — they never write code or edit source files, regardless of how trivial the change seems. This isn't ceremony for its own sake:
 
-- **Spawns produce artifacts.** A coder spawn generates a traceable report, changed file list, and session transcript. Direct edits via Bash leave no trail — if something breaks downstream, there's nothing to inspect.
+- **Spawns produce artifacts.** A @coder spawn generates a traceable report, changed file list, and session transcript. Direct edits via Bash leave no trail — if something breaks downstream, there's nothing to inspect.
 - **Review catches what the author can't see.** Even a one-line change can have unintended consequences. The orchestrator that wrote the code can't objectively review it — the same blind spot that let the bug through will let it pass review.
 - **Workarounds compound.** When Edit/Write are blocked, writing files via `Bash(cat >)` or `python3 -c` bypasses the restriction without removing the reason it exists. Each workaround teaches the next session that the rules are negotiable.
 
-If a task is too trivial for a full impl-orchestrator cycle, the dev-orchestrator should spawn a coder + reviewer directly — not hand it to an impl-orchestrator that shortcuts the process.
+If a task is too trivial for a full @impl-orchestrator cycle, the @dev-orchestrator should spawn a @coder + @verifier directly, adding @smoke-tester or @unit-tester as warranted — not hand it to an @impl-orchestrator that shortcuts the process.
 
 ## Refactor Continuously
 
-The `refactor-reviewer -> coder` loop is mandatory and immediate:
+The `@refactor-reviewer -> @coder` loop is mandatory and immediate:
 
-- Run `refactor-reviewer` after every feature phase.
-- Resolve structural findings before starting the next phase.
-- If structural debt is flagged, fix it now rather than deferring.
+- Run @refactor-reviewer during design review and during the final implementation review loop.
+- Resolve structural findings before final convergence; do not defer them to follow-up work by default.
+- During intermediate implementation phases, use tester-led loops; escalate to @reviewers only for unresolved behavioral concerns.
 - Maintain structural health proactively; reactive refactors are slower and riskier.

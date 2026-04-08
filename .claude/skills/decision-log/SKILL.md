@@ -22,6 +22,6 @@ Every decision entry answers three questions: **what** was decided, **why** it w
 
 Record a decision when someone could reasonably make a different choice and the reasoning isn't obvious from the code itself. The test: would you want this context if you were reading this code for the first time?
 
-Especially important when: overruling a reviewer, deferring a known issue, pivoting during implementation because the plan met reality, or choosing between genuinely different architectural approaches.
+Especially important when: overruling a @reviewer, deferring a known issue, pivoting during implementation because the plan met reality, or choosing between genuinely different architectural approaches.
 
 Skip boilerplate decisions that follow directly from project conventions. The goal is a useful record of non-obvious choices, not a comprehensive log of everything that happened.

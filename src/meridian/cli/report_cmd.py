@@ -98,6 +98,20 @@ def register_report_commands(app: Any, emit: Emitter) -> tuple[set[str], dict[st
         app,
         group="report",
         handlers=handlers,
+        command_help_epilogues={
+            "report.create": (
+                "Example:\n\n"
+                '  echo "Report body" | meridian spawn report create --stdin\n'
+            ),
+            "report.show": (
+                "Example:\n\n"
+                "  meridian spawn report show p107\n"
+            ),
+            "report.search": (
+                "Example:\n\n"
+                '  meridian spawn report search "auth bug"\n'
+            ),
+        },
         emit=emit,
         default_handler=partial(_report_create, emit),
     )

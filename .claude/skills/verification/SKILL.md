@@ -27,7 +27,7 @@ Mechanical breakage doesn't require judgment:
 - Formatting issues
 - Trivial test fixes (wrong assertion value after an intentional change)
 
-Fix these without asking. The whole point is to clear the noise so reviewers can focus on real issues.
+Fix these without asking. The whole point is to clear the noise so @reviewers can focus on real issues.
 
 ## Report What's Substantive
 

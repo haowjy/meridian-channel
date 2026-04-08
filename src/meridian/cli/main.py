@@ -57,8 +57,11 @@ Run 'meridian spawn -h' for full usage.
 Commands:
   mars     Forward arguments to bundled mars CLI
   spawn    Create and manage subagent runs (includes report subgroup)
+  session  Read and search harness session transcripts
   work     Work item dashboard and coordination
   models   Model catalog
+  config   Repository config inspection and overrides
+  doctor   Health check and orphan reconciliation
 
 Output:
   Agent mode defaults to JSON. All commands emit structured JSON.
@@ -540,8 +543,28 @@ spawn_app = App(
     ),
     help_formatter="plain",
 )
-report_app = App(name="report", help="Report management commands", help_formatter="plain")
-session_app = App(name="session", help="Session inspection commands", help_formatter="plain")
+report_app = App(
+    name="report",
+    help="Report management commands.",
+    help_epilogue=(
+        "Examples:\n\n"
+        "  meridian spawn report show p107\n\n"
+        '  meridian spawn report search "auth bug"\n\n'
+        '  echo "Report body" | meridian spawn report create --stdin\n'
+    ),
+    help_formatter="plain",
+)
+session_app = App(
+    name="session",
+    help=(
+        "Inspect harness session transcripts.\n\n"
+        "Session refs accept three forms: chat ids (c123), spawn ids (p123),\n"
+        "or raw harness session ids. By default, commands operate on\n"
+        "$MERIDIAN_CHAT_ID -- inherited from the spawning session -- so a\n"
+        "subagent reads its parent's transcript, not its own."
+    ),
+    help_formatter="plain",
+)
 work_app = App(
     name="work",
     help=(
@@ -551,7 +574,18 @@ work_app = App(
     help_formatter="plain",
 )
 models_app = App(name="models", help="Model catalog commands", help_formatter="plain")
-config_app = App(name="config", help="Repository config commands", help_formatter="plain")
+config_app = App(
+    name="config",
+    help=(
+        "Repository-level config (.meridian/config.toml) for default\n"
+        "agent, model, harness, timeouts, and output verbosity.\n\n"
+        "Resolved values are evaluated independently per field -- a CLI\n"
+        "override on one field does not pull other fields from the same\n"
+        "source. Use `meridian config show` to see each value with its\n"
+        "source annotation."
+    ),
+    help_formatter="plain",
+)
 completion_app = App(name="completion", help="Shell completion helpers", help_formatter="plain")
 
 

@@ -102,3 +102,44 @@ There are no parallelization questions, no design uncertainties left unresolved,
 **Decision (revised after review):** `06-consumer-profile-updates.md` provides an explicit rule for `__meridian-cli` adoption (every profile whose body invokes a CLI command beyond `meridian spawn` / `meridian work` gets the skill). The implementer applies the rule by grepping; the planner does not need to enumerate every profile by hand.
 
 **Why:** Reviewer p1065 flagged that the original "sweep and decide per profile" handed implementation-meaningful judgment to the implementer with no guidance. A rule lets the implementer apply the judgment mechanically and gives the verifier a grep target. This trades "design enumerates each profile" for "design provides a rule + verification check," which is the right altitude for a consolidation that touches a moving set of agent profiles.
+
+## D11 — Add `__meridian-cli` to base `__meridian-orchestrator` (deviation from 06 Rule 3)
+
+**Decision:** Added `__meridian-cli` to the skills array of `meridian-base/agents/__meridian-orchestrator.md`, contrary to `design/06-consumer-profile-updates.md` Rule 3 which said the base orchestrator should stay minimal and skip `__meridian-cli`.
+
+**Why:** D9's safety condition mandates that every profile loading `__meridian-spawn` must also load `__meridian-cli` before the duplicated principle lines (env vars, JSON discipline, auto-recovery) are trimmed from `__meridian-spawn`. The base `__meridian-orchestrator` loads `__meridian-spawn`. The two design decisions (06 Rule 3 vs D9 safety) collide: either `__meridian-spawn` cannot be trimmed for that profile, or `__meridian-cli` must be added. Adding `__meridian-cli` is the cheaper resolution — it costs one extra skill load on the base orchestrator, but preserves the principle-canonicalization in `__meridian-cli` for every consumer of `__meridian-spawn`.
+
+**Rejected:**
+- *Skip the `__meridian-spawn` trims entirely.* Defeats D9 and leaves the duplication.
+- *Trim `__meridian-spawn` but leave base orchestrator without `__meridian-cli`.* Silently loses principle content for the most foundational orchestrator.
+- *Make `__meridian-cli` optional via conditional load.* No such mechanism exists.
+
+**What changed:** `meridian-base/agents/__meridian-orchestrator.md` skills now include `__meridian-cli` with `__meridian-spawn`, `__meridian-work-coordination`, and `__meridian-privilege-escalation`. The same treatment was applied to `tech-writer` and `impl-orchestrator` for the same D9 safety reason.
+
+## D12 — Drop `__` prefix from base meridian profiles and skills
+
+**Decision:** Rename base meridian-prefixed profiles and skills to drop the double-underscore prefix: `__meridian-spawn`, `__meridian-work-coordination`, `__meridian-cli`, `__meridian-privilege-escalation`, `__meridian-orchestrator`, and `__meridian-subagent` become `meridian-*` names.
+
+**Why:** The `meridian-` stem already provides clear namespace identity. Keeping both `__` and `meridian-` is redundant and adds noise in profile references, docs, and commands. Applying the rename consistently (including `__meridian-subagent`) avoids mixed naming conventions in the same package and reduces migration churn later.
+
+**Rejected:**
+- *Rename only `__meridian-orchestrator` and leave `__meridian-subagent`.* Inconsistent naming inside the same base profile set.
+- *Keep `__` for "internal" skills only.* Adds a second naming rule with little practical value and more cognitive overhead.
+
+## D13 — Keep spawn skill pointers to moved CLI resources (repoint, don't drop)
+
+**Decision:** In `meridian-base/skills/meridian-spawn/SKILL.md`, keep explicit pointers for troubleshooting and configuration, but repoint them to `../meridian-cli/resources/debugging.md` and `../meridian-cli/resources/configuration.md` after relocation.
+
+**Why:** The references are still useful at point-of-need in the spawn workflow. Repointing preserves discoverability while keeping ownership of those docs at the CLI layer.
+
+**Rejected:** Dropping the pointers entirely and relying only on co-loaded `meridian-cli` to surface those docs.
+
+## D14 — Also rename `__meridian-subagent` → `meridian-subagent` (Phase 4 scope expansion)
+
+**Context:** Phase 4 scope as handed to the coder explicitly excluded `__meridian-subagent` from the rename, listing only the four `__meridian-*` skills plus `__meridian-orchestrator` for the prefix drop. The Phase 4 coder (p1089) expanded scope and renamed `__meridian-subagent` → `meridian-subagent` anyway, propagating through Python defaults (`settings.py`, `ops/config.py`, `ops/diag.py`, `ops/spawn/prepare.py`) and `docs/configuration.md`. A follow-up fix pass (p1094) updated the four test fixture files that were still using the old string so everything is self-consistent.
+
+**Decision:** Accept the expansion. `__meridian-subagent` becomes `meridian-subagent`.
+
+**Why:** The stated rationale for Phase 4 was "drop the `__` prefix everywhere" — the redundant prefix conflicts with the `meridian-*` stem that already signals the layer. Keeping `__meridian-subagent` while every other base skill/agent drops the prefix would recreate the exact inconsistency the phase was supposed to fix (especially visible because `meridian-default-orchestrator` and `meridian-subagent` are listed together as the two base-agent defaults in `settings.py`). The exclusion in the original phase scope was an oversight by the impl-orchestrator, not a deliberate carve-out.
+
+**Rejected:** Reverting the subagent rename to match the original phase scope. Would leave the base agent directory mixed (`meridian-default-orchestrator.md` alongside `__meridian-subagent.md`) and the Python defaults split across naming conventions.

@@ -12,9 +12,9 @@ from meridian.lib.ops.spawn.prepare import build_create_payload
 def _write_minimal_subagent(repo_root: Path) -> None:
     agents_dir = repo_root / ".agents" / "agents"
     agents_dir.mkdir(parents=True, exist_ok=True)
-    (agents_dir / "__meridian-subagent.md").write_text(
+    (agents_dir / "meridian-subagent.md").write_text(
         "---\n"
-        "name: __meridian-subagent\n"
+        "name: meridian-subagent\n"
         "description: Test subagent profile\n"
         "model: gpt-5.3-codex\n"
         "---\n"

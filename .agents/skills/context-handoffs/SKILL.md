@@ -4,7 +4,7 @@ description: Context scoping for agent spawns — use when deciding what context
 ---
 # Context Handoffs
 
-Every spawn starts with a context decision. Get it wrong and the agent either guesses (too little context) or drowns (too much). The `/__meridian-spawn` skill teaches the mechanics of `-f`, `--from`, and spawn commands. This skill teaches the judgment — when to use which, how much to pass, and when to materialize before spawning.
+Every spawn starts with a context decision. Get it wrong and the agent either guesses (too little context) or drowns (too much). The `/meridian-spawn` skill teaches the mechanics of `-f`, `--from`, and spawn commands. This skill teaches the judgment — when to use which, how much to pass, and when to materialize before spawning.
 
 ## Choose the Right Mechanism
 
@@ -49,7 +49,7 @@ When writing the prompt, prove you understood the context: include file paths, k
 
 ## Cross-Phase Context
 
-Use `--from <prior-spawn-id>` to carry forward what a previous phase learned. The phase-2 coder benefits from seeing what the phase-1 coder discovered — unexpected edge cases, deviations from the plan, judgment calls. The next agent can explore further on its own, but starts with the predecessor's hard-won context.
+Use `--from <prior-spawn-id>` to carry forward what a previous phase learned. The phase-2 @coder benefits from seeing what the phase-1 @coder discovered — unexpected edge cases, deviations from the plan, judgment calls. The next agent can explore further on its own, but starts with the predecessor's hard-won context.
 
 Combine mechanisms when phases produce artifacts: pass the prior spawn's report via `--from` for reasoning context, and the files it created via `-f` for concrete outputs.
 

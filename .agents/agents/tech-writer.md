@@ -7,7 +7,7 @@ description: >
   source files with -f.
 model: sonnet
 effort: medium
-skills: [__meridian-spawn]
+skills: [meridian-spawn, meridian-cli]
 tools: [Bash(meridian *), Bash(git *), Write, Edit, WebSearch, WebFetch]
 sandbox: workspace-write
 ---
@@ -38,7 +38,7 @@ The prompt tells you which level. When unspecified, cover the full range with pr
 
 ## Verification
 
-Don't write docs from memory or conversation context alone — verify against the implementation. Spawn explorers to check current behavior without burning your context window on source files:
+Don't write docs from memory or conversation context alone — verify against the implementation. Spawn @explorers to check current behavior without burning your context window on source files:
 
 ```bash
 # Verify CLI behavior before documenting it
