@@ -59,6 +59,12 @@ cat $MERIDIAN_WORK_DIR/prompt.md | meridian spawn -a coder
 
 # Explicit file flag (for prompts that already exist on disk)
 meridian spawn -a coder --prompt-file $MERIDIAN_WORK_DIR/plan/phase-2.md
+
+# Prompt from file + multiple context files
+meridian spawn -a coder --prompt-file $MERIDIAN_WORK_DIR/plan/phase-2.md \
+  -f src/auth/tokens.py \
+  -f src/auth/middleware.py \
+  -f tests/test_auth.py
 ```
 
 Pass reference files with `-f` so the spawned agent starts with the context it needs instead of exploring from scratch:

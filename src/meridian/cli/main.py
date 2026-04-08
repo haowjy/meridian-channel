@@ -573,11 +573,11 @@ def _run_mars_passthrough(
     subcommand = _mars_subcommand(mars_args)
     is_sync = subcommand == "sync"
     wants_json = _mars_requested_json(mars_args) or output_format == "json"
-    if is_sync and wants_json and not _mars_requested_json(mars_args):
+    if wants_json and not _mars_requested_json(mars_args):
         mars_args = ["--json", *mars_args]
 
     try:
-        if is_sync and wants_json:
+        if wants_json:
             result = subprocess.run(
                 [executable, *mars_args],
                 check=False,
@@ -593,6 +593,21 @@ def _run_mars_passthrough(
         )
         raise SystemExit(1) from None
 
+    if wants_json:
+        json_result = cast("subprocess.CompletedProcess[str]", result)
+        stdout_text = json_result.stdout or ""
+        stderr_text = json_result.stderr or ""
+
+        if not is_sync:
+            if stdout_text:
+                sys.stdout.write(stdout_text)
+            if stderr_text:
+                sys.stderr.write(stderr_text)
+            raise SystemExit(result.returncode)
+    else:
+        stdout_text = ""
+        stderr_text = ""
+
     if not is_sync:
         raise SystemExit(result.returncode)
 
@@ -602,8 +617,6 @@ def _run_mars_passthrough(
         upgrades = check_upgrade_availability(root_override)
 
     if wants_json:
-        json_result = cast("subprocess.CompletedProcess[str]", result)
-        stdout_text = json_result.stdout or ""
         if upgrades is not None and upgrades.count > 0 and stdout_text.strip():
             stdout_text = _inject_upgrade_hint_into_sync_json(
                 stdout_text,
@@ -612,7 +625,6 @@ def _run_mars_passthrough(
             )
         if stdout_text:
             sys.stdout.write(stdout_text)
-        stderr_text = json_result.stderr or ""
         if stderr_text:
             sys.stderr.write(stderr_text)
 

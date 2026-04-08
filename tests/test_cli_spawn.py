@@ -7,6 +7,7 @@ import pytest
 from meridian.lib.ops.spawn.models import SpawnActionOutput, SpawnContinueInput, SpawnCreateInput
 
 spawn_cli = importlib.import_module("meridian.cli.spawn")
+cli_main = importlib.import_module("meridian.cli.main")
 
 
 class _FakeStdin(io.StringIO):
@@ -146,6 +147,21 @@ def test_spawn_create_prompt_file_dash_reads_stdin(monkeypatch: pytest.MonkeyPat
     assert captured["prompt"] == "stdin prompt"
 
 
+def test_spawn_create_prompt_file_dash_works_through_full_cli_parsing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _capture_create_prompt(monkeypatch)
+    monkeypatch.setenv("MERIDIAN_DEPTH", "1")
+    monkeypatch.setattr(cli_main, "_interactive_terminal_attached", lambda: False)
+    monkeypatch.setattr(spawn_cli.sys, "stdin", _FakeStdin("stdin prompt", is_tty=False))
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main.main(["spawn", "-a", "reviewer", "--prompt-file", "-", "--dry-run"])
+
+    assert exc_info.value.code == 0
+    assert captured["prompt"] == "stdin prompt"
+
+
 def test_spawn_create_prompt_file_dash_with_tty_stdin_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -235,7 +251,7 @@ def test_spawn_create_file_only_without_prompt_is_allowed(
 ) -> None:
     captured = _capture_create_prompt(monkeypatch)
     emitted: list[SpawnActionOutput] = []
-    monkeypatch.setattr(spawn_cli.sys, "stdin", _FakeStdin("", is_tty=True))
+    monkeypatch.setattr(spawn_cli.sys, "stdin", _FakeStdin("", is_tty=False))
 
     spawn_cli._spawn_create(
         lambda payload: emitted.append(payload),
@@ -265,6 +281,68 @@ def test_spawn_create_file_only_with_literal_prompt_is_allowed(
 
     assert captured["prompt"] == "literal"
     assert captured["files"] == ("README.md",)
+    assert emitted[0].status == "dry-run"
+    assert emitted[0].command == "spawn.create"
+
+
+def test_spawn_create_literal_prompt_with_multiple_files_is_allowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _capture_create_prompt(monkeypatch)
+    emitted: list[SpawnActionOutput] = []
+    monkeypatch.setattr(spawn_cli.sys, "stdin", _FakeStdin("", is_tty=True))
+
+    spawn_cli._spawn_create(
+        lambda payload: emitted.append(payload),
+        prompt="review the refactor",
+        references=("src/a.py", "src/b.py", "src/c.py"),
+        dry_run=True,
+    )
+
+    assert captured["prompt"] == "review the refactor"
+    assert captured["files"] == ("src/a.py", "src/b.py", "src/c.py")
+    assert emitted[0].status == "dry-run"
+    assert emitted[0].command == "spawn.create"
+
+
+def test_spawn_create_prompt_file_with_multiple_files_is_allowed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    captured = _capture_create_prompt(monkeypatch)
+    emitted: list[SpawnActionOutput] = []
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("review from file\n", encoding="utf-8")
+    monkeypatch.setattr(spawn_cli.sys, "stdin", _FakeStdin("", is_tty=True))
+
+    spawn_cli._spawn_create(
+        lambda payload: emitted.append(payload),
+        prompt_file=prompt_file.as_posix(),
+        references=("src/a.py", "src/b.py", "src/c.py"),
+        dry_run=True,
+    )
+
+    assert captured["prompt"] == "review from file\n"
+    assert captured["files"] == ("src/a.py", "src/b.py", "src/c.py")
+    assert emitted[0].status == "dry-run"
+    assert emitted[0].command == "spawn.create"
+
+
+def test_spawn_create_piped_stdin_prompt_with_multiple_files_is_allowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _capture_create_prompt(monkeypatch)
+    emitted: list[SpawnActionOutput] = []
+    monkeypatch.setattr(spawn_cli.sys, "stdin", _FakeStdin("prompt body\n", is_tty=False))
+
+    spawn_cli._spawn_create(
+        lambda payload: emitted.append(payload),
+        references=("src/a.py", "src/b.py"),
+        dry_run=True,
+    )
+
+    assert captured["prompt"] == "prompt body\n"
+    assert captured["files"] == ("src/a.py", "src/b.py")
     assert emitted[0].status == "dry-run"
     assert emitted[0].command == "spawn.create"
 

@@ -189,3 +189,69 @@ def test_main_mars_defaults_to_json_in_agent_mode(monkeypatch: pytest.MonkeyPatc
     assert exc_info.value.code == 0
     assert captured["args"] == ["sync"]
     assert captured["output_format"] == "json"
+
+
+def test_run_mars_passthrough_list_honors_json_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(cli_main, "_resolve_mars_executable", lambda: "/usr/bin/mars")
+    commands: list[list[str]] = []
+    run_kwargs: list[dict[str, object]] = []
+
+    def _fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        run_kwargs.append(dict(_kwargs))
+        return subprocess.CompletedProcess(
+            args=command,
+            returncode=0,
+            stdout='{"packages": []}\n',
+            stderr="",
+        )
+
+    monkeypatch.setattr(cli_main.subprocess, "run", _fake_run)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main._run_mars_passthrough(["list"], output_format="json")
+
+    assert exc_info.value.code == 0
+    assert commands and commands[0] == ["/usr/bin/mars", "--json", "list"]
+    assert run_kwargs and run_kwargs[0].get("capture_output") is True
+    assert run_kwargs[0].get("text") is True
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload == {"packages": []}
+
+
+def test_agent_mode_mars_list_emits_json(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("MERIDIAN_DEPTH", "1")
+    monkeypatch.setattr(cli_main, "_interactive_terminal_attached", lambda: False)
+    monkeypatch.setattr(cli_main, "_resolve_mars_executable", lambda: "/usr/bin/mars")
+    commands: list[list[str]] = []
+    run_kwargs: list[dict[str, object]] = []
+
+    def _fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        run_kwargs.append(dict(_kwargs))
+        return subprocess.CompletedProcess(
+            args=command,
+            returncode=0,
+            stdout='{"packages": []}\n',
+            stderr="",
+        )
+
+    monkeypatch.setattr(cli_main.subprocess, "run", _fake_run)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main.main(["mars", "list"])
+
+    assert exc_info.value.code == 0
+    assert commands and commands[0] == ["/usr/bin/mars", "--json", "list"]
+    assert run_kwargs and run_kwargs[0].get("capture_output") is True
+    assert run_kwargs[0].get("text") is True
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload == {"packages": []}

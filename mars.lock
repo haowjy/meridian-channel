@@ -6,8 +6,8 @@ commit = "98669c11ca63e9c81c11501e1437e5c47b556621"
 
 [dependencies.meridian-base]
 url = "https://github.com/haowjy/meridian-base"
-version = "v0.0.11"
-commit = "ea525018cd830562642b44f365a20fa90f6fa625"
+version = "v0.0.12"
+commit = "2112a5c9fb7b450ef1b5a3346d2397c3053ea0ae"
 
 [dependencies.meridian-dev-workflow]
 url = "https://github.com/haowjy/meridian-dev-workflow"
@@ -255,9 +255,9 @@ dest_path = "skills/meridian-privilege-escalation"
 [items."skills/meridian-spawn"]
 source = "meridian-base"
 kind = "skill"
-version = "v0.0.11"
-source_checksum = "sha256:5ee54e6169d03e3300e98cc6d30b67e8d17e0281751979a0e0fe11aa8bb4581f"
-installed_checksum = "sha256:5ee54e6169d03e3300e98cc6d30b67e8d17e0281751979a0e0fe11aa8bb4581f"
+version = "v0.0.12"
+source_checksum = "sha256:88bd69f9c3d0dddf6e2fa0cacd1ab095b186c245757df12d69fb39b9f58dac91"
+installed_checksum = "sha256:88bd69f9c3d0dddf6e2fa0cacd1ab095b186c245757df12d69fb39b9f58dac91"
 dest_path = "skills/meridian-spawn"
 
 [items."skills/meridian-work-coordination"]

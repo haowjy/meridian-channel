@@ -54,7 +54,7 @@ def _spawn_create_exit_code(result: SpawnActionOutput) -> int:
     return 1
 
 
-def _read_prompt_from_stdin(*, explicit_prompt_file_stdin: bool) -> str:
+def _read_prompt_from_stdin(*, explicit_prompt_file_stdin: bool, allow_empty: bool = False) -> str:
     if sys.stdin.isatty():
         if explicit_prompt_file_stdin:
             raise ValueError("--prompt-file - requires stdin to be piped or redirected")
@@ -63,7 +63,7 @@ def _read_prompt_from_stdin(*, explicit_prompt_file_stdin: bool) -> str:
         prompt_text = sys.stdin.read()
     except UnicodeDecodeError as exc:
         raise ValueError("prompt stdin is not valid UTF-8") from exc
-    if not prompt_text:
+    if not prompt_text and not allow_empty:
         raise ValueError("prompt stdin is empty")
     return prompt_text
 
@@ -99,7 +99,12 @@ def _resolve_spawn_prompt(
             return _read_prompt_from_stdin(explicit_prompt_file_stdin=True)
         return _read_prompt_from_file(prompt_file)
     if not sys.stdin.isatty():
-        return _read_prompt_from_stdin(explicit_prompt_file_stdin=False)
+        prompt_text = _read_prompt_from_stdin(explicit_prompt_file_stdin=False, allow_empty=True)
+        if prompt_text:
+            return prompt_text
+        if has_files or is_continue:
+            return ""
+        raise ValueError("prompt stdin is empty")
     if has_files or is_continue:
         return ""
     raise ValueError("prompt required: pass -p, --prompt-file, or pipe stdin")
@@ -120,6 +125,7 @@ def _spawn_create(
                 "If neither --prompt nor --prompt-file is set and stdin is piped, "
                 "stdin is used as the prompt."
             ),
+            allow_leading_hyphen=True,
         ),
     ] = None,
     *passthrough: Annotated[
