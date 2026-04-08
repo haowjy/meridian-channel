@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict
 from meridian.lib.core.spawn_lifecycle import is_active_spawn_status
 from meridian.lib.core.util import FormatContext
 from meridian.lib.launch.default_agent_policy import configured_default_agent_warning
+from meridian.lib.ops.mars import UpgradeAvailability, check_upgrade_availability
 from meridian.lib.ops.runtime import build_runtime, resolve_state_root
 from meridian.lib.state import spawn_store
 from meridian.lib.state.session_store import cleanup_stale_sessions
@@ -29,6 +30,8 @@ class DoctorOutput(BaseModel):
     agents_dir: str
     skills_dir: str
     warnings: tuple[str, ...] = ()
+    outdated_dependencies_warning: UpgradeAvailability | None = None
+    updates_check_warning: str | None = None
     repaired: tuple[str, ...] = ()
 
     def format_text(self, ctx: FormatContext | None = None) -> str:
@@ -94,6 +97,15 @@ def _legacy_install_artifacts_warning(repo_root: Path) -> str | None:
     )
 
 
+def _format_outdated_dependencies_warning(availability: UpgradeAvailability) -> str:
+    noun = "dependency update" if availability.count == 1 else "dependency updates"
+    names = ", ".join(availability.names)
+    return (
+        f"{availability.count} {noun} available ({names}). "
+        "Run `meridian mars outdated` to see details."
+    )
+
+
 def doctor_sync(payload: DoctorInput) -> DoctorOutput:
     runtime = build_runtime(payload.repo_root)
 
@@ -137,6 +149,18 @@ def doctor_sync(payload: DoctorInput) -> DoctorOutput:
     if legacy_install_artifacts is not None:
         warnings.append(legacy_install_artifacts)
 
+    outdated_dependencies_warning: UpgradeAvailability | None = None
+    updates_check_warning: str | None = None
+    availability = check_upgrade_availability(runtime.repo_root)
+    if availability is None:
+        updates_check_warning = (
+            "Could not check for dependency updates (`mars outdated --json` failed)."
+        )
+        warnings.append(updates_check_warning)
+    elif availability.count > 0:
+        outdated_dependencies_warning = availability
+        warnings.append(_format_outdated_dependencies_warning(availability))
+
     running = [
         row.id
         for row in spawn_store.list_spawns(resolve_state_root(runtime.repo_root))
@@ -152,6 +176,8 @@ def doctor_sync(payload: DoctorInput) -> DoctorOutput:
         agents_dir=agents_dir.as_posix(),
         skills_dir=skills_dir.as_posix(),
         warnings=tuple(warnings),
+        outdated_dependencies_warning=outdated_dependencies_warning,
+        updates_check_warning=updates_check_warning,
         repaired=tuple(sorted(set(repaired))),
     )
 

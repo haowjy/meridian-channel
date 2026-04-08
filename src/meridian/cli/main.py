@@ -1,9 +1,9 @@
 """Cyclopts CLI entry point for meridian."""
 
+import json
 import logging
 import os
 import shlex
-import shutil
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -32,6 +32,11 @@ from meridian.lib.core.sink import OutputSink
 from meridian.lib.core.util import FormatContext
 from meridian.lib.harness.registry import get_default_harness_registry
 from meridian.lib.launch import LaunchRequest, SessionMode, launch_primary
+from meridian.lib.ops.mars import (
+    check_upgrade_availability,
+    format_upgrade_hint_lines,
+    resolve_mars_executable,
+)
 from meridian.lib.ops.reference import resolve_session_reference
 from meridian.lib.ops.spawn.api import SpawnActionOutput
 from meridian.lib.ops.spawn.plan import SessionContinuation
@@ -485,17 +490,77 @@ def serve() -> None:
 def _resolve_mars_executable() -> str | None:
     """Prefer the mars binary from the current install environment over PATH."""
 
-    # Keep the wrapper path intact: uv tool scripts point at a symlinked Python binary,
-    # and resolving it jumps out of the tool environment where the sibling mars lives.
-    scripts_dir = Path(sys.executable).parent
-    for name in ("mars", "mars.exe"):
-        candidate = scripts_dir / name
-        if candidate.is_file():
-            return str(candidate)
-    return shutil.which("mars")
+    return resolve_mars_executable()
 
 
-def _run_mars_passthrough(args: Sequence[str]) -> None:
+def _mars_requested_json(args: Sequence[str]) -> bool:
+    return any(token == "--json" for token in args)
+
+
+def _mars_requested_root(args: Sequence[str]) -> Path | None:
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token == "--root":
+            next_value = args[index + 1].strip() if index + 1 < len(args) else ""
+            if next_value:
+                return Path(next_value)
+            index += 2
+            continue
+        if token.startswith("--root="):
+            candidate = token.partition("=")[2].strip()
+            if candidate:
+                return Path(candidate)
+        index += 1
+    return None
+
+
+def _mars_subcommand(args: Sequence[str]) -> str | None:
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token == "--":
+            return None
+        if token == "--root":
+            index += 2
+            continue
+        if token.startswith("--root="):
+            index += 1
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        return token
+    return None
+
+
+def _inject_upgrade_hint_into_sync_json(
+    raw_stdout: str,
+    *,
+    count: int,
+    names: tuple[str, ...],
+) -> str:
+    stripped = raw_stdout.strip()
+    if not stripped:
+        return raw_stdout
+    try:
+        parsed = json.loads(stripped)
+    except (json.JSONDecodeError, ValueError):
+        return raw_stdout
+    if not isinstance(parsed, dict):
+        return raw_stdout
+    parsed["upgrade_hint"] = {"count": count, "names": list(names)}
+    rendered = json.dumps(parsed)
+    if raw_stdout.endswith("\n"):
+        rendered += "\n"
+    return rendered
+
+
+def _run_mars_passthrough(
+    args: Sequence[str],
+    *,
+    output_format: str | None = None,
+) -> None:
     executable = _resolve_mars_executable()
     if executable is None:
         print(
@@ -503,14 +568,59 @@ def _run_mars_passthrough(args: Sequence[str]) -> None:
             file=sys.stderr,
         )
         raise SystemExit(1)
+
+    mars_args = list(args)
+    subcommand = _mars_subcommand(mars_args)
+    is_sync = subcommand == "sync"
+    wants_json = _mars_requested_json(mars_args) or output_format == "json"
+    if is_sync and wants_json and not _mars_requested_json(mars_args):
+        mars_args = ["--json", *mars_args]
+
     try:
-        result = subprocess.run([executable, *args], check=False)
+        if is_sync and wants_json:
+            result = subprocess.run(
+                [executable, *mars_args],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        else:
+            result = subprocess.run([executable, *mars_args], check=False)
     except FileNotFoundError:
         print(
             "error: Failed to execute 'mars'. Install meridian with dependencies and retry.",
             file=sys.stderr,
         )
         raise SystemExit(1) from None
+
+    if not is_sync:
+        raise SystemExit(result.returncode)
+
+    root_override = _mars_requested_root(mars_args)
+    upgrades = None
+    if result.returncode in {0, 1}:
+        upgrades = check_upgrade_availability(root_override)
+
+    if wants_json:
+        json_result = cast("subprocess.CompletedProcess[str]", result)
+        stdout_text = json_result.stdout or ""
+        if upgrades is not None and upgrades.count > 0 and stdout_text.strip():
+            stdout_text = _inject_upgrade_hint_into_sync_json(
+                stdout_text,
+                count=upgrades.count,
+                names=upgrades.names,
+            )
+        if stdout_text:
+            sys.stdout.write(stdout_text)
+        stderr_text = json_result.stderr or ""
+        if stderr_text:
+            sys.stderr.write(stderr_text)
+
+    if not wants_json and upgrades is not None and upgrades.count > 0:
+        line1, line2 = format_upgrade_hint_lines(upgrades)
+        print(line1)
+        print(line2)
+
     raise SystemExit(result.returncode)
 
 
@@ -526,7 +636,7 @@ def mars(
 ) -> None:
     """Forward all arguments to the bundled mars CLI."""
 
-    _run_mars_passthrough(args)
+    _run_mars_passthrough(args, output_format=get_global_options().output.format)
 
 
 spawn_app = App(
@@ -1019,14 +1129,14 @@ def main(argv: Sequence[str] | None = None) -> None:
     configure_logging(json_mode=json_mode, verbosity=verbose_count)
 
     cleaned_args, options = _extract_global_options(args)
-    if cleaned_args and cleaned_args[0] == "mars":
-        _run_mars_passthrough(cleaned_args[1:])
-
     agent_mode = (
         agent_mode_enabled() and not options.force_human and not _interactive_terminal_attached()
     )
     if agent_mode and not options.output_explicit:
         options = options.model_copy(update={"output": OutputConfig(format="json")})
+
+    if cleaned_args and cleaned_args[0] == "mars":
+        _run_mars_passthrough(cleaned_args[1:], output_format=options.output.format)
 
     if agent_mode and (not cleaned_args or _is_root_help_request(cleaned_args)):
         _print_agent_root_help()
