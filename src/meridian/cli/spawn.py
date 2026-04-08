@@ -1,7 +1,9 @@
 """CLI command handlers for spawn.* operations."""
 
+import sys
 from collections.abc import Callable
 from functools import partial
+from pathlib import Path
 from typing import Annotated, Any, cast
 
 from cyclopts import App, Parameter
@@ -52,12 +54,74 @@ def _spawn_create_exit_code(result: SpawnActionOutput) -> int:
     return 1
 
 
+def _read_prompt_from_stdin(*, explicit_prompt_file_stdin: bool) -> str:
+    if sys.stdin.isatty():
+        if explicit_prompt_file_stdin:
+            raise ValueError("--prompt-file - requires stdin to be piped or redirected")
+        raise ValueError("prompt required: pass -p, --prompt-file, or pipe stdin")
+    try:
+        prompt_text = sys.stdin.read()
+    except UnicodeDecodeError as exc:
+        raise ValueError("prompt stdin is not valid UTF-8") from exc
+    if not prompt_text:
+        raise ValueError("prompt stdin is empty")
+    return prompt_text
+
+
+def _read_prompt_from_file(prompt_file: str) -> str:
+    if not prompt_file.strip():
+        raise ValueError("prompt file path is empty")
+    prompt_path = Path(prompt_file)
+    try:
+        prompt_text = prompt_path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise ValueError(f"prompt file not found: {prompt_file}") from exc
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"prompt file is not valid UTF-8: {prompt_file}") from exc
+    if not prompt_text:
+        raise ValueError(f"prompt file is empty: {prompt_file}")
+    return prompt_text
+
+
+def _resolve_spawn_prompt(
+    prompt: str | None,
+    prompt_file: str | None,
+    *,
+    has_files: bool,
+    is_continue: bool,
+) -> str:
+    if prompt is not None and prompt_file is not None:
+        raise ValueError("cannot specify both -p and --prompt-file")
+    if prompt is not None:
+        return prompt
+    if prompt_file is not None:
+        if prompt_file == "-":
+            return _read_prompt_from_stdin(explicit_prompt_file_stdin=True)
+        return _read_prompt_from_file(prompt_file)
+    if not sys.stdin.isatty():
+        return _read_prompt_from_stdin(explicit_prompt_file_stdin=False)
+    if has_files or is_continue:
+        return ""
+    raise ValueError("prompt required: pass -p, --prompt-file, or pipe stdin")
+
+
 def _spawn_create(
     emit: Any,
     prompt: Annotated[
-        str,
-        Parameter(name=["--prompt", "-p"], help="Prompt text for the spawn."),
-    ] = "",
+        str | None,
+        Parameter(name=["--prompt", "-p"], help="Prompt as a literal string."),
+    ] = None,
+    prompt_file: Annotated[
+        str | None,
+        Parameter(
+            name="--prompt-file",
+            help=(
+                "Read prompt from a file. Use '-' to read stdin. "
+                "If neither --prompt nor --prompt-file is set and stdin is piped, "
+                "stdin is used as the prompt."
+            ),
+        ),
+    ] = None,
     *passthrough: Annotated[
         str,
         Parameter(
@@ -203,6 +267,7 @@ def _spawn_create(
     ] = None,
 ) -> None:
     global_harness = get_global_options().harness
+    resolved_continue_from = (continue_from or "").strip() or None
 
     # Resolve --yolo / --approval interaction.
     if yolo and approval is not None:
@@ -211,8 +276,13 @@ def _spawn_create(
         )
     resolved_approval = approval if approval is not None else ("yolo" if yolo else None)
     parsed_skills = parse_csv_list(skills, field_name="skills")
-    resolved_continue_from = (continue_from or "").strip() or None
     resolved_fork_from = (fork_from or "").strip() or None
+    resolved_prompt = _resolve_spawn_prompt(
+        prompt,
+        prompt_file,
+        has_files=bool(references),
+        is_continue=resolved_continue_from is not None,
+    )
 
     if resolved_fork_from is not None and resolved_continue_from is not None:
         raise ValueError("Cannot combine --fork with --continue.")
@@ -238,7 +308,7 @@ def _spawn_create(
 
         result = spawn_create_sync(
             SpawnCreateInput(
-                prompt=prompt,
+                prompt=resolved_prompt,
                 model=requested_model or (resolved_reference.source_model or ""),
                 files=references,
                 template_vars=template_vars,
@@ -277,7 +347,7 @@ def _spawn_create(
         result = spawn_continue_sync(
             SpawnContinueInput(
                 spawn_id=resolved_continue_from,
-                prompt=prompt,
+                prompt=resolved_prompt,
                 model=model,
                 harness=global_harness,
                 agent=agent,
@@ -293,7 +363,7 @@ def _spawn_create(
     else:
         result = spawn_create_sync(
             SpawnCreateInput(
-                prompt=prompt,
+                prompt=resolved_prompt,
                 model=model,
                 files=references,
                 context_from=context_from,

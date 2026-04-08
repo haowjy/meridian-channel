@@ -46,6 +46,21 @@ You can combine both to override a profile's default model, but you usually shou
 meridian spawn -a reviewer -m sonnet -p "Quick review"
 ```
 
+Long inline prompts hit shell-quoting bugs faster than you'd expect. Backticks, dollar signs, unbalanced quotes, zsh history expansion, and heredoc edge cases can silently corrupt the prompt. For anything multi-paragraph or containing code, pipe from stdin (`cat prompt.md | meridian spawn ...`) or pass `--prompt-file`. Both avoid shell parsing entirely, so the prompt bytes are read exactly as written. Reserve inline `-p` for short literal prompts.
+
+Use the prompt input mode that matches prompt complexity:
+
+```bash
+# Short inline
+meridian spawn -a reviewer -p 'review the auth diff'
+
+# Stdin pipe (for long prompts assembled from files or scripts)
+cat $MERIDIAN_WORK_DIR/prompt.md | meridian spawn -a coder
+
+# Explicit file flag (for prompts that already exist on disk)
+meridian spawn -a coder --prompt-file $MERIDIAN_WORK_DIR/plan/phase-2.md
+```
+
 Pass reference files with `-f` so the spawned agent starts with the context it needs instead of exploring from scratch:
 
 ```bash
