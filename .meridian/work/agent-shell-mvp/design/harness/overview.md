@@ -29,7 +29,7 @@ a parallel abstraction.
 
 ```mermaid
 flowchart LR
-  Caller["meridian spawn create<br/>(--stream mode)"] --> Adapter
+  Caller["meridian spawn create<br/>(--ag-ui-stream mode)"] --> Adapter
   Inject["meridian spawn inject<br/>&lt;spawn_id&gt;"] --> Control["per-spawn control FIFO<br/>.meridian/spawns/&lt;id&gt;/control.fifo"]
   Control --> Adapter
 

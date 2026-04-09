@@ -36,8 +36,10 @@ frames flow back in via the same stream.
 
 Per-line frame families relevant to AG-UI translation:
 
-- `system` boot/handshake frames — translate to `RUN_STARTED` plus the
-  `CAPABILITY` event
+- `system` boot/handshake frames — translate to `RUN_STARTED`
+  (capabilities are reported out-of-band via `params.json` at launch
+  time, not as a wire event — see
+  [`mid-turn-steering.md`](mid-turn-steering.md))
 - `assistant` message frames with content blocks (`text`, `thinking`,
   `tool_use`) — translate to `TEXT_MESSAGE_*`, `THINKING_*`,
   `TOOL_CALL_*`
@@ -49,10 +51,10 @@ Per-line frame families relevant to AG-UI translation:
 
 | Claude wire | AG-UI event |
 |---|---|
-| `system` boot | `RUN_STARTED` + `CAPABILITY` |
+| `system` boot | `RUN_STARTED` |
 | `assistant` text content | `TEXT_MESSAGE_START` / `TEXT_MESSAGE_CONTENT` / `TEXT_MESSAGE_END` |
 | `assistant` thinking content | `THINKING_START` / `THINKING_TEXT_MESSAGE_CONTENT` |
-| `assistant` `tool_use` block | `TOOL_CALL_START` (with per-tool render config) + `TOOL_CALL_ARGS` |
+| `assistant` `tool_use` block | `TOOL_CALL_START` (`{toolName, toolCallId}` only) + `TOOL_CALL_ARGS` |
 | Tool start/finish boundary | `TOOL_CALL_END` |
 | `user` `tool_result` content | `TOOL_CALL_RESULT` + `TOOL_OUTPUT` |
 | `result` summary | `RUN_FINISHED` (with token usage) |
@@ -63,41 +65,50 @@ field, how streaming text deltas frame `TEXT_MESSAGE_CONTENT`, how
 lives in [`../events/harness-translation.md`](../events/harness-translation.md).
 
 Claude is the only tier-1 harness that exposes a structured reasoning
-stream today, so `capabilities.supports_structured_reasoning_stream =
-True`.
+stream today, so `capabilities.structured_reasoning_stream = true` in
+the `params.json` capability bundle.
 
-### Per-Tool Render Config
+### Tool Naming Coordination (No Per-Tool Wire Config)
 
-Claude's tool set is the standard Anthropic harness tool set plus
-whatever MCP tools are configured for the run. Default render config
-for the built-in tools matches what meridian-flow's reducer already
-expects. The canonical examples live in meridian-flow:
+**The wire format does not carry per-tool render config.** Per
+meridian-flow's [`frontend/component-architecture.md`](../../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/frontend/component-architecture.md),
+`ToolDisplayConfig` is a **frontend-resident** dictionary
+(`toolDisplayConfigs: Record<string, ToolDisplayConfig>`) keyed by
+`toolName`. The reducer looks up the config when it sees
+`TOOL_CALL_START` and applies whatever `inputCollapsed`,
+`stdoutCollapsed`, `stderrMode`, `producesResults`, optional `label`,
+and optional `icon` the registry provides.
 
-- [`meridian-flow/.meridian/work/biomedical-mvp/design/backend/bash-tool.md`](../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/backend/bash-tool.md)
-  — bash: input collapsed, stdout collapsed
-- [`meridian-flow/.meridian/work/biomedical-mvp/design/backend/python-tool.md`](../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/backend/python-tool.md)
-  — python: input collapsed, stdout **inline / visible**
+The Claude adapter's job on `TOOL_CALL_START` is therefore to emit the
+canonical Claude tool name on the `toolName` field, paired with a
+`toolCallId`. That's it. No per-tool config dict on the wire, no
+adapter-side render table, no in-Python lookup.
 
-For the Claude built-ins (and the matching MCP tool defaults), the
-adapter ships these render defaults on `TOOL_CALL_START`:
+What this requires from the Claude adapter is **naming
+coordination**: the tool names the adapter emits must match the keys
+the meridian-flow reducer expects. The current cloud reducer uses keys
+like `bash`, `python`, `Read`, etc. For each Claude built-in or MCP
+tool the local-deployment path will exercise, the adapter emits the
+same key the cloud path emits. If a Claude tool name and a
+meridian-flow registry key disagree, the local path falls back to the
+reducer's default render config — which is acceptable but visible.
 
-| Tool | Input | Output |
-|---|---|---|
-| `Bash` | collapsed | collapsed |
-| `Read` | collapsed | collapsed |
-| `Grep` | collapsed | collapsed |
-| `Glob` | collapsed | collapsed |
-| `Edit`, `Write`, `MultiEdit` | collapsed | collapsed |
-| `WebFetch`, `WebSearch` | collapsed | collapsed |
-| `Task` (sub-agent) | visible (one line) | collapsed |
-| MCP tool: `python` | collapsed | inline |
-| MCP tool: any other | collapsed | collapsed |
+**Coordination checklist** (one row per built-in to verify against the
+meridian-flow registry before V0 ships):
 
-These defaults are not invented here — they reproduce what
-meridian-flow's reducer already applies for the cloud path. The
-adapter's job is to attach the right config to the right
-`TOOL_CALL_START` event so the reducer does not have to special-case
-the local-deployment path.
+- `Bash` / `bash`
+- `Read`
+- `Grep`
+- `Glob`
+- `Edit`, `Write`, `MultiEdit`
+- `WebFetch`, `WebSearch`
+- `Task` (sub-agent)
+- MCP tool: `python`
+- MCP tools: any other configured tools
+
+Resolution discipline: when a name disagrees, **change the adapter's
+emitted name** to match the registry, do not push a new key into
+meridian-flow. The frontend registry is the source of truth (D36).
 
 ### Report / Session Compatibility
 
@@ -109,7 +120,8 @@ dogfood workflow depends on:
   `extract_report`).
 - `output.jsonl` — the existing raw JSONL capture path stays. AG-UI
   events are written to a **separate sink** (the spawn's stdout in
-  `--stream` mode, or a sibling artifact file in non-streaming mode).
+  `--ag-ui-stream` mode, or a sibling artifact file in non-streaming
+  mode).
 - `stderr.log` — unchanged. `ops/spawn/query.py` reads it for the
   running-spawn last-assistant snippet that drives `--from`.
 - Session id extraction — unchanged. `extract_session_id`,
@@ -162,14 +174,14 @@ Claude's stream-json, just framed differently:
 
 | Codex wire | AG-UI event |
 |---|---|
-| `initialized` | `RUN_STARTED` + `CAPABILITY` |
+| `initialized` | `RUN_STARTED` |
 | `item/agentMessage` (text deltas) | `TEXT_MESSAGE_START` / `_CONTENT` / `_END` |
 | `item/reasoning` (bulk) | `THINKING_START` + a single `THINKING_TEXT_MESSAGE_CONTENT` |
-| `item/commandExecution` start | `TOOL_CALL_START` (bash render config) + `TOOL_CALL_ARGS` |
+| `item/commandExecution` start | `TOOL_CALL_START` (`{toolName: "bash", toolCallId}`) + `TOOL_CALL_ARGS` |
 | `item/commandExecution` output stream | `TOOL_OUTPUT` (stream: stdout/stderr) |
 | `item/commandExecution` complete | `TOOL_CALL_END` + `TOOL_CALL_RESULT` |
-| `item/fileChange` lifecycle | `TOOL_CALL_START` (edit render config) + `TOOL_CALL_END` + `TOOL_CALL_RESULT` |
-| `item/webSearch`, `item/mcpToolCall` | `TOOL_CALL_*` + render defaults per tool family |
+| `item/fileChange` lifecycle | `TOOL_CALL_START` (`{toolName: "edit"}` or matching registry key) + `TOOL_CALL_END` + `TOOL_CALL_RESULT` |
+| `item/webSearch`, `item/mcpToolCall` | `TOOL_CALL_*` (canonical tool name only — no per-tool config on the wire) |
 | `item/contextCompaction` | (internal — no AG-UI event in V0; logged for diagnostics) |
 | `turn/completed` | `RUN_FINISHED` |
 
@@ -182,33 +194,44 @@ is the best available reference** for this translation — read it,
 reimplement in Python against our own AG-UI model, do not vendor.
 
 Known capability gaps from companion's reference adapter (per the
-findings doc) the V0 Codex adapter inherits and declares honestly:
+findings doc) the V0 Codex adapter inherits and declares honestly in
+the `params.json` capability bundle, using the canonical flat shape
+from [`abstraction.md`](abstraction.md):
 
-- `supports_structured_reasoning_stream = False` (companion handles
-  reasoning bulk-only; `item/reasoning/delta` is a follow-up)
-- `supports_runtime_model_switch = False` (Codex sets the model at
-  `thread/start` — runtime switching is not in the protocol)
-- `supports_cost_tracking` — declare honestly. Companion does not
-  surface per-token usage from `turn/completed` yet, but the field is
-  there in the protocol; V0 Codex adapter declares whatever the first
-  implementation actually wires up.
+- `structured_reasoning_stream: false` — companion handles reasoning
+  bulk-only; `item/reasoning/delta` streaming is a known follow-up.
+  V0 Codex adapter declares **false**.
+- `runtime_model_switch: false` — Codex sets the model at
+  `thread/start`; runtime switching is not in the protocol.
+- `cost_tracking: false` for V0 — declare honestly. Companion does
+  not surface per-token usage from `turn/completed` today, and the
+  V0 Codex adapter inherits that gap. Flip to `true` when an
+  implementation wires `turn/completed` token usage through to the
+  artifact contract.
 
-### Per-Tool Render Config
+### Tool Naming Coordination (No Per-Tool Wire Config)
 
-Codex's tool families map onto the same render-config buckets:
+Same rule as Claude: the wire format does not carry per-tool config
+(see [`frontend/component-architecture.md`](../../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/frontend/component-architecture.md)).
+The adapter's job is to translate each Codex item type into a
+canonical `toolName` that matches a key in meridian-flow's
+`toolDisplayConfigs` registry. The reducer applies the registry's
+config when it sees `TOOL_CALL_START`.
 
-| Codex item type | Render config |
-|---|---|
-| `commandExecution` (shell) | input collapsed, stdout collapsed |
-| `fileChange` | input collapsed, output collapsed |
-| `webSearch` | input collapsed, results collapsed |
-| `mcpToolCall` (python-style) | input collapsed, stdout inline |
-| `mcpToolCall` (other) | input collapsed, output collapsed |
+**Coordination checklist** (one row per Codex item type to verify
+against the meridian-flow registry before V0 ships):
 
-The render defaults are the same as the Claude built-in equivalents
-because the consumer (meridian-flow's reducer) is the same. The
-adapter's job is to attach the right per-tool config to each
-`TOOL_CALL_START` based on the Codex item type.
+- `item/commandExecution` (shell) → `bash`
+- `item/fileChange` → `edit` (or whatever the registry uses for
+  edit-style tools)
+- `item/webSearch` → `webSearch` (or `web_search`)
+- `item/mcpToolCall` (python-style) → `python`
+- `item/mcpToolCall` (other) → use the MCP-declared tool name
+  verbatim; the registry handles unknown tools with a default config
+
+When a name disagrees with the registry, change the adapter's emitted
+name, not the registry. The frontend registry is the source of
+truth (D36).
 
 ### Report / Session Compatibility
 
@@ -242,6 +265,18 @@ today:
   handles large lines and redaction; the AG-UI translator must not
   introduce a new line-size assumption.
 
+> **File size sprawl risk (deferred to implementation).** `codex.py`
+> is already ~511 lines before the refactor and gains AG-UI
+> translation plus FIFO control dispatch in this work item. Keep one
+> adapter entrypoint (`codex.py`) but if the file grows past ~800
+> LoC or accumulates more than three responsibilities (command
+> building + JSON-RPC framing + AG-UI translation + control
+> dispatch), split out small sibling helpers — `codex_translate.py`
+> for the wire→AG-UI mapping or `codex_rpc.py` for the JSON-RPC
+> envelope handling. Decide during the implementation pass once the
+> real shape is visible; do not preemptively fragment the module in
+> the design.
+
 ## OpenCode
 
 ### Wire Protocol Today
@@ -260,33 +295,32 @@ message endpoint. No interrupt, no queue, no stream-format negotiation.
 
 | OpenCode session event | AG-UI event |
 |---|---|
-| Session start | `RUN_STARTED` + `CAPABILITY` |
+| Session start | `RUN_STARTED` |
 | Assistant text delta | `TEXT_MESSAGE_START` / `_CONTENT` / `_END` |
-| Tool invocation start | `TOOL_CALL_START` (with per-tool render config) + `TOOL_CALL_ARGS` |
+| Tool invocation start | `TOOL_CALL_START` (`{toolName, toolCallId}` only) + `TOOL_CALL_ARGS` |
 | Tool invocation output | `TOOL_OUTPUT` |
 | Tool invocation complete | `TOOL_CALL_END` + `TOOL_CALL_RESULT` |
 | Session done | `RUN_FINISHED` |
 
 OpenCode's reasoning surface is harness-dependent on the underlying
-model; the adapter declares
-`supports_structured_reasoning_stream` based on what the wired model
-actually returns. Default `False` in V0.
+model; the adapter declares `structured_reasoning_stream` (in the
+`params.json` capability bundle) based on what the wired model
+actually returns. Default `false` in V0.
 
 Per-field mapping lives in
 [`../events/harness-translation.md`](../events/harness-translation.md).
 
-### Per-Tool Render Config
+### Tool Naming Coordination (No Per-Tool Wire Config)
 
-OpenCode's built-in tools cover the same surface as Claude's. Defaults
-match the Claude/Codex tables above:
-
-| Tool family | Input | Output |
-|---|---|---|
-| Shell / bash | collapsed | collapsed |
-| Read / search / glob | collapsed | collapsed |
-| Edit / write | collapsed | collapsed |
-| Python (MCP) | collapsed | inline |
-| Other MCP | collapsed | collapsed |
+Same rule as Claude and Codex: the wire format does not carry
+per-tool config. The OpenCode adapter emits canonical `toolName`s
+matching the meridian-flow registry; the reducer applies the
+config. The OpenCode tool families overlap heavily with Claude's
+built-ins (shell, read/search/glob, edit/write, MCP `python`, other
+MCP), so the coordination checklist is the same shape as Claude's:
+verify each emitted name against the registry before V0 ships, and
+when in doubt, change the adapter's emitted name to match the
+registry rather than pushing a new key into meridian-flow.
 
 ### Report / Session Compatibility
 
@@ -338,7 +372,7 @@ when the two pull in different directions.
 ## Read Next
 
 - [`mid-turn-steering.md`](mid-turn-steering.md) — the per-harness
-  injection mechanics and the stdin control protocol in detail.
+  injection mechanics and the FIFO control protocol in detail.
 - [`../events/harness-translation.md`](../events/harness-translation.md)
   — the per-field mapping tables this doc references.
 - [`../refactor-touchpoints.md`](../refactor-touchpoints.md) — the

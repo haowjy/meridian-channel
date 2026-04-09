@@ -20,21 +20,29 @@ same order; only the source events differ.
 | # | Event | Emitted by adapter when … |
 |---|---|---|
 | 1 | `RUN_STARTED` | Adapter has launched the harness subprocess and the harness has acknowledged readiness (Claude: `system` init line; Codex: `initialize` response; OpenCode: session create response) |
-| 2 | `CAPABILITY` | Immediately after `RUN_STARTED`, declaring per-harness capabilities (notably `mid_turn_injection: queue \| interrupt_restart \| http_post \| none`). See "Capability Event Placement" below |
-| 3 | `STEP_STARTED` | A new turn begins inside the run (initial prompt acknowledged, or a mid-turn injection causes a new turn boundary) |
-| 4 | `THINKING_START` / `THINKING_TEXT_MESSAGE_CONTENT` | Harness emits agent reasoning (Claude `thinking` blocks; Codex `item/reasoning/*`; OpenCode reasoning events). Skipped if the harness does not surface reasoning for this turn |
-| 5 | `TEXT_MESSAGE_START` / `TEXT_MESSAGE_CONTENT` / `TEXT_MESSAGE_END` | Harness streams assistant text deltas. `START` on the first delta of a contiguous text block, `CONTENT` per delta, `END` when the block closes |
-| 6 | `TOOL_CALL_START` | Harness emits a `tool_use` content block. Payload includes `toolName`, `toolCallId`, and the per-tool render config (see "Per-Tool Behavior Config Attachment" below) |
-| 7 | `TOOL_CALL_ARGS` | Streaming JSON deltas of the tool input arguments — emitted as the harness streams them, not buffered |
-| 8 | `TOOL_CALL_END` | Tool input is complete and the harness is about to invoke the tool |
-| 9 | `TOOL_OUTPUT` `{stream: stdout \| stderr}` | Streaming tool execution output. Per-tool config decides if it renders inline, collapsed, or hidden-popup |
-| 10 | `TOOL_CALL_RESULT` | Tool completed; payload includes exit code and structured result summary |
-| 11 | `DISPLAY_RESULT` `{resultType}` | Structured tool result (text, markdown, image, table, mesh_ref, etc.). Emitted only when the tool surfaces rich content for inline rendering |
-| 12 | `RUN_FINISHED` | Adapter has observed the harness's terminal signal (Claude `result` line; Codex `turn/completed`; OpenCode session completion event) |
+| 2 | `STEP_STARTED` | A new turn begins inside the run (initial prompt acknowledged, or a mid-turn injection causes a new turn boundary) |
+| 3 | `THINKING_START` / `THINKING_TEXT_MESSAGE_CONTENT` | Harness emits agent reasoning (Claude `thinking` blocks; Codex `item/reasoning/*`; OpenCode reasoning events). Skipped if the harness does not surface reasoning for this turn |
+| 4 | `TEXT_MESSAGE_START` / `TEXT_MESSAGE_CONTENT` / `TEXT_MESSAGE_END` | Harness streams assistant text deltas. `START` on the first delta of a contiguous text block, `CONTENT` per delta, `END` when the block closes |
+| 5 | `TOOL_CALL_START` | Harness emits a `tool_use` content block. Payload includes only `toolName` and `toolCallId` — render config is frontend-resident in meridian-flow's `toolDisplayConfigs` registry, looked up by toolName (see "Tool Naming, Not Wire Config" below) |
+| 6 | `TOOL_CALL_ARGS` | Streaming JSON deltas of the tool input arguments — emitted as the harness streams them, not buffered |
+| 7 | `TOOL_CALL_END` | Tool input is complete and the harness is about to invoke the tool |
+| 8 | `TOOL_OUTPUT` `{stream: stdout \| stderr}` | Streaming tool execution output. The reducer decides how to render based on the registry config for `toolName` |
+| 9 | `TOOL_CALL_RESULT` | Tool completed; payload includes exit code and structured result summary |
+| 10 | `DISPLAY_RESULT` `{resultType}` | Structured tool result (text, markdown, image, table, mesh_ref, etc.). Emitted only when the tool surfaces rich content for inline rendering |
+| 11 | `RUN_FINISHED` | Adapter has observed the harness's terminal signal (Claude `result` line; Codex `turn/completed`; OpenCode session completion event) |
 
-Steps 4–11 repeat as the agent thinks, writes text, and calls tools. Steps
-3–11 repeat when a new turn boundary occurs (initial turn, mid-turn injection,
+Steps 3–10 repeat as the agent thinks, writes text, and calls tools. Steps
+2–10 repeat when a new turn boundary occurs (initial turn, mid-turn injection,
 or harness-driven step).
+
+> **No on-wire `CAPABILITY` event.** meridian-flow owns the AG-UI event
+> taxonomy (D36); meridian-channel cannot mint new event types. Per-harness
+> capability data (`mid_turn_injection`, `runtime_model_switch`,
+> `runtime_permission_switch`, `structured_reasoning_stream`,
+> `cost_tracking`) is reported out-of-band via the per-spawn `params.json`
+> artifact at launch time. Consumers read it once at spawn-attach time.
+> See [`../harness/mid-turn-steering.md`](../harness/mid-turn-steering.md)
+> §"Capability Reporting Via `params.json`".
 
 ## Per-Event Origin (Brief)
 
@@ -45,7 +53,6 @@ the *terse* version — the full mapping table lives in
 | AG-UI event | Claude Code source | Codex source | OpenCode source |
 |---|---|---|---|
 | `RUN_STARTED` | `system` init line on stdout | `initialize` JSON-RPC response | session create response |
-| `CAPABILITY` | adapter-emitted constant | adapter-emitted constant | adapter-emitted constant |
 | `STEP_STARTED` | first `assistant` event after a user turn | `turn/start` notification | `session.turn.started` SSE event |
 | `THINKING_*` | `assistant.content[].type == "thinking"` deltas | `item/reasoning/*` notifications | reasoning event family |
 | `TEXT_MESSAGE_*` | `assistant.content[].type == "text"` deltas | `item/agentMessage/*` notifications | `message.delta` SSE events |
@@ -64,9 +71,9 @@ table per harness.
 
 User asks "What time is it?", agent answers with text only. This is the
 minimal happy-path trace, shown as the **initial turn of a new streaming
-spawn** — the prompt arrives via `meridian spawn --stream -p "..."`, not
-via stdin. (The mid-turn injection variant is sketched at the end of
-"Stdin Control Frames and Turn Boundaries" below.)
+spawn** — the prompt arrives via `meridian spawn create --ag-ui-stream -p "..."`,
+not via the FIFO. (The mid-turn injection variant is sketched at the end
+of "FIFO Control Frames and Turn Boundaries" below.)
 
 ```mermaid
 sequenceDiagram
@@ -77,11 +84,11 @@ sequenceDiagram
     participant LLM as LLM
 
     U->>FE: "What time is it?"
-    FE->>MC: "spawn --stream -p ... (initial prompt via CLI)"
+    FE->>MC: "spawn create --ag-ui-stream -p ... (initial prompt via CLI)"
+    Note over FE,MC: "FE reads capabilities from params.json once at attach"
     MC->>H: launch harness subprocess
     H-->>MC: ready (init / handshake)
     MC-->>FE: RUN_STARTED
-    MC-->>FE: "CAPABILITY {mid_turn_injection}"
     MC-->>FE: STEP_STARTED
 
     MC->>H: deliver initial prompt
@@ -105,11 +112,11 @@ applies the "text never collapsed" default per
 ## Example Trace 2: Tool-Call Turn With Inline Output
 
 User asks the Claude Code adapter to "show me the running processes". The
-agent calls the `Bash` tool with `ps aux | head`. The adapter emits the bash
-tool config (`input: collapsed, stdout: collapsed`) on `TOOL_CALL_START`, so
-the row renders collapsed by default — the user sees a one-line summary
-unless they expand it. Shown again as the initial turn of a new streaming
-spawn.
+agent calls the `Bash` tool with `ps aux | head`. The wire payload on
+`TOOL_CALL_START` is just `{toolName: "bash", toolCallId}` — the
+meridian-flow reducer looks up `toolDisplayConfigs["bash"]` and applies
+`inputCollapsed: true, stdoutCollapsed: true`, so the row renders
+collapsed by default. Shown as the initial turn of a new streaming spawn.
 
 ```mermaid
 sequenceDiagram
@@ -120,11 +127,11 @@ sequenceDiagram
     participant LLM as LLM
 
     U->>FE: "show me running processes"
-    FE->>MC: "spawn --stream -p ..."
+    FE->>MC: "spawn create --ag-ui-stream -p ..."
+    Note over FE,MC: "FE reads capabilities from params.json once"
     MC->>H: launch harness subprocess
     H-->>MC: ready
     MC-->>FE: RUN_STARTED
-    MC-->>FE: "CAPABILITY {mid_turn_injection: queue}"
     MC-->>FE: STEP_STARTED
 
     MC->>H: deliver initial prompt
@@ -135,7 +142,7 @@ sequenceDiagram
 
     LLM-->>H: "tool_use Bash: ps aux | head"
     H-->>MC: "stream-json tool_use block"
-    MC-->>FE: "TOOL_CALL_START {Bash,<br/>config: input=collapsed, stdout=collapsed}"
+    MC-->>FE: "TOOL_CALL_START {toolName: bash, toolCallId}"
     MC-->>FE: "TOOL_CALL_ARGS (json deltas)"
     MC-->>FE: TOOL_CALL_END
 
@@ -161,82 +168,85 @@ followed by a collapsed `ToolItem` (Bash) showing only the header
 processes"). The user can expand the bash row to see input + stdout.
 
 **Compare to a Python tool turn**: if the same trace ran the Python tool
-instead, `TOOL_CALL_START` would carry `config: stdout=visible` per
-meridian-flow's [`python-tool.md`](../../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/backend/python-tool.md),
-and stdout would render inline beneath the tool row by default. The reducer
-logic doesn't change — only the per-tool config attached to the event does.
-A `show_mesh()` call in the Python code would also produce
+instead, `TOOL_CALL_START` would carry `{toolName: "python", toolCallId}`
+and the reducer would look up `toolDisplayConfigs["python"]` per
+meridian-flow's [`python-tool.md`](../../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/backend/python-tool.md)
+(which defines `inputCollapsed: true, stdoutCollapsed: false` — stdout
+renders inline). The wire payload is identical in shape; only the
+`toolName` value changes, and the registry decides the render. A
+`show_mesh()` call in the Python code would also produce
 `DISPLAY_RESULT {resultType: mesh_ref}` events that render as inline mesh
 cards, exactly as Step 10 of meridian-flow's streaming walkthrough describes.
 
-## Per-Tool Behavior Config Attachment
+## Tool Naming, Not Wire Config
 
-The frontend reducer must not have to special-case tool names. Instead, each
-`TOOL_CALL_START` event carries a render config object describing how the
-input, stdout, and stderr should be presented:
+The wire format does **not** carry per-tool render config. Per
+meridian-flow's
+[`frontend/component-architecture.md`](../../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/frontend/component-architecture.md),
+`ToolDisplayConfig` (`inputCollapsed`, `stdoutCollapsed`, `stderrMode`,
+`producesResults`, optional `label`, optional `icon`) is **frontend-resident**
+in a `toolDisplayConfigs: Record<string, ToolDisplayConfig>` dictionary
+keyed by `toolName`. The reducer looks up the config when it sees
+`TOOL_CALL_START` and applies whatever the registry provides.
+
+The on-wire `TOOL_CALL_START` payload is therefore just:
 
 ```jsonc
-// TOOL_CALL_START payload (subset)
+// TOOL_CALL_START payload
 {
   "type": "TOOL_CALL_START",
   "toolCallId": "tc_01J...",
-  "toolName": "Bash",
-  "config": {
-    "input": "collapsed",       // visible | collapsed
-    "stdout": "collapsed",      // visible | collapsed | inline
-    "stderr": "hidden-popup"    // visible | collapsed | hidden-popup
-  }
+  "toolName": "bash"
 }
 ```
 
-The exact field names and value enums are owned by meridian-flow's
-[`frontend/component-architecture.md`](../../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/frontend/component-architecture.md)
-(`ToolDisplayConfig` type) and the canonical examples in
-[`backend/python-tool.md`](../../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/backend/python-tool.md)
-and [`backend/bash-tool.md`](../../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/backend/bash-tool.md).
-meridian-channel's adapters reuse those values verbatim — no new vocabulary.
+**Each adapter owns its harness's tool-name translation.** Claude Code's
+adapter knows that `Bash`/`bash`/etc. should map to a canonical tool name
+matching meridian-flow's registry. Codex's adapter knows that
+`item/commandExecution` maps to `bash`. OpenCode's adapter knows its tool
+set. The coordination requirement is that the names emitted on the wire
+match the keys in `toolDisplayConfigs` — not that meridian-channel ships
+its own per-tool config dictionary.
 
-**Each adapter owns its harness's tool-config dictionary.** Claude Code's
-adapter knows about `Bash`, `Read`, `Write`, `Edit`, `Grep`, `Glob`, `Task`,
-`WebFetch`, `WebSearch`, etc., and what render defaults each takes. Codex's
-adapter knows its tool set. OpenCode's adapter knows its tool set. The shared
-table lives in `harness/ag_ui_events.py` so the three adapters can't drift on
-the config shape, but each adapter owns the rows for its harness's tools.
-Per-harness tables are listed in
-[harness-translation.md](harness-translation.md).
+When a harness adds a new tool, the adapter emits a sensible canonical
+tool name and meridian-flow's registry decides the render. If the registry
+has no entry for that tool name, the reducer uses its default config.
+Per-harness coordination tables (one per adapter) live in
+[`../harness/adapters.md`](../harness/adapters.md), with the full
+translation map in [harness-translation.md](harness-translation.md).
 
-When a harness adds a new tool, the only update needed is one row in the
-adapter's config dict — the reducer requires no change because it always
-reads the config off the event payload.
+## Capability Reporting Is Out-Of-Band
 
-## Capability Event Placement
+There is no on-wire `CAPABILITY` event. meridian-flow owns the AG-UI
+taxonomy (D36); meridian-channel cannot mint new event types unilaterally.
 
-The adapter emits `CAPABILITY` **immediately after** `RUN_STARTED`, before
-the first `STEP_STARTED`. This gives the consumer the per-harness mid-turn
-injection semantic before the user can submit a mid-turn message:
+Per-harness capability data lives in the per-spawn `params.json` artifact:
 
 ```jsonc
+// .meridian/spawns/<spawn_id>/params.json (capabilities subtree)
 {
-  "type": "CAPABILITY",
-  "mid_turn_injection": "queue",          // queue | interrupt_restart | http_post | none
-  "runtime_model_switch": false,
-  "runtime_permission_switch": false,
-  "structured_reasoning_stream": true,
-  "cost_tracking": true
+  "capabilities": {
+    "mid_turn_injection": "queue",          // queue | interrupt_restart | http_post | none
+    "runtime_model_switch": false,
+    "runtime_permission_switch": false,
+    "structured_reasoning_stream": true,
+    "cost_tracking": true,
+    "control_protocol_version": "0.1"
+  }
 }
 ```
 
 The semantic enum is the one from
 [`findings-harness-protocols.md` §1](../../findings-harness-protocols.md).
-The consumer renders the right affordance: a Claude consumer shows
-"queued for next turn" feedback; a Codex consumer shows "this will interrupt
-the current turn"; an OpenCode consumer shows the standard send button.
-**Per [D37](../../decisions.md), adapters do not lie about wire-level
-behavior to fake uniformity.**
+The consumer reads `params.json` once at spawn-attach time and renders the
+right affordance: a Claude consumer shows "queued for next turn" feedback;
+a Codex consumer shows "this will interrupt the current turn"; an OpenCode
+consumer shows the standard send button. **Per [D37](../../decisions.md),
+adapters do not lie about wire-level behavior to fake uniformity.**
 
-The full per-harness semantics (and the stdin control frame format that
+The full per-harness semantics (and the FIFO control frame format that
 drives them) live in [`../harness/mid-turn-steering.md`](../harness/mid-turn-steering.md).
-This doc just notes the placement and the on-wire shape.
+This doc just notes that capability data is out-of-band, not on the wire.
 
 ## Lifecycle Integration With Existing Artifacts
 
@@ -275,11 +285,14 @@ contract, and vice versa. This is the central preservation rule of the
 refactor — see [D33](../../decisions.md) and
 [`../refactor-touchpoints.md`](../refactor-touchpoints.md).
 
-## Stdin Control Frames and Turn Boundaries
+## FIFO Control Frames and Turn Boundaries
 
-The streaming spawn's stdin is a JSONL control channel
-(see [D37](../../decisions.md)). Control frames affect the AG-UI event
-stream as follows:
+The streaming spawn's control channel is the per-spawn FIFO at
+`.meridian/spawns/<spawn_id>/control.fifo` (see [D37](../../decisions.md)
+and [`../harness/mid-turn-steering.md`](../harness/mid-turn-steering.md)).
+The FIFO is the **single authoritative control ingress**; the streaming
+spawn does not also read its own stdin as a control channel. Control
+frames affect the AG-UI event stream as follows:
 
 - **`{"type": "user_message", "text": "..."}`** — mid-turn user input. The
   adapter delivers it via its harness's mid-turn semantic. The on-wire
@@ -291,13 +304,17 @@ stream as follows:
   - **OpenCode (http_post)**: the POST is acknowledged asynchronously; the
     next `STEP_STARTED` arrives when OpenCode begins the new turn.
 - **`{"type": "interrupt"}`** — stop the current turn but keep the spawn
-  alive. Adapter signals the harness; the in-flight turn ends with a
-  `RUN_FINISHED`-equivalent step boundary, and the spawn waits for the next
-  control frame.
+  alive. If the adapter has a clean interrupt primitive (Codex
+  `turn/interrupt`, OpenCode session-cancel where supported), it signals
+  the harness and the in-flight turn ends with a `RUN_FINISHED`-equivalent
+  step boundary. If not (Claude in queue mode), the adapter writes a
+  `rejected` entry to `control.log` and the in-flight turn keeps running.
 - **`{"type": "cancel"}`** — terminate the spawn entirely. Adapter tears down
   the harness subprocess (SIGTERM with timeout, then SIGKILL); the AG-UI
   stream ends with `RUN_FINISHED`.
 
+Adapter-side outcomes (delivered, rejected, errored) are recorded in the
+per-spawn `control.log` JSONL artifact, **not** as on-wire AG-UI events.
 This doc deliberately does **not** cover the per-harness wire-level details
 of how the adapter delivers each control frame — that lives in
 [`../harness/mid-turn-steering.md`](../harness/mid-turn-steering.md). The
@@ -305,4 +322,4 @@ events doc only describes the *AG-UI event consequences* of each control
 frame so consumers know what to render. For the full semantics — how
 ordering between rapid `user_message` and `interrupt` resolves on each
 harness, what happens when injection is impossible mid-tool-execution, and
-how the adapter buffers vs drops — read the harness doc.
+how the adapter records outcomes in `control.log` — read the harness doc.

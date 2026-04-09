@@ -49,19 +49,25 @@ adapter** as a parallel output channel: the adapter consumes its own
 harness's wire format (Claude stream-json NDJSON, Codex JSON-RPC over
 stdio, OpenCode session events) and produces a normalized AG-UI event
 stream that matches what meridian-flow's frontend reducer already
-expects. Per-tool render config (collapsed by default for `bash`,
-inline for `python` stdout, etc.) rides on `TOOL_CALL_START` events.
-The existing `report.md` and `output.jsonl` artifacts stay intact —
-AG-UI is additive, not a replacement.
+expects. Per-tool render config — `inputCollapsed`, `stdoutCollapsed`,
+`stderrMode`, `producesResults` — is **frontend-resident** in
+meridian-flow's `toolDisplayConfigs` registry; the wire only carries
+`{toolName, toolCallId}` on `TOOL_CALL_START` and the reducer looks up
+the config by tool name. The existing `report.md` and `output.jsonl`
+artifacts stay intact — AG-UI is additive, not a replacement.
 
-### 2. Streaming spawn mode + stdin control protocol (D37)
+### 2. Streaming spawn mode + FIFO control protocol (D37)
 
 A new invocation shape on `meridian spawn create` (working name
-`--stream`) where stdout is a JSONL stream of AG-UI events and stdin
-is a JSONL **control channel** carrying `user_message`, `interrupt`,
-and `cancel` frames. The streaming spawn process runs until the agent
-finishes naturally, stdin closes, or a `cancel` frame arrives. The
-existing per-spawn artifact directory (`.meridian/spawns/<id>/`),
+`--ag-ui-stream` to avoid colliding with the existing hidden `--stream`
+debug flag at `cli/spawn.py:211`) where stdout is a JSONL stream of
+AG-UI events. The control channel is a **per-spawn FIFO** at
+`.meridian/spawns/<id>/control.fifo`, carrying JSONL `user_message`,
+`interrupt`, and `cancel` frames. The FIFO is the **single
+authoritative control ingress** — the streaming spawn does not also
+read its own stdin as a control channel. The streaming spawn process
+runs until the agent finishes naturally or a `cancel` frame arrives.
+The existing per-spawn artifact directory (`.meridian/spawns/<id>/`),
 the current report-extraction pipeline, and `meridian spawn show /
 log / wait / files / stats` keep working unchanged — streaming is a
 parallel invocation shape, not a replacement for the foreground or
@@ -112,7 +118,7 @@ The three highest-risk touchpoints, all in the harness layer, are:
 - `src/meridian/lib/harness/codex.py`
 - `src/meridian/lib/harness/opencode.py`
 
-All three must gain AG-UI event emission and a stdin control surface
+All three must gain AG-UI event emission and a FIFO control dispatcher
 **without** regressing the existing artifact contracts (`report.md`,
 `output.jsonl`, `stderr.log`, session-id extraction, `--from`, `--fork`,
 reaper liveness). The risk profile is the inverse of the visible work:
@@ -141,7 +147,7 @@ the overview:
 | [`harness/overview.md`](harness/overview.md) | One-page orientation to the harness layer after the refactor |
 | [`harness/abstraction.md`](harness/abstraction.md) | Adapter interface — new methods, new DTOs, capability semantics, what stays unchanged |
 | [`harness/adapters.md`](harness/adapters.md) | Per-harness translation rules (Claude, Codex, OpenCode), per-tool render config, regression risks |
-| [`harness/mid-turn-steering.md`](harness/mid-turn-steering.md) | Stdin control protocol, control frame model, per-harness injection mechanics, `meridian spawn inject` CLI |
+| [`harness/mid-turn-steering.md`](harness/mid-turn-steering.md) | FIFO control protocol, control frame model, per-harness injection mechanics, `meridian spawn inject` CLI |
 | [`events/overview.md`](events/overview.md) | What the AG-UI event taxonomy is and where its canonical definition lives |
 | [`events/flow.md`](events/flow.md) | The AG-UI event sequence inside a streaming spawn lifecycle |
 | [`events/harness-translation.md`](events/harness-translation.md) | Harness wire format → AG-UI event mapping tables (one section per harness) |
@@ -155,7 +161,7 @@ following decisions in [`../decisions.md`](../decisions.md):
 - **D34** — agent-shell-mvp is meridian-channel's GUI, not a new product
 - **D35** — meridian-channel stays Python, no Go rewrite
 - **D36** — AG-UI event taxonomy is the canonical output schema
-- **D37** — Streaming spawn mode + stdin control protocol
+- **D37** — Streaming spawn mode + FIFO control protocol
 - **D38** — Scope collapse of agent-shell-mvp design tree
 - **D39** — Workstream split across repositories
 - **D40** — No `providers/claude-code/` in meridian-llm-go

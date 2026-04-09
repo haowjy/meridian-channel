@@ -19,14 +19,21 @@ The refactor adds three orthogonal responsibilities:
    wire format into the canonical AG-UI event taxonomy and push events
    onto the spawn's stdout AG-UI channel **as they happen**, not after
    the run completes.
-2. **Accept stdin control frames** — read normalized control frames
-   (`user_message`, `interrupt`, `cancel`) from a per-spawn control
-   surface and dispatch them through the harness-native injection
-   mechanic.
+2. **Accept FIFO control frames** — read normalized control frames
+   (`user_message`, `interrupt`, `cancel`) from the per-spawn control
+   FIFO and dispatch them through the harness-native injection
+   mechanic. The FIFO is the **single authoritative control ingress**;
+   the streaming spawn does not multiplex stdin as a control channel
+   (see [`mid-turn-steering.md`](mid-turn-steering.md) for the
+   ownership story).
 3. **Report capabilities honestly** — extend `HarnessCapabilities` so
    the consumer (CLI, frontend, dev-workflow orchestrator) can render
    the right affordance for what this harness can actually do
-   mid-turn.
+   mid-turn. Capabilities are reported **out-of-band via `params.json`**
+   at spawn-launch time, not as an on-wire AG-UI event — meridian-flow
+   owns the AG-UI taxonomy and meridian-channel does not unilaterally
+   add events to it (see "Capability reporting via `params.json`"
+   below).
 
 These three responsibilities sit alongside the existing ones, not on
 top of them. The existing artifact contracts (`report.md`,
@@ -68,26 +75,38 @@ src/meridian/lib/harness/ag_ui_events.py
 
 `ag_ui_events.py` owns:
 
-- The AG-UI event Pydantic models (one per event type — `RUN_STARTED`,
-  `STEP_STARTED`, `THINKING_*`, `TEXT_MESSAGE_*`, `TOOL_CALL_*`,
-  `TOOL_OUTPUT`, `TOOL_CALL_RESULT`, `DISPLAY_RESULT`, `RUN_FINISHED`,
-  plus the meridian-channel-specific `CAPABILITY` and `CONTROL_ERROR`
-  events introduced in [`mid-turn-steering.md`](mid-turn-steering.md)).
+- The AG-UI event Pydantic models — one per event type from
+  meridian-flow's canonical taxonomy: `RUN_STARTED`, `STEP_STARTED`,
+  `THINKING_*`, `TEXT_MESSAGE_*`, `TOOL_CALL_*`, `TOOL_OUTPUT`,
+  `TOOL_CALL_RESULT`, `DISPLAY_RESULT`, `RUN_FINISHED`. **No
+  meridian-channel-only events.** Capability discovery happens
+  out-of-band via `params.json`; control errors and acks are written
+  to `control.log` and surfaced through CLI exit codes (see
+  [`mid-turn-steering.md`](mid-turn-steering.md)). meridian-channel
+  cannot mint new event types in the AG-UI vocabulary because
+  meridian-flow owns the schema (D36).
 - A small `AgUiEmitter` interface that adapters call into:
   `emit(event: AgUiEvent)`. The concrete emitter writes JSONL to the
-  spawn's AG-UI sink (stdout in `--stream` mode, a per-spawn artifact
-  file in non-streaming mode for replay).
-- The **per-tool behavior config model** — a typed structure that
-  attaches render defaults (input collapsed/visible, stdout
-  visible/collapsed/inline) to a `TOOL_CALL_START` event. The set of
-  fields matches what meridian-flow's frontend reducer already
-  consumes — see [`adapters.md`](adapters.md) for the per-harness
-  defaults and the meridian-flow tool docs for the canonical field
-  list.
+  spawn's AG-UI sink (stdout in `--ag-ui-stream` mode, a per-spawn
+  artifact file in non-streaming mode for replay).
+- **No per-tool render config model.** Per-tool render config is
+  frontend-resident in meridian-flow's `toolDisplayConfigs` dictionary
+  (see [`adapters.md`](adapters.md)); meridian-channel's wire format
+  carries only `{toolName, toolCallId}` on `TOOL_CALL_START` and the
+  reducer looks up the config by tool name. The adapters do not ship a
+  per-tool config table.
+
+> **Sprawl risk note (deferred to implementation).** If `ag_ui_events.py`
+> grows past ~300 LoC or accumulates more than three responsibilities
+> (types, emitter wiring, display-result synthesis helpers), split it
+> into `ag_ui_types.py` (Pydantic models only) plus
+> `ag_ui_emitter.py` (sink + serialization). Keep the design as one
+> module for now — revisit during the implementation pass once the real
+> shape is visible.
 
 > **Reference, do not duplicate.** `ag_ui_events.py` defines a Python
 > type model that **mirrors** the AG-UI taxonomy from
-> [`meridian-flow/.meridian/work/biomedical-mvp/design/streaming-walkthrough.md`](../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/streaming-walkthrough.md).
+> [`meridian-flow/.meridian/work/biomedical-mvp/design/streaming-walkthrough.md`](../../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/streaming-walkthrough.md).
 > When that taxonomy gains a field, the Python model gains a field. The
 > taxonomy itself is **not** redefined here.
 
@@ -105,25 +124,34 @@ async def stream_ag_ui_events(
     self,
     *,
     raw_lines: AsyncIterator[str],   # already framed by stream_capture
-    emitter: AgUiEmitter,
     spawn_id: SpawnId,
-) -> SpawnResult:
+) -> AsyncIterator[AgUiEvent]:
     """Translate harness wire frames into AG-UI events.
+
+    Yields AG-UI events as the harness produces them. The runner
+    (`launch/runner.py`) consumes the iterator and forwards events to
+    the configured sink (stdout JSONL in `--ag-ui-stream` mode, a
+    sibling artifact file otherwise). Lifecycle / finalization /
+    `SpawnResult` derivation stays where it is today — this method does
+    not own those concerns.
 
     Adapters override; the base class is a no-op for backward compat.
     """
 ```
 
-The exact signature is a planning concern; the architectural commitment
-is "translation runs **inside the adapter**, against an emitter the
-harness layer hands in." The `launch/stream_capture.py` bridge already
-has a generic event-observer callback hook (per the touchpoints map);
-that hook is where the per-line stream is teed into the adapter's
-translator.
+The architectural commitment is "translation runs **inside the
+adapter**, returning an async iterator of typed events. The runner owns
+sink wiring and finalization; the adapter owns translation only." This
+keeps `stream_ag_ui_events` a pure raw-wire → AG-UI events boundary and
+preserves the existing `launch/runner.py` ownership of `SpawnResult`,
+`report.md`, exit codes, and the artifact contract. The
+`launch/stream_capture.py` bridge already has a generic event-observer
+callback hook (per the touchpoints map); that hook is where the
+per-line stream is teed into the adapter's translator.
 
-### Stdin control surface
+### FIFO control surface
 
-The control frame model + reader live in a second new sibling module:
+The control frame model lives in a second new sibling module:
 
 ```
 src/meridian/lib/harness/control_channel.py
@@ -135,14 +163,24 @@ src/meridian/lib/harness/control_channel.py
   (`UserMessageFrame`, `InterruptFrame`, `CancelFrame`). Field shapes
   and the `version` field are pinned in
   [`mid-turn-steering.md`](mid-turn-steering.md).
-- A `ControlChannelReader` that reads JSONL frames from a file-like
-  source (the per-spawn control FIFO described in
-  `mid-turn-steering.md`), validates them, and yields typed frames.
+- A `ControlFrameParser` that validates a JSONL line and yields a
+  typed frame, raising on schema violations.
 - A `ControlDispatcher` interface adapters implement: a single
   `dispatch(frame: ControlFrame) -> None` (or async equivalent) that
-  the harness reader calls when a new frame arrives. The dispatcher
-  owns the harness-native translation: stream-json frame for Claude,
-  `turn/interrupt` + `turn/start` for Codex, HTTP POST for OpenCode.
+  is called when a new frame arrives. The dispatcher owns the
+  harness-native translation: stream-json frame written to the
+  **harness's** stdin for Claude, `turn/interrupt` + `turn/start` for
+  Codex, HTTP POST for OpenCode.
+
+The **FIFO reader** (the actual `os.open(fifo_path, O_NONBLOCK |
+O_RDONLY)` plumbing and the read loop that yields raw lines) lives in
+the launch layer, alongside the existing subprocess plumbing — see
+`lib/launch/control_fifo.py` (new) or as an extension to the streaming
+launch branch in `lib/launch/process.py`. **Position**: FIFO opening
+and tailing is launch-process plumbing, not adapter concern;
+`harness/control_channel.py` stays pure types + parser. This mirrors
+the outbound side, where `lib/launch/stream_capture.py` is the
+plumbing bridge while the AG-UI types live in `harness/ag_ui_events.py`.
 
 The shared piece is the **frame format and validation** — the same
 JSONL shape on the wire, the same parser, the same version field. The
@@ -155,13 +193,18 @@ be shared.
 ### Capability surface
 
 `HarnessCapabilities` (in `adapter.py` today) gains a small set of
-honesty fields:
+honesty fields. **The new fields use a flat shape with no `supports_`
+prefix**, because they describe semantic capabilities, not boolean
+gates. The existing legacy `supports_*` fields stay as-is for backward
+compat with non-refactored code paths but are NOT broadcast on the
+wire and are NOT part of the streaming-spawn capability bundle. The
+new fields are the canonical streaming-mode capability surface:
 
 ```python
 class HarnessCapabilities(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    # ... existing fields stay ...
+    # ... existing legacy fields stay (used by non-streaming code paths) ...
     supports_stream_events: bool = True
     supports_stdin_prompt: bool = False
     supports_session_resume: bool = False
@@ -172,18 +215,21 @@ class HarnessCapabilities(BaseModel):
     supports_primary_launch: bool = False
     reference_input_mode: Literal["inline", "paths"] = "paths"
 
-    # NEW — D37/findings-harness-protocols.md.
+    # NEW — D37 / findings-harness-protocols.md.
+    # Flat shape, no `supports_` prefix. This is the canonical
+    # streaming-mode capability surface, identical across every
+    # surface (params.json, the in-process Python class, and any
+    # downstream consumer that reads it).
     mid_turn_injection: Literal[
-        "queue",            # write user frame, harness queues for next boundary (Claude)
-        "interrupt_restart",# call interrupt, then start a new turn with the new prompt (Codex)
-        "http_post",        # POST to live session message endpoint (OpenCode)
-        "none",             # adapter does not implement injection in this build
+        "queue",             # Claude — write user frame, harness queues for next boundary
+        "interrupt_restart", # Codex — call interrupt then start a new turn with the new prompt
+        "http_post",         # OpenCode — POST to live session message endpoint
+        "none",              # adapter does not implement injection in this build
     ] = "none"
-    supports_interrupt: bool = False     # honors `InterruptFrame` regardless of injection mode
-    supports_cancel: bool = True          # all adapters must honor `CancelFrame`
-    supports_runtime_model_switch: bool = False
-    supports_cost_tracking: bool = True
-    supports_structured_reasoning_stream: bool = False
+    runtime_model_switch: bool = False
+    runtime_permission_switch: bool = False
+    structured_reasoning_stream: bool = False
+    cost_tracking: bool = True
 ```
 
 `mid_turn_injection` is a **semantic enum** because the wire-level
@@ -194,32 +240,63 @@ needs to render the difference. Per the
 the current turn"; an OpenCode user sees a normal send button. **Don't
 lie about wire-level behavior to fake uniformity.**
 
-`supports_cost_tracking` and `supports_structured_reasoning_stream` are
-honesty flags called out by the findings doc — Codex's companion-style
-adapter doesn't surface per-token usage or `item/reasoning/delta`
-streaming today, so the adapter declares that and the consumer renders
+There is no `supports_interrupt` or `supports_cancel` field. Cancel
+semantics are handled at the lifecycle layer (every adapter must tear
+down its harness subprocess on a `CancelFrame` — that is a contract,
+not a capability). Interrupt semantics fold into the `mid_turn_injection`
+enum: a `queue` adapter cannot interrupt cleanly, an `interrupt_restart`
+adapter is the interrupt primitive, an `http_post` adapter routes
+interrupt through whatever the session API exposes (or rejects the
+frame with a control-log entry — see
+[`mid-turn-steering.md`](mid-turn-steering.md)).
+
+`cost_tracking` and `structured_reasoning_stream` are honesty flags
+called out by the findings doc — Codex's companion-style adapter
+doesn't surface per-token usage or `item/reasoning/delta` streaming
+today, so the adapter declares that and the consumer renders
 accordingly.
 
-`supports_cancel` defaults `True` because every adapter must honor a
-`CancelFrame` — that is the lifecycle hook for the streaming spawn
-process itself, not a harness-specific capability. The interface
-contract is "you accept the frame and tear down your subprocess
-cleanly."
+### Capability reporting via `params.json`
 
-### Capability advertisement on the wire
+Capabilities are written to the per-spawn `params.json` artifact at
+spawn-launch time, not as an on-wire AG-UI event. `params.json` is
+already a load-bearing per-spawn artifact (per
+[`../refactor-touchpoints.md`](../refactor-touchpoints.md)): every
+existing dry-run / `spawn show` / debugging surface reads it. Adding a
+`capabilities` block to it is a low-cost extension that does not
+require meridian-flow to bless a new event type.
 
-Capability is broadcast to consumers via a `CAPABILITY` AG-UI event
-emitted on spawn start, **before** any other event. The event payload
-is the `HarnessCapabilities` model serialized to the AG-UI envelope.
-This is a meridian-channel extension to the AG-UI taxonomy, not a
-field redefinition — the rest of the events are unchanged.
+The capability bundle in `params.json` looks like:
 
-The `CAPABILITY` event is the on-wire half of the same information
-returned by `adapter.capabilities`. Two surfaces, same data: callers
-that hold an adapter handle in-process read `capabilities` directly;
-callers downstream of a streaming spawn (the Go backend, the
-frontend, a sibling CLI) read it from the `CAPABILITY` event on the
-event stream.
+```json
+{
+  "spawn_id": "...",
+  "agent": "...",
+  "harness": "claude",
+  "capabilities": {
+    "mid_turn_injection": "queue",
+    "runtime_model_switch": false,
+    "runtime_permission_switch": false,
+    "structured_reasoning_stream": true,
+    "cost_tracking": true
+  }
+}
+```
+
+Any consumer that needs to know what mid-turn semantics this spawn
+exposes — the Go backend rendering an affordance, the dev-workflow
+orchestrator deciding whether to show "queued for next turn" — reads
+`params.json` once at spawn-attach time. The live AG-UI event stream
+stays pure: it carries only events from meridian-flow's canonical
+taxonomy.
+
+> **Future migration.** If meridian-flow later blesses a canonical
+> `CAPABILITY` event in its AG-UI taxonomy, meridian-channel can start
+> emitting it on the wire as the first event after `RUN_STARTED`. The
+> event payload would be the same `capabilities` object that lives in
+> `params.json` today. Until that conversation has happened, the bundle
+> lives in `params.json` only — meridian-channel does not unilaterally
+> mint new events in the AG-UI vocabulary (D36).
 
 ## What Does Not Change
 
