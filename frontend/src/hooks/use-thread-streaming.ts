@@ -5,6 +5,7 @@ import {
   SpawnChannel,
   type ConnectionCapabilities,
   type StreamEvent,
+  type WsState,
 } from "@/lib/ws"
 import {
   initialState,
@@ -16,6 +17,7 @@ export function useThreadStreaming(spawnId: string | null) {
   const [capabilities, setCapabilities] = useState<ConnectionCapabilities | null>(
     null,
   )
+  const [connectionState, setConnectionState] = useState<WsState>("idle")
   const channelRef = useRef<SpawnChannel | null>(null)
 
   useEffect(() => {
@@ -23,12 +25,14 @@ export function useThreadStreaming(spawnId: string | null) {
       channelRef.current?.destroy()
       channelRef.current = null
       setCapabilities(null)
+      setConnectionState("idle")
       dispatch({ type: "RESET" })
       return
     }
 
     dispatch({ type: "RESET" })
     setCapabilities(null)
+    setConnectionState("connecting")
 
     const channel = new SpawnChannel(spawnId, {
       onEvent: (event: StreamEvent) => {
@@ -38,6 +42,9 @@ export function useThreadStreaming(spawnId: string | null) {
         }
 
         dispatch(event)
+      },
+      onStateChange: (nextState: WsState) => {
+        setConnectionState(nextState)
       },
     })
 
@@ -68,5 +75,5 @@ export function useThreadStreaming(spawnId: string | null) {
     return sent
   }, [])
 
-  return { state, capabilities, channel: channelRef, cancel }
+  return { state, capabilities, channel: channelRef, cancel, connectionState }
 }

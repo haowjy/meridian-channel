@@ -1,145 +1,192 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
+import { StatusBar } from "@/components/StatusBar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { ThreadView } from "@/features/threads/components/ThreadView"
+import { TooltipProvider } from "@/components/ui/tooltip"
+import { SpawnHeader } from "@/features/spawn-selector/SpawnHeader"
+import { SpawnSelector } from "@/features/spawn-selector/SpawnSelector"
+import { Composer } from "@/features/threads/composer/Composer"
 import { StreamingIndicator } from "@/features/threads/components/StreamingIndicator"
+import { ThreadView } from "@/features/threads/components/ThreadView"
 import { useThreadStreaming } from "@/hooks/use-thread-streaming"
+import type { ConnectionCapabilities, WsState } from "@/lib/ws"
+
+function mapWsStateToConnectionStatus(
+  spawnId: string | null,
+  wsState: WsState,
+): "connecting" | "connected" | "disconnected" {
+  if (!spawnId) {
+    return "disconnected"
+  }
+
+  if (wsState === "open") {
+    return "connected"
+  }
+
+  if (wsState === "closed") {
+    return "disconnected"
+  }
+
+  return "connecting"
+}
+
+function inferHarnessId(capabilities: ConnectionCapabilities | null): string | null {
+  if (!capabilities) {
+    return null
+  }
+
+  if (capabilities.midTurnInjection === "queue") {
+    return "claude"
+  }
+
+  if (capabilities.midTurnInjection === "interrupt_restart") {
+    return "codex"
+  }
+
+  return "opencode"
+}
 
 function App() {
-  const [spawnIdInput, setSpawnIdInput] = useState("")
   const [spawnId, setSpawnId] = useState<string | null>(null)
+  const [harnessId, setHarnessId] = useState<string | null>(null)
 
-  const { state, capabilities, cancel } = useThreadStreaming(spawnId)
+  const { state, capabilities, channel, cancel, connectionState } =
+    useThreadStreaming(spawnId)
 
-  const canConnect = useMemo(() => spawnIdInput.trim().length > 0, [spawnIdInput])
+  const connectionStatus = useMemo(
+    () => mapWsStateToConnectionStatus(spawnId, connectionState),
+    [spawnId, connectionState],
+  )
 
-  function handleConnect(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault()
+  const composerDisabled = useMemo(() => {
+    return !spawnId || connectionStatus !== "connected" || Boolean(state.error)
+  }, [spawnId, connectionStatus, state.error])
 
-    const nextSpawnId = spawnIdInput.trim()
-    if (!nextSpawnId) {
+  useEffect(() => {
+    if (!spawnId) {
+      setHarnessId(null)
       return
     }
 
+    let isActive = true
+
+    async function loadSpawnMetadata() {
+      try {
+        const response = await fetch(`/api/spawn/${spawnId}`)
+        if (!response.ok) {
+          return
+        }
+
+        const payload = (await response.json()) as { harness?: string }
+        if (isActive) {
+          setHarnessId(payload.harness ?? null)
+        }
+      } catch {
+        if (isActive) {
+          setHarnessId((current) => current ?? null)
+        }
+      }
+    }
+
+    void loadSpawnMetadata()
+
+    return () => {
+      isActive = false
+    }
+  }, [spawnId])
+
+  useEffect(() => {
+    if (!spawnId || harnessId) {
+      return
+    }
+
+    const inferredHarness = inferHarnessId(capabilities)
+    if (inferredHarness) {
+      setHarnessId(inferredHarness)
+    }
+  }, [spawnId, harnessId, capabilities])
+
+  function handleSpawnCreated(nextSpawnId: string) {
     setSpawnId(nextSpawnId)
-    setSpawnIdInput(nextSpawnId)
+    setHarnessId(null)
   }
 
   function handleDisconnect() {
     setSpawnId(null)
+    setHarnessId(null)
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <header className="border-b border-border px-6 py-3">
-        <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <span className="font-mono text-sm tracking-tight text-accent-text font-semibold">
-              meridian
-            </span>
-            <Badge variant="secondary" className="text-xs font-mono">
-              app
-            </Badge>
-          </div>
-          <div className="flex items-center gap-2">
-            {spawnId ? (
-              <Badge variant="outline" className="font-mono text-xs">
-                spawn: {spawnId}
+    <TooltipProvider>
+      <div className="flex min-h-screen flex-col bg-background text-foreground">
+        <header className="border-b border-border px-6 py-3">
+          <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="font-mono text-sm font-semibold tracking-tight text-accent-text">
+                meridian
+              </span>
+              <Badge variant="secondary" className="font-mono text-xs">
+                app
               </Badge>
-            ) : (
-              <Badge variant="outline" className="font-mono text-xs">
-                no spawns
-              </Badge>
-            )}
-            {state.isCancelled ? (
-              <Badge variant="destructive" className="font-mono text-xs">
-                cancelled
-              </Badge>
-            ) : null}
-          </div>
-        </div>
-      </header>
-
-      <main className="px-6 py-6">
-        <form
-          onSubmit={handleConnect}
-          className="mx-auto mb-4 flex w-full max-w-5xl items-center gap-2"
-        >
-          <Input
-            placeholder="Enter spawn ID"
-            value={spawnIdInput}
-            onChange={(event) => setSpawnIdInput(event.target.value)}
-          />
-          <Button type="submit" size="sm" disabled={!canConnect}>
-            Connect
-          </Button>
-          {spawnId ? (
-            <Button type="button" size="sm" variant="outline" onClick={handleDisconnect}>
-              Disconnect
-            </Button>
-          ) : null}
-          {spawnId ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={cancel}
-              disabled={!state.isStreaming}
-            >
-              Cancel Run
-            </Button>
-          ) : null}
-        </form>
-
-        {!spawnId ? (
-          <div className="mx-auto flex w-full max-w-lg items-center justify-center py-20">
-            <Card className="w-full">
-              <CardHeader>
-                <CardTitle className="font-mono text-lg">Spawn Workspace</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <p className="text-sm text-muted-foreground leading-relaxed">
-                  No active spawns. Create one via the API or connect to an existing spawn
-                  to see streaming AG-UI events here.
-                </p>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" disabled>
-                    Connect to Spawn
-                  </Button>
-                  <Button size="sm" disabled>
-                    New Spawn
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        ) : (
-          <div className="mx-auto flex h-[calc(100vh-11rem)] w-full max-w-5xl flex-col gap-3">
-            {capabilities ? (
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <Badge variant="secondary" className="font-mono">
-                  mid-turn: {capabilities.midTurnInjection}
-                </Badge>
-                <Badge variant="outline" className="font-mono">
-                  interrupt: {String(capabilities.supportsInterrupt)}
-                </Badge>
-                <Badge variant="outline" className="font-mono">
-                  cancel: {String(capabilities.supportsCancel)}
-                </Badge>
-              </div>
-            ) : null}
-
-            <div className="min-h-0 flex-1">
-              <ThreadView items={state.items} error={state.error} />
             </div>
-            {state.isStreaming ? <StreamingIndicator /> : null}
+
+            <div className="flex items-center gap-2">
+              {state.isCancelled ? (
+                <Badge variant="destructive" className="font-mono text-xs">
+                  cancelled
+                </Badge>
+              ) : null}
+              <Badge variant="outline" className="font-mono text-xs">
+                {spawnId ? "active" : "idle"}
+              </Badge>
+            </div>
           </div>
-        )}
-      </main>
-    </div>
+        </header>
+
+        <main className="min-h-0 flex-1 px-6 py-6">
+          {!spawnId ? (
+            <SpawnSelector onSpawnCreated={handleSpawnCreated} />
+          ) : (
+            <div className="mx-auto flex h-full max-h-[calc(100vh-12.5rem)] w-full max-w-5xl flex-col gap-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <SpawnHeader
+                    spawnId={spawnId}
+                    harnessId={harnessId}
+                    capabilities={capabilities}
+                    connectionStatus={connectionStatus}
+                  />
+                </div>
+                <Button type="button" size="sm" variant="outline" onClick={handleDisconnect}>
+                  Disconnect
+                </Button>
+              </div>
+
+              <div className="min-h-0 flex-1">
+                <ThreadView items={state.items} error={state.error} />
+              </div>
+
+              {state.isStreaming ? <StreamingIndicator /> : null}
+
+              <Composer
+                channel={channel}
+                capabilities={capabilities}
+                isStreaming={state.isStreaming}
+                disabled={composerDisabled}
+                onCancel={cancel}
+              />
+            </div>
+          )}
+        </main>
+
+        <StatusBar
+          connectionStatus={connectionStatus}
+          spawnId={spawnId}
+          harnessId={harnessId}
+        />
+      </div>
+    </TooltipProvider>
   )
 }
 
