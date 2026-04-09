@@ -1,127 +1,168 @@
 # agent-shell-mvp Design Overview
 
-> What this is: the complete-at-this-level map of the local shell MVP after the
-> correction pass.
+> What this is: the meridian-channel refactor that lets a Go backend
+> drive Claude Code, Codex, and OpenCode through one streaming spawn
+> and steer them mid-turn.
 >
-> What this is not: the full contract for any one subsystem. Read a child doc
-> when you need wire details, adapter mechanics, or package structure.
+> What this is not: a new product, a new frontend, a new wire schema, or
+> a Go rewrite of meridian-channel.
 
-The shell is the **top of the funnel**, not the destination product. V0 is a
-**local, BYO-Claude shell** that proves one thing: a neutral runtime plus
-mars-packaged capabilities can carry a real customer workflow end to end.
+Read [`reframe.md`](../reframe.md) first if you have not already. It is
+the architectural correction that supersedes the pre-D34 framing of this
+work item. This overview assumes that correction.
 
-The moat is **mars packaging**, not the shell chrome. The shell stays neutral.
-Verticals arrive as installable packages that combine agents, skills, MCP
-servers, and interaction-layer extensions. The hosted product is Act III of the
-same story: **same packages, different runtime**.
+## What This Work Item Is
 
-## 1. V0 In One Page
+A scoped refactor of **meridian-channel** that adds three capabilities
+to its existing harness layer. The contract those capabilities have to
+match — the AG-UI event taxonomy, the 3-WS topology, the per-tool
+behavior config — already lives in **meridian-flow** and is treated
+here as a **read-only external contract**, not a thing this work item
+defines.
 
-- **Posture:** local-only, zero hosting, developer-mediated setup for the first
-  concierge customers.
-- **Customer test:** Yao Lab must be able to run the μCT workflow through a
-  package that exercises every V0 extension point the shell claims to support.
-- **Shell scope:** chat UI, published wire contracts, harness adapters, mars
-  materialization, packaged MCP launch, and extension relay.
-- **Shell non-scope:** biomedical code, PyVista, DICOM-specific views,
-  project-owned virtualenvs, marketplace UI, hosted continuity features.
-- **V0 discipline:** if removing a feature does not block Yao Lab, cut it; if
-  keeping a shortcut traps us in six months, redesign it.
+External contract anchors (do not duplicate):
 
-```mermaid
-flowchart LR
-  User["User In Browser"] --> UI["Generic Chat UI<br/>core renderers only"]
-  UI --> FE["Frontend Protocol"]
-  FE --> Shell["Local Shell Backend"]
-  Shell --> Harness["Harness Adapter<br/>Claude V0"]
-  Shell --> Relay["Extension Relay"]
-  Shell --> Mars["mars materialization"]
-  Mars --> Pkg["Installed packages"]
-  Pkg --> Agent["agent + skills"]
-  Pkg --> MCP["MCP servers"]
-  Pkg --> Ext["interaction-layer extensions"]
-  Relay --> MCP
-  UI --> Ext
-  Pkg -. "same packages" .-> Hosted["Future hosted runtime"]
-```
+| File | Role |
+|---|---|
+| [`meridian-flow/.meridian/work/biomedical-mvp/design/frontend/data-flow.md`](../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/frontend/data-flow.md) | 3-WS topology, the three hooks, reconnect recovery, snapshot order |
+| [`meridian-flow/.meridian/work/biomedical-mvp/design/streaming-walkthrough.md`](../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/streaming-walkthrough.md) | End-to-end AG-UI event sequence with code traces |
+| [`meridian-flow/.meridian/work/biomedical-mvp/design/frontend/foundations.md`](../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/frontend/foundations.md) | Cross-cutting frontend model |
+| [`meridian-flow/.meridian/work/biomedical-mvp/design/frontend/state-management.md`](../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/frontend/state-management.md) | Store specs the activity stream reducer drives |
+| [`meridian-flow/.meridian/work/biomedical-mvp/design/frontend/thread-model.md`](../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/frontend/thread-model.md) | Thread/turn/work-item lifecycle |
+| [`meridian-flow/.meridian/work/biomedical-mvp/design/backend/python-tool.md`](../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/backend/python-tool.md) | Per-tool behavior config (example: python — stdout inline) |
+| [`meridian-flow/.meridian/work/biomedical-mvp/design/backend/bash-tool.md`](../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/backend/bash-tool.md) | Per-tool behavior config (example: bash — input + stdout collapsed) |
 
-## 2. System Shape
+If a question is "what does the AG-UI event schema look like" or "how
+does the activity stream reducer collapse a `bash` tool," the answer
+lives in those files. This design tree only describes how
+meridian-channel is going to **emit** that schema and **honor** that
+config from inside its harness adapters.
 
-The shell has seven subsystems:
+## Three Deliverables
 
-1. **Strategy** explains the funnel, moat, concierge package-authoring posture,
-   and the governing D28 test.
-2. **Harness** defines the adapter boundary. Claude is the only live V0
-   adapter. Codex and OpenCode remain tier-1 design targets.
-3. **Events** publish the canonical normalized schema and the turn/orchestration
-   flow that all adapters and clients must obey.
-4. **Frontend** defines a generic chat UI and a small set of built-in content
-   renderers. Anything beyond that is an extension.
-5. **Extensions** define how mars-installed packages add paired frontend+MCP
-   interactions beyond the built-in chat UI.
-6. **Execution** defines how packaged MCP servers and local model runtimes run
-   on the host.
-7. **Packaging** defines how mars materializes agent-facing capability bundles
-   and how the shell loads them.
+### 1. Harness adapters emit canonical AG-UI events (D36)
 
-## 3. V0 Boundaries
+Today, each adapter (`claude.py`, `codex.py`, `opencode.py`) writes raw
+harness wire output to `output.jsonl` and post-hoc extracts a final
+`report.md`. The refactor adds **AG-UI event emission inside each
+adapter** as a parallel output channel: the adapter consumes its own
+harness's wire format (Claude stream-json NDJSON, Codex JSON-RPC over
+stdio, OpenCode session events) and produces a normalized AG-UI event
+stream that matches what meridian-flow's frontend reducer already
+expects. Per-tool render config (collapsed by default for `bash`,
+inline for `python` stdout, etc.) rides on `TOOL_CALL_START` events.
+The existing `report.md` and `output.jsonl` artifacts stay intact —
+AG-UI is additive, not a replacement.
 
-- **Architecture wide:** open `ItemKind`, published versioned seams, frontend
-  designed for extraction, local and future hosted runtimes sharing the same
-  package contract.
-- **Implementation narrow:** Claude adapter only, one shell process, one active
-  session, second tab as read-only observer, four package kinds, 3–5 built-in
-  renderers, relay only for the Yao Lab class of interactions.
-- **Deferred:** marketplace UI, signing enforcement, hosted continuity,
-  CLI-command plugins, harness-adapter plugins, multi-session orchestration
-  unification, and any shell-owned domain runtime. Per D27, deferred
-  `cli_command` and `harness_adapter` kinds remain reserved open-schema
-  extension points rather than closed-out features.
+### 2. Streaming spawn mode + stdin control protocol (D37)
 
-## 4. Subsystem Docs
+A new invocation shape on `meridian spawn create` (working name
+`--stream`) where stdout is a JSONL stream of AG-UI events and stdin
+is a JSONL **control channel** carrying `user_message`, `interrupt`,
+and `cancel` frames. The streaming spawn process runs until the agent
+finishes naturally, stdin closes, or a `cancel` frame arrives. The
+existing per-spawn artifact directory (`.meridian/spawns/<id>/`),
+the current report-extraction pipeline, and `meridian spawn show /
+log / wait / files / stats` keep working unchanged — streaming is a
+parallel invocation shape, not a replacement for the foreground or
+background launches we already have.
 
-- [strategy/overview.md](./strategy/overview.md)
-- [strategy/funnel-and-moat.md](./strategy/funnel-and-moat.md)
-- [harness/overview.md](./harness/overview.md)
-- [harness/abstraction.md](./harness/abstraction.md)
-- [harness/adapters.md](./harness/adapters.md)
-- [harness/mid-turn-steering.md](./harness/mid-turn-steering.md)
-- [events/overview.md](./events/overview.md)
-- [events/normalized-schema.md](./events/normalized-schema.md)
-- [events/flow.md](./events/flow.md)
-- [frontend/overview.md](./frontend/overview.md)
-- [frontend/chat-ui.md](./frontend/chat-ui.md)
-- [frontend/content-blocks.md](./frontend/content-blocks.md)
-- [frontend/protocol.md](./frontend/protocol.md)
-- [extensions/overview.md](./extensions/overview.md)
-- [extensions/interaction-layer.md](./extensions/interaction-layer.md)
-- [extensions/relay-protocol.md](./extensions/relay-protocol.md)
-- [extensions/package-contract.md](./extensions/package-contract.md)
-- [execution/overview.md](./execution/overview.md)
-- [execution/local-model.md](./execution/local-model.md)
-- [execution/project-layout.md](./execution/project-layout.md)
-- [packaging/overview.md](./packaging/overview.md)
-- [packaging/agent-loading.md](./packaging/agent-loading.md)
+### 3. `meridian spawn inject <spawn_id> "message"` CLI primitive (D37)
 
-## 5. Neutral Example
+A top-level CLI command that injects a mid-turn `user_message` into a
+running streaming spawn from a different process. Two consumers:
+existing dev-workflow orchestrators steering their children mid-execution,
+and meridian-flow's Go backend forwarding frontend user messages into a
+running agent turn. Underneath, the CLI writes a `user_message` control
+frame to a per-spawn control surface owned by the streaming spawn — see
+[`harness/mid-turn-steering.md`](harness/mid-turn-steering.md) for the
+full ownership story.
 
-The shell itself does not ship a biomedical viewer. A package installer mounts a
-custom 3D mesh viewer by installing:
+## Out Of Scope
 
-- an agent profile and skill set that know when to ask for mesh inspection,
-- an MCP server that produces mesh payloads and handles follow-up events, and
-- a frontend extension that renders the mesh and relays user interaction back
-  through the shell.
+Per D38 and D39, none of the following are part of this work item:
 
-That same package should work unchanged when the runtime later moves from
-local-only shell to hosted platform.
+- **Strategy, extensions, packaging, frontend.** Pre-reframe `design/`
+  subtrees were deleted; their concerns either belong at product strategy
+  level or live in meridian-flow.
+- **Local deployment packaging** (localhost binding, static frontend
+  serving, single-user defaults). That is meridian-flow's local deployment
+  workstream (D39 #3).
+- **Backend 3-WS refactor** (`issue #8` rename + Project WS handler).
+  meridian-flow's backend workstream (D39 #2).
+- **Meridian-channel subprocess adapter inside meridian-flow's backend**.
+  Same workstream.
+- **`providers/claude-code/` (or any harness-shim provider) in
+  meridian-llm-go.** Explicitly rejected by D40. The shell path does not
+  go through meridian-llm-go at all.
+- **In-process harness streaming.** `direct.py` (in-process Anthropic
+  Messages API) keeps `supports_stream_events=False` and stays out of
+  this refactor. The streaming surface is a subprocess-harness concern.
 
-## 6. Intentionally Open
+## Refactor Touchpoints
 
-- **Q7 remains open:** should `meridian spawn` eventually consume the same
-  session-lived `HarnessAdapter` family? The recommendation is yes, but this
-  pass leaves it unresolved because it is broader than the shell MVP itself.
-- **Mars manifest schema is not restated here:** the canonical source stays in
-  [`../../mars-mcp-packaging/requirements.md`](../../mars-mcp-packaging/requirements.md).
-- **Frontend extraction is designed for, not performed:** the protocol is the
-  seam; the repo split is deferred.
+The explorer pre-pass mapped the load-bearing files. **37 files** are
+on the critical path; the full table — file, status (`must change` /
+`may change` / `unchanged`), current role, expected impact, consumers,
+and risk — lives in [`refactor-touchpoints.md`](refactor-touchpoints.md).
+
+The three highest-risk touchpoints, all in the harness layer, are:
+
+- `src/meridian/lib/harness/claude.py`
+- `src/meridian/lib/harness/codex.py`
+- `src/meridian/lib/harness/opencode.py`
+
+All three must gain AG-UI event emission and a stdin control surface
+**without** regressing the existing artifact contracts (`report.md`,
+`output.jsonl`, `stderr.log`, session-id extraction, `--from`, `--fork`,
+reaper liveness). The risk profile is the inverse of the visible work:
+the new code is moderate, the regressions are easy.
+
+Two structural concerns from the touchpoints map deserve flagging in
+the overview:
+
+1. **`state/spawn_store.py` has no live-control metadata today.** A
+   per-spawn control handle (FIFO or socket path) has to be designed
+   into `paths.py` and `spawn_store.py` before `spawn inject` has
+   anything authoritative to target. Covered in
+   [`harness/mid-turn-steering.md`](harness/mid-turn-steering.md).
+2. **`launch/process.py` already copies parent stdin into the child
+   PTY for primary launches.** A naïve "streaming spawn owns its own
+   stdin" approach will collide with that path and break interactive
+   `meridian` sessions. Resolved by treating streaming mode as a
+   non-PTY launch shape and routing `meridian spawn inject` through a
+   dedicated per-spawn control FIFO instead of the streaming process's
+   stdin. Covered in `harness/mid-turn-steering.md`.
+
+## How To Navigate This Design
+
+| Doc | What you get |
+|---|---|
+| [`harness/overview.md`](harness/overview.md) | One-page orientation to the harness layer after the refactor |
+| [`harness/abstraction.md`](harness/abstraction.md) | Adapter interface — new methods, new DTOs, capability semantics, what stays unchanged |
+| [`harness/adapters.md`](harness/adapters.md) | Per-harness translation rules (Claude, Codex, OpenCode), per-tool render config, regression risks |
+| [`harness/mid-turn-steering.md`](harness/mid-turn-steering.md) | Stdin control protocol, control frame model, per-harness injection mechanics, `meridian spawn inject` CLI |
+| [`events/overview.md`](events/overview.md) | What the AG-UI event taxonomy is and where its canonical definition lives |
+| [`events/flow.md`](events/flow.md) | The AG-UI event sequence inside a streaming spawn lifecycle |
+| [`events/harness-translation.md`](events/harness-translation.md) | Harness wire format → AG-UI event mapping tables (one section per harness) |
+| [`refactor-touchpoints.md`](refactor-touchpoints.md) | The 37-file impact map — read this before touching any source file |
+
+## Decision Anchors
+
+Every claim in this design tree must trace back to one or more of the
+following decisions in [`../decisions.md`](../decisions.md):
+
+- **D34** — agent-shell-mvp is meridian-channel's GUI, not a new product
+- **D35** — meridian-channel stays Python, no Go rewrite
+- **D36** — AG-UI event taxonomy is the canonical output schema
+- **D37** — Streaming spawn mode + stdin control protocol
+- **D38** — Scope collapse of agent-shell-mvp design tree
+- **D39** — Workstream split across repositories
+- **D40** — No `providers/claude-code/` in meridian-llm-go
+
+Findings that ground the harness work, especially mid-turn semantics
+across the three harnesses:
+
+- [`findings-harness-protocols.md`](../findings-harness-protocols.md) —
+  authoritative reference. **All three harnesses are tier-1, mid-turn
+  steering is V0, capability is a semantic enum and not a boolean.**
