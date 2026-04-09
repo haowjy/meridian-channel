@@ -1,5 +1,6 @@
 """Cyclopts CLI entry point for meridian."""
 
+import asyncio
 import json
 import logging
 import os
@@ -28,6 +29,7 @@ from meridian.cli.output import (
 from meridian.cli.output import emit as emit_output
 from meridian.cli.report_cmd import register_report_commands
 from meridian.cli.session_cmd import register_session_commands
+from meridian.cli.streaming_serve import streaming_serve
 from meridian.cli.utils import missing_fork_session_error
 from meridian.lib.core.sink import OutputSink
 from meridian.lib.core.util import FormatContext
@@ -764,6 +766,7 @@ work_app = App(
     help_formatter="plain",
 )
 models_app = App(name="models", help="Model catalog commands", help_formatter="plain")
+streaming_app = App(name="streaming", help="Streaming layer commands", help_formatter="plain")
 config_app = App(
     name="config",
     help=(
@@ -784,6 +787,7 @@ spawn_app.command(report_app, name="report")
 app.command(session_app, name="session")
 app.command(work_app, name="work")
 app.command(models_app, name="models")
+app.command(streaming_app, name="streaming")
 app.command(config_app, name="config")
 app.command(completion_app, name="completion")
 
@@ -837,6 +841,40 @@ def completion_install(
         add_to_startup=add_to_startup,
     )
     emit({"shell": normalized_shell, "path": destination.as_posix()})
+
+
+@streaming_app.command(name="serve")
+def streaming_serve_cmd(
+    prompt: Annotated[
+        str,
+        Parameter(name=["--prompt", "-p"], help="Initial prompt for the streaming run."),
+    ] = "",
+    harness: Annotated[
+        str | None,
+        Parameter(name="--harness", help="Harness id: claude, codex, or opencode."),
+    ] = None,
+    model: Annotated[
+        str | None,
+        Parameter(name=["--model", "-m"], help="Optional model override."),
+    ] = None,
+    agent: Annotated[
+        str | None,
+        Parameter(name=["--agent", "-a"], help="Optional agent profile."),
+    ] = None,
+) -> None:
+    resolved_harness = (harness or get_global_options().harness or "").strip()
+    if not resolved_harness:
+        raise ValueError("harness required: pass --harness")
+    if not prompt.strip():
+        raise ValueError("prompt required: pass --prompt")
+    asyncio.run(
+        streaming_serve(
+            harness=resolved_harness,
+            prompt=prompt,
+            model=model,
+            agent=agent,
+        )
+    )
 
 
 def _run_primary_launch(

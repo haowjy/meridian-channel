@@ -1,5 +1,6 @@
 """CLI command handlers for spawn.* operations."""
 
+import asyncio
 import sys
 from collections.abc import Callable
 from functools import partial
@@ -10,6 +11,7 @@ from cyclopts import App, Parameter
 
 from meridian.cli.main import agent_mode_enabled, current_output_sink, get_global_options
 from meridian.cli.registration import register_manifest_cli_group
+from meridian.cli.spawn_inject import inject_message
 from meridian.cli.utils import missing_fork_session_error, parse_csv_list
 from meridian.lib.core.domain import SpawnStatus
 from meridian.lib.ops.reference import resolve_session_reference
@@ -685,6 +687,34 @@ def _spawn_log(
     )
 
 
+def _spawn_inject(
+    spawn_id: Annotated[
+        str,
+        Parameter(help="Spawn ID to inject into."),
+    ],
+    message: Annotated[
+        str,
+        Parameter(help="Message text to inject."),
+    ] = "",
+    interrupt: Annotated[
+        bool,
+        Parameter(name="--interrupt", help="Send interrupt signal."),
+    ] = False,
+    cancel: Annotated[
+        bool,
+        Parameter(name="--cancel", help="Cancel the spawn."),
+    ] = False,
+) -> None:
+    asyncio.run(
+        inject_message(
+            spawn_id,
+            message if message.strip() else None,
+            interrupt=interrupt,
+            cancel=cancel,
+        )
+    )
+
+
 def register_spawn_commands(app: App, emit: Emitter) -> tuple[set[str], dict[str, str]]:
     """Register spawn CLI commands using registry metadata as source of truth."""
 
@@ -698,10 +728,20 @@ def register_spawn_commands(app: App, emit: Emitter) -> tuple[set[str], dict[str
         "spawn.cancel": lambda: partial(_spawn_cancel, emit),
         "spawn.wait": lambda: partial(_spawn_wait, emit),
     }
-    return register_manifest_cli_group(
+    registered, descriptions = register_manifest_cli_group(
         app,
         group="spawn",
         handlers=handlers,
         emit=emit,
         default_handler=partial(_spawn_create, emit),
     )
+    app.command(
+        _spawn_inject,
+        name="inject",
+        help="Inject a message, interrupt, or cancel request into a running streaming spawn.",
+    )
+    registered.add("spawn.inject")
+    descriptions["spawn.inject"] = (
+        "Inject a message, interrupt, or cancel request into a running streaming spawn."
+    )
+    return registered, descriptions
