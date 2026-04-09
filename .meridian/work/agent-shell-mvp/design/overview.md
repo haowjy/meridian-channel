@@ -1,174 +1,191 @@
-# agent-shell-mvp Design Overview
+# Agent Shell MVP — Design Overview
 
-> What this is: the meridian-channel refactor that lets a Go backend
-> drive Claude Code, Codex, and OpenCode through one streaming spawn
-> and steer them mid-turn.
->
-> What this is not: a new product, a new frontend, a new wire schema, or
-> a Go rewrite of meridian-channel.
+This document is the entry point for the 3-phase agent shell design. It describes the system topology at runtime, how the three phases compose, and where each piece lives in the codebase.
 
-Read [`reframe.md`](../reframe.md) first if you have not already. It is
-the architectural correction that supersedes the pre-D34 framing of this
-work item. This overview assumes that correction.
+## System Topology
 
-## What This Work Item Is
+At runtime, `meridian app` is a single Python process with three layers:
 
-A scoped refactor of **meridian-channel** that adds three capabilities
-to its existing harness layer. The contract those capabilities have to
-match — the AG-UI event taxonomy, the 3-WS topology, the per-tool
-behavior config — already lives in **meridian-flow** and is treated
-here as a **read-only external contract**, not a thing this work item
-defines.
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  React UI (Phase 3)                                             │
+│  Browser tab at http://localhost:<port>                          │
+│  Renders AG-UI events, sends user_message/interrupt/cancel      │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │ WebSocket (JSON frames)
+┌──────────────────────────▼──────────────────────────────────────┐
+│  FastAPI Server (Phase 2)                                       │
+│  WS endpoint: /ws/spawn/{spawn_id}                              │
+│  Translates harness wire → AG-UI events (outbound)              │
+│  Routes user_message/interrupt/cancel → control layer (inbound) │
+│  Serves static React build at /                                 │
+├─────────────────────────────────────────────────────────────────┤
+│  Bidirectional Streaming Layer (Phase 1)                        │
+│  HarnessConnection per spawn — asyncio tasks                    │
+│  SpawnManager: tracks active connections, routes inject msgs    │
+│  Per-spawn control socket for cross-process `spawn inject`      │
+├─────────────────────────────────────────────────────────────────┤
+│  Harness Subprocesses                                           │
+│  Claude Code (WS client → our WS server)                        │
+│  Codex app-server (WS server ← our WS client)                  │
+│  OpenCode (HTTP session API)                                    │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-External contract anchors (do not duplicate):
+**Key property**: Phase 1 is useful without Phase 2 or 3. The `meridian spawn inject` CLI command validates the bidirectional layer end-to-end from the command line. Phase 2 wraps Phase 1's control surface in a WebSocket API. Phase 3 wraps Phase 2 in a React UI. Each layer has its own gate and can be tested independently.
 
-| File | Role |
+## Data Flow
+
+### Outbound (harness → user)
+
+1. Harness subprocess emits wire-format events (NDJSON for Claude, JSON-RPC notifications for Codex, HTTP/NDJSON for OpenCode)
+2. Phase 1 adapter receives raw events via its transport (WebSocket or HTTP)
+3. Phase 1 yields `HarnessEvent` objects on an async iterator
+4. Phase 2 mapper transforms `HarnessEvent` → `ag_ui.core` event (e.g., `TextMessageContentEvent`)
+5. Phase 2 serializes: `event.model_dump_json(by_alias=True, exclude_none=True)`
+6. Phase 2 sends JSON string as a WebSocket text frame to the connected client
+7. Phase 3 reducer dispatches the event into the activity stream state
+
+### Inbound (user → harness)
+
+1. Phase 3 UI sends a JSON frame: `{"type": "user_message", "text": "..."}`
+2. Phase 2 WebSocket handler parses the frame, calls `spawn_manager.inject(spawn_id, message)`
+3. Phase 1 `SpawnManager` looks up the `HarnessConnection` for the spawn
+4. Phase 1 calls `connection.send_user_message(text)` on the adapter
+5. Adapter translates to harness wire format and delivers:
+   - Claude: sends `{"type": "user", "content": "..."}` JSON over WebSocket
+   - Codex: sends `turn/start` or `turn/steer` JSON-RPC request
+   - OpenCode: POSTs to session HTTP endpoint
+
+### Cross-process inject (CLI → harness)
+
+1. `meridian spawn inject <spawn_id> "message"` CLI command
+2. Connects to Unix domain socket at `.meridian/spawns/<spawn_id>/control.sock`
+3. Sends JSON control message: `{"type": "user_message", "text": "..."}`
+4. Spawn manager's socket listener receives the message, routes to adapter
+5. Same adapter path as inbound WebSocket
+
+## Phase Dependencies
+
+```
+Phase 1 (bidirectional streaming)
+  └── Phase 2 (FastAPI + AG-UI mapping)
+        └── Phase 3 (React UI)
+```
+
+Phase 1 has no dependency on Phase 2 or 3. Phase 2 depends on Phase 1's `SpawnManager` and `HarnessConnection` interfaces. Phase 3 depends on Phase 2's WebSocket endpoint contract.
+
+## Design Documents
+
+| Document | Covers |
 |---|---|
-| [`meridian-flow/.meridian/work/biomedical-mvp/design/frontend/data-flow.md`](../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/frontend/data-flow.md) | 3-WS topology, the three hooks, reconnect recovery, snapshot order |
-| [`meridian-flow/.meridian/work/biomedical-mvp/design/streaming-walkthrough.md`](../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/streaming-walkthrough.md) | End-to-end AG-UI event sequence with code traces |
-| [`meridian-flow/.meridian/work/biomedical-mvp/design/frontend/foundations.md`](../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/frontend/foundations.md) | Cross-cutting frontend model |
-| [`meridian-flow/.meridian/work/biomedical-mvp/design/frontend/state-management.md`](../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/frontend/state-management.md) | Store specs the activity stream reducer drives |
-| [`meridian-flow/.meridian/work/biomedical-mvp/design/frontend/thread-model.md`](../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/frontend/thread-model.md) | Thread/turn/work-item lifecycle |
-| [`meridian-flow/.meridian/work/biomedical-mvp/design/backend/python-tool.md`](../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/backend/python-tool.md) | Per-tool behavior config (example: python — stdout inline) |
-| [`meridian-flow/.meridian/work/biomedical-mvp/design/backend/bash-tool.md`](../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/backend/bash-tool.md) | Per-tool behavior config (example: bash — input + stdout collapsed) |
+| [overview.md](overview.md) | This file — system topology, data flow, phase relationships |
+| [harness-abstraction.md](harness-abstraction.md) | SOLID interface design, `HarnessConnection` protocol, per-harness topology hiding, capability introspection |
+| [phase-1-streaming.md](phase-1-streaming.md) | Phase 1 — bidirectional adapters, `SpawnManager`, control socket, `meridian spawn inject`, refactoring scope against existing code |
+| [phase-2-fastapi-agui.md](phase-2-fastapi-agui.md) | Phase 2 — FastAPI WebSocket endpoint, AG-UI event mapping per harness, inbound frame handling |
+| [phase-3-react-ui.md](phase-3-react-ui.md) | Phase 3 — frontend-v2 adaptation, component tree, activity stream, capability-aware affordances |
+| [edge-cases.md](edge-cases.md) | Failure modes, boundary conditions, error propagation across layers |
 
-If a question is "what does the AG-UI event schema look like" or "how
-does the activity stream reducer collapse a `bash` tool," the answer
-lives in those files. This design tree only describes how
-meridian-channel is going to **emit** that schema and **honor** that
-config from inside its harness adapters.
+## Repository Layout
 
-## Three Deliverables
+New code added to `meridian-channel`:
 
-### 1. Harness adapters emit canonical AG-UI events (D36)
+```
+src/meridian/
+├── lib/
+│   ├── harness/
+│   │   ├── adapter.py          # Extended with BidirectionalHarness protocol
+│   │   ├── connections/        # NEW — per-harness connection implementations
+│   │   │   ├── __init__.py
+│   │   │   ├── base.py         # HarnessConnection ABC + HarnessEvent types
+│   │   │   ├── claude_ws.py    # Claude --sdk-url WS server adapter
+│   │   │   ├── codex_ws.py     # Codex app-server WS client adapter
+│   │   │   └── opencode_http.py # OpenCode HTTP session adapter
+│   │   ├── claude.py           # Unchanged — fire-and-forget stays
+│   │   ├── codex.py            # Unchanged
+│   │   └── opencode.py         # Unchanged
+│   ├── streaming/              # NEW — Phase 1 control layer
+│   │   ├── __init__.py
+│   │   ├── spawn_manager.py    # Active connection registry + inject routing
+│   │   ├── control_socket.py   # Unix domain socket listener per spawn
+│   │   └── types.py            # ControlMessage, InjectResult types
+│   └── app/                    # NEW — Phase 2 server
+│       ├── __init__.py
+│       ├── server.py           # FastAPI app + static file serving
+│       ├── ws_endpoint.py      # WebSocket handler
+│       └── agui_mapping/       # Per-harness → AG-UI translation
+│           ├── __init__.py
+│           ├── base.py         # AGUIMapper protocol
+│           ├── claude.py       # Claude NDJSON → AG-UI
+│           ├── codex.py        # Codex JSON-RPC → AG-UI
+│           └── opencode.py     # OpenCode wire → AG-UI
+├── cli/
+│   ├── app.py                  # NEW — `meridian app` CLI command
+│   └── spawn_inject.py         # NEW — `meridian spawn inject` CLI command
+frontend/                       # NEW — Phase 3 React app (copied from frontend-v2)
+├── src/
+├── package.json
+└── vite.config.ts
+pyproject.toml                  # Updated: new deps (fastapi, uvicorn, websockets, ag-ui-protocol)
+```
 
-Today, each adapter (`claude.py`, `codex.py`, `opencode.py`) writes raw
-harness wire output to `output.jsonl` and post-hoc extracts a final
-`report.md`. The refactor adds **AG-UI event emission inside each
-adapter** as a parallel output channel: the adapter consumes its own
-harness's wire format (Claude stream-json NDJSON, Codex JSON-RPC over
-stdio, OpenCode session events) and produces a normalized AG-UI event
-stream that matches what meridian-flow's frontend reducer already
-expects. Per-tool render config — `inputCollapsed`, `stdoutCollapsed`,
-`stderrMode`, `producesResults` — is **frontend-resident** in
-meridian-flow's `toolDisplayConfigs` registry; the wire only carries
-`{toolName, toolCallId}` on `TOOL_CALL_START` and the reducer looks up
-the config by tool name. The existing `report.md` and `output.jsonl`
-artifacts stay intact — AG-UI is additive, not a replacement.
+### What Changes vs. What's New
 
-### 2. Streaming spawn mode + FIFO control protocol (D37)
+**Existing code that stays unchanged:**
+- `src/meridian/lib/harness/claude.py`, `codex.py`, `opencode.py` — fire-and-forget adapters. These continue to power `meridian spawn` for non-interactive spawns.
+- `src/meridian/lib/launch/runner.py`, `process.py`, `stream_capture.py` — existing subprocess launch and capture. The bidirectional path is additive, not a replacement.
+- `src/meridian/lib/harness/adapter.py` — `SubprocessHarness` protocol stays. Extended with a new `BidirectionalHarness` protocol that co-exists.
 
-A new invocation shape on `meridian spawn create` (working name
-`--ag-ui-stream` to avoid colliding with the existing hidden `--stream`
-debug flag at `cli/spawn.py:211`) where stdout is a JSONL stream of
-AG-UI events. The control channel is a **per-spawn FIFO** at
-`.meridian/spawns/<id>/control.fifo`, carrying JSONL `user_message`,
-`interrupt`, and `cancel` frames. The FIFO is the **single
-authoritative control ingress** — the streaming spawn does not also
-read its own stdin as a control channel. The streaming spawn process
-runs until the agent finishes naturally or a `cancel` frame arrives.
-The existing per-spawn artifact directory (`.meridian/spawns/<id>/`),
-the current report-extraction pipeline, and `meridian spawn show /
-log / wait / files / stats` keep working unchanged — streaming is a
-parallel invocation shape, not a replacement for the foreground or
-background launches we already have.
+**New code:**
+- `src/meridian/lib/harness/connections/` — per-harness bidirectional connection implementations
+- `src/meridian/lib/streaming/` — spawn manager and control socket
+- `src/meridian/lib/app/` — FastAPI server and AG-UI mapping
+- `src/meridian/cli/app.py` — `meridian app` entry point
+- `src/meridian/cli/spawn_inject.py` — `meridian spawn inject` entry point
+- `frontend/` — React UI adapted from frontend-v2
 
-### 3. `meridian spawn inject <spawn_id> "message"` CLI primitive (D37)
+### Dependencies Added
 
-A top-level CLI command that injects a mid-turn `user_message` into a
-running streaming spawn from a different process. Two consumers:
-existing dev-workflow orchestrators steering their children mid-execution,
-and meridian-flow's Go backend forwarding frontend user messages into a
-running agent turn. Underneath, the CLI writes a `user_message` control
-frame to a per-spawn control surface owned by the streaming spawn — see
-[`harness/mid-turn-steering.md`](harness/mid-turn-steering.md) for the
-full ownership story.
+```toml
+# pyproject.toml additions
+[project.dependencies]
+fastapi = ">=0.115"
+uvicorn = {version = ">=0.34", extras = ["standard"]}
+websockets = ">=14.0"
+ag-ui-protocol = ">=0.1"
 
-## Out Of Scope
+[project.optional-dependencies]
+app = ["fastapi", "uvicorn[standard]", "websockets", "ag-ui-protocol"]
+```
 
-Per D38 and D39, none of the following are part of this work item:
+The `app` optional dependency group keeps the base `meridian` install lightweight. `meridian app` checks for the group and gives a clear error if missing.
 
-- **Strategy, extensions, packaging, frontend.** Pre-reframe `design/`
-  subtrees were deleted; their concerns either belong at product strategy
-  level or live in meridian-flow.
-- **Local deployment packaging** (localhost binding, static frontend
-  serving, single-user defaults). That is meridian-flow's local deployment
-  workstream (D39 #3).
-- **Backend 3-WS refactor** (`issue #8` rename + Project WS handler).
-  meridian-flow's backend workstream (D39 #2).
-- **Meridian-channel subprocess adapter inside meridian-flow's backend**.
-  Same workstream.
-- **`providers/claude-code/` (or any harness-shim provider) in
-  meridian-llm-go.** Explicitly rejected by D40. The shell path does not
-  go through meridian-llm-go at all.
-- **In-process harness streaming.** `direct.py` (in-process Anthropic
-  Messages API) keeps `supports_stream_events=False` and stays out of
-  this refactor. The streaming surface is a subprocess-harness concern.
+## What `meridian app` Does
 
-## Refactor Touchpoints
+```bash
+meridian app                    # Start server, open browser
+meridian app --port 8420        # Custom port
+meridian app --no-browser       # Start server only
+```
 
-The explorer pre-pass mapped the load-bearing files. **37 files** are
-on the critical path; the full table — file, status (`must change` /
-`may change` / `unchanged`), current role, expected impact, consumers,
-and risk — lives in [`refactor-touchpoints.md`](refactor-touchpoints.md).
+On launch:
+1. Creates a FastAPI application with the WebSocket endpoint and static file serving
+2. Starts the `SpawnManager` (Phase 1 control layer)
+3. Starts uvicorn on `localhost:<port>`
+4. Opens the default browser to `http://localhost:<port>`
 
-The three highest-risk touchpoints, all in the harness layer, are:
+The user interacts with spawns through the React UI. The UI can:
+- Start a new spawn (selecting harness and agent profile)
+- View the real-time activity stream of a running spawn
+- Send messages mid-turn (routed through Phase 1's inject mechanism)
+- Interrupt or cancel a running spawn
 
-- `src/meridian/lib/harness/claude.py`
-- `src/meridian/lib/harness/codex.py`
-- `src/meridian/lib/harness/opencode.py`
+## Relationship to Existing `meridian spawn`
 
-All three must gain AG-UI event emission and a FIFO control dispatcher
-**without** regressing the existing artifact contracts (`report.md`,
-`output.jsonl`, `stderr.log`, session-id extraction, `--from`, `--fork`,
-reaper liveness). The risk profile is the inverse of the visible work:
-the new code is moderate, the regressions are easy.
+The existing `meridian spawn` command continues to work exactly as it does today for fire-and-forget spawns. The bidirectional layer is additive:
 
-Two structural concerns from the touchpoints map deserve flagging in
-the overview:
+- `meridian spawn -a agent -p "task"` → fire-and-forget, uses existing `SubprocessHarness` path
+- `meridian spawn inject <spawn_id> "message"` → **new**, sends a message to a running spawn via Phase 1's control layer
+- `meridian app` → **new**, starts the full web UI
 
-1. **`state/spawn_store.py` has no live-control metadata today.** A
-   per-spawn control handle (FIFO or socket path) has to be designed
-   into `paths.py` and `spawn_store.py` before `spawn inject` has
-   anything authoritative to target. Covered in
-   [`harness/mid-turn-steering.md`](harness/mid-turn-steering.md).
-2. **`launch/process.py` already copies parent stdin into the child
-   PTY for primary launches.** A naïve "streaming spawn owns its own
-   stdin" approach will collide with that path and break interactive
-   `meridian` sessions. Resolved by treating streaming mode as a
-   non-PTY launch shape and routing `meridian spawn inject` through a
-   dedicated per-spawn control FIFO instead of the streaming process's
-   stdin. Covered in `harness/mid-turn-steering.md`.
-
-## How To Navigate This Design
-
-| Doc | What you get |
-|---|---|
-| [`harness/overview.md`](harness/overview.md) | One-page orientation to the harness layer after the refactor |
-| [`harness/abstraction.md`](harness/abstraction.md) | Adapter interface — new methods, new DTOs, capability semantics, what stays unchanged |
-| [`harness/adapters.md`](harness/adapters.md) | Per-harness translation rules (Claude, Codex, OpenCode), tool naming coordination (no wire config), regression risks |
-| [`harness/mid-turn-steering.md`](harness/mid-turn-steering.md) | FIFO control protocol, control frame model, per-harness injection mechanics, `meridian spawn inject` CLI |
-| [`events/overview.md`](events/overview.md) | What the AG-UI event taxonomy is and where its canonical definition lives |
-| [`events/flow.md`](events/flow.md) | The AG-UI event sequence inside a streaming spawn lifecycle |
-| [`events/harness-translation.md`](events/harness-translation.md) | Harness wire format → AG-UI event mapping tables (one section per harness) |
-| [`refactor-touchpoints.md`](refactor-touchpoints.md) | The 37-file impact map — read this before touching any source file |
-
-## Decision Anchors
-
-Every claim in this design tree must trace back to one or more of the
-following decisions in [`../decisions.md`](../decisions.md):
-
-- **D34** — agent-shell-mvp is meridian-channel's GUI, not a new product
-- **D35** — meridian-channel stays Python, no Go rewrite
-- **D36** — AG-UI event taxonomy is the canonical output schema
-- **D37** — Streaming spawn mode + FIFO control protocol
-- **D38** — Scope collapse of agent-shell-mvp design tree
-- **D39** — Workstream split across repositories
-- **D40** — No `providers/claude-code/` in meridian-llm-go
-
-Findings that ground the harness work, especially mid-turn semantics
-across the three harnesses:
-
-- [`findings-harness-protocols.md`](../findings-harness-protocols.md) —
-  authoritative reference. **All three harnesses are tier-1, mid-turn
-  steering is V0, capability is a semantic enum and not a boolean.**
+A spawn started via `meridian app` is also visible to `meridian spawn list`, `meridian spawn show`, and `meridian spawn log` — it writes to the same `.meridian/` state as any other spawn. The bidirectional layer adds the control socket and connection metadata; the rest of the spawn lifecycle (state tracking, artifact storage, session recording) uses the existing infrastructure.

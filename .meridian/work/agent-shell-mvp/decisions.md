@@ -960,3 +960,170 @@ meridian-llm-go stays **as-is** for meridian-flow's current cloud-hosted biomedi
 **Alternatives rejected**:
 - *Add `providers/claude-code/` that shells out to `claude --input-format stream-json ...` directly* — loses access to meridian-channel's agent runtime (profiles, skills, model routing, work item context, mars integration). The shell's whole point is spawning agents, not raw harness sessions.
 - *Add `providers/meridian/` that shells out to `meridian spawn`* — same subprocess adapter, just at the wrong layer. Adds a `meridian-llm-go` ↔ `meridian-channel` dependency that doesn't need to exist.
+
+---
+
+## D41 — MVP reframe: bidirectional streaming foundation, 3-phase delivery, all three harnesses
+2026-04-08, supersedes D34–D40 scope framing and the existing requirements.md Decision 4.
+
+**Decision**: The agent-shell-mvp is delivered as **three sequenced phases**, with the universal foundation being "every single spawn in meridian-channel can stream inputs as well as outputs, across all three tier-1 harnesses":
+
+1. **Phase 1 — Bidirectional streaming foundation + smoke tests.** Every harness adapter (Claude Code, Codex, OpenCode) gains input-channel writability while the subprocess is reading from output. Always available, not an opt-in flag, not a new invocation shape — fire-and-forget spawns still work exactly as they do today if the caller ignores the input side. Gate is "all three harnesses pass end-to-end smoke tests for mid-turn injection."
+2. **Phase 2 — Python FastAPI WebSocket server** that uses the Phase 1 layer to host an AG-UI event stream over WebSocket, with inbound `user_message` / `interrupt` / `cancel` frames routed to the spawn's input channel. Gate is "smoke tests (end-to-end WebSocket) and unit tests (harness-wire-format → AG-UI mapping in isolation) both green."
+3. **Phase 3 — React UI** (`meridian app`), adapted from `frontend-v2`, consuming the Phase 2 WebSocket. Gate is "a single customer can run `meridian app` and interact with a Claude Code spawn end-to-end."
+
+Everything else — Codex/OpenCode parity *in the UI*, permission gating, session persistence, Go CLI rewrite, consolidation of scattered code across the four parallel repos, PyVista interactive tool harness beyond V0-minimum — is tracked in the `post-mvp-cleanup` work item and touched only after the customer validates the direction.
+
+**Scope change vs. existing requirements Decision 4**: The old framing was "V0 Claude Code only, V1 adds OpenCode, Codex deferred indefinitely because exec mode is single-shot." This is superseded: **all three harnesses land in Phase 1**, because the foundation is "every spawn streams bidirectionally" and the foundation can't be half-built without leaving per-harness hacks in the layer above. Codex mid-turn works through its app-server path (JSON-RPC `turn/interrupt` + `turn/start`), not through `codex exec` — per `findings-harness-protocols.md`. Phase 3 (the UI) can still legitimately ship Claude-only first and add the others incrementally, since by then the foundation is uniform.
+
+**Scope change vs. D34–D40**: Those decisions framed the work as "meridian-channel refactor so a separate Go backend (meridian-flow) can consume its output." That framing added the FIFO control protocol, the AG-UI-as-wire-contract-between-languages, and the `meridian spawn inject` CLI primitive as the central deliverables. Under the reframed MVP, there is no separate Go backend during MVP — the Python FastAPI server runs in-process with the spawn manager. Control can be an asyncio queue, not a FIFO. `meridian spawn inject` is still valuable for CLI-to-CLI injection (dev-workflow orchestrators steering children from other shells) but is no longer architecturally central.
+
+**Why**:
+- The user's repeated framing in the reframe conversation (c1135+): "primary foundation is to move launch EVERY SINGLE SPAWN WITH THE ABILITY TO STREAM INPUTS AS WELL AS OUTPUTS" and "make sure this works well with all harnesses first." The universality of the foundation is the point.
+- The 2-repo Go-backend architecture from D34–D40 was building the right capability for the wrong deployment model. Single customer validation on localhost does not need a cross-language wire protocol; it needs one Python process that handles everything in-process.
+- The existing `requirements.md` (from c1046, earlier today) already had most of the right ideas — Python FastAPI + WebSocket, local-only, frontend-v2 in this repo, SOLID harness abstraction — and those are preserved. The 3-phase framing makes the sequencing explicit and gives each phase a verifiable gate.
+
+**Alternatives rejected**:
+- *Claude-Code-first, other harnesses in later phases*: lets Phase 1 "land" before the foundation is actually uniform, which means Phase 2 and Phase 3 get written against a Claude-shaped abstraction that then has to be retrofitted for Codex and OpenCode. Cheaper up front, more expensive overall.
+- *Ship UI first, fix harness layer later*: inverts the dependency. The UI depends on the foundation being real; shipping UI against a not-yet-bidirectional layer would require mock harnesses in tests and stubbed inject paths in code — both of which would then have to be ripped out.
+- *Keep D34–D40 framing as-is and shoehorn the MVP into it*: forces a FIFO control protocol and cross-language wire contract for a single-process Python MVP. Pure complexity tax.
+
+---
+
+## D42 — WebSocket transport for Phase 2 (over SSE + POST)
+2026-04-08
+
+**Decision**: Phase 2's FastAPI server uses **WebSocket** as its transport, not Server-Sent Events with a sibling POST endpoint.
+
+**Why**:
+- **Single endpoint / single lifecycle / single frame format.** `/ws/spawn/{id}` handles both outbound AG-UI events and inbound `user_message` / `interrupt` / `cancel` frames. The SSE+POST alternative means two endpoints, two auth checks, two failure modes, and two wire formats (SSE `data:` framing vs JSON request bodies) for one logical protocol.
+- **Matches user intent.** The user asked for "bidirectional" explicitly. WebSocket is bidirectional natively; SSE is unidirectional with a sidecar POST as a workaround.
+- **Matches the existing Go server.** `meridian-flow/backend/internal/service/llm/streaming/` already uses WebSocket. When the post-MVP Go rewrite replaces the Python MVP server with the real Go server, the wire contract stays identical and the React UI doesn't need to change.
+- **`ag_ui.core` event types work over any transport.** The `ag_ui.encoder.EventEncoder` is specifically an SSE framer; skipping it costs one line per event (`event.model_dump_json(by_alias=True, exclude_none=True)`). The Pydantic models — which are the valuable part — are transport-agnostic.
+
+**Cost**: WebSocket requires manual reconnect logic on the client side (~20 lines of TypeScript, the `ReconnectingWebSocket` pattern). Deferred to post-MVP polish; single-customer validation can accept "refresh if disconnected" for the first release.
+
+**Alternatives rejected**:
+- *SSE outbound + POST inbound*: conceptually simpler in isolation but operationally more complex — two surfaces, two failure modes, two wire formats. Wrong trade for a localhost single-user MVP.
+- *SSE only*: loses bidirectional, breaks the entire premise of the work item.
+- *Raw TCP / custom framing*: hostile to browsers, no upside over WebSocket for this use case.
+
+---
+
+## D43 — Adopt `ag-ui-protocol` Python SDK for event types
+2026-04-08
+
+**Decision**: Phase 2 uses the `ag-ui-protocol` PyPI package as the source of truth for AG-UI event types and serialization, rather than porting `events.go` / `emitter.go` from the Go server by hand.
+
+**What the SDK gives us**:
+- `ag_ui.core` — all AG-UI event types as Pydantic models: `RunStartedEvent`, `TextMessageStartEvent/Content/End`, `ToolCallStartEvent/Args/End/Result`, `StateSnapshotEvent`, `StateDeltaEvent`, `MessagesSnapshotEvent`, `StepStartedEvent/Finished`, `ReasoningStart/Content/End`, `RunFinishedEvent`, `RunErrorEvent`, plus `RAW` and `CUSTOM` escape hatches.
+- Pydantic validation and `model_dump_json(by_alias=True, exclude_none=True)` for protocol-compliant camelCase serialization.
+- `ag_ui.encoder.EventEncoder` for SSE framing (not used in Phase 2 since we picked WebSocket per D42, but kept available).
+- Automatic forward-compatibility with upstream AG-UI spec evolution.
+
+**What the SDK does NOT give us**:
+- The **mapping from harness wire format to AG-UI events**. The Go server's mapping is for HTTP-API streams (Anthropic Messages API, OpenRouter) — it is not a harness-subprocess mapping. The Python MVP still has to write a Claude-stream-json → AG-UI mapper, a Codex-JSON-RPC → AG-UI mapper, and an OpenCode-wire → AG-UI mapper from scratch. This is the bulk of Phase 2's real work.
+
+**Role of the Go server** (`meridian-flow/backend/internal/service/llm/streaming/`): reduced from "code we port" to **semantic reference only**. When writing the harness-to-AG-UI mappers, the design team reads `emitter.go`, `stream_executor.go`, `block_processor.go`, `tool_executor.go`, `cancel_handler.go`, and `catchup.go` to understand when to emit which event, how state snapshots interact with message deltas, how tool calls order relative to text content, and how reconnect/catchup behaves. But the types themselves come from the Python SDK.
+
+**Reference implementation to inspect**: `agent-framework-ag-ui` on PyPI (released April 2026) already has the "orchestrator → event bridge → FastAPI SSE endpoint" shape. Not adopted as a dependency, but worth reading as a template for how the pattern looks in idiomatic Python.
+
+**Why**:
+- Porting `events.go` by hand is lossy, duplicative, and guarantees drift from upstream AG-UI as it evolves.
+- Pydantic gives us validation, type safety, and JSON schema export for free — all of which we'd have to rebuild if we rolled our own types.
+- The frontend-v2 React components already speak AG-UI, so using the canonical Python package guarantees wire compatibility.
+
+**Alternatives rejected**:
+- *Port `events.go` to Python by hand*: duplicative, lossy, requires ongoing sync with upstream.
+- *Invent our own event taxonomy*: breaks frontend-v2 compatibility and throws away the entire point of using AG-UI.
+- *Depend on `agent-framework-ag-ui`*: too much surface area (Agent Framework itself, orchestrator bridge, etc.) for what we actually need — which is just the event types.
+
+---
+
+## D44 — Archive `agent-shell-mvp/design/` subtree entirely, restart from scratch
+2026-04-08, supersedes D38's "kept but rewritten for the corrected scope" plan for `design/harness/` and `design/events/`.
+
+**Decision**: The entire `agent-shell-mvp/design/` subtree is archived as of this decision. A fresh design tree is produced from scratch by a new `@design-orchestrator` spawn using the updated `requirements.md` as its input.
+
+**What gets archived (removed from live tree, preserved in git history)**:
+- `design/overview.md`
+- `design/refactor-touchpoints.md`
+- `design/harness/` (overview, abstraction, adapters, mid-turn-steering)
+- `design/events/` (overview, flow, harness-translation)
+- Any nested content in `design/`
+
+**What stays live at the work item root** (not part of `design/`):
+- `requirements.md` — updated in this same decision pass
+- `decisions.md` — the authoritative decision log (this file)
+- `findings-harness-protocols.md` — authoritative reference for harness mid-turn capabilities; referenced by D41 and must stay accessible to the fresh design pass
+- `reframe.md`, `synthesis.md`, `exploration/`, `reviews/`, `correction-pass-brief.md`, `correction-review-brief.md` — historical artifacts from prior rounds, preserved
+
+**Why**:
+- The archived tree was built under the D34–D40 framing (meridian-flow as Go backend consumer, AG-UI as cross-language wire contract, FIFO control protocol as the central deliverable). Under D41's reframe, most of those deliverables either don't apply or apply very differently.
+- Cherry-picking "still-valid" bits of the old tree creates confusion about what's current vs historical. Fresh design from scratch — using the 3-phase scope and the preserved findings as inputs — is cleaner than incremental repair.
+- The fresh `@design-orchestrator` run gets a clean slate and produces a design that is coherent end-to-end against D41, rather than a patchwork of old-framing-with-edits.
+
+**Alternatives rejected**:
+- *Incrementally rewrite the existing `design/` files*: guarantees residual old-framing assumptions slipping through. Cheap to do, expensive to audit.
+- *Keep the old tree alongside new design as "deprecated"*: two design trees in one work item is confusing and agents waste cycles figuring out which is current.
+- *Preserve `refactor-touchpoints.md` as a standalone artifact at work item root*: tempting (the 37-file impact map is factually useful ground truth about the harness layer), but it was mapped against the D34–D40 deliverables. The new design will need its own touchpoints map against the 3-phase scope, and the old one would bias that exercise. Preserved in git history if needed.
+
+---
+
+## D45 — OpenCode adapter uses HTTP, not WebSocket (issue #13388 not merged)
+2026-04-09, informed by p1180 research
+
+**Decision**: The Phase 1 OpenCode adapter uses the HTTP session API (`POST /session/:id/message` + `GET /event` SSE), not the proposed `/acp` WebSocket endpoint from issue #13388.
+
+**Why**: Issue #13388 is still open as of 2026-04-09. The HTTP API is the current stable surface exposed by `opencode serve`. Designing against an unmerged proposal would leave the adapter untestable.
+
+**What this means**: The `OpenCodeConnection` implementation is HTTP-based, using `aiohttp` for async HTTP requests and SSE streaming. If #13388 merges later, a transport-layer swap from HTTP to WebSocket is scoped to `opencode_http.py` internals — the `HarnessConnection` protocol insulates everything above it.
+
+**Alternatives rejected**:
+- *Wait for #13388 to merge* — blocks Phase 1 indefinitely on an external timeline.
+- *Stub the OpenCode adapter* — violates D41's "all three harnesses in Phase 1" commitment.
+
+---
+
+## D46 — Additive architecture: bidirectional path alongside fire-and-forget
+2026-04-09
+
+**Decision**: The bidirectional streaming layer is a parallel code path (`harness/connections/` + `streaming/`), not a modification of the existing fire-and-forget launch path (`launch/`). The existing `SubprocessHarness` protocol, `runner.py`, `process.py`, and `stream_capture.py` are untouched.
+
+**Why**: The fire-and-forget path is battle-tested and powers every existing `meridian spawn`. Modifying it risks regressions in all existing dev-workflow orchestration. The bidirectional path has fundamentally different mechanics (WebSocket/HTTP transport vs. subprocess stdio) and doesn't benefit from sharing implementation with the existing path.
+
+**What this means**: A harness now has two implementations: a `SubprocessHarness` (existing) for fire-and-forget spawns, and a `HarnessConnection` (new) for bidirectional spawns. They share the harness ID and capability metadata, but their implementations are independent. This is SRP applied at the concern level — command building is a different concern from bidirectional transport management.
+
+**Alternatives rejected**:
+- *Replace the existing launch path with the bidirectional one* — too much risk to existing functionality. The bidirectional path must be proven in the new context before it could ever replace the old one.
+- *Refactor both paths into a shared abstraction* — premature unification. The two paths may converge post-MVP, but forcing it now would slow Phase 1 with no user benefit.
+
+---
+
+## D47 — Unix domain socket for cross-process inject (Phase 1)
+2026-04-09
+
+**Decision**: Cross-process `meridian spawn inject` communicates with the spawn manager via a Unix domain socket at `.meridian/spawns/<spawn_id>/control.sock`.
+
+**Why**: `meridian spawn inject` runs in a separate process from the one hosting the `SpawnManager`. The socket provides a clean, discoverable control channel. It's filesystem-based (fits files-as-authority), path is deterministic from spawn ID, supports async message passing, and cleans up naturally with spawn artifacts.
+
+**What this means**: Each bidirectional spawn creates a Unix domain socket. The socket protocol is simple JSON request/response — one message per connection. Phase 2's FastAPI server uses the in-process asyncio path directly (no socket needed — same process).
+
+**Alternatives rejected**:
+- *Named pipe (FIFO)* — unidirectional, doesn't support request/response without a second pipe.
+- *HTTP endpoint per spawn* — heavy for a localhost-only control channel.
+- *File-based signaling (write a file, poll for it)* — latency and race conditions.
+- *Shared memory / mmap* — overcomplicated for simple JSON messages.
+
+---
+
+## D48 — AG-UI Thinking vs. Reasoning event naming: use THINKING_* with Meridian thinkingId extension
+2026-04-09, informed by p1178 research
+
+**Decision**: The Phase 2 AG-UI mapper emits `THINKING_START` / `THINKING_TEXT_MESSAGE_*` events for Claude's thinking blocks, with a Meridian-extended `thinkingId` field. The newer `REASONING_*` event family exists in the SDK but is not used for MVP.
+
+**Why**: The frontend-v2 reducer already consumes `THINKING_START` + `THINKING_TEXT_MESSAGE_CONTENT` with `thinkingId`. The AG-UI SDK exports both families. Switching to `REASONING_*` would require frontend changes for zero user benefit in the MVP. The `thinkingId` extension is a Meridian convention (AG-UI's `ThinkingStartEvent` uses `message_id`, not a dedicated thinking ID) — the Phase 2 mapper generates it and the frontend expects it.
+
+**Alternatives rejected**:
+- *Use REASONING_* events* — would require updating frontend-v2's reducer, which adds Phase 3 scope for no user-visible benefit.
+- *Use raw AG-UI ThinkingStartEvent.message_id as-is* — breaks frontend-v2 compatibility which expects `thinkingId`.
