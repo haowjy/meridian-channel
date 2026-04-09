@@ -38,7 +38,7 @@ _websockets_module_cache: Any | None = None
 
 
 class _WsTransport(Protocol):
-    closed: bool
+    state: object | None
 
     async def recv(self) -> str | bytes: ...
 
@@ -55,6 +55,28 @@ class _WsServer(Protocol):
     def close(self) -> None: ...
 
     async def wait_closed(self) -> None: ...
+
+
+def _ws_is_open(ws: _WsTransport) -> bool:
+    """Handle websockets state checks across API versions."""
+    state = getattr(ws, "state", None)
+    if state is not None:
+        state_name = getattr(state, "name", None)
+        if isinstance(state_name, str):
+            return state_name == "OPEN"
+
+        state_value = getattr(state, "value", None)
+        if isinstance(state_value, int):
+            return state_value == 1
+
+        if isinstance(state, int):
+            return state == 1
+
+    closed = getattr(ws, "closed", None)
+    if isinstance(closed, bool):
+        return not closed
+
+    return False
 
 
 def _websockets_module() -> Any:
@@ -406,7 +428,7 @@ class ClaudeConnection(HarnessConnection):
 
     async def _accept_connection(self, websocket: _WsTransport) -> None:
         async with self._accept_lock:
-            if self._ws is not None and not self._ws.closed:
+            if self._ws is not None and _ws_is_open(self._ws):
                 await websocket.close(code=1013, reason="Connection already active")
                 return
             self._ws = websocket
@@ -415,7 +437,7 @@ class ClaudeConnection(HarnessConnection):
 
     async def _send_json(self, payload: dict[str, object]) -> None:
         ws = self._ws
-        if ws is None or ws.closed:
+        if ws is None or not _ws_is_open(ws):
             raise ConnectionNotReady("Claude WebSocket is not connected.")
 
         wire_payload = json.dumps(payload, separators=(",", ":"))

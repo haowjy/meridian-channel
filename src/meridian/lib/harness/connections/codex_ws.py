@@ -40,6 +40,28 @@ def _load_websockets_module() -> Any | None:
 _WEBSOCKETS_MODULE: Any | None = _load_websockets_module()
 
 
+def _ws_is_open(ws: object) -> bool:
+    """Handle websockets state checks across API versions."""
+    state = getattr(ws, "state", None)
+    if state is not None:
+        state_name = getattr(state, "name", None)
+        if isinstance(state_name, str):
+            return state_name == "OPEN"
+
+        state_value = getattr(state, "value", None)
+        if isinstance(state_value, int):
+            return state_value == 1
+
+        if isinstance(state, int):
+            return state == 1
+
+    closed = getattr(ws, "closed", None)
+    if isinstance(closed, bool):
+        return not closed
+
+    return False
+
+
 class _AiohttpWebSocketCompat:
     """Compatibility layer matching the subset of the websockets API we use."""
 
@@ -217,7 +239,7 @@ class CodexConnection(HarnessConnection):
 
     def health(self) -> bool:
         process_running = self._process is not None and self._process.returncode is None
-        ws_open = self._ws is not None and not bool(getattr(self._ws, "closed", True))
+        ws_open = self._ws is not None and _ws_is_open(self._ws)
         return self._state == "connected" and process_running and ws_open
 
     async def send_user_message(self, text: str) -> None:
