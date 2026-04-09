@@ -9,9 +9,10 @@ from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
 from typing import NotRequired, Protocol, TypedDict, cast
 
+from ag_ui.core import BaseEvent, RunErrorEvent
+
 from meridian.lib.app.agui_mapping import get_agui_mapper
 from meridian.lib.app.agui_mapping.base import AGUIMapper
-from meridian.lib.app.agui_types import BaseEvent, RunErrorEvent
 from meridian.lib.core.types import SpawnId
 from meridian.lib.harness.connections.base import HarnessEvent
 from meridian.lib.streaming.spawn_manager import SpawnManager

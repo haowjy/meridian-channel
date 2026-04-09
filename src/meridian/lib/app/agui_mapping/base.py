@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
-from meridian.lib.app.agui_types import BaseEvent, RunFinishedEvent, RunStartedEvent
 from meridian.lib.harness.connections.base import HarnessEvent
+
+if TYPE_CHECKING:
+    from ag_ui.core import BaseEvent, RunFinishedEvent, RunStartedEvent
 
 
 class AGUIMapper(Protocol):
