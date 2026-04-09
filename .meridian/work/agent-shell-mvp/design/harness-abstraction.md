@@ -51,13 +51,30 @@ ConnectionState = Literal[
 ]
 
 # Transition rules:
-#   created  → starting  (start() called)
-#   starting → connected (transport established, harness ready)
-#   starting → failed    (timeout, process crash during startup)
-#   connected → stopping (stop() or send_cancel() called)
-#   connected → failed   (harness process dies unexpectedly)
-#   stopping → stopped   (clean shutdown complete)
-#   stopping → failed    (shutdown timeout, SIGKILL needed)
+#   created   → starting  (start() called)
+#   starting  → connected (transport established, harness ready)
+#   starting  → failed    (timeout, process crash during startup)
+#   connected → stopping  (stop() or send_cancel() called)
+#   connected → failed    (harness process dies unexpectedly)
+#   stopping  → stopped   (clean shutdown complete)
+#   stopping  → failed    (shutdown timeout, SIGKILL needed)
+#   failed    → stopped   (stop() called for cleanup — teardown resources)
+#
+# stop() behavior by state:
+#   "connected" → normal shutdown: connected → stopping → stopped
+#   "stopping"  → idempotent: already tearing down, wait for completion
+#   "stopped"   → no-op (already stopped)
+#   "failed"    → cleanup: close transport, kill process if alive → stopped
+#   "created"   → no-op (nothing to stop)
+#   "starting"  → abort: cancel startup → failed → stopped
+#
+# Normal cancel-then-stop sequence:
+#   send_cancel() transitions connected → stopping (signals harness)
+#   Caller waits for events() to drain (harness may finish current tool)
+#   stop() transitions stopping → stopped (tears down transport, kills process)
+#
+# Forced shutdown (skip graceful cancel):
+#   stop() transitions connected → stopping → stopped directly
 #
 # Behavioral contracts per state:
 #   send_*() methods raise ConnectionNotReady if state != "connected"
@@ -172,7 +189,13 @@ class HarnessSender(Protocol):
 
 
 class HarnessReceiver(Protocol):
-    """Receive events from the harness."""
+    """Receive events from the harness.
+
+    Standalone use: SpawnManager._drain_loop() accepts HarnessReceiver,
+    not the full HarnessConnection. This makes the drain task testable
+    with a mock receiver and keeps the ISP boundary honest — the drain
+    only needs to iterate events, not send messages or check capabilities.
+    """
 
     def events(self) -> AsyncIterator[HarnessEvent]:
         """Async iterator of events from the harness.

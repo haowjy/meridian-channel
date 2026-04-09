@@ -152,11 +152,11 @@ async def spawn_websocket(
                 data = await websocket.receive_json()
                 msg_type = data.get("type")
                 if msg_type == "user_message":
-                    await manager.inject(SpawnId(spawn_id), data["text"])
+                    await manager.inject(SpawnId(spawn_id), data["text"], source="websocket")
                 elif msg_type == "interrupt":
-                    await manager.interrupt(SpawnId(spawn_id))
+                    await manager.interrupt(SpawnId(spawn_id), source="websocket")
                 elif msg_type == "cancel":
-                    await manager.cancel(SpawnId(spawn_id))
+                    await manager.cancel(SpawnId(spawn_id), source="websocket")
         except WebSocketDisconnect:
             pass  # Client disconnected — drain task continues independently
 

@@ -45,19 +45,30 @@ Each connected UI client gets an `asyncio.Queue` that the drain task feeds. When
 class SpawnManager:
     """Registry of active harness connections with durable event drain.
 
-    Owns the lifecycle of HarnessConnection instances. Each spawn gets
-    one connection, one drain task, one control socket. The SpawnManager
-    starts the connection, begins draining events to output.jsonl,
-    and tears everything down when the spawn finishes.
+    Thin registry + lifecycle coordinator. Per-spawn state is grouped in
+    SpawnSession (see below) to keep SpawnManager's responsibility narrow:
+    it owns the collection, not the per-spawn concerns.
     """
 
     def __init__(self, state_root: Path, repo_root: Path):
-        self._connections: dict[SpawnId, HarnessConnection] = {}
-        self._drain_tasks: dict[SpawnId, asyncio.Task] = {}
-        self._subscribers: dict[SpawnId, asyncio.Queue[HarnessEvent | None]] = {}
-        self._control_servers: dict[SpawnId, asyncio.AbstractServer] = {}
+        self._sessions: dict[SpawnId, "SpawnSession"] = {}
         self._state_root = state_root
         self._repo_root = repo_root
+
+# Per-spawn state grouping:
+@dataclass
+class SpawnSession:
+    """All per-spawn resources grouped together.
+
+    SpawnManager holds a dict of these. Each SpawnSession owns its
+    connection, drain task, subscriber queue, and control socket server.
+    This keeps SpawnManager thin — it coordinates lifecycle across sessions
+    but doesn't hold 5 parallel dicts keyed by spawn_id.
+    """
+    connection: HarnessConnection
+    drain_task: asyncio.Task
+    subscriber: asyncio.Queue[HarnessEvent | None] | None  # None if no UI client
+    control_server: ControlSocketServer
 
     async def start_spawn(
         self,
@@ -130,11 +141,12 @@ class SpawnManager:
         """Remove a UI client's subscription."""
         self._subscribers.pop(spawn_id, None)
 
-    async def inject(self, spawn_id: SpawnId, message: str) -> InjectResult:
+    async def inject(self, spawn_id: SpawnId, message: str, source: str = "control_socket") -> InjectResult:
         """Send a user message to a running spawn.
 
-        Also records the inbound action to the spawn's inbound.jsonl file
-        for audit trail (see Inbound Action Recording below).
+        Write-ahead-log semantics: records the intent to inbound.jsonl BEFORE
+        routing to the harness. If the process crashes between record and send,
+        the audit trail still captures the user's intervention.
 
         Returns InjectResult indicating success, or an error if the spawn
         is not found, not running, or the adapter rejected the message.
@@ -143,43 +155,46 @@ class SpawnManager:
         if connection is None:
             return InjectResult(success=False, error="spawn not found")
         try:
+            # Record intent first (write-ahead)
+            await self._record_inbound(spawn_id, "user_message", {"text": message}, source=source)
+            # Then deliver
             await connection.send_user_message(message)
-            await self._record_inbound(spawn_id, "user_message", {"text": message})
             return InjectResult(success=True)
         except ConnectionNotReady as e:
             return InjectResult(success=False, error=f"connection not ready: {e}")
         except Exception as e:
             return InjectResult(success=False, error=str(e))
 
-    async def interrupt(self, spawn_id: SpawnId) -> InjectResult:
+    async def interrupt(self, spawn_id: SpawnId, source: str = "control_socket") -> InjectResult:
         """Interrupt the current turn of a running spawn."""
         connection = self._connections.get(spawn_id)
         if connection is None:
             return InjectResult(success=False, error="spawn not found")
         try:
+            await self._record_inbound(spawn_id, "interrupt", {}, source=source)
             await connection.send_interrupt()
-            await self._record_inbound(spawn_id, "interrupt", {})
             return InjectResult(success=True)
         except ConnectionNotReady as e:
             return InjectResult(success=False, error=f"connection not ready: {e}")
         except Exception as e:
             return InjectResult(success=False, error=str(e))
 
-    async def cancel(self, spawn_id: SpawnId) -> InjectResult:
+    async def cancel(self, spawn_id: SpawnId, source: str = "control_socket") -> InjectResult:
         """Cancel a running spawn entirely."""
         connection = self._connections.get(spawn_id)
         if connection is None:
             return InjectResult(success=False, error="spawn not found")
         try:
+            await self._record_inbound(spawn_id, "cancel", {}, source=source)
             await connection.send_cancel()
-            await self._record_inbound(spawn_id, "cancel", {})
             return InjectResult(success=True)
         except Exception as e:
             return InjectResult(success=False, error=str(e))
 
-    async def _record_inbound(self, spawn_id: SpawnId, action: str, data: dict) -> None:
+    async def _record_inbound(self, spawn_id: SpawnId, action: str, data: dict, source: str = "control_socket") -> None:
         """Record an inbound steering action to the spawn's inbound.jsonl.
 
+        Called BEFORE routing to the harness (write-ahead-log semantics).
         See 'Inbound Action Recording' section below.
         """
         inbound_path = self._state_root / "spawns" / str(spawn_id) / "inbound.jsonl"
@@ -187,7 +202,7 @@ class SpawnManager:
             "action": action,
             "data": data,
             "ts": time.time(),
-            "source": "control_socket",  # or "websocket" — set by caller context
+            "source": source,
         }) + "\n"
         async with aiofiles.open(inbound_path, "a") as f:
             await f.write(record)
@@ -207,7 +222,7 @@ class SpawnManager:
 
 ## Inbound Action Recording (Files-as-Authority)
 
-All inbound steering actions — `user_message`, `interrupt`, `cancel` — are durably recorded to `.meridian/spawns/<spawn_id>/inbound.jsonl` before being routed to the harness. This satisfies the files-as-authority principle: the most important user interventions during a spawn are recoverable from the filesystem.
+All inbound steering actions — `user_message`, `interrupt`, `cancel` — are durably recorded to `.meridian/spawns/<spawn_id>/inbound.jsonl` **before** being routed to the harness (write-ahead-log semantics). If the process crashes between recording and delivery, the audit trail still captures the user's intent. This satisfies the files-as-authority principle: the most important user interventions during a spawn are recoverable from the filesystem.
 
 Format:
 ```json
@@ -404,15 +419,12 @@ The `SpawnManager` maintains the heartbeat file for each active connection, usin
 
 | File | Why |
 |---|---|
-| `harness/claude.py` | Fire-and-forget adapter. `ClaudeAdapter.build_command()` still used for non-interactive spawns. |
-| `harness/codex.py` | Same — fire-and-forget stays. |
+| `harness/claude.py` | `ClaudeAdapter.build_command()` and extraction logic unchanged. `supports_bidirectional=True` added to capabilities. |
+| `harness/codex.py` | Same — command building, extraction stay. |
 | `harness/opencode.py` | Same. |
-| `harness/adapter.py` | `SubprocessHarness` protocol unchanged. `HarnessCapabilities` extended (see below). |
 | `harness/registry.py` | Unchanged — still resolves `SubprocessHarness` instances. |
-| `launch/runner.py` | Unchanged — async subprocess execution for fire-and-forget spawns. |
 | `launch/process.py` | Unchanged — primary interactive launch with PTY. |
-| `launch/stream_capture.py` | Unchanged — stdout/stderr capture for fire-and-forget. |
-| `state/spawn_store.py` | Extended with new `kind` and `launch_mode` values. |
+| `launch/stream_capture.py` | Unchanged — stdout/stderr capture stays for artifact files. |
 
 ### What's extended
 
@@ -430,6 +442,15 @@ class HarnessCapabilities(BaseModel):
 ```
 
 Each existing adapter (`ClaudeAdapter`, `CodexAdapter`, `OpenCodeAdapter`) gets `supports_bidirectional=True` added to their `capabilities` property. **No `mid_turn_injection` enum on this side** — that semantic detail lives exclusively in `ConnectionCapabilities` on `HarnessConnection` (see harness-abstraction.md, Capability model boundary).
+
+**`launch/runner.py`** — The async subprocess runner is extended to wire up the bidirectional layer for harnesses where `supports_bidirectional=True`. After launching the subprocess, it:
+1. Creates a `HarnessConnection` from the connection registry
+2. Calls `connection.start()` to establish the bidirectional transport
+3. Starts the durable drain task (events → `output.jsonl`)
+4. Starts the control socket server
+5. Registers the connection with the global `SpawnManager`
+
+This is the integration point that makes universality concrete. The fire-and-forget subprocess lifecycle (launch, capture, heartbeat, finalize) continues to own the process. The bidirectional layer runs alongside it — same subprocess, additional transport. If `supports_bidirectional=False` for a harness, none of this fires and the spawn works exactly as before.
 
 **`state/spawn_store.py`** — no schema changes. Spawns use existing `kind` and `launch_mode` values. The bidirectional layer is additive infrastructure, not a new spawn category.
 
@@ -451,9 +472,9 @@ Each existing adapter (`ClaudeAdapter`, `CodexAdapter`, `OpenCodeAdapter`) gets 
 
 ### What's NOT touched
 
-The entire `launch/` directory is untouched. The bidirectional path is a parallel code path, not a modification of the existing launch path. This is deliberate — the fire-and-forget path is battle-tested and powers all existing meridian spawns. Phase 1 adds bidirectional capability alongside it.
+The `launch/process.py` (PTY interactive mode) and `launch/stream_capture.py` (stdout/stderr capture) are not modified. The bidirectional transport runs alongside the existing capture — same subprocess, separate communication channel (WebSocket for Claude/Codex, HTTP for OpenCode).
 
-The existing `SubprocessHarness` adapters (`ClaudeAdapter`, `CodexAdapter`, `OpenCodeAdapter`) are not modified beyond adding the `supports_bidirectional` boolean capability flag. Their command-building, report extraction, and session management logic stays as-is.
+The existing `SubprocessHarness` adapters' command-building, report extraction, and session management logic stays as-is. Only the `capabilities` property gains the `supports_bidirectional` flag.
 
 ## Phase 1 Gate: Smoke Tests
 

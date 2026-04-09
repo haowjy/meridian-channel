@@ -132,10 +132,12 @@ pyproject.toml                  # Updated: new deps (fastapi, uvicorn, websocket
 
 ### What Changes vs. What's New
 
-**Existing code that stays unchanged:**
-- `src/meridian/lib/harness/claude.py`, `codex.py`, `opencode.py` — fire-and-forget adapters. These continue to power `meridian spawn` for non-interactive spawns.
-- `src/meridian/lib/launch/runner.py`, `process.py`, `stream_capture.py` — existing subprocess launch and capture. The bidirectional path is additive, not a replacement.
-- `src/meridian/lib/harness/adapter.py` — `SubprocessHarness` protocol stays. Extended with a new `BidirectionalHarness` protocol that co-exists.
+**Existing code that stays mostly unchanged:**
+- `src/meridian/lib/harness/claude.py`, `codex.py`, `opencode.py` — fire-and-forget `SubprocessHarness` adapters. Command-building, report extraction, and session management logic is unchanged. `supports_bidirectional=True` added to capabilities.
+- `src/meridian/lib/launch/runner.py`, `process.py`, `stream_capture.py` — existing subprocess launch and capture stay as internal implementation.
+- `src/meridian/lib/harness/adapter.py` — `SubprocessHarness` protocol stays. `HarnessCapabilities` gains `supports_bidirectional: bool`.
+
+**Integration point (how universality works):** The existing spawn launch path in `runner.py` is extended to, after launching the subprocess, also establish a `HarnessConnection` and start the control socket when the harness's `supports_bidirectional` capability is True. This is the bridge that makes every spawn injectable — the fire-and-forget launch path still owns the subprocess lifecycle, but it additionally sets up the bidirectional transport alongside. The `HarnessConnection` reads events from its own transport (WS/HTTP), while `stream_capture.py` continues to capture stdout/stderr to artifact files as before. Both run concurrently for the duration of the spawn.
 
 **New code:**
 - `src/meridian/lib/harness/connections/` — per-harness bidirectional connection implementations
