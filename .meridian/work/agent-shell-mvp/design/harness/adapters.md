@@ -11,7 +11,7 @@ Up: [`overview.md`](overview.md).
 
 ## All Three Are Tier-1
 
-Per [`../findings-harness-protocols.md`](../findings-harness-protocols.md),
+Per [`../../findings-harness-protocols.md`](../../findings-harness-protocols.md),
 **Claude Code, Codex app-server, and OpenCode are all tier-1** design
 targets with stable, programmatic, mid-turn-capable control surfaces.
 Earlier framing that treated Codex as experimental or deferred is

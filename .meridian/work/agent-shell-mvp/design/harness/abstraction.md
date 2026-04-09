@@ -235,7 +235,7 @@ class HarnessCapabilities(BaseModel):
 `mid_turn_injection` is a **semantic enum** because the wire-level
 behavior is honestly different across the three harnesses, and the UI
 needs to render the difference. Per the
-[findings doc](../findings-harness-protocols.md): a Claude user sees
+[findings doc](../../findings-harness-protocols.md): a Claude user sees
 "message queued for next turn"; a Codex user sees "this will interrupt
 the current turn"; an OpenCode user sees a normal send button. **Don't
 lie about wire-level behavior to fake uniformity.**
@@ -273,6 +273,7 @@ The capability bundle in `params.json` looks like:
   "spawn_id": "...",
   "agent": "...",
   "harness": "claude",
+  "control_protocol_version": "0.1",
   "capabilities": {
     "mid_turn_injection": "queue",
     "runtime_model_switch": false,

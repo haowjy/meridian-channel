@@ -223,15 +223,15 @@ taxonomy (D36); meridian-channel cannot mint new event types unilaterally.
 Per-harness capability data lives in the per-spawn `params.json` artifact:
 
 ```jsonc
-// .meridian/spawns/<spawn_id>/params.json (capabilities subtree)
+// .meridian/spawns/<spawn_id>/params.json (control metadata + capabilities subtree)
 {
+  "control_protocol_version": "0.1",
   "capabilities": {
     "mid_turn_injection": "queue",          // queue | interrupt_restart | http_post | none
     "runtime_model_switch": false,
     "runtime_permission_switch": false,
     "structured_reasoning_stream": true,
-    "cost_tracking": true,
-    "control_protocol_version": "0.1"
+    "cost_tracking": true
   }
 }
 ```

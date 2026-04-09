@@ -17,8 +17,10 @@ and **OpenCode**. Today the layer launches subprocesses, captures
 stdout/stderr, and post-hoc extracts a `report.md` plus token usage and
 session ids. After the refactor, it does that **and** emits a normalized
 **AG-UI event stream** that meridian-flow's frontend reducer can ingest
-directly, **and** consumes a normalized **stdin control protocol** that
-lets a parent process steer a running spawn mid-turn.
+directly, **and** consumes a normalized **FIFO-based control protocol** that
+lets a parent process steer a running spawn mid-turn. Stdin is reserved for
+harness subprocess I/O only; the adapter does not use parent stdin as a
+control channel.
 
 The boundary stays exactly where it is — `src/meridian/lib/harness/`.
 The refactor grows the existing surfaces (`adapter.py`, `common.py`,
@@ -67,7 +69,7 @@ Three things flow through the layer at runtime:
 | Per-harness translation | `harness/claude.py`, `codex.py`, `opencode.py` | extends |
 | Shared parsing helpers | `harness/common.py` | extends (carefully — do not let it become a dumping ground) |
 | AG-UI event model + emitter | `harness/ag_ui_events.py` | **new sibling** |
-| Stdin control frame model + reader | `harness/control_channel.py` | **new sibling** |
+| FIFO control frame model + reader | `harness/control_channel.py` | **new sibling** |
 | Streaming launch metadata | `harness/launch_types.py` | extends |
 | In-process Anthropic adapter | `harness/direct.py` | **unchanged** — out of scope |
 | Adapter registry | `harness/registry.py` | unchanged or trivial typing update |
@@ -90,9 +92,9 @@ adapter-specific piece is the harness-native dispatch.
   what methods grow, what DTOs grow, what `HarnessCapabilities` becomes,
   what stays the same.
 - [`adapters.md`](adapters.md) — Claude / Codex / OpenCode translation
-  rules, per-tool render config, regression risks per adapter.
+  rules, tool naming coordination (no wire config), regression risks per adapter.
 - [`mid-turn-steering.md`](mid-turn-steering.md) — the differentiating
-  feature. Stdin control protocol, control frame model, per-harness
+  feature. FIFO control protocol, control frame model, per-harness
   injection mechanics, the `meridian spawn inject` CLI, ownership of
   the per-spawn control FIFO.
 - [`../events/overview.md`](../events/overview.md) — the AG-UI event

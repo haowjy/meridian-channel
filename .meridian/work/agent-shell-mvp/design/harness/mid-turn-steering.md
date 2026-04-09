@@ -12,7 +12,7 @@ Up: [`overview.md`](overview.md).
 
 ## Mid-Turn Steering Is Tier-1, Not A Footnote
 
-Per [`../findings-harness-protocols.md`](../findings-harness-protocols.md)
+Per [`../../findings-harness-protocols.md`](../../findings-harness-protocols.md)
 **§ "Mid-Turn Steering is Tier-1, Not Optional"**, mid-turn injection
 is **the differentiating feature of the platform** and the harness
 abstraction must be shaped around it from day one. The findings doc is
@@ -28,7 +28,7 @@ support collapses the loop by making **every spawn in the tree
 steerable mid-execution** — a user (or a parent orchestrator) can say
 "wait, reconsider X" mid-run and the running agent absorbs the
 correction without being killed and respawned. The
-[findings doc](../findings-harness-protocols.md) is the authoritative
+[findings doc](../../findings-harness-protocols.md) is the authoritative
 statement; this design implements it.
 
 Two consequences for the design pass:
@@ -163,7 +163,7 @@ initial prompt.
 The adapter calls JSON-RPC `turn/interrupt` to stop the current turn,
 then `turn/start` with the injected `user_message.text` as the new
 turn's initial prompt. Per the
-[findings doc](../findings-harness-protocols.md), this is the
+[findings doc](../../findings-harness-protocols.md), this is the
 documented stable mechanism — `turn/interrupt` is part of Codex's
 core stable protocol over stdio.
 
@@ -210,13 +210,13 @@ gate where the truth is a semantic enum:
   "spawn_id": "...",
   "agent": "...",
   "harness": "claude",
+  "control_protocol_version": "0.1",
   "capabilities": {
     "mid_turn_injection": "queue",
     "runtime_model_switch": false,
     "runtime_permission_switch": false,
     "structured_reasoning_stream": true,
-    "cost_tracking": true,
-    "control_protocol_version": "0.1"
+    "cost_tracking": true
   }
 }
 ```
@@ -345,8 +345,10 @@ def resolve_spawn_control_log(repo_root: Path, spawn_id: SpawnId) -> Path:
 
 # state/spawn_store.py  (new field on SpawnRecord)
 control_protocol: Literal["none", "fifo"] = "none"
-control_protocol_version: str | None = None
 ```
+
+`control_protocol_version` is a top-level field in each spawn's
+`params.json`, not a `SpawnRecord` field.
 
 `reaper.py` learns to clean up dangling FIFOs (and the
 `control.log` artifact) the same way it cleans up dangling pid files.
@@ -377,7 +379,8 @@ meridian spawn inject <spawn_id> --frame-file frame.json
 ### Writing The Frame
 
 4. Build a `ControlFrame` Pydantic model with a fresh `id`, the
-   `version` from `control_protocol_version`, and the requested type.
+   `version` from top-level `params.json.control_protocol_version`,
+   and the requested type.
 5. Serialize to JSONL. **Reject** the frame synchronously if it
    serializes to more than 3500 bytes (see "Maximum frame size"
    above) — the caller should split the message.

@@ -22,15 +22,17 @@ fork it — it emits events in the shape meridian-flow's reducer already expects
 |---|---|
 | [`meridian-flow/.meridian/work/biomedical-mvp/design/streaming-walkthrough.md`](../../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/streaming-walkthrough.md) | End-to-end AG-UI event sequence during a turn, with traces |
 | [`meridian-flow/.meridian/work/biomedical-mvp/design/frontend/data-flow.md`](../../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/frontend/data-flow.md) | 3-WS topology, Agent WS role, streaming reducer contract |
+| [`meridian-flow/.meridian/work/biomedical-mvp/design/frontend/component-architecture.md#per-tool-display-config`](../../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/frontend/component-architecture.md#per-tool-display-config) | Canonical `ToolDisplayConfig` contract and `toolDisplayConfigs` registry (`toolName`-keyed, frontend-resident) |
 | [`meridian-flow/.meridian/work/biomedical-mvp/design/backend/python-tool.md`](../../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/backend/python-tool.md) | Per-tool render config example: python (stdout visible inline) |
 | [`meridian-flow/.meridian/work/biomedical-mvp/design/backend/bash-tool.md`](../../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/backend/bash-tool.md) | Per-tool render config example: bash (everything collapsed) |
 | [`meridian-flow/.meridian/work/biomedical-mvp/design/backend/display-results.md`](../../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/backend/display-results.md) | DISPLAY_RESULT and TOOL_OUTPUT payload contracts |
 
 When this subtree references an event by name (`TOOL_CALL_START`, `DISPLAY_RESULT`,
 etc.) it always means the meridian-flow definition. When it talks about per-tool
-render config (`stdout: visible | collapsed | inline`) it always means the
-config shape meridian-flow's reducer applies. Read those docs first if any name
-is unfamiliar — this subtree is deliberately a thin layer on top of them.
+display behavior, it means meridian-flow's frontend `ToolDisplayConfig` fields
+(`inputCollapsed`, `stdoutCollapsed`, `stderrMode`) resolved from
+`toolDisplayConfigs` by `toolName`. Read those docs first if any name is
+unfamiliar — this subtree is deliberately a thin layer on top of them.
 
 ## Why AG-UI Is Canonical (D36)
 
@@ -57,8 +59,8 @@ normalization layer.
 
 Per the structural analysis in
 [`../refactor-touchpoints.md` §Structural Analysis](../refactor-touchpoints.md#structural-analysis),
-the canonical home for the AG-UI event model types and the per-tool behavior
-config tables is a **new sibling module** `src/meridian/lib/harness/ag_ui_events.py`:
+the canonical home for the AG-UI event model types and shared serialization
+helpers is a **new sibling module** `src/meridian/lib/harness/ag_ui_events.py`:
 
 - **Not in `transcript.py`** — that file is post-hoc text normalization for
   session log replay; AG-UI emission is a wire-format concern.
@@ -71,20 +73,22 @@ config tables is a **new sibling module** `src/meridian/lib/harness/ag_ui_events
   adapter, not in generic stream capture.
 
 Each adapter owns its harness's wire-format → AG-UI translation. Shared
-event constructors, the per-tool config dict, and the cross-harness
-capability enum live in `ag_ui_events.py` so the three adapters don't
-diverge on what an `AGUIToolCallStart` payload looks like. The adapter
-contract — i.e., the *interface* the rest of meridian-channel sees — lives
-in [`../harness/abstraction.md`](../harness/abstraction.md). This subtree
-covers the *event-level* view; the harness subtree covers the *adapter
-contract* view. They reference each other and don't duplicate.
+event constructors and serialization helpers live in `ag_ui_events.py` so the
+three adapters don't diverge on what an `AGUIToolCallStart` payload looks like.
+The adapter layer does **not** own per-tool display config tables; that remains
+frontend-resident in meridian-flow's `toolDisplayConfigs` registry (see
+[`frontend/component-architecture.md` §Per-Tool Display Config](../../../../../../meridian-flow/.meridian/work/biomedical-mvp/design/frontend/component-architecture.md#per-tool-display-config)).
+The adapter contract — i.e., the *interface* the rest of meridian-channel sees —
+lives in [`../harness/abstraction.md`](../harness/abstraction.md). This subtree
+covers the *event-level* view; the harness subtree covers the *adapter contract*
+view. They reference each other and don't duplicate.
 
 ## Navigation
 
 | Doc | Purpose |
 |---|---|
 | [flow.md](flow.md) | The AG-UI event sequence during a streaming spawn, from `RUN_STARTED` to `RUN_FINISHED`, with example traces (simple text turn, tool-call turn) |
-| [harness-translation.md](harness-translation.md) | Per-harness mapping tables: native wire format → AG-UI events, plus per-tool render config and known gaps |
+| [harness-translation.md](harness-translation.md) | Per-harness mapping tables: native wire format → AG-UI events, plus tool naming coordination (no wire config) and known gaps |
 
 For the *adapter contract* view (protocol interface, lifecycle methods,
 mid-turn steering semantics), see [`../harness/`](../harness/overview.md).

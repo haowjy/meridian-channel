@@ -146,7 +146,7 @@ the overview:
 |---|---|
 | [`harness/overview.md`](harness/overview.md) | One-page orientation to the harness layer after the refactor |
 | [`harness/abstraction.md`](harness/abstraction.md) | Adapter interface — new methods, new DTOs, capability semantics, what stays unchanged |
-| [`harness/adapters.md`](harness/adapters.md) | Per-harness translation rules (Claude, Codex, OpenCode), per-tool render config, regression risks |
+| [`harness/adapters.md`](harness/adapters.md) | Per-harness translation rules (Claude, Codex, OpenCode), tool naming coordination (no wire config), regression risks |
 | [`harness/mid-turn-steering.md`](harness/mid-turn-steering.md) | FIFO control protocol, control frame model, per-harness injection mechanics, `meridian spawn inject` CLI |
 | [`events/overview.md`](events/overview.md) | What the AG-UI event taxonomy is and where its canonical definition lives |
 | [`events/flow.md`](events/flow.md) | The AG-UI event sequence inside a streaming spawn lifecycle |
