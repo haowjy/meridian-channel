@@ -116,7 +116,8 @@ main() {
     esac
   done
 
-  require_clean_tree
+  # No clean-tree check — concurrent agents routinely leave untracked/dirty
+  # files, and this script only stages the version file explicitly.
   local branch
   branch="$(require_branch)"
 
