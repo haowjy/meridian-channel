@@ -1,6 +1,6 @@
 # Implementation Status
 
-Last updated: 2026-04-09 (all phases complete, final review)
+Last updated: 2026-04-09 (final review complete)
 
 ## Phase 1 — Bidirectional Streaming Foundation
 
@@ -33,7 +33,7 @@ Last updated: 2026-04-09 (all phases complete, final review)
 
 | Review | Status | Notes |
 |---|---|---|
-| Design alignment (gpt-5.4) | in progress | Round 10 — fan-out |
-| Security + correctness (opus) | in progress | Round 10 — fan-out |
-| API surface (gpt-5.2) | in progress | Round 10 — fan-out |
-| Structural hygiene (refactor-reviewer) | in progress | Round 10 — fan-out |
+| Design alignment (gpt-5.4) | done | 5 findings: 3 HIGH fixed, 2 MEDIUM (agent profile selector deferred) |
+| Security + correctness (opus) | done | 12 findings: 3 blocking fixed, 3 medium noted, 6 informational |
+| API surface (gpt-5.2) | done | 5 findings: 2 blocking fixed, 1 medium noted, 2 minor |
+| Structural hygiene (refactor-reviewer) | done | 5 findings: 2 HIGH fixed, 1 MEDIUM deferred (connection layer refactor), 2 LOW |
