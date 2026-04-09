@@ -1243,3 +1243,25 @@ The resolution: `--sdk-url` is the right choice for MVP because it gives true bi
 **Alternatives rejected**:
 - *Mirror mid_turn_injection on both*: dual-source divergence when they inevitably drift.
 - *Put everything on ConnectionCapabilities only*: need the boolean on `HarnessCapabilities` so code can check "does this harness support bidirectional at all?" without constructing a connection.
+
+---
+
+## D56 — Override D48: use standard AG-UI `REASONING_*` events, not custom `THINKING_*`
+2026-04-09, user override of design-orchestrator's D48.
+
+**Decision**: Claude's extended thinking maps to the standard `REASONING_START`, `REASONING_MESSAGE_CONTENT`, `REASONING_MESSAGE_END` events from `ag_ui.core` — not custom `THINKING_*` events. Reasoning and thinking are the same concept. If frontend-v2 uses `THINKING_*` naming internally, rename those references during Phase 3 adaptation to align with the AG-UI standard.
+
+**What this changes**: Phase 2's Claude AG-UI mapper emits `ReasoningMessageStartEvent`, `ReasoningMessageContentEvent`, `ReasoningMessageEndEvent` from `ag_ui.core` instead of custom event dicts. Phase 3 renames any frontend-v2 `THINKING_*` references to `REASONING_*` to match.
+
+**Why**: D43 adopted the `ag-ui-protocol` Python SDK as the canonical source for event types. Diverging from the standard for thinking/reasoning events undermines that commitment. The standard `REASONING_*` events exist for exactly this purpose — there's no semantic gap that justifies custom events.
+
+## D57 — Two-layer WS client: generic WsClient + SpawnChannel
+2026-04-09, user direction.
+
+**Decision**: The frontend WebSocket client is split into two layers: a generic `WsClient` (connection lifecycle, JSON frame send/receive, state tracking — no domain knowledge) and a `SpawnChannel` on top (constructs spawn URL, parses AG-UI events, typed send methods). Replaces the plan's monolithic `SpawnWsClient`.
+
+**What this replaces**: Design and plan originally specified a single `SpawnWsClient` that mixed transport concerns with spawn-specific AG-UI logic.
+
+**Why**: If meridian app eventually becomes a cloud service, the WS transport layer needs to support channels beyond spawn streaming (project management, collaboration, etc.). Baking spawn semantics into the transport makes that extension require a rewrite. Generic transport + domain channels is the standard pattern and costs almost nothing extra now.
+
+**Alternatives rejected**: (1) Copy `WsClient` from frontend-v2 — user preferred building our own to avoid carrying frontend-v2's assumptions. (2) Single `SpawnWsClient` — locks the transport to one use case.

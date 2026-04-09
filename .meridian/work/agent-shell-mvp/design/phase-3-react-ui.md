@@ -37,18 +37,34 @@ Phase 3 adapts `frontend-v2` from `meridian-collab/` into a standalone React app
 | `features/threads/transport-types.ts` | Simplify — remove `BackendTurn` / `BackendTurnBlock` REST types; the MVP has no REST paginated history. |
 | Activity stream types | Add `capabilities` event handling for the CUSTOM capabilities event. |
 
-## WebSocket Client
+## WebSocket Client — Two-Layer Architecture
 
-Replace the Go backend's multi-lane WS client with a minimal client for our Phase 2 endpoint:
+Replace the Go backend's multi-lane WS client with a layered architecture: generic transport + spawn-specific channel. The generic layer is designed to support future channels beyond spawns (projects, collaboration, cloud service).
 
 ```typescript
-// src/lib/ws/spawn-ws-client.ts
+// src/lib/ws/ws-client.ts — Generic transport (no domain knowledge)
 
-export type SpawnWsState = "connecting" | "connected" | "disconnected"
+export type WsState = "connecting" | "connected" | "disconnected"
 
-export interface SpawnWsClient {
-  readonly state: SpawnWsState
+export interface WsClient {
+  readonly state: WsState
+  readonly url: string
+
+  connect(url: string): void
+  disconnect(): void
+  send(data: Record<string, unknown>): void
+
+  onMessage(handler: (data: unknown) => void): () => void
+  onStateChange(handler: (state: WsState) => void): () => void
+}
+```
+
+```typescript
+// src/lib/ws/spawn-channel.ts — Spawn-specific layer on top of WsClient
+
+export interface SpawnChannel {
   readonly spawnId: string
+  readonly client: WsClient
 
   connect(spawnId: string): void
   disconnect(): void
@@ -58,11 +74,10 @@ export interface SpawnWsClient {
   sendCancel(): void
 
   onEvent(handler: (event: StreamEvent) => void): () => void
-  onStateChange(handler: (state: SpawnWsState) => void): () => void
 }
 ```
 
-Implementation: open a WebSocket to `ws://localhost:<port>/ws/spawn/{spawnId}`, parse incoming JSON frames as `StreamEvent`, dispatch to registered handlers. Send outbound JSON frames for user actions.
+`WsClient` handles connection lifecycle, JSON frame send/receive, and state tracking. `SpawnChannel` constructs the spawn URL, parses AG-UI events, and provides typed send methods. Future channels (e.g. project management, collaboration) create their own channel type on top of the same `WsClient`.
 
 No reconnect logic for MVP (per requirements.md — "manual refresh on disconnect is acceptable").
 
@@ -123,17 +138,17 @@ Simple React state with `useReducer` — no external state library needed for MV
 const [streamState, dispatch] = useReducer(reduceStreamEvent, createInitialState(spawnId))
 
 // Connection state
-const [wsState, setWsState] = useState<SpawnWsState>("disconnected")
+const [wsState, setWsState] = useState<WsState>("disconnected")
 
 // Capabilities (from CUSTOM event)
 const [capabilities, setCapabilities] = useState<HarnessCapabilities | null>(null)
 
-// Effect: connect WS and dispatch events
+// Effect: connect SpawnChannel and dispatch events
 useEffect(() => {
-  const client = createSpawnWsClient()
-  client.connect(spawnId)
+  const channel = createSpawnChannel()
+  channel.connect(spawnId)
 
-  const unsub = client.onEvent((event) => {
+  const unsub = channel.onEvent((event) => {
     if (event.type === "CUSTOM" && event.name === "capabilities") {
       setCapabilities(event.value as HarnessCapabilities)
     } else {
@@ -141,7 +156,7 @@ useEffect(() => {
     }
   })
 
-  return () => { unsub(); client.disconnect() }
+  return () => { unsub(); channel.disconnect() }
 }, [spawnId])
 ```
 

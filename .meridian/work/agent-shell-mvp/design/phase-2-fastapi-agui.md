@@ -223,9 +223,9 @@ Claude's wire format is NDJSON with `type` discriminators. The mapper handles:
 | `stream_event` with `content_block_start` (text) | `TextMessageStartEvent(message_id=<generated>)` |
 | `stream_event` with `content_block_delta` (text) | `TextMessageContentEvent(message_id=..., delta=...)` |
 | `stream_event` with `content_block_stop` (text) | `TextMessageEndEvent(message_id=...)` |
-| `stream_event` with `content_block_start` (thinking) | `THINKING_START` (custom event with `thinkingId`) |
-| `stream_event` with `content_block_delta` (thinking) | `THINKING_TEXT_MESSAGE_CONTENT` (custom with `thinkingId`, `delta`) |
-| `stream_event` with `content_block_stop` (thinking) | `THINKING_TEXT_MESSAGE_END` (custom with `thinkingId`) |
+| `stream_event` with `content_block_start` (thinking) | `ReasoningMessageStartEvent(message_id=<generated>)` (D56) |
+| `stream_event` with `content_block_delta` (thinking) | `ReasoningMessageContentEvent(message_id=..., delta=...)` (D56) |
+| `stream_event` with `content_block_stop` (thinking) | `ReasoningMessageEndEvent(message_id=...)` (D56) |
 | `stream_event` with `content_block_start` (tool_use) | `ToolCallStartEvent(tool_call_id=..., tool_call_name=...)` |
 | `stream_event` with `content_block_delta` (tool_use) | `ToolCallArgsEvent(tool_call_id=..., delta=...)` |
 | `stream_event` with `content_block_stop` (tool_use) | `ToolCallEndEvent(tool_call_id=...)` |
@@ -234,9 +234,9 @@ Claude's wire format is NDJSON with `type` discriminators. The mapper handles:
 | `result` (error) | `RunErrorEvent(message=...)` |
 | `system/init` | (consumed internally for capability setup) |
 
-**Thinking events**: Per D48, the mapper emits custom event dicts (not standard `ThinkingStartEvent`) with the `thinkingId` field that frontend-v2 expects. These are sent as `CustomEvent` with `name="THINKING_START"` or as raw JSON matching the frontend's expected shape.
+**Reasoning events (D56 override)**: The mapper emits standard `ReasoningMessageStartEvent`, `ReasoningMessageContentEvent`, `ReasoningMessageEndEvent` from `ag_ui.core` — NOT custom `THINKING_*` events. D48 originally specified custom thinking events; D56 overrides this to use the AG-UI standard. Reasoning and thinking are the same concept.
 
-**ID generation**: The mapper generates `messageId`, `thinkingId`, and `toolCallId` values. Claude's wire format includes `tool_use_id` for tools; for text and thinking blocks, the mapper generates UUIDs. The `threadId` is the spawn ID; `runId` is `{spawn_id}-run-{n}`.
+**ID generation**: The mapper generates `messageId` and `toolCallId` values. Claude's wire format includes `tool_use_id` for tools; for text and reasoning blocks, the mapper generates UUIDs. The `threadId` is the spawn ID; `runId` is `{spawn_id}-run-{n}`.
 
 ### Codex Mapper
 
@@ -248,7 +248,7 @@ Codex speaks JSON-RPC 2.0 notifications. The mapper handles:
 | `item/agentMessage` (complete) | `TextMessageStartEvent` + `TextMessageContentEvent` + `TextMessageEndEvent` |
 | `item/commandExecution` | `ToolCallStartEvent` + `ToolCallArgsEvent` + `ToolCallEndEvent` |
 | `item/fileChange` | `ToolCallStartEvent` (name="FileWrite") + `ToolCallArgsEvent` + `ToolCallEndEvent` |
-| `item/reasoning` | `THINKING_START` + `THINKING_TEXT_MESSAGE_CONTENT` + `THINKING_TEXT_MESSAGE_END` |
+| `item/reasoning` | `ReasoningMessageStartEvent` + `ReasoningMessageContentEvent` + `ReasoningMessageEndEvent` (D56) |
 | `item/webSearch` | `ToolCallStartEvent` (name="WebSearch") + args + end |
 | `item/mcpToolCall` | `ToolCallStartEvent` + args + end + result |
 | `item/*/requestApproval` | (held — approval UI is post-MVP; auto-approve for now) |
@@ -265,7 +265,7 @@ OpenCode uses ACP-style `session/update` notifications over SSE. The mapper hand
 | OpenCode update type | AG-UI event(s) |
 |---|---|
 | `agent_message_chunk` | `TextMessageContentEvent` |
-| `agent_thought_chunk` | `THINKING_TEXT_MESSAGE_CONTENT` |
+| `agent_thought_chunk` | `ReasoningMessageContentEvent` (D56) |
 | `tool_call` | `ToolCallStartEvent` + `ToolCallArgsEvent` + `ToolCallEndEvent` |
 | `tool_call_update` | `ToolCallResultEvent` |
 | `user_message_chunk` | (consumed — this is our own message echoed back) |
@@ -277,7 +277,7 @@ OpenCode uses ACP-style `session/update` notifications over SSE. The mapper hand
 
 The MVP extends standard AG-UI in three places, all backward-compatible:
 
-1. **`thinkingId` on THINKING_* events** — AG-UI's `ThinkingStartEvent` uses `message_id`. Meridian adds `thinkingId` as a separate identifier that the frontend uses to key thinking blocks. Sent as extra field on the JSON payload.
+1. **~~`thinkingId` on THINKING_* events~~** — **Superseded by D56.** The mapper now emits standard `ReasoningMessage*Event` from `ag_ui.core`, which use `message_id` natively. No custom `thinkingId` field needed.
 
 2. **`isCancelled` on RUN_ERROR** — Distinguishes user-initiated cancellation from actual errors. The frontend suppresses the error toast for cancellations. Matches the Go server's `MeridianRunErrorEvent`.
 
