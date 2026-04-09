@@ -38,7 +38,7 @@ class WebSocketClient(Protocol):
     async def receive(self) -> WebSocketMessage: ...
 
 
-WebSocketRouteHandler = Callable[[WebSocketClient, str], Awaitable[None]]
+WebSocketRouteHandler = Callable[[object, str], Awaitable[None]]
 WebSocketRouteDecorator = Callable[[WebSocketRouteHandler], object]
 
 
@@ -194,9 +194,10 @@ def register_ws_routes(app: object, manager: SpawnManager) -> None:
 
     typed_app = cast("FastAPIApp", app)
 
-    async def _spawn_ws_route(websocket: WebSocketClient, spawn_id: str) -> None:
+    async def _spawn_ws_route(websocket: object, spawn_id: str) -> None:
+        typed_websocket = cast("WebSocketClient", websocket)
         try:
-            await spawn_websocket(websocket, spawn_id, manager)
+            await spawn_websocket(typed_websocket, spawn_id, manager)
         except Exception as exc:
             if _is_websocket_disconnect(exc):
                 logger.debug("WebSocket disconnected", extra={"spawn_id": spawn_id})

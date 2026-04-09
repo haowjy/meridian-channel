@@ -502,6 +502,22 @@ def serve() -> None:
     run_server()
 
 
+@app.command(name="app")
+def app_command(
+    port: Annotated[int, Parameter(name="--port", help="Server port")] = 8420,
+    no_browser: Annotated[
+        bool,
+        Parameter(name="--no-browser", help="Do not open a browser automatically."),
+    ] = False,
+    host: Annotated[str, Parameter(name="--host", help="Server host")] = "127.0.0.1",
+) -> None:
+    """Start the Meridian app web UI server."""
+
+    from meridian.cli.app_cmd import run_app
+
+    run_app(port=port, no_browser=no_browser, host=host)
+
+
 def _resolve_mars_executable() -> str | None:
     """Prefer the mars binary from the current install environment over PATH."""
 

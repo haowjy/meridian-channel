@@ -43,6 +43,18 @@ class SpawnManager:
         self._repo_root = repo_root
         self._sessions: dict[SpawnId, SpawnSession] = {}
 
+    @property
+    def state_root(self) -> Path:
+        """Return the resolved Meridian state root."""
+
+        return self._state_root
+
+    @property
+    def repo_root(self) -> Path:
+        """Return the repository root used for managed spawns."""
+
+        return self._repo_root
+
     async def start_spawn(self, config: ConnectionConfig) -> HarnessConnection:
         """Start one connection and register durable drain/control resources."""
 
