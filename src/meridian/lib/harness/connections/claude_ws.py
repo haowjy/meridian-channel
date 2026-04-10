@@ -28,6 +28,7 @@ from meridian.lib.state.paths import resolve_spawn_log_dir
 logger = logging.getLogger(__name__)
 
 _PROCESS_KILL_GRACE_SECONDS: Final[float] = 10.0
+_STDOUT_READLINE_LIMIT: Final[int] = 128 * 1024 * 1024  # 128 MiB
 _VERSION_CHECK_TIMEOUT_SECONDS: Final[float] = 5.0
 _TESTED_VERSION_PREFIXES: Final[tuple[str, ...]] = ("1.", "2.")
 _HARNESS_NAME: Final[str] = HarnessId.CLAUDE.value
@@ -312,6 +313,7 @@ class ClaudeConnection(HarnessConnection):
             stdin=PIPE,
             stdout=PIPE,
             stderr=self._stderr_handle,
+            limit=_STDOUT_READLINE_LIMIT,
         )
 
     async def _send_user_turn(self, text: str) -> None:
