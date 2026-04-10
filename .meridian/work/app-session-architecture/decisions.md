@@ -194,3 +194,27 @@
 **Decision:** The `_spawn_to_session` reverse lookup dict uses `(Path, SpawnId)` as the key (matching SpawnManager's compound key).
 
 **Reasoning:** Since spawn IDs are only unique within a repo, a reverse lookup from spawn_id to session_id must also include repo_root to be unambiguous. The `get_by_spawn()` method requires both parameters.
+
+## D24: Extend existing frontend-ui-redesign.md rather than rewrite
+
+**Decision:** Add edge cases, failure modes, loading states, scope boundaries, and accessibility sections to the existing `frontend-ui-redesign.md` rather than creating a new design doc.
+
+**Reasoning:** The existing doc was written to address these exact requirements and covers layout architecture, component hierarchy, file structure, routing, all four composer controls, model browser, hooks, session creation flow, backend endpoints, state flow, and implementation ordering. Rewriting would duplicate 90% of the content and create confusion about which doc is canonical. The gaps (edge cases, loading states, a11y) are additive sections that slot into the existing structure.
+
+**Rejected:**
+- **New doc in a separate work item** — the design is part of `app-session-architecture`, and the existing doc establishes the canonical location.
+- **Minimal delta doc** — edge cases need to be co-located with the components they affect, not in a separate file that implementers have to cross-reference.
+
+## D25: Multi-repo deferred in frontend only
+
+**Decision:** Frontend assumes single-repo. No repo selector, no repo grouping in sidebar. `POST /api/sessions` omits `repo_root`; backend uses server's launch context. Backend session registry retains multi-repo support (each session carries `repo_root`).
+
+**Reasoning:** Requirements explicitly drop "Multi-repo support / Jupyter-style repo switching." The backend's multi-repo support is essentially free (session entries already have `repo_root`), so keeping it doesn't add complexity. Removing it from the frontend eliminates the repo selector, repo grouping in sidebar, and repo context in headers — significant UX surface area with no current use case.
+
+**Constraint discovered:** `repo_root` is still required in the session registry JSONL format because spawn IDs are only unique within a repo. Even in single-repo mode, the backend must record which repo a session belongs to for artifact path resolution.
+
+## D26: No event replay for completed sessions in v1
+
+**Decision:** Completed sessions show metadata only (harness, model, agent, status, timestamps). No historical thread content. Event replay from `output.jsonl` is a future enhancement.
+
+**Reasoning:** Replay requires reading the full `output.jsonl`, re-processing through the streaming reducer, handling partial/interrupted events, and performance consideration for long sessions. The architecture supports adding replay later without changes to session URLs, component structure, or the streaming protocol — the reducer already processes events incrementally, so feeding historical events is the same code path.
