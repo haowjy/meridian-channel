@@ -109,6 +109,24 @@
 
 **Reasoning (from p1271 and p1270):** The design had split ownership — CLI creates, SpawnManager copies to SpawnSession, cleanup is vaguely assigned. This consolidates: SpawnManager creates the tracer (or receives it via config), stores it on SpawnSession, and is responsible for closing it when the session ends. For `meridian app`, this means unclosed handles don't accumulate across spawn lifecycles.
 
+## D16: DebugTracer creates parent directories on lazy open
+
+**Decision:** `DebugTracer._ensure_open()` creates parent directories (`path.parent.mkdir(parents=True, exist_ok=True)`) when opening the file handle for the first time.
+
+**Reasoning (from convergence reviewer p1277):** The first trace event is `state_change(created→starting)`, which fires before `_start_subprocess()` creates the spawn directory. Without parent dir creation, the lazy open would fail on the first `emit()`, permanently disabling the tracer before it captures anything useful.
+
+## D17: start_spawn() closes tracer on startup failure
+
+**Decision:** `SpawnManager.start_spawn()` wraps `connection.start(config)` in a try/except that calls `tracer.close()` if the connection fails before SpawnSession is created.
+
+**Reasoning (from convergence reviewer p1277):** In `meridian app` mode, SpawnManager creates a tracer for each spawn. If `connection.start()` raises, the SpawnSession is never created, so the cleanup paths in `_cleanup_completed_session()` and `stop_spawn()` never run. Repeated failed starts would leak file descriptors.
+
+## D18: emit() serializes dict data values, then truncates the serialized string
+
+**Decision:** `emit()` processes `data` dict values: string values are truncated directly; dict/list values are serialized to JSON first, then truncated; non-serializable values fall back to `repr()` then truncate.
+
+**Reasoning (from convergence reviewer p1277):** The mapper trace passes `HarnessEvent.payload` as a dict, but `_truncate()` only handles strings. Without a serialization rule, either payloads go through unbounded or fall back to lossy `repr()`. Serializing first, then truncating, preserves the JSON structure up to the truncation point.
+
 ## D15: Centralize repetitive trace helpers, keep transport-specific extraction at call sites
 
 **Decision:** Provide shared helpers for common trace patterns (state transition, parsed/dropped event) as module-level functions in the observability package. Adapters call these helpers at their transport-specific extraction points. No mixin, no proxy.

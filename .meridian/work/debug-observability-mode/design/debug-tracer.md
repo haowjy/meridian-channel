@@ -46,7 +46,7 @@ class DebugTracer:
 - **Non-raising.** `emit()` wraps all internal operations (serialization, file I/O, stderr echo) in `try/except Exception`. On first failure, logs one `logger.warning` and sets `self._disabled = True`. All subsequent `emit()` calls return immediately. The tracer must never crash the pipeline it observes.
 - **Synchronous.** Appends one line to an open file handle. No async machinery — debug tracing must not introduce event loop pressure or backpressure.
 - **Thread-safe** via `threading.Lock` on the file handle, since `emit()` can be called from `asyncio.to_thread` paths (e.g., the `_append_jsonl` helper).
-- **Lazy file open.** The handle opens on first `emit()`, not in `__init__`, so creating a tracer has zero I/O cost.
+- **Lazy file open with dir creation.** The handle opens on first `emit()`, not in `__init__`, so creating a tracer has zero I/O cost. On first open, creates parent directories (`path.parent.mkdir(parents=True, exist_ok=True)`) to handle the case where the first trace event fires before the spawn directory is created by the adapter.
 - **Idempotent close.** `close()` can be called multiple times safely. Called from SpawnManager cleanup.
 
 ## Shared Trace Helpers
@@ -124,7 +124,30 @@ Each line in `debug.jsonl` is one JSON object:
 
 Wire payloads (the `payload` field within `data`) are truncated to `max_payload_bytes` (default 4096). Truncation appends `...[truncated, {original_bytes}B total]` so you know data was lost and how much. Non-payload fields (byte counts, status codes, state names) are never truncated.
 
+### Data Serialization and Truncation
+
+`emit()` processes `data` dict values before writing:
+- **String values:** truncated directly via `_truncate()`.
+- **Dict/list values:** serialized to JSON first (`json.dumps`), then truncated as a string. This preserves JSON structure up to the truncation point.
+- **Non-serializable values:** fall back to `repr()`, then truncate.
+
 ```python
+def _prepare_data(self, data: dict[str, object]) -> dict[str, object]:
+    """Serialize and truncate data values for JSONL output."""
+    result: dict[str, object] = {}
+    for key, value in data.items():
+        if isinstance(value, str):
+            result[key] = self._truncate(value)
+        elif isinstance(value, (dict, list)):
+            try:
+                serialized = json.dumps(value, ensure_ascii=False)
+            except (TypeError, ValueError):
+                serialized = repr(value)
+            result[key] = self._truncate(serialized)
+        else:
+            result[key] = value  # int, float, bool, None — pass through
+    return result
+
 def _truncate(self, value: str) -> str:
     if len(value) <= self._max_payload_bytes:
         return value
@@ -304,8 +327,7 @@ The `_outbound_loop` and `_inbound_loop` signatures gain a `tracer: DebugTracer 
 ```python
 async def spawn_websocket(websocket, spawn_id, manager):
     # ... existing setup ...
-    session = manager._sessions.get(SpawnId(spawn_id))
-    tracer = session.debug_tracer if session else None
+    tracer = manager.get_tracer(SpawnId(spawn_id))
 
     outbound_task = asyncio.create_task(
         _outbound_loop(websocket, event_queue, mapper, spawn_id, tracer)
@@ -315,7 +337,13 @@ async def spawn_websocket(websocket, spawn_id, manager):
     )
 ```
 
-Note: accessing `manager._sessions` is a private access. The cleaner approach is adding a `get_tracer(spawn_id)` method to SpawnManager.
+SpawnManager exposes tracer access through a public method:
+
+```python
+def get_tracer(self, spawn_id: SpawnId) -> DebugTracer | None:
+    session = self._sessions.get(spawn_id)
+    return session.debug_tracer if session is not None else None
+```
 
 ## CLI Integration
 
@@ -369,7 +397,8 @@ SpawnManager is the single lifecycle owner:
 1. **Creation:** Either passed in via `ConnectionConfig` (CLI path) or created by SpawnManager itself (app server path when `debug=True`).
 2. **Storage:** Stored on `SpawnSession.debug_tracer`.
 3. **Usage:** Passed directly to `_drain_loop()`. Extracted by ws_endpoint via `manager.get_tracer(spawn_id)`.
-4. **Cleanup:** `tracer.close()` is called in both `_cleanup_completed_session()` and `stop_spawn()`:
+4. **Startup failure cleanup:** If `connection.start(config)` raises before `SpawnSession` is created, `start_spawn()` closes the tracer in its except block. This prevents file descriptor leaks from repeated failed starts in app server mode.
+5. **Normal cleanup:** `tracer.close()` is called in both `_cleanup_completed_session()` and `stop_spawn()`:
 
 ```python
 async def _cleanup_completed_session(self, spawn_id, *, status, exit_code, error=None):
@@ -401,7 +430,8 @@ async def _cleanup_completed_session(self, spawn_id, *, status, exit_code, error
 ## Edge Cases and Failure Modes
 
 - **Tracer write fails (disk full, permissions):** `emit()` catches the exception, logs one `logger.warning`, sets `self._disabled = True`, and returns silently on all subsequent calls. The tracer never crashes the pipeline.
-- **Serialization fails (non-serializable data):** Caught by the same `try/except` in `emit()`. Uses `repr()` fallback for non-JSON-serializable values in `data`.
+- **Serialization fails (non-serializable data):** Dict/list values in `data` are serialized via `json.dumps`; non-serializable values fall back to `repr()`. All serialization is inside the `try/except` in `emit()`.
+- **First trace event fires before spawn dir exists:** `_ensure_open()` creates parent directories. The first `state_change(created→starting)` fires before adapters create the spawn dir — this is handled.
 - **Concurrent emit() calls:** Protected by `threading.Lock`. The lock is uncontested in practice (one spawn = one event stream), but safe if drain_loop and fan_out race.
 - **Large payloads:** Truncated at 4KB by default. The `bytes` field in data always reports the original size so you know truncation happened.
 - **Tracer not closed (crash):** Python's GC and OS process exit will flush the file. No data loss beyond the current unflushed line.
