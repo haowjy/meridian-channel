@@ -8,7 +8,7 @@ import pytest
 from meridian.lib.core.types import HarnessId, SpawnId
 from meridian.lib.harness.connections.base import ConnectionConfig
 from meridian.lib.harness.connections.codex_ws import CodexConnection
-from meridian.lib.harness.launch_spec import ResolvedLaunchSpec
+from meridian.lib.harness.launch_spec import CodexLaunchSpec, ResolvedLaunchSpec
 
 
 class _FakeWebSocket:
@@ -38,12 +38,16 @@ class _TestableCodexConnection(CodexConnection):
         self._state = "connected"
         self._ws = ws
 
+    def set_launch_spec_for_test(self, spec: ResolvedLaunchSpec) -> None:
+        self._launch_spec = spec
+
     def thread_bootstrap_request_for_test(
         self,
         config: ConnectionConfig,
         spec: ResolvedLaunchSpec,
     ) -> tuple[str, dict[str, object]]:
-        return self._thread_bootstrap_request(config, spec)
+        self._config = config
+        return self._thread_bootstrap_request(spec)
 
     async def run_reader(self) -> None:
         await self._read_messages_loop()
@@ -88,6 +92,46 @@ async def test_codex_ws_auto_accepts_command_execution_approval_requests() -> No
             "jsonrpc": "2.0",
             "id": "req-1",
             "result": {"decision": "accept"},
+        }
+    ]
+    assert await connection.next_event() is None
+
+
+@pytest.mark.asyncio
+async def test_codex_ws_rejects_approval_requests_in_confirm_mode(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    message = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": "req-2",
+            "method": "item/fileChange/requestApproval",
+            "params": {
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "itemId": "call-2",
+            },
+        }
+    )
+    ws = _FakeWebSocket([message])
+    connection = _TestableCodexConnection()
+    connection.attach_websocket(ws)
+    connection.set_launch_spec_for_test(CodexLaunchSpec(approval_mode="confirm"))
+
+    with caplog.at_level("WARNING"):
+        await connection.run_reader()
+
+    assert "Rejecting Codex server approval request in confirm mode" in caplog.text
+    assert [json.loads(payload) for payload in ws.sent] == [
+        {
+            "jsonrpc": "2.0",
+            "id": "req-2",
+            "error": {
+                "code": -32000,
+                "message": (
+                    "Codex websocket approval requests are unsupported in confirm mode."
+                ),
+            },
         }
     ]
     assert await connection.next_event() is None
@@ -140,11 +184,27 @@ def test_codex_ws_thread_bootstrap_request_starts_new_thread(tmp_path: Path) -> 
 
     method, payload = connection.thread_bootstrap_request_for_test(
         _build_config(tmp_path),
-        ResolvedLaunchSpec(prompt="hello"),
+        ResolvedLaunchSpec(prompt="hello", model="gpt-5.3-codex"),
     )
 
     assert method == "thread/start"
-    assert payload == {"cwd": str(tmp_path), "model": "gpt-5.4"}
+    assert payload == {"cwd": str(tmp_path), "model": "gpt-5.3-codex"}
+
+
+def test_codex_ws_thread_bootstrap_request_forwards_effort_from_codex_spec(tmp_path: Path) -> None:
+    connection = _TestableCodexConnection()
+
+    method, payload = connection.thread_bootstrap_request_for_test(
+        _build_config(tmp_path),
+        CodexLaunchSpec(prompt="hello", model="gpt-5.3-codex", effort="high"),
+    )
+
+    assert method == "thread/start"
+    assert payload == {
+        "cwd": str(tmp_path),
+        "model": "gpt-5.3-codex",
+        "config": {"model_reasoning_effort": "high"},
+    }
 
 
 def test_codex_ws_thread_bootstrap_request_resumes_existing_thread(tmp_path: Path) -> None:
@@ -152,13 +212,17 @@ def test_codex_ws_thread_bootstrap_request_resumes_existing_thread(tmp_path: Pat
 
     method, payload = connection.thread_bootstrap_request_for_test(
         _build_config(tmp_path),
-        ResolvedLaunchSpec(prompt="hello", continue_session_id="thread-123"),
+        ResolvedLaunchSpec(
+            prompt="hello",
+            model="gpt-5.3-codex",
+            continue_session_id="thread-123",
+        ),
     )
 
     assert method == "thread/resume"
     assert payload == {
         "cwd": str(tmp_path),
-        "model": "gpt-5.4",
+        "model": "gpt-5.3-codex",
         "threadId": "thread-123",
     }
 
@@ -170,6 +234,7 @@ def test_codex_ws_thread_bootstrap_request_forks_existing_thread(tmp_path: Path)
         _build_config(tmp_path),
         ResolvedLaunchSpec(
             prompt="hello",
+            model="gpt-5.3-codex",
             continue_session_id="thread-123",
             continue_fork=True,
         ),
@@ -178,6 +243,6 @@ def test_codex_ws_thread_bootstrap_request_forks_existing_thread(tmp_path: Path)
     assert method == "thread/fork"
     assert payload == {
         "cwd": str(tmp_path),
-        "model": "gpt-5.4",
+        "model": "gpt-5.3-codex",
         "threadId": "thread-123",
     }
