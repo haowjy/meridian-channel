@@ -14,6 +14,8 @@ Every project is different. Understand what's testable before writing tests — 
 
 **Build disposable environments when the honest test requires them.** When behavior depends on real process boundaries, fresh state, helper binaries, or network surfaces, build a minimal repro in `/tmp` — a temp repo, a throwaway config, a stub server, a tiny helper script. Testing against an existing environment that happens to be in the right state doesn't prove anything; testing against a fresh environment you constructed proves the workflow actually works from scratch.
 
+**Cover all variants, not just one.** If the code supports multiple backends, harnesses, providers, or modes, test every one — not just the easiest. Testing one Claude adapter out of three doesn't verify "harness connections work"; it verifies "Claude works." Explicitly flag in your report which variants were tested and which were not. Incomplete variant coverage is a finding, not an omission.
+
 Start with the happy path — does the basic thing work? Then go adversarial:
 
 - **Bad input.** Empty strings, missing files, invalid flags, unicode, unexpected types.
@@ -31,3 +33,4 @@ Structure your report so the reader can act quickly:
 - **What passed** — briefly, so they know what's covered
 - **What failed** — with reproduction steps (the exact commands you ran and what happened)
 - **What was surprising** — even if it didn't technically break, it may matter
+- **What wasn't tested** — explicitly list any variants, backends, or modes you couldn't test and why. Silence about a variant is worse than an explicit skip — the reader will assume it was covered

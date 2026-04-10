@@ -53,6 +53,14 @@ Think about what depends on what:
 - **Final implementation loop (default):** one end-to-end @reviewer fan-out over the complete change set; include @refactor-reviewer.
 - **Intermediate implementation phases (exception only):** @reviewer engagement is escalation-driven, triggered by specific unresolved behavioral concerns from testing.
 
+## Integration Boundaries
+
+When a phase talks to an external system (CLI tool, API, wire protocol), the staffing changes:
+
+- **@coder prerequisite:** the blueprint must include a protocol validation step — probe the real binary/API, extract or reference the actual schema, then implement against observed behavior. Don't let @coders write adapters against assumed protocols.
+- **@smoke-tester is mandatory, not optional:** integration code can only be verified by running against the real external system. Staff a @smoke-tester for every integration phase, with explicit instructions to test against each external target. Unit tests and type checks verify internal correctness; only smoke tests verify protocol correctness.
+- **Per-target coverage:** if the phase touches N integration targets, the @smoke-tester must exercise all N and explicitly report which were tested. Testing one target out of three is incomplete coverage, not a passing result.
+
 ## Edge Case Coverage
 
 Edge-case coverage is mandatory at every layer:

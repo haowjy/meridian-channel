@@ -36,6 +36,13 @@ Round 3: Phase 4                    (needs Phase 2 and Phase 3)
 
 **Front-load risk.** If a phase might invalidate the whole approach — an unproven integration, a speculative optimization — make it early. Find out it doesn't work before you've built five phases on top of it. Similarly, front-load phases that produce interfaces downstream phases consume, so later phases aren't coding against a moving target.
 
+**Identify integration boundaries.** When a phase involves talking to an external binary, API, or wire protocol, mark it explicitly. Integration phases need different treatment than self-contained code:
+
+- **Protocol validation first.** Before coding an adapter, the @coder must probe the real system — run the binary, hit the endpoints, generate the schema. This is a prerequisite step in the blueprint, not an afterthought. Reference the actual protocol spec or observed behavior in the blueprint.
+- **Test against the real thing.** Phase-level verification for integration phases must include running against the real external system, not just unit tests and type checks. Staff a @smoke-tester that exercises each integration target.
+- **Observability before correctness.** If the integration layer lacks debug/trace capability, build it first. You can't verify protocol correctness without seeing the wire traffic. A phase that adds an adapter without wire-level observability is incomplete.
+- **One adapter per phase.** Don't bundle multiple integration targets (e.g., "adapters for Codex, Claude, and OpenCode") into a single phase. Each external system has its own protocol, its own failure modes, and its own verification requirements. Bundling them hides which ones were actually tested.
+
 ## Writing Blueprints
 
 Each blueprint gives the @coder everything it needs, and nothing it doesn't. It should be self-contained enough that the @coder does not need to mine the full design doc.

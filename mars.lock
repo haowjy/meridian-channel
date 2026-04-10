@@ -10,9 +10,7 @@ version = "v0.0.12"
 commit = "2112a5c9fb7b450ef1b5a3346d2397c3053ea0ae"
 
 [dependencies.meridian-dev-workflow]
-url = "https://github.com/haowjy/meridian-dev-workflow"
-version = "v0.0.6"
-commit = "32a1d31cb88955d79b607ad8ffbc32d369f47079"
+path = "/home/jimyao/gitrepos/meridian-channel/meridian-dev-workflow"
 
 [items."agents/architect.md"]
 source = "meridian-dev-workflow"
@@ -178,8 +176,8 @@ dest_path = "skills/agent-creator"
 [items."skills/agent-staffing"]
 source = "meridian-dev-workflow"
 kind = "skill"
-source_checksum = "sha256:7f1a75a314c7e6d25c6571b713adb7e3b8997c54e8caf6ed300fe72dd524d1e1"
-installed_checksum = "sha256:7f1a75a314c7e6d25c6571b713adb7e3b8997c54e8caf6ed300fe72dd524d1e1"
+source_checksum = "sha256:b5149b504a9f93fecef62cb289e6aa0904fec4338ea54681fbc3f699c3d80601"
+installed_checksum = "sha256:b5149b504a9f93fecef62cb289e6aa0904fec4338ea54681fbc3f699c3d80601"
 dest_path = "skills/agent-staffing"
 
 [items."skills/architecture"]
@@ -220,8 +218,8 @@ dest_path = "skills/dev-artifacts"
 [items."skills/dev-principles"]
 source = "meridian-dev-workflow"
 kind = "skill"
-source_checksum = "sha256:2a594bc50eb2bf0ab001f7fbec88dced84a71c5e7321794a437bd171c82de0ce"
-installed_checksum = "sha256:2a594bc50eb2bf0ab001f7fbec88dced84a71c5e7321794a437bd171c82de0ce"
+source_checksum = "sha256:a178816a7b55a6a3b0380fc71ea7e459e2431778f306cb426cdfb785d39f2dd5"
+installed_checksum = "sha256:a178816a7b55a6a3b0380fc71ea7e459e2431778f306cb426cdfb785d39f2dd5"
 dest_path = "skills/dev-principles"
 
 [items."skills/frontend-design"]
@@ -277,8 +275,8 @@ dest_path = "skills/mermaid"
 [items."skills/planning"]
 source = "meridian-dev-workflow"
 kind = "skill"
-source_checksum = "sha256:2e781bbf530f6392caaacd59c3d2e159643b4f6eea9c23d87f24152bd324ff21"
-installed_checksum = "sha256:2e781bbf530f6392caaacd59c3d2e159643b4f6eea9c23d87f24152bd324ff21"
+source_checksum = "sha256:dbb3371ea350ac07121edfcd02d8fdf3880cf19e52d427eef11a56e8ffb4c3b0"
+installed_checksum = "sha256:dbb3371ea350ac07121edfcd02d8fdf3880cf19e52d427eef11a56e8ffb4c3b0"
 dest_path = "skills/planning"
 
 [items."skills/review"]
@@ -305,8 +303,8 @@ dest_path = "skills/skill-creator"
 [items."skills/smoke-test"]
 source = "meridian-dev-workflow"
 kind = "skill"
-source_checksum = "sha256:ced4fe6a375bf3726d8068e45c133f08966b1fbd1a7f61200ad0e4b6734feda0"
-installed_checksum = "sha256:ced4fe6a375bf3726d8068e45c133f08966b1fbd1a7f61200ad0e4b6734feda0"
+source_checksum = "sha256:83ff47aa63b76ce2af728a5467227134d7487dc81ea052ae6474c8aef69a9250"
+installed_checksum = "sha256:83ff47aa63b76ce2af728a5467227134d7487dc81ea052ae6474c8aef69a9250"
 dest_path = "skills/smoke-test"
 
 [items."skills/tech-docs"]

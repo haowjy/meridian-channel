@@ -52,6 +52,16 @@ Treat each signal as an immediate action trigger, not backlog material:
 - An abstraction accumulates conditionals to fit new cases.
 - Greppability drops due to dynamic dispatch, metaprogramming, or computed names.
 
+# Probe Before You Build at Integration Boundaries
+
+Code that talks to external systems — CLI tools, APIs, wire protocols, servers — is fundamentally different from self-contained code. Its correctness depends on assumptions about the other side, and those assumptions can't be verified by reading your own code.
+
+- Before writing an adapter, probe the real system: run the binary, hit the endpoints, generate the schema, read the actual response. Code against what you observed, not what you assumed.
+- If the external system provides a schema or spec (OpenAPI, JSON Schema, `--help`, protocol docs), extract it and reference it in the implementation. Don't guess at required fields, endpoint paths, or wire formats.
+- Build observability into integration code from the start — wire logging, request/response capture, state transition traces. You can't verify what you can't see, and integration bugs are invisible without protocol-level visibility.
+- Treat "it compiles and the internal tests pass" as necessary but not sufficient for integration code. The only proof is running against the real external system.
+- When integration fails, the debug trace should show exactly what was sent, what came back, and where the mismatch is. If it can't, the observability is inadequate.
+
 # Chesterton's Fence
 
 - Understand why code exists before removing it.
