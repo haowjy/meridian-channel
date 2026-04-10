@@ -67,6 +67,130 @@ async def test_spawn_manager_natural_completion_writes_envelope_and_completion_o
     repo_root = tmp_path
     state_root = resolve_state_paths(repo_root).root_dir
     release_completion = asyncio.Event()
+    stop_called = asyncio.Event()
+
+    class FakeControlSocketServer:
+        def __init__(self, spawn_id: str, socket_path: Path, manager: SpawnManager) -> None:
+            _ = spawn_id, manager
+            self.socket_path = socket_path
+
+        async def start(self) -> None:
+            self.socket_path.parent.mkdir(parents=True, exist_ok=True)
+
+        async def stop(self) -> None:
+            pass
+
+    class FakeConnection:
+        def __init__(self) -> None:
+            self._spawn_id = ""
+            self.state = "created"
+            self.stop_calls = 0
+            self.capabilities = ConnectionCapabilities(
+                mid_turn_injection="queue",
+                supports_steer=True,
+                supports_interrupt=True,
+                supports_cancel=True,
+                runtime_model_switch=False,
+                structured_reasoning=False,
+            )
+
+        @property
+        def harness_id(self) -> HarnessId:
+            return HarnessId.CODEX
+
+        @property
+        def spawn_id(self) -> str:
+            return self._spawn_id
+
+        async def start(self, config: ConnectionConfig, params: SpawnParams) -> None:
+            _ = params
+            self._spawn_id = config.spawn_id
+            self.state = "connected"
+
+        async def stop(self) -> None:
+            self.stop_calls += 1
+            self.state = "stopped"
+            stop_called.set()
+
+        def health(self) -> bool:
+            return True
+
+        async def send_user_message(self, text: str) -> None:
+            _ = text
+
+        async def send_interrupt(self) -> None:
+            return None
+
+        async def send_cancel(self) -> None:
+            return None
+
+        async def events(self):  # type: ignore[no-untyped-def]
+            yield HarnessEvent(
+                event_type="item.completed",
+                harness_id="codex",
+                payload={"type": "item.completed", "item": {"type": "agent_message", "text": "hi"}},
+            )
+            await release_completion.wait()
+
+    monkeypatch.setattr(spawn_manager_module, "ControlSocketServer", FakeControlSocketServer)
+    monkeypatch.setattr(
+        "meridian.lib.harness.connections.get_connection_class",
+        lambda harness_id: FakeConnection,
+    )
+
+    spawn_id = start_spawn(
+        state_root,
+        chat_id="c1",
+        model="gpt-5.3-codex",
+        agent="coder",
+        harness="codex",
+        kind="streaming",
+        prompt="hello",
+        launch_mode="foreground",
+        status="running",
+    )
+    manager = SpawnManager(state_root=state_root, repo_root=repo_root)
+    await manager.start_spawn(_build_config(spawn_id, repo_root), SpawnParams(prompt="hello"))
+    completion_task = asyncio.create_task(manager.wait_for_completion(spawn_id))
+    release_completion.set()
+    completion = await completion_task
+    assert completion is not None
+    await _wait_until(
+        lambda: get_spawn(state_root, spawn_id) is not None
+        and manager.get_connection(spawn_id) is None
+        and stop_called.is_set()
+    )
+    assert completion.status == "succeeded"
+    assert completion.exit_code == 0
+    assert completion.error is None
+    assert completion.duration_secs >= 0.0
+
+    output = _read_output_lines(state_root, spawn_id)
+    assert output == [
+        {
+            "event_type": "item.completed",
+            "harness_id": "codex",
+            "payload": {"item": {"text": "hi", "type": "agent_message"}, "type": "item.completed"},
+        }
+    ]
+
+    spawn_events = _read_spawn_events(state_root)
+    assert [event["event"] for event in spawn_events] == ["start"]
+
+    row = get_spawn(state_root, spawn_id)
+    assert row is not None
+    assert row.status == "running"
+    assert row.exit_code is None
+
+
+@pytest.mark.asyncio
+async def test_spawn_manager_wait_for_completion_after_natural_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path
+    state_root = resolve_state_paths(repo_root).root_dir
+    cleanup_finished = asyncio.Event()
 
     class FakeControlSocketServer:
         def __init__(self, spawn_id: str, socket_path: Path, manager: SpawnManager) -> None:
@@ -124,9 +248,11 @@ async def test_spawn_manager_natural_completion_writes_envelope_and_completion_o
             yield HarnessEvent(
                 event_type="item.completed",
                 harness_id="codex",
-                payload={"type": "item.completed", "item": {"type": "agent_message", "text": "hi"}},
+                payload={
+                    "type": "item.completed",
+                    "item": {"type": "agent_message", "text": "done"},
+                },
             )
-            await release_completion.wait()
 
     monkeypatch.setattr(spawn_manager_module, "ControlSocketServer", FakeControlSocketServer)
     monkeypatch.setattr(
@@ -146,36 +272,21 @@ async def test_spawn_manager_natural_completion_writes_envelope_and_completion_o
         status="running",
     )
     manager = SpawnManager(state_root=state_root, repo_root=repo_root)
-    await manager.start_spawn(_build_config(spawn_id, repo_root), SpawnParams(prompt="hello"))
-    completion_task = asyncio.create_task(manager.wait_for_completion(spawn_id))
-    release_completion.set()
-    completion = await completion_task
+    original_cleanup = manager._cleanup_completed_session
+
+    async def tracked_cleanup(spawn_id: SpawnId) -> None:
+        await original_cleanup(spawn_id)
+        cleanup_finished.set()
+
+    monkeypatch.setattr(manager, "_cleanup_completed_session", tracked_cleanup)
+    await manager.start_spawn(_build_config(spawn_id, repo_root))
+
+    await cleanup_finished.wait()
+    assert manager.get_connection(spawn_id) is None
+    completion = await manager.wait_for_completion(spawn_id)
     assert completion is not None
-    await _wait_until(
-        lambda: get_spawn(state_root, spawn_id) is not None
-        and manager.get_connection(spawn_id) is None
-    )
     assert completion.status == "succeeded"
     assert completion.exit_code == 0
-    assert completion.error is None
-    assert completion.duration_secs >= 0.0
-
-    output = _read_output_lines(state_root, spawn_id)
-    assert output == [
-        {
-            "event_type": "item.completed",
-            "harness_id": "codex",
-            "payload": {"item": {"text": "hi", "type": "agent_message"}, "type": "item.completed"},
-        }
-    ]
-
-    spawn_events = _read_spawn_events(state_root)
-    assert [event["event"] for event in spawn_events] == ["start"]
-
-    row = get_spawn(state_root, spawn_id)
-    assert row is not None
-    assert row.status == "running"
-    assert row.exit_code is None
 
 
 @pytest.mark.asyncio

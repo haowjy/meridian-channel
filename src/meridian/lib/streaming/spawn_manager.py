@@ -59,6 +59,7 @@ class SpawnManager:
         self._state_root = state_root
         self._repo_root = repo_root
         self._sessions: dict[SpawnId, SpawnSession] = {}
+        self._completion_futures: dict[SpawnId, asyncio.Future[DrainOutcome]] = {}
         self._cleanup_tasks: set[asyncio.Task[None]] = set()
 
     @property
@@ -120,6 +121,7 @@ class SpawnManager:
             started_monotonic=started_monotonic,
             completion_future=completion_future,
         )
+        self._completion_futures[spawn_id] = completion_future
         return connection
 
     async def _drain_loop(self, spawn_id: SpawnId, receiver: HarnessReceiver) -> None:
@@ -219,10 +221,10 @@ class SpawnManager:
     async def wait_for_completion(self, spawn_id: SpawnId) -> DrainOutcome | None:
         """Await one spawn's terminal drain outcome, if still tracked."""
 
-        session = self._sessions.get(spawn_id)
-        if session is None:
+        completion_future = self._completion_futures.get(spawn_id)
+        if completion_future is None:
             return None
-        return await session.completion_future
+        return await completion_future
 
     async def inject(
         self,
@@ -347,6 +349,7 @@ class SpawnManager:
 
         self._fan_out_event(spawn_id, None)
         self._sessions.pop(spawn_id, None)
+        self._completion_futures.pop(spawn_id, None)
         return outcome
 
     async def shutdown(
@@ -365,6 +368,7 @@ class SpawnManager:
                 exit_code=exit_code,
                 error=error,
             )
+        self._completion_futures.clear()
 
     def list_spawns(self) -> list[SpawnId]:
         """List active spawn IDs."""
@@ -407,6 +411,8 @@ class SpawnManager:
         session = self._sessions.pop(spawn_id, None)
         if session is None:
             return
+        with suppress(Exception):
+            await session.connection.stop()
         with suppress(Exception):
             await session.control_server.stop()
 

@@ -173,6 +173,7 @@ class OpenCodeAdapter(BaseSubprocessHarness):
         return HarnessCapabilities(
             supports_stream_events=True,
             supports_stdin_prompt=True,
+            supports_bidirectional=True,
             supports_session_resume=True,
             supports_session_fork=True,
             supports_native_skills=True,

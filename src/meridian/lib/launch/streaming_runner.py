@@ -495,16 +495,17 @@ async def run_streaming_spawn(
                 raise RuntimeError("streaming spawn completed without drain outcome")
             return outcome
     finally:
-        if subscriber is not None:
-            manager.unsubscribe(spawn_id)
-        for task in (completion_task, signal_task, consume_task):
-            if task is not None and not task.done():
-                task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await task
-        _remove_signal_handlers(loop, installed_signals)
-        with suppress(Exception):
-            await manager.shutdown(status="cancelled", exit_code=1, error="shutdown")
+        with signal_coordinator().mask_sigterm():
+            if subscriber is not None:
+                manager.unsubscribe(spawn_id)
+            for task in (completion_task, signal_task, consume_task):
+                if task is not None and not task.done():
+                    task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await task
+            _remove_signal_handlers(loop, installed_signals)
+            with suppress(Exception):
+                await manager.shutdown(status="cancelled", exit_code=1, error="shutdown")
 
 
 async def _run_streaming_attempt(
