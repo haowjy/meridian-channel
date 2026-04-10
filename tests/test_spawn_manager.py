@@ -44,7 +44,6 @@ def _build_config(spawn_id: str, repo_root: Path) -> ConnectionConfig:
     return ConnectionConfig(
         spawn_id=spawn_id,
         harness_id=HarnessId.CODEX,
-        model="gpt-5.3-codex",
         prompt="hello",
         repo_root=repo_root,
         env_overrides={},

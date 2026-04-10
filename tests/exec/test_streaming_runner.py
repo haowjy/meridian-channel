@@ -364,7 +364,6 @@ async def test_run_streaming_spawn_finishes_on_turn_completed_without_connection
             config=ConnectionConfig(
                 spawn_id=SpawnId("p1"),
                 harness_id=HarnessId.CODEX,
-                model="gpt-5.3-codex",
                 prompt="hello",
                 repo_root=tmp_path,
                 env_overrides={},
@@ -511,7 +510,6 @@ async def test_run_streaming_spawn_finishes_on_claude_result_without_connection_
             config=ConnectionConfig(
                 spawn_id=SpawnId("p2"),
                 harness_id=HarnessId.CLAUDE,
-                model="claude-opus-4-1",
                 prompt="hello",
                 repo_root=tmp_path,
                 env_overrides={},
@@ -589,7 +587,6 @@ async def test_run_streaming_spawn_finishes_on_opencode_idle_without_connection_
             config=ConnectionConfig(
                 spawn_id=SpawnId("p3"),
                 harness_id=HarnessId.OPENCODE,
-                model="openrouter/qwen/qwen3-coder:free",
                 prompt="hello",
                 repo_root=tmp_path,
                 env_overrides={},
@@ -604,6 +601,43 @@ async def test_run_streaming_spawn_finishes_on_opencode_idle_without_connection_
 
     assert outcome.status == "succeeded"
     assert outcome.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_run_streaming_spawn_preserves_none_model_in_launch_spec(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_root = resolve_state_paths(tmp_path).root_dir
+    monkeypatch.setattr(spawn_manager_module, "ControlSocketServer", _FakeControlSocketServer)
+    monkeypatch.setattr(
+        "meridian.lib.harness.connections.get_connection_class",
+        _fake_opencode_capture_spec_connection_class,
+    )
+    _OpenCodeCaptureSpecThenIdleConnection.seen_spec = None
+
+    outcome = await asyncio.wait_for(
+        run_streaming_spawn(
+            config=ConnectionConfig(
+                spawn_id=SpawnId("p4"),
+                harness_id=HarnessId.OPENCODE,
+                prompt="hello",
+                repo_root=tmp_path,
+                env_overrides={},
+            ),
+            params=SpawnParams(prompt="hello", model=None),
+            state_root=state_root,
+            repo_root=tmp_path,
+            spawn_id=SpawnId("p4"),
+        ),
+        timeout=0.5,
+    )
+
+    assert outcome.status == "succeeded"
+    assert outcome.exit_code == 0
+    observed_spec = _OpenCodeCaptureSpecThenIdleConnection.seen_spec
+    assert observed_spec is not None
+    assert observed_spec.model is None
 
 
 @pytest.mark.asyncio

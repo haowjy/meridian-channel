@@ -29,6 +29,11 @@ from meridian.lib.harness.connections.base import ConnectionConfig, HarnessConne
 from meridian.lib.harness.extractor import StreamingExtractor
 from meridian.lib.harness.launch_spec import ResolvedLaunchSpec
 from meridian.lib.harness.registry import HarnessRegistry
+from meridian.lib.launch.claude_preflight import (
+    ensure_claude_session_accessible,
+    merge_allowed_tools_flag,
+    read_parent_claude_permissions,
+)
 from meridian.lib.launch.cwd import resolve_child_execution_cwd
 from meridian.lib.launch.env import build_harness_child_env
 from meridian.lib.launch.errors import ErrorCategory, classify_error, should_retry
@@ -38,7 +43,6 @@ from meridian.lib.launch.extract import (
     reset_finalize_attempt_artifacts,
 )
 from meridian.lib.launch.heartbeat import heartbeat_scope
-from meridian.lib.launch.runner import ensure_claude_session_accessible
 from meridian.lib.launch.session_ids import extract_latest_session_id
 from meridian.lib.launch.signals import signal_coordinator, signal_to_exit_code
 from meridian.lib.ops.spawn.plan import PreparedSpawnPlan
@@ -98,101 +102,6 @@ def _spawn_kind(state_root: Path, spawn_id: SpawnId) -> str:
     if normalized in {"primary", "child"}:
         return normalized
     return "child"
-
-
-def _dedupe_nonempty(values: list[str]) -> list[str]:
-    seen: set[str] = set()
-    deduped: list[str] = []
-    for raw_value in values:
-        value = raw_value.strip()
-        if not value or value in seen:
-            continue
-        seen.add(value)
-        deduped.append(value)
-    return deduped
-
-
-def _split_csv_entries(value: str) -> list[str]:
-    return [entry.strip() for entry in value.split(",") if entry.strip()]
-
-
-def _read_parent_claude_permissions(execution_cwd: Path) -> tuple[list[str], list[str]]:
-    additional_directories: list[str] = []
-    allowed_tools: list[str] = []
-    settings_dir = execution_cwd / ".claude"
-    settings_files = (
-        settings_dir / "settings.json",
-        settings_dir / "settings.local.json",
-    )
-    for settings_path in settings_files:
-        if not settings_path.exists():
-            continue
-
-        try:
-            raw_payload = json.loads(settings_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            logger.warning(
-                "Failed to parse parent Claude settings while forwarding child permissions",
-                path=str(settings_path),
-            )
-            continue
-
-        if not isinstance(raw_payload, dict):
-            continue
-        payload = cast("dict[str, object]", raw_payload)
-        raw_permissions = payload.get("permissions")
-        if not isinstance(raw_permissions, dict):
-            continue
-        permissions = cast("dict[str, object]", raw_permissions)
-
-        raw_additional_directories = permissions.get("additionalDirectories")
-        if isinstance(raw_additional_directories, list):
-            for directory in cast("list[object]", raw_additional_directories):
-                if isinstance(directory, str):
-                    additional_directories.append(directory)
-
-        raw_allowed_tools = permissions.get("allow")
-        if isinstance(raw_allowed_tools, list):
-            for tool in cast("list[object]", raw_allowed_tools):
-                if isinstance(tool, str):
-                    allowed_tools.append(tool)
-
-    return _dedupe_nonempty(additional_directories), _dedupe_nonempty(allowed_tools)
-
-
-def _merge_allowed_tools_flag(
-    command: tuple[str, ...], additional_allowed_tools: list[str]
-) -> tuple[str, ...]:
-    if not additional_allowed_tools:
-        return command
-
-    existing_allowed_tools: list[str] = []
-    merged_command: list[str] = []
-    index = 0
-
-    while index < len(command):
-        arg = command[index]
-        if arg == "--allowedTools":
-            if index + 1 < len(command):
-                existing_allowed_tools.extend(_split_csv_entries(command[index + 1]))
-                index += 2
-                continue
-            index += 1
-            continue
-        if arg.startswith("--allowedTools="):
-            existing_allowed_tools.extend(_split_csv_entries(arg.split("=", 1)[1]))
-            index += 1
-            continue
-        merged_command.append(arg)
-        index += 1
-
-    combined_allowed_tools = _dedupe_nonempty(
-        existing_allowed_tools + additional_allowed_tools
-    )
-    if not combined_allowed_tools:
-        return tuple(merged_command)
-    merged_command.extend(("--allowedTools", ",".join(combined_allowed_tools)))
-    return tuple(merged_command)
 
 
 def _append_budget_exceeded_event(*, run: Spawn, breach: BudgetBreach) -> None:
@@ -544,7 +453,7 @@ async def run_streaming_spawn(
     terminal_event_future: asyncio.Future[_TerminalEventOutcome] | None = None
     subscriber: asyncio.Queue[HarnessEvent | None] | None = None
     run_spec = ResolvedLaunchSpec(
-        model=str(params.model).strip() if params.model else config.model,
+        model=(str(params.model).strip() or None) if params.model else None,
         effort=params.effort,
         prompt=params.prompt,
         continue_session_id=(params.continue_harness_session_id or "").strip() or None,
@@ -840,11 +749,11 @@ async def execute_with_streaming(
         if harness.id == HarnessId.CLAUDE:
             expanded_args = [*passthrough_args, "--add-dir", str(execution_cwd)]
             parent_additional_directories, parent_allowed_tools = (
-                _read_parent_claude_permissions(execution_cwd)
+                read_parent_claude_permissions(execution_cwd)
             )
             for additional_directory in parent_additional_directories:
                 expanded_args.extend(("--add-dir", additional_directory))
-            passthrough_args = _merge_allowed_tools_flag(
+            passthrough_args = merge_allowed_tools_flag(
                 tuple(expanded_args), parent_allowed_tools
             )
 
@@ -908,7 +817,6 @@ async def execute_with_streaming(
     config = ConnectionConfig(
         spawn_id=run.spawn_id,
         harness_id=resolved_harness_id,
-        model=(str(run.model).strip() or None),
         prompt=run.prompt,
         repo_root=child_cwd,
         env_overrides=child_env,

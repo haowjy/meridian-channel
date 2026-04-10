@@ -21,7 +21,6 @@ def _build_config(tmp_path: Path) -> ConnectionConfig:
     return ConnectionConfig(
         spawn_id=SpawnId("p123"),
         harness_id=HarnessId.CLAUDE,
-        model="claude-sonnet-4-6",
         prompt="hello",
         repo_root=tmp_path,
         env_overrides={},

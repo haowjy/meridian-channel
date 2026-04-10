@@ -49,7 +49,6 @@ class ConnectionConfig:
 
     spawn_id: SpawnId
     harness_id: HarnessId
-    model: str | None
     prompt: str
     repo_root: Path
     env_overrides: dict[str, str]

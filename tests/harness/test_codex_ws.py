@@ -60,7 +60,6 @@ def _build_config(tmp_path: Path) -> ConnectionConfig:
     return ConnectionConfig(
         spawn_id=SpawnId("p321"),
         harness_id=HarnessId.CODEX,
-        model="gpt-5.4",
         prompt="hello",
         repo_root=tmp_path,
         env_overrides={},

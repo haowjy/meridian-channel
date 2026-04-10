@@ -71,7 +71,6 @@ async def streaming_serve(
     config = ConnectionConfig(
         spawn_id=spawn_id,
         harness_id=harness_id,
-        model=normalized_model or None,
         prompt=prompt,
         repo_root=repo_root,
         env_overrides={},

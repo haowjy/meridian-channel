@@ -40,10 +40,10 @@ from meridian.lib.state.session_store import (
 )
 from meridian.lib.state.spawn_store import FOREGROUND_LAUNCH_MODE
 
+from .claude_preflight import ensure_claude_session_accessible
 from .command import build_launch_env
 from .heartbeat import threaded_heartbeat_scope
 from .plan import ResolvedPrimaryLaunchPlan
-from .runner import ensure_claude_session_accessible
 from .session_ids import extract_latest_session_id
 from .session_scope import session_scope
 from .types import SessionMode

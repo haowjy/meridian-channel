@@ -184,7 +184,6 @@ def create_app(spawn_manager: SpawnManager) -> object:
         config = ConnectionConfig(
             spawn_id=spawn_id,
             harness_id=harness_id,
-            model=(body.model.strip() or None) if body.model is not None else None,
             prompt=prompt,
             repo_root=repo_root,
             env_overrides={},
