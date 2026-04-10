@@ -10,6 +10,7 @@ from contextlib import suppress
 from typing import NotRequired, Protocol, TypedDict, cast
 
 from ag_ui.core import BaseEvent, RunErrorEvent
+from starlette.websockets import WebSocket
 
 from meridian.lib.app.agui_mapping import get_agui_mapper
 from meridian.lib.app.agui_mapping.base import AGUIMapper
@@ -39,7 +40,7 @@ class WebSocketClient(Protocol):
     async def receive(self) -> WebSocketMessage: ...
 
 
-WebSocketRouteHandler = Callable[[object, str], Awaitable[None]]
+WebSocketRouteHandler = Callable[[WebSocket, str], Awaitable[None]]
 WebSocketRouteDecorator = Callable[[WebSocketRouteHandler], object]
 
 
@@ -200,7 +201,7 @@ def register_ws_routes(
 
     typed_app = cast("FastAPIApp", app)
 
-    async def _spawn_ws_route(websocket: object, spawn_id: str) -> None:
+    async def _spawn_ws_route(websocket: WebSocket, spawn_id: str) -> None:
         typed_websocket = cast("WebSocketClient", websocket)
         try:
             typed_spawn_id = (

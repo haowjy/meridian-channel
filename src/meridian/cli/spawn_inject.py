@@ -36,7 +36,17 @@ async def inject_message(
 
     if not spawn_dir.exists():
         _fail(f"spawn not found: {normalized_spawn_id}")
-    if not socket_path.exists():
+
+    # The control socket may not be visible immediately after spawn start.
+    # Retry briefly to tolerate the startup race.
+    _SOCKET_WAIT_ATTEMPTS = 3
+    _SOCKET_WAIT_INTERVAL = 1.0
+    for _attempt in range(_SOCKET_WAIT_ATTEMPTS):
+        if socket_path.exists():
+            break
+        if _attempt < _SOCKET_WAIT_ATTEMPTS - 1:
+            await asyncio.sleep(_SOCKET_WAIT_INTERVAL)
+    else:
         _fail(f"spawn not running: {normalized_spawn_id} has no control socket")
 
     normalized_message = message.strip() if message is not None else ""
