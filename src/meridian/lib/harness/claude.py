@@ -29,6 +29,7 @@ from meridian.lib.harness.common import (
     extract_session_id_from_artifacts,
     extract_usage_from_artifacts,
 )
+from meridian.lib.harness.launch_spec import ClaudeLaunchSpec, resolve_permission_config
 from meridian.lib.harness.launch_types import PromptPolicy, SessionSeed
 from meridian.lib.safety.permissions import PermissionConfig
 
@@ -258,6 +259,33 @@ class ClaudeAdapter(BaseSubprocessHarness):
 
     def build_adhoc_agent_payload(self, *, name: str, description: str, prompt: str) -> str:
         return build_claude_adhoc_agent_json(name=name, description=description, prompt=prompt)
+
+    def resolve_launch_spec(self, run: SpawnParams, perms: PermissionResolver) -> ClaudeLaunchSpec:
+        effort = run.effort
+        normalized_effort = None
+        if effort is not None:
+            normalized_value = str(effort).strip()
+            normalized_effort = {
+                "low": "low",
+                "medium": "medium",
+                "high": "high",
+                "xhigh": "max",
+            }.get(normalized_value, normalized_value)
+        return ClaudeLaunchSpec(
+            model=str(run.model).strip() if run.model else None,
+            effort=normalized_effort,
+            prompt=run.prompt,
+            continue_session_id=(run.continue_harness_session_id or "").strip() or None,
+            continue_fork=run.continue_fork,
+            permission_config=resolve_permission_config(perms),
+            permission_resolver=perms,
+            extra_args=run.extra_args,
+            report_output_path=run.report_output_path,
+            interactive=run.interactive,
+            appended_system_prompt=run.appended_system_prompt,
+            agents_payload=run.adhoc_agent_payload.strip() or None,
+            agent_name=run.agent,
+        )
 
     def build_command(self, run: SpawnParams, perms: PermissionResolver) -> list[str]:
         if run.interactive:

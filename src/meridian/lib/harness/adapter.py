@@ -1,7 +1,7 @@
 """Harness adapter protocol and shared data models."""
 
 from pathlib import Path
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -10,6 +10,9 @@ from meridian.lib.core.domain import TokenUsage
 from meridian.lib.core.types import ArtifactKey, HarnessId, ModelId, SpawnId
 from meridian.lib.harness.launch_types import PromptPolicy, SessionSeed
 from meridian.lib.safety.permissions import PermissionConfig
+
+if TYPE_CHECKING:
+    from meridian.lib.harness.launch_spec import ResolvedLaunchSpec
 
 
 def _empty_metadata() -> dict[str, object]:
@@ -144,6 +147,12 @@ class SubprocessHarness(Protocol):
 
     def build_adhoc_agent_payload(self, *, name: str, description: str, prompt: str) -> str: ...
 
+    def resolve_launch_spec(
+        self,
+        run: SpawnParams,
+        perms: PermissionResolver,
+    ) -> "ResolvedLaunchSpec": ...
+
     def build_command(self, run: SpawnParams, perms: PermissionResolver) -> list[str]: ...
 
     def mcp_config(self, run: SpawnParams) -> McpConfig | None: ...
@@ -221,6 +230,26 @@ class BaseSubprocessHarness:
     def build_adhoc_agent_payload(self, *, name: str, description: str, prompt: str) -> str:
         _ = name, description, prompt
         return ""
+
+    def resolve_launch_spec(
+        self,
+        run: SpawnParams,
+        perms: PermissionResolver,
+    ) -> "ResolvedLaunchSpec":
+        from meridian.lib.harness.launch_spec import ResolvedLaunchSpec, resolve_permission_config
+
+        return ResolvedLaunchSpec(
+            model=str(run.model).strip() if run.model else None,
+            effort=run.effort,
+            prompt=run.prompt,
+            continue_session_id=(run.continue_harness_session_id or "").strip() or None,
+            continue_fork=run.continue_fork,
+            permission_config=resolve_permission_config(perms),
+            permission_resolver=perms,
+            extra_args=run.extra_args,
+            report_output_path=run.report_output_path,
+            interactive=run.interactive,
+        )
 
     def fork_session(self, source_session_id: str) -> str:
         """Fork one harness session and return the new session ID."""
