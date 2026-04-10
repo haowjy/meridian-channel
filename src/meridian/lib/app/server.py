@@ -14,7 +14,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel
 
-from meridian.lib.core.types import HarnessId, SpawnId
+from meridian.lib.core.types import HarnessId, ModelId, SpawnId
+from meridian.lib.harness.adapter import SpawnParams
 from meridian.lib.harness.connections.base import ConnectionConfig
 from meridian.lib.state import spawn_store
 from meridian.lib.streaming.spawn_manager import SpawnManager
@@ -184,14 +185,18 @@ def create_app(spawn_manager: SpawnManager) -> object:
             spawn_id=spawn_id,
             harness_id=harness_id,
             model=(body.model.strip() or None) if body.model is not None else None,
-            agent=(body.agent.strip() or None) if body.agent is not None else None,
             prompt=prompt,
             repo_root=repo_root,
             env_overrides={},
         )
+        params = SpawnParams(
+            prompt=prompt,
+            model=ModelId(body.model.strip()) if body.model and body.model.strip() else None,
+            agent=body.agent.strip() if body.agent else None,
+        )
 
         try:
-            connection = await spawn_manager.start_spawn(config)
+            connection = await spawn_manager.start_spawn(config, params)
         except Exception as exc:
             spawn_store.finalize_spawn(
                 state_root,

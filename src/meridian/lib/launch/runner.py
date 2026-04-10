@@ -878,14 +878,14 @@ async def execute_with_finalization(
 
                 extracted = enrich_finalize(
                     artifacts=artifacts,
-                    adapter=harness,
+                    extractor=harness,
                     spawn_id=run.spawn_id,
                     log_dir=log_dir,
                     secrets=secrets,
                 )
                 extracted_harness_session_id = (
                     extract_latest_session_id(
-                        adapter=harness,
+                        extractor=harness,
                         current_session_id=observed_harness_session_id,
                         artifacts=artifacts,
                         spawn_id=run.spawn_id,

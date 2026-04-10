@@ -10,6 +10,7 @@ from typing import cast
 import pytest
 
 from meridian.lib.core.types import HarnessId, SpawnId
+from meridian.lib.harness.adapter import SpawnParams
 from meridian.lib.harness.connections.base import (
     ConnectionCapabilities,
     ConnectionConfig,
@@ -44,7 +45,6 @@ def _build_config(spawn_id: str, repo_root: Path) -> ConnectionConfig:
         spawn_id=spawn_id,
         harness_id=HarnessId.CODEX,
         model="gpt-5.3-codex",
-        agent="coder",
         prompt="hello",
         repo_root=repo_root,
         env_overrides={},
@@ -100,7 +100,8 @@ async def test_spawn_manager_natural_completion_writes_envelope_and_completion_o
         def spawn_id(self) -> str:
             return self._spawn_id
 
-        async def start(self, config: ConnectionConfig) -> None:
+        async def start(self, config: ConnectionConfig, params: SpawnParams) -> None:
+            _ = params
             self._spawn_id = config.spawn_id
             self.state = "connected"
 
@@ -145,7 +146,7 @@ async def test_spawn_manager_natural_completion_writes_envelope_and_completion_o
         status="running",
     )
     manager = SpawnManager(state_root=state_root, repo_root=repo_root)
-    await manager.start_spawn(_build_config(spawn_id, repo_root))
+    await manager.start_spawn(_build_config(spawn_id, repo_root), SpawnParams(prompt="hello"))
     completion_task = asyncio.create_task(manager.wait_for_completion(spawn_id))
     release_completion.set()
     completion = await completion_task
@@ -219,7 +220,8 @@ async def test_spawn_manager_stop_spawn_returns_cancelled_outcome_without_finali
         def spawn_id(self) -> str:
             return self._spawn_id
 
-        async def start(self, config: ConnectionConfig) -> None:
+        async def start(self, config: ConnectionConfig, params: SpawnParams) -> None:
+            _ = params
             self._spawn_id = config.spawn_id
             self.state = "connected"
 
@@ -326,7 +328,8 @@ async def test_spawn_manager_stop_spawn_race_uses_natural_completion_outcome_onc
         def spawn_id(self) -> str:
             return self._spawn_id
 
-        async def start(self, config: ConnectionConfig) -> None:
+        async def start(self, config: ConnectionConfig, params: SpawnParams) -> None:
+            _ = params
             self._spawn_id = config.spawn_id
             self.state = "connected"
 

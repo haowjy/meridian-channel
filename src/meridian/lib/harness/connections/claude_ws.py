@@ -13,6 +13,7 @@ from io import BufferedWriter
 from typing import Final, cast
 
 from meridian.lib.core.types import HarnessId, SpawnId
+from meridian.lib.harness.adapter import SpawnParams
 from meridian.lib.harness.connections.base import (
     ConnectionCapabilities,
     ConnectionConfig,
@@ -94,7 +95,11 @@ class ClaudeConnection(HarnessConnection):
     def capabilities(self) -> ConnectionCapabilities:
         return self._CAPABILITIES
 
-    async def start(self, config: ConnectionConfig) -> None:
+    @property
+    def session_id(self) -> str | None:
+        return None
+
+    async def start(self, config: ConnectionConfig, params: SpawnParams) -> None:
         """Launch Claude subprocess and send the initial user prompt via stdin."""
 
         if self._state != "created":
@@ -106,7 +111,7 @@ class ClaudeConnection(HarnessConnection):
 
         try:
             await self._check_claude_version()
-            await self._start_subprocess(config)
+            await self._start_subprocess(config, params)
             await self._send_user_turn(config.prompt)
             self._set_state("connected")
         except Exception:
@@ -266,7 +271,7 @@ class ClaudeConnection(HarnessConnection):
                 return token.strip()
         return None
 
-    async def _start_subprocess(self, config: ConnectionConfig) -> None:
+    async def _start_subprocess(self, config: ConnectionConfig, params: SpawnParams) -> None:
         spawn_dir = resolve_spawn_log_dir(config.repo_root, config.spawn_id)
         spawn_dir.mkdir(parents=True, exist_ok=True)
 
@@ -284,8 +289,8 @@ class ClaudeConnection(HarnessConnection):
         ]
         if config.model:
             command.extend(["--model", config.model])
-        if config.extra_args:
-            command.extend(config.extra_args)
+        if params.extra_args:
+            command.extend(params.extra_args)
 
         env = inherit_child_env(
             os.environ,

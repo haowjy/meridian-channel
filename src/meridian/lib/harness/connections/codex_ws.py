@@ -18,6 +18,7 @@ from aiohttp import ClientSession, WSMsgType
 
 from meridian import __version__
 from meridian.lib.core.types import HarnessId, SpawnId
+from meridian.lib.harness.adapter import SpawnParams
 from meridian.lib.harness.connections.base import (
     ConnectionCapabilities,
     ConnectionConfig,
@@ -155,7 +156,11 @@ class CodexConnection(HarnessConnection):
             structured_reasoning=True,
         )
 
-    async def start(self, config: ConnectionConfig) -> None:
+    @property
+    def session_id(self) -> str | None:
+        return self._thread_id
+
+    async def start(self, config: ConnectionConfig, params: SpawnParams) -> None:
         if self._state not in {"created", "stopped", "failed"}:
             raise RuntimeError(f"Cannot start CodexConnection from state '{self._state}'")
 
@@ -183,7 +188,7 @@ class CodexConnection(HarnessConnection):
                 "app-server",
                 "--listen",
                 ws_url,
-                *config.extra_args,
+                *params.extra_args,
                 cwd=str(config.repo_root),
                 env=env,
                 stdout=asyncio.subprocess.DEVNULL,

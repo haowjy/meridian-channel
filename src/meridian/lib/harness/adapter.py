@@ -120,6 +120,17 @@ class ArtifactStore(Protocol):
 
 
 @runtime_checkable
+class SpawnExtractor(Protocol):
+    """Artifact extraction interface for spawn finalization."""
+
+    def extract_usage(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> TokenUsage: ...
+
+    def extract_session_id(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> str | None: ...
+
+    def extract_report(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> str | None: ...
+
+
+@runtime_checkable
 class SubprocessHarness(Protocol):
     """Protocol for subprocess-launching harness behavior."""
 

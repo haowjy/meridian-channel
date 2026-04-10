@@ -14,6 +14,7 @@ from io import BufferedWriter
 from typing import Any, ClassVar, cast
 
 from meridian.lib.core.types import HarnessId, SpawnId
+from meridian.lib.harness.adapter import SpawnParams
 from meridian.lib.harness.connections.base import (
     ConnectionCapabilities,
     ConnectionConfig,
@@ -113,7 +114,11 @@ class OpenCodeConnection:
     def capabilities(self) -> ConnectionCapabilities:
         return self._CAPABILITIES
 
-    async def start(self, config: ConnectionConfig) -> None:
+    @property
+    def session_id(self) -> str | None:
+        return self._session_id
+
+    async def start(self, config: ConnectionConfig, params: SpawnParams) -> None:
         if self._state != "created":
             raise RuntimeError(f"Cannot start OpenCode connection from state '{self._state}'")
 
@@ -128,9 +133,10 @@ class OpenCodeConnection:
         )
 
         try:
-            await self._launch_process(config)
+            await self._launch_process(config, params)
             self._session_id = await self._create_session_with_retry(
                 config,
+                params,
                 timeout_seconds=startup_timeout,
             )
             await self._post_session_message(config.prompt)
@@ -254,10 +260,10 @@ class OpenCodeConnection:
                 return
             await asyncio.sleep(self._EVENT_RETRY_DELAY_SECONDS)
 
-    async def _launch_process(self, config: ConnectionConfig) -> None:
+    async def _launch_process(self, config: ConnectionConfig, params: SpawnParams) -> None:
         port = _find_free_port()
         self._base_url = f"http://127.0.0.1:{port}"
-        command = ["opencode", "serve", "--port", str(port), *config.extra_args]
+        command = ["opencode", "serve", "--port", str(port), *params.extra_args]
         env = inherit_child_env(os.environ, config.env_overrides)
         spawn_dir = resolve_spawn_log_dir(config.repo_root, config.spawn_id)
         spawn_dir.mkdir(parents=True, exist_ok=True)
@@ -273,6 +279,7 @@ class OpenCodeConnection:
     async def _create_session_with_retry(
         self,
         config: ConnectionConfig,
+        params: SpawnParams,
         *,
         timeout_seconds: float,
     ) -> str:
@@ -282,7 +289,7 @@ class OpenCodeConnection:
             if self._process_exited():
                 raise RuntimeError("OpenCode process exited before becoming healthy")
             try:
-                session_id = await self._create_session(config)
+                session_id = await self._create_session(config, params)
                 self._last_health_ok = True
                 return session_id
             except Exception as exc:
@@ -294,18 +301,18 @@ class OpenCodeConnection:
                 ) from last_error
             await asyncio.sleep(0.2)
 
-    async def _create_session(self, config: ConnectionConfig) -> str:
+    async def _create_session(self, config: ConnectionConfig, params: SpawnParams) -> str:
         payload: dict[str, object] = {}
         if config.model is not None:
             payload["model"] = config.model
             payload["modelID"] = config.model
-        if config.agent is not None:
-            payload["agent"] = config.agent
-        if config.skills:
-            payload["skills"] = list(config.skills)
-        if config.continue_session_id is not None:
-            payload["session_id"] = config.continue_session_id
-            payload["continue_session_id"] = config.continue_session_id
+        if params.agent is not None:
+            payload["agent"] = params.agent
+        if params.skills:
+            payload["skills"] = list(params.skills)
+        if params.continue_harness_session_id is not None:
+            payload["session_id"] = params.continue_harness_session_id
+            payload["continue_session_id"] = params.continue_harness_session_id
 
         payload_variants: tuple[dict[str, object], ...] = (payload, {}) if payload else ({},)
 

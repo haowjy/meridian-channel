@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, cast
 
 from meridian.lib.core.domain import SpawnStatus
 from meridian.lib.core.types import SpawnId
+from meridian.lib.harness.adapter import SpawnParams
 from meridian.lib.state.atomic import append_text_line
 from meridian.lib.streaming.control_socket import ControlSocketServer
 from meridian.lib.streaming.types import InjectResult
@@ -72,7 +73,11 @@ class SpawnManager:
 
         return self._repo_root
 
-    async def start_spawn(self, config: ConnectionConfig) -> HarnessConnection:
+    async def start_spawn(
+        self,
+        config: ConnectionConfig,
+        params: SpawnParams | None = None,
+    ) -> HarnessConnection:
         """Start one connection and register durable drain/control resources."""
 
         spawn_id = config.spawn_id
@@ -87,7 +92,8 @@ class SpawnManager:
         connection = connection_factory()
         started_monotonic = time.monotonic()
         completion_future: asyncio.Future[DrainOutcome] = asyncio.get_running_loop().create_future()
-        await connection.start(config)
+        run_params = params or SpawnParams(prompt=config.prompt)
+        await connection.start(config, run_params)
 
         drain_task = asyncio.create_task(self._drain_loop(spawn_id, connection))
         control_server = ControlSocketServer(

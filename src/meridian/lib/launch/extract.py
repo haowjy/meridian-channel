@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.core.domain import TokenUsage
 from meridian.lib.core.types import ArtifactKey, SpawnId
-from meridian.lib.harness.adapter import SubprocessHarness
+from meridian.lib.harness.adapter import SpawnExtractor
 from meridian.lib.launch.artifact_io import read_artifact_text
 from meridian.lib.launch.report import ExtractedReport, extract_or_fallback_report
 from meridian.lib.safety.redaction import SecretSpec, redact_secrets
@@ -92,16 +92,16 @@ def _is_empty_output(
 def enrich_finalize(
     *,
     artifacts: ArtifactStore,
-    adapter: SubprocessHarness,
+    extractor: SpawnExtractor,
     spawn_id: SpawnId,
     log_dir: Path,
     secrets: tuple[SecretSpec, ...] = (),
 ) -> FinalizeExtraction:
     """Spawn all extraction steps and return one enriched finalization payload."""
 
-    usage = adapter.extract_usage(artifacts, spawn_id)
-    harness_session_id = adapter.extract_session_id(artifacts, spawn_id)
-    report = extract_or_fallback_report(artifacts, spawn_id, adapter=adapter)
+    usage = extractor.extract_usage(artifacts, spawn_id)
+    harness_session_id = extractor.extract_session_id(artifacts, spawn_id)
+    report = extract_or_fallback_report(artifacts, spawn_id, extractor=extractor)
     report_path = _persist_report(
         artifacts=artifacts,
         spawn_id=spawn_id,

@@ -4,6 +4,7 @@ from meridian.lib.core.types import SpawnId
 from meridian.lib.harness.adapter import ArtifactStore
 from meridian.lib.harness.claude import ClaudeAdapter
 from meridian.lib.harness.codex import CodexAdapter
+from meridian.lib.harness.common import unwrap_event_payload
 from meridian.lib.harness.opencode import OpenCodeAdapter
 from meridian.lib.launch.report import extract_or_fallback_report
 from meridian.lib.launch.written_files import extract_written_files
@@ -127,7 +128,7 @@ def test_extract_or_fallback_report_tolerates_adapter_errors_and_bad_jsonl() -> 
     extracted = extract_or_fallback_report(
         artifacts,
         failing_spawn,
-        adapter=_StubCodexAdapter(raises=RuntimeError("boom")),
+        extractor=_StubCodexAdapter(raises=RuntimeError("boom")),
     )
     assert extracted.content == "generic fallback"
     assert extracted.source == "assistant_message"
@@ -198,7 +199,58 @@ def test_extract_or_fallback_report_tolerates_malformed_jsonl_and_blank_adapter_
     extracted = extract_or_fallback_report(
         artifacts,
         whitespace_spawn,
-        adapter=_StubCodexAdapter(report="   \n\t"),
+        extractor=_StubCodexAdapter(report="   \n\t"),
     )
     assert extracted.content == "generic fallback"
     assert extracted.source == "assistant_message"
+
+
+def test_unwrap_event_payload_extracts_envelope_payload() -> None:
+    line = {
+        "event_type": "assistant",
+        "payload": {"type": "assistant", "message": "inner"},
+    }
+    assert unwrap_event_payload(line) == {"type": "assistant", "message": "inner"}
+
+
+def test_unwrap_event_payload_passthrough_for_raw_lines() -> None:
+    line = {"type": "assistant", "message": "raw"}
+    assert unwrap_event_payload(line) == line
+
+
+def test_extractors_handle_envelope_wrapped_output_jsonl_lines() -> None:
+    artifacts = InMemoryStore()
+
+    codex_spawn = SpawnId("r-codex-envelope")
+    artifacts.put(
+        make_artifact_key(codex_spawn, "output.jsonl"),
+        (
+            b'{"event_type":"item.completed","payload":{"type":"item.completed",'
+            b'"item":{"type":"agent_message","text":"wrapped codex report"}}}\n'
+        ),
+    )
+    assert CodexAdapter().extract_report(artifacts, codex_spawn) == "wrapped codex report"
+
+    claude_spawn = SpawnId("r-claude-envelope")
+    artifacts.put(
+        make_artifact_key(claude_spawn, "output.jsonl"),
+        b'{"event_type":"result","payload":{"type":"result","result":"wrapped claude report"}}\n',
+    )
+    assert ClaudeAdapter().extract_report(artifacts, claude_spawn) == "wrapped claude report"
+
+    opencode_spawn = SpawnId("r-opencode-envelope")
+    artifacts.put(
+        make_artifact_key(opencode_spawn, "output.jsonl"),
+        (
+            b'{"event_type":"response.completed","payload":{"event":"response.completed","usage":{"input":7,"output":2},"cost":{"total_cost_usd":"0.01"}}}\n'
+            b'{"event_type":"session.updated","payload":{"type":"session.updated","sessionID":"oc_wrapped_session"}}\n'
+            b'{"event_type":"assistant","payload":{"type":"assistant",'
+            b'"message":"wrapped opencode report"}}\n'
+        ),
+    )
+    usage = OpenCodeAdapter().extract_usage(artifacts, opencode_spawn)
+    assert usage.input_tokens == 7
+    assert usage.output_tokens == 2
+    assert usage.total_cost_usd == 0.01
+    assert OpenCodeAdapter().extract_session_id(artifacts, opencode_spawn) == "oc_wrapped_session"
+    assert OpenCodeAdapter().extract_report(artifacts, opencode_spawn) == "wrapped opencode report"

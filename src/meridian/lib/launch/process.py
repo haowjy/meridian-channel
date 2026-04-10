@@ -433,7 +433,7 @@ def run_harness_process(
                     observed_harness_session_id = None
                     if primary_started_epoch > 0.0:
                         observed_harness_session_id = extract_latest_session_id(
-                            adapter=plan.adapter,
+                            extractor=plan.adapter,
                             current_session_id=resolved_harness_session_id,
                             artifacts=artifacts,
                             spawn_id=primary_spawn_id,

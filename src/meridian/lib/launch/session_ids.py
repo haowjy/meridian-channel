@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from meridian.lib.core.types import SpawnId
-from meridian.lib.harness.adapter import ArtifactStore, SubprocessHarness
+from meridian.lib.harness.adapter import ArtifactStore, SpawnExtractor, SubprocessHarness
 
 
 def _normalize_session_id(value: str | None) -> str | None:
@@ -15,7 +15,7 @@ def _normalize_session_id(value: str | None) -> str | None:
 
 def extract_latest_session_id(
     *,
-    adapter: SubprocessHarness,
+    extractor: SpawnExtractor,
     current_session_id: str | None = None,
     artifacts: ArtifactStore | None = None,
     spawn_id: SpawnId | None = None,
@@ -32,13 +32,17 @@ def extract_latest_session_id(
     """
 
     if artifacts is not None and spawn_id is not None:
-        extracted = _normalize_session_id(adapter.extract_session_id(artifacts, spawn_id))
+        extracted = _normalize_session_id(extractor.extract_session_id(artifacts, spawn_id))
         if extracted is not None:
             return extracted
 
-    if repo_root is not None and started_at_epoch is not None:
+    if (
+        repo_root is not None
+        and started_at_epoch is not None
+        and isinstance(extractor, SubprocessHarness)
+    ):
         detected = _normalize_session_id(
-            adapter.detect_primary_session_id(
+            extractor.detect_primary_session_id(
                 repo_root=repo_root,
                 started_at_epoch=started_at_epoch,
                 started_at_local_iso=started_at_local_iso,

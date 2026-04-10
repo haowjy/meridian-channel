@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Literal, Protocol, runtime_checkable
 
 from meridian.lib.core.types import HarnessId, SpawnId
+from meridian.lib.harness.adapter import SpawnParams
 
 
 @dataclass(frozen=True)
@@ -46,13 +47,9 @@ class ConnectionConfig:
     spawn_id: SpawnId
     harness_id: HarnessId
     model: str | None
-    agent: str | None
     prompt: str
     repo_root: Path
     env_overrides: dict[str, str]
-    extra_args: tuple[str, ...] = ()
-    skills: tuple[str, ...] = ()
-    continue_session_id: str | None = None
     timeout_seconds: float | None = None
     ws_bind_host: str = "127.0.0.1"
     ws_port: int = 0
@@ -65,7 +62,7 @@ class HarnessLifecycle(Protocol):
     @property
     def state(self) -> ConnectionState: ...
 
-    async def start(self, config: ConnectionConfig) -> None: ...
+    async def start(self, config: ConnectionConfig, params: SpawnParams) -> None: ...
 
     async def stop(self) -> None: ...
 
@@ -102,6 +99,9 @@ class HarnessConnection(HarnessLifecycle, HarnessSender, HarnessReceiver, Protoc
 
     @property
     def capabilities(self) -> ConnectionCapabilities: ...
+
+    @property
+    def session_id(self) -> str | None: ...
 
 
 __all__ = [

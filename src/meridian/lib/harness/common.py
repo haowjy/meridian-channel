@@ -179,6 +179,18 @@ def _read_json_artifact(
     return None
 
 
+def unwrap_event_payload(line: dict[str, object]) -> dict[str, object]:
+    """Extract the effective payload from an output.jsonl line.
+
+    Handles both envelope format (streaming drain) and raw format (legacy).
+    """
+    if "event_type" in line and "payload" in line:
+        payload = line["payload"]
+        if isinstance(payload, dict):
+            return cast("dict[str, object]", payload)
+    return line
+
+
 class _UsageCandidate(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -304,7 +316,7 @@ def _iter_json_lines_artifact(
         except json.JSONDecodeError:
             continue
         if isinstance(payload_obj, dict):
-            payloads.append(cast("dict[str, object]", payload_obj))
+            payloads.append(unwrap_event_payload(cast("dict[str, object]", payload_obj)))
     return payloads
 
 
@@ -453,17 +465,7 @@ def extract_session_id_from_artifacts_with_patterns(
         return None
 
     raw_output = artifacts.get(output_key).decode("utf-8", errors="ignore")
-    for line in raw_output.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            payload_obj = json.loads(stripped)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(payload_obj, dict):
-            continue
-        payload = cast("dict[str, object]", payload_obj)
+    for payload in _iter_json_lines_artifact(artifacts, spawn_id, "output.jsonl"):
         for nested in iter_nested_dicts(payload):
             for key_name in json_keys:
                 value = nested.get(key_name)

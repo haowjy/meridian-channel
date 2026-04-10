@@ -35,8 +35,8 @@ async def test_streaming_serve_shutdown_finalizes_once_as_cancelled(
             self._state_root = state_root
             self._repo_root = repo_root
 
-        async def start_spawn(self, config: object) -> None:
-            _ = config
+        async def start_spawn(self, config: object, params: object | None = None) -> None:
+            _ = config, params
 
         def subscribe(self, spawn_id: str) -> asyncio.Queue[object | None]:
             _ = spawn_id
@@ -99,8 +99,8 @@ async def test_streaming_serve_start_failure_finalizes_failed_once(
         def __init__(self, *, state_root: Path, repo_root: Path) -> None:
             _ = state_root, repo_root
 
-        async def start_spawn(self, config: object) -> None:
-            _ = config
+        async def start_spawn(self, config: object, params: object | None = None) -> None:
+            _ = config, params
             raise RuntimeError("boom")
 
         def subscribe(self, spawn_id: str) -> None:

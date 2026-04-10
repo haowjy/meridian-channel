@@ -9,7 +9,8 @@ from collections.abc import Iterable
 from uuid import uuid4
 
 from meridian.lib.core.domain import SpawnStatus
-from meridian.lib.core.types import HarnessId
+from meridian.lib.core.types import HarnessId, ModelId
+from meridian.lib.harness.adapter import SpawnParams
 from meridian.lib.harness.connections.base import ConnectionConfig, HarnessEvent
 from meridian.lib.ops.runtime import resolve_runtime_root_and_config
 from meridian.lib.state import spawn_store
@@ -95,10 +96,14 @@ async def streaming_serve(
         spawn_id=spawn_id,
         harness_id=harness_id,
         model=(model.strip() or None) if model is not None else None,
-        agent=(agent.strip() or None) if agent is not None else None,
         prompt=prompt,
         repo_root=repo_root,
         env_overrides={},
+    )
+    params = SpawnParams(
+        prompt=prompt,
+        model=ModelId(model.strip()) if model and model.strip() else None,
+        agent=agent.strip() if agent else None,
     )
 
     output_path = state_root / "spawns" / str(spawn_id) / "output.jsonl"
@@ -114,7 +119,7 @@ async def streaming_serve(
     completion_task: asyncio.Task[str] | None = None
     shutdown_task: asyncio.Task[str] | None = None
     try:
-        await manager.start_spawn(config)
+        await manager.start_spawn(config, params)
         print(f"Started spawn {spawn_id} (harness={harness_id.value})")
         print(f"Control socket: {socket_path}")
         print(f"Events: {output_path}")
