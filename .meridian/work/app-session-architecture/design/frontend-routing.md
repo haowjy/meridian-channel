@@ -12,7 +12,7 @@ New dependency: `wouter` (add via `pnpm add wouter`).
 
 | Path | Component | Purpose |
 |------|-----------|---------|
-| `/` | `<Dashboard />` | List sessions, create new spawns |
+| `/` | `<Dashboard />` | List sessions grouped by repo, create new spawns |
 | `/s/:sessionId` | `<SessionView />` | Thread view for one session |
 | `*` (catch-all) | Redirect to `/` | Unknown paths go to dashboard |
 
@@ -37,10 +37,11 @@ App.tsx                    ← Conditional: SpawnSelector OR thread view
 ```
 App.tsx                    ← Shell: header + router + footer
 ├── Dashboard.tsx          ← Route: /
-│   ├── SessionList.tsx    ← Active/recent sessions with status
-│   └── SpawnSelector.tsx  ← "Start New Spawn" form (minor changes)
+│   ├── RepoGroup.tsx      ← Sessions grouped by repo
+│   ├── SessionCard.tsx    ← One session in the list
+│   └── SpawnSelector.tsx  ← "Start New Spawn" form (with repo selector)
 ├── SessionView.tsx        ← Route: /s/:sessionId
-│   ├── SpawnHeader.tsx    ← Session ID + harness + status badges
+│   ├── SpawnHeader.tsx    ← Session ID + repo + harness + status badges
 │   ├── ThreadView.tsx     ← Event stream rendering (unchanged)
 │   ├── Composer.tsx       ← User input (unchanged)
 │   └── StreamingIndicator ← (unchanged)
@@ -79,20 +80,27 @@ The header stays global but simplifies — no more spawn-specific badges in the 
 
 ### Dashboard Component (new)
 
-`Dashboard.tsx` composes two sections:
+`Dashboard.tsx` composes three sections:
 
-1. **Session list** — fetched from `GET /api/sessions`. Shows a card for each session with:
-   - Session ID (displayed as short code, e.g., `a7f3b2c1`)
-   - Harness badge (claude/codex/opencode)
-   - Status badge (running/succeeded/failed/cancelled)
-   - Prompt preview (first ~100 chars)
-   - Created timestamp (relative, e.g., "2 min ago")
-   - Click → navigates to `/s/{session_id}`
+1. **Repo-grouped session list** — fetched from `GET /api/sessions`. Sessions are grouped by `repo_root`, with each group showing:
+   - **Repo header** — repo name (last path component of `repo_root`) and full path as tooltip
+   - **Session cards** within that repo, each showing:
+     - Session ID (displayed as short code, e.g., `a7f3b2c1`)
+     - Harness badge (claude/codex/opencode)
+     - Status badge (running/succeeded/failed/cancelled/repo_unavailable)
+     - Prompt preview (first ~100 chars)
+     - Created timestamp (relative, e.g., "2 min ago")
+     - Click → navigates to `/s/{session_id}`
 
-2. **Spawn creation form** — the existing `SpawnSelector` component with minor changes:
-   - Calls `POST /api/sessions` instead of `POST /api/spawns`
+2. **Spawn creation form** — the existing `SpawnSelector` component with changes:
+   - Includes a **repo selector** — dropdown of known repos (from `GET /api/sessions` repo list, plus the ability to enter a custom path)
+   - Passes `repo_root` to `POST /api/sessions`
    - On success, navigates to `/s/{session_id}` using `wouter`'s `useLocation`
    - No longer calls `onSpawnCreated` callback — navigation handles the transition
+
+3. **Empty state** — when no sessions exist yet, show instructions to create the first spawn
+
+**Repo grouping:** The frontend groups by `repo_root` client-side. The API returns a flat list with `repo_root` and `repo_name` on each entry. The dashboard sorts groups by most-recently-active repo first (based on the newest session in each group).
 
 Session list polls `GET /api/sessions` on a 5-second interval to update status badges for active sessions. The poll stops when the component unmounts (tab/route switch).
 
@@ -105,7 +113,7 @@ function SessionView() {
   const [, params] = useRoute("/s/:sessionId")
   const sessionId = params?.sessionId ?? null
   
-  // Load session metadata
+  // Load session metadata (includes repo_root, repo_name)
   const session = useSessionMetadata(sessionId)
   
   // Connect to WebSocket stream (only if spawn is active)
@@ -121,26 +129,42 @@ Key changes from current `App.tsx`:
 - No "disconnect" button that clears state — instead, navigate back to dashboard
 - The "back to dashboard" action is a link/navigation, not a state reset
 - All session-specific state is local to this component
+- The `SpawnHeader` shows repo context (repo name) alongside session ID and harness
 
 ### SpawnSelector Changes
 
-Minimal changes to the existing `SpawnSelector.tsx`:
+Changes to the existing `SpawnSelector.tsx`:
 
 1. **API endpoint**: `POST /api/sessions` instead of `POST /api/spawns`
-2. **Navigation**: On success, use `useLocation` to navigate to `/s/{session_id}`
-3. **Props**: Replace `onSpawnCreated: (spawnId: string) => void` with no callback needed (navigation handles it)
+2. **Repo selector**: New dropdown/input for selecting the target repo
+3. **Request body**: Includes `repo_root` from the selector
+4. **Navigation**: On success, use `useLocation` to navigate to `/s/{session_id}`
+5. **Props**: Replace `onSpawnCreated: (spawnId: string) => void` with no callback needed (navigation handles it)
 
 ```tsx
-// SpawnSelector.tsx — key change
+// SpawnSelector.tsx — key changes
 const [, navigate] = useLocation()
+const [repoRoot, setRepoRoot] = useState<string>("")
 
 async function handleCreateSpawn(event: FormEvent) {
   // ... same validation ...
-  const response = await fetch("/api/sessions", { method: "POST", ... })
+  const response = await fetch("/api/sessions", {
+    method: "POST",
+    body: JSON.stringify({
+      harness,
+      prompt,
+      model,
+      agent,
+      repo_root: repoRoot,
+    }),
+    ...
+  })
   const payload = await response.json()
   navigate(`/s/${payload.session_id}`)
 }
 ```
+
+**Repo selector UX:** The repo dropdown is populated from the list of distinct repos that already have sessions (from `GET /api/sessions`). A "Browse..." option allows entering a custom absolute path. The most recently used repo is pre-selected. If no sessions exist yet, the field starts empty and the user must enter a repo path manually.
 
 ### useThreadStreaming Hook Changes
 
@@ -186,10 +210,11 @@ interface StatusBarProps {
   connectionStatus?: "connecting" | "connected" | "disconnected"
   sessionId?: string | null
   harnessId?: string | null
+  repoName?: string | null
 }
 ```
 
-When `sessionId` is null (dashboard), it shows "No active session." When populated, it shows session info as before.
+When `sessionId` is null (dashboard), it shows server-level info (e.g., "3 active sessions across 2 repos"). When populated, it shows session info including the repo name.
 
 ## SPA Static File Serving
 
@@ -235,10 +260,11 @@ The existing proxy config already covers all `/api/...` paths, so no change is n
 ### Dashboard → Session
 
 1. User is on `/` (Dashboard)
-2. Clicks "Start Spawn" → `POST /api/sessions`
-3. On success → `navigate("/s/{session_id}")`
-4. `SessionView` mounts, reads `sessionId` from URL params
-5. `useThreadStreaming(sessionId)` opens WebSocket to `/api/sessions/{sessionId}/ws`
+2. Selects a repo from the repo selector (or uses the pre-selected most-recent repo)
+3. Clicks "Start Spawn" → `POST /api/sessions` with `repo_root`
+4. On success → `navigate("/s/{session_id}")`
+5. `SessionView` mounts, reads `sessionId` from URL params
+6. `useThreadStreaming(sessionId)` opens WebSocket to `/api/sessions/{sessionId}/ws`
 
 ### Session → Dashboard
 
@@ -246,16 +272,16 @@ The existing proxy config already covers all `/api/...` paths, so no change is n
 2. Clicks "Back to Dashboard" or the "meridian" logo
 3. `<Link href="/">` navigates to dashboard
 4. `SessionView` unmounts, WebSocket closes (useEffect cleanup)
-5. `Dashboard` mounts, fetches session list
+5. `Dashboard` mounts, fetches session list across all repos
 
 ### Direct URL Navigation
 
 1. User pastes `http://localhost:8420/s/a7f3b2c1` into a new tab
 2. Server serves `index.html` (SPA fallback)
 3. `wouter` reads URL, renders `SessionView` with `sessionId = "a7f3b2c1"`
-4. Component loads session metadata via `GET /api/sessions/a7f3b2c1`
+4. Component loads session metadata via `GET /api/sessions/a7f3b2c1` (includes repo context)
 5. If spawn is active in current server process → connect WebSocket for live streaming
-6. If spawn is terminal → show terminal status badge (succeeded/failed/cancelled), prompt, and harness info. No WebSocket connection attempted. Full event replay from `output.jsonl` is a future enhancement — v1 shows metadata only for completed sessions.
+6. If spawn is terminal → show terminal status badge (succeeded/failed/cancelled), prompt, harness, and repo info. No WebSocket connection attempted. Full event replay from `output.jsonl` is a future enhancement — v1 shows metadata only for completed sessions.
 7. If spawn was active but server restarted since it started → show stale status from spawn store. No live streaming available (the SpawnManager connection doesn't survive restarts). Future: replay from output.jsonl.
 8. If session not found → show "Session not found" error with link back to dashboard
 

@@ -138,3 +138,59 @@
 **Reasoning:** Re-reviewer (p1261) identified that the "wait up to 5s" approach was time-based and didn't account for actual in-flight state. A counter tracks exactly how many create requests are in progress. The timeout is a safety bound for truly stuck requests, not the primary synchronization mechanism.
 
 **Overruling reviewer on timeout completeness (p1265):** Reviewer p1265 flagged the 10s timeout as "not a true guarantee" since shutdown proceeds anyway after timeout. This is intentional: a local dev tool should not hang indefinitely on Ctrl-C because a spawn creation is stuck. The counter-based approach closes the normal-case race (creates that take <10s, which is all of them). The timeout handles the pathological case (stuck harness, network hang) by proceeding with a warning log. An indefinite wait would create a worse problem — an unresponsive shutdown requiring SIGKILL.
+
+## D17: Single server per machine (Jupyter model)
+
+**Decision:** Change from one server per repo to one server per machine. A single `meridian app` server at localhost:8420 serves all repos.
+
+**Reasoning:** The per-repo model required cross-repo discovery (`~/.meridian/app/servers/` directory, hash-based filenames, reconciliation between repo-level and user-level state). A single server eliminates this complexity entirely: one lockfile, one sessions registry, one flock, one port. The Jupyter model is familiar — developers already expect a single dashboard at one URL showing all their work. It also avoids the port exhaustion issue where many repos each claim a port from the 8420-8429 range.
+
+**Rejected:**
+- Per-repo servers (original design) — more complex lifecycle management (server registry, hash-based discovery, dual lockfiles), port range exhaustion with many repos, confusing UX when the user has to remember which port maps to which repo.
+- Hybrid (one server, but lockfile per repo) — unnecessary indirection. With one server, one lockfile at `~/.meridian/app/server.json` is sufficient.
+
+## D18: SpawnManager removes global state_root/repo_root
+
+**Decision:** `SpawnManager.__init__()` takes no path arguments. Each `SpawnSession` carries its own `state_root` and `repo_root` derived from `ConnectionConfig.repo_root`.
+
+**Reasoning:** With a single server handling multiple repos, there is no single "state root" or "repo root." Each spawn belongs to a specific repo, and its artifacts (output.jsonl, inbound.jsonl, control.sock) live in that repo's `.meridian/spawns/` directory. The `ConnectionConfig` already carries `repo_root` per-spawn — the SpawnManager just needs to use it instead of a global.
+
+**Constraint discovered:** Spawn IDs (`p1`, `p2`) are only unique within a repo. Two spawns from different repos can have the same spawn_id. The SpawnManager's internal `_sessions` dict must use a compound key — see D19.
+
+## D19: Compound spawn key — `(repo_root, spawn_id)` tuple
+
+**Decision:** SpawnManager uses `(repo_root, spawn_id)` as the compound key for its internal `_sessions` dict, with a `SpawnKey = tuple[Path, SpawnId]` type alias.
+
+**Reasoning:** Spawn IDs are repo-scoped, not globally unique. With multiple repos in one server, `p1` from repo-alpha and `p1` from repo-beta are different spawns. A compound key is the simplest correct approach — explicit, type-safe, and doesn't require inventing a new ID format.
+
+**Rejected:**
+- Hash-based compound ID (e.g., `sha256(repo_root + spawn_id)[:12]`) — obscures the components, harder to debug, and gains nothing since the tuple works fine as a dict key.
+- Globally unique spawn IDs — would require changing the spawn_store ID generation, which is out of scope and breaks the simplicity of per-repo sequential IDs.
+
+## D20: Eliminate server registry directory
+
+**Decision:** Remove `~/.meridian/app/servers/` entirely. With one server per machine, `~/.meridian/app/server.json` (single lockfile) is the only server state file.
+
+**Reasoning:** The servers directory existed to answer "what servers are running across all my repos." With a single server, this question is trivially answered by one file. The hash-based filenames, reconciliation logic between repo-level and user-level state, and the "crash between lockfile and registry write" edge case all disappear.
+
+## D21: Session entries include `repo_root`
+
+**Decision:** Each entry in `~/.meridian/app/sessions.jsonl` includes a `repo_root` field — the absolute path to the repo the spawn belongs to.
+
+**Reasoning:** The sessions registry is now user-level (not per-repo), so it must know which repo each session belongs to. This is how the server finds spawn artifacts (in `<repo_root>/.meridian/spawns/<spawn_id>/`), how the dashboard groups sessions by repo, and how `POST /api/sessions` spawn creation targets the correct repo's state root.
+
+## D22: `POST /api/sessions` requires `repo_root`
+
+**Decision:** The `repo_root` field is required in `POST /api/sessions`. The server has no default repo — every spawn must explicitly declare which repo it belongs to.
+
+**Reasoning:** With a single server handling multiple repos, the server cannot assume which repo the user means. The CLI resolves `repo_root` from `cwd` before calling the API. The frontend includes it from a repo selector. Validation ensures the path exists and contains `.meridian/`.
+
+**Rejected:**
+- Default to the repo of the last session — fragile and surprising when working across repos.
+- Optional `repo_root` with server-level default — the server is repo-agnostic by design; adding a default contradicts that.
+
+## D23: AppSessionRegistry keyed by `(repo_root, spawn_id)` for reverse lookup
+
+**Decision:** The `_spawn_to_session` reverse lookup dict uses `(Path, SpawnId)` as the key (matching SpawnManager's compound key).
+
+**Reasoning:** Since spawn IDs are only unique within a repo, a reverse lookup from spawn_id to session_id must also include repo_root to be unambiguous. The `get_by_spawn()` method requires both parameters.
