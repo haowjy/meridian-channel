@@ -20,6 +20,7 @@ async def streaming_serve(
     prompt: str,
     model: str | None = None,
     agent: str | None = None,
+    debug: bool = False,
 ) -> None:
     """Start a bidirectional spawn and keep it running until completion."""
 
@@ -56,6 +57,17 @@ async def streaming_serve(
         status="running",
     )
 
+    tracer = None
+    if debug:
+        from meridian.lib.observability.debug_tracer import DebugTracer
+
+        spawn_dir = state_root / "spawns" / str(spawn_id)
+        tracer = DebugTracer(
+            spawn_id=str(spawn_id),
+            debug_path=spawn_dir / "debug.jsonl",
+            echo_stderr=True,
+        )
+
     config = ConnectionConfig(
         spawn_id=spawn_id,
         harness_id=harness_id,
@@ -63,6 +75,7 @@ async def streaming_serve(
         prompt=prompt,
         repo_root=repo_root,
         env_overrides={},
+        debug_tracer=tracer,
     )
     params = SpawnParams(
         prompt=prompt,

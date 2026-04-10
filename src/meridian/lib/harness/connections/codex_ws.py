@@ -12,7 +12,10 @@ import socket
 from asyncio.subprocess import Process
 from collections.abc import AsyncIterator
 from io import BufferedWriter
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, Final, cast
+
+if TYPE_CHECKING:
+    from meridian.lib.observability.debug_tracer import DebugTracer
 
 from aiohttp import ClientSession, WSMsgType
 
@@ -28,6 +31,11 @@ from meridian.lib.harness.connections.base import (
     HarnessEvent,
 )
 from meridian.lib.launch.env import inherit_child_env
+from meridian.lib.observability.trace_helpers import (
+    trace_parse_error,
+    trace_state_change,
+    trace_wire_send,
+)
 from meridian.lib.state.paths import resolve_spawn_log_dir
 
 _MAX_INITIAL_PROMPT_BYTES = 50 * 1024
@@ -116,6 +124,15 @@ async def _aiohttp_connect(ws_url: str) -> _AiohttpWebSocketCompat:
 class CodexConnection(HarnessConnection):
     """JSON-RPC 2.0 bridge between Meridian and Codex app-server."""
 
+    _ALLOWED_TRANSITIONS: Final[dict[ConnectionState, set[ConnectionState]]] = {
+        "created": {"starting", "stopping", "stopped", "failed"},
+        "starting": {"connected", "stopping", "stopped", "failed"},
+        "connected": {"stopping", "failed"},
+        "stopping": {"stopped", "failed"},
+        "failed": {"stopped"},
+        "stopped": set(),
+    }
+
     def __init__(self) -> None:
         self._state: ConnectionState = "created"
         self._spawn_id: SpawnId = SpawnId("")
@@ -132,6 +149,7 @@ class CodexConnection(HarnessConnection):
 
         self._current_turn_id: str | None = None
         self._thread_id: str | None = None
+        self._tracer: DebugTracer | None = None
 
     @property
     def state(self) -> ConnectionState:
@@ -171,8 +189,9 @@ class CodexConnection(HarnessConnection):
         if self._state not in {"created", "stopped", "failed"}:
             raise RuntimeError(f"Cannot start CodexConnection from state '{self._state}'")
 
-        self._state = "starting"
+        self._transition("starting")
         self._spawn_id = config.spawn_id
+        self._tracer = config.debug_tracer
         self._config = config
         self._next_request_id = 1
         self._pending_requests = {}
@@ -253,9 +272,9 @@ class CodexConnection(HarnessConnection):
                 },
             )
 
-            self._state = "connected"
+            self._transition("connected")
         except Exception:
-            self._state = "failed"
+            self._transition("failed")
             await self._cleanup_resources(mark_stopped=False)
             raise
 
@@ -264,7 +283,7 @@ class CodexConnection(HarnessConnection):
             return
 
         if self._state != "failed":
-            self._state = "stopping"
+            self._transition("stopping")
 
         await self._cleanup_resources(mark_stopped=self._state != "failed")
 
@@ -312,7 +331,7 @@ class CodexConnection(HarnessConnection):
     async def send_cancel(self) -> None:
         self._require_connected("send_cancel")
 
-        self._state = "stopping"
+        self._transition("stopping")
         await self._close_ws()
 
     async def events(self) -> AsyncIterator[HarnessEvent]:
@@ -370,6 +389,13 @@ class CodexConnection(HarnessConnection):
         response_future: asyncio.Future[dict[str, object]] = loop.create_future()
         self._pending_requests[request_id] = response_future
 
+        trace_wire_send(
+            self._tracer,
+            "ws_send_request",
+            json.dumps(payload),
+            method=method,
+            request_id=request_id,
+        )
         try:
             await ws.send(json.dumps(payload))
             response = await asyncio.wait_for(
@@ -402,6 +428,7 @@ class CodexConnection(HarnessConnection):
         }
         if params is not None:
             payload["params"] = params
+        trace_wire_send(self._tracer, "ws_send_notify", json.dumps(payload), method=method)
         await ws.send(json.dumps(payload))
 
     async def _read_messages_loop(self) -> None:
@@ -412,14 +439,25 @@ class CodexConnection(HarnessConnection):
         try:
             async for raw_message in ws:
                 raw_text = _coerce_text(raw_message)
+                if self._tracer is not None:
+                    self._tracer.emit(
+                        "wire", "ws_recv", direction="inbound",
+                        data={"raw_text": raw_text, "bytes": len(raw_text.encode("utf-8"))},
+                    )
                 parsed = _parse_jsonrpc(raw_text)
                 if parsed is None:
+                    trace_parse_error(self._tracer, "codex", raw_text, error="malformed_json_rpc")
                     continue
 
                 if "id" in parsed:
                     response_id = _coerce_int(parsed.get("id"))
                     if response_id is None:
                         continue
+                    if self._tracer is not None:
+                        self._tracer.emit(
+                            "wire", "ws_recv_response", direction="inbound",
+                            data={"request_id": response_id, "has_error": "error" in parsed},
+                        )
                     future = self._pending_requests.get(response_id)
                     if future is not None and not future.done():
                         future.set_result(parsed)
@@ -428,6 +466,12 @@ class CodexConnection(HarnessConnection):
                 method = parsed.get("method")
                 if not isinstance(method, str):
                     continue
+
+                if self._tracer is not None:
+                    self._tracer.emit(
+                        "wire", "ws_recv_notification", direction="inbound",
+                        data={"method": method},
+                    )
 
                 params_obj = parsed.get("params")
                 payload = (
@@ -447,7 +491,7 @@ class CodexConnection(HarnessConnection):
                 )
         except Exception as exc:
             if self._state in {"starting", "connected"}:
-                self._state = "failed"
+                self._transition("failed")
                 await self._event_queue.put(
                     HarnessEvent(
                         event_type="error/connectionClosed",
@@ -486,7 +530,7 @@ class CodexConnection(HarnessConnection):
         self._close_log_handles()
 
         if mark_stopped:
-            self._state = "stopped"
+            self._transition("stopped")
             await self._event_queue.put(None)
 
     async def _close_ws(self) -> None:
@@ -508,6 +552,18 @@ class CodexConnection(HarnessConnection):
         if self._stderr_handle is not None:
             self._stderr_handle.close()
             self._stderr_handle = None
+
+    def _transition(self, next_state: ConnectionState) -> None:
+        """Validate and apply a state transition."""
+        if next_state == self._state:
+            return
+        allowed = self._ALLOWED_TRANSITIONS.get(self._state, set())
+        if next_state not in allowed:
+            raise RuntimeError(
+                f"Invalid CodexConnection transition: {self._state!r} -> {next_state!r}"
+            )
+        trace_state_change(self._tracer, "codex", self._state, next_state)
+        self._state = next_state
 
     def _require_connected(self, operation: str) -> None:
         if self._state != "connected":

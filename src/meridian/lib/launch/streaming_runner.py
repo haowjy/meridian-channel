@@ -674,6 +674,7 @@ async def execute_with_streaming(
     event_observer: Callable[[StreamEvent], None] | None = None,
     stream_stdout_to_terminal: bool = False,
     stream_stderr_to_terminal: bool = False,
+    debug: bool = False,
 ) -> int:
     """Execute one streaming spawn and always finalize the spawn row."""
 
@@ -757,6 +758,16 @@ async def execute_with_streaming(
         permission_config=plan.execution.permission_config,
         runtime_env_overrides=merged_env_overrides,
     )
+    tracer: DebugTracer | None = None
+    if debug:
+        from meridian.lib.observability.debug_tracer import DebugTracer
+
+        tracer = DebugTracer(
+            spawn_id=str(run.spawn_id),
+            debug_path=log_dir / "debug.jsonl",
+            echo_stderr=stream_stdout_to_terminal,
+        )
+
     config = ConnectionConfig(
         spawn_id=run.spawn_id,
         harness_id=resolved_harness_id,
@@ -765,6 +776,7 @@ async def execute_with_streaming(
         repo_root=child_cwd,
         env_overrides=child_env,
         timeout_seconds=timeout_seconds,
+        debug_tracer=tracer,
     )
 
     spawn_row = spawn_store.get_spawn(state_root, run.spawn_id)

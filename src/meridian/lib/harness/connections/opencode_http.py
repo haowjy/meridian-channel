@@ -11,7 +11,10 @@ import socket
 import time
 from collections.abc import AsyncIterator, Mapping
 from io import BufferedWriter
-from typing import Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
+
+if TYPE_CHECKING:
+    from meridian.lib.observability.debug_tracer import DebugTracer
 
 from meridian.lib.core.types import HarnessId, SpawnId
 from meridian.lib.harness.adapter import SpawnParams
@@ -23,6 +26,12 @@ from meridian.lib.harness.connections.base import (
     HarnessEvent,
 )
 from meridian.lib.launch.env import inherit_child_env
+from meridian.lib.observability.trace_helpers import (
+    trace_parse_error,
+    trace_state_change,
+    trace_wire_recv,
+    trace_wire_send,
+)
 from meridian.lib.state.paths import resolve_spawn_log_dir
 
 logger = logging.getLogger(__name__)
@@ -95,6 +104,7 @@ class OpenCodeConnection:
         self._session_id: str | None = None
         self._event_path: str | None = None
         self._last_health_ok = False
+        self._tracer: DebugTracer | None = None
 
     @property
     def state(self) -> ConnectionState:
@@ -131,6 +141,7 @@ class OpenCodeConnection:
 
         self._config = config
         self._spawn_id = config.spawn_id
+        self._tracer = config.debug_tracer
         self._transition("starting")
 
         startup_timeout = (
@@ -247,6 +258,13 @@ class OpenCodeConnection:
                             sse_data_lines=sse_data_lines,
                         )
                         if event is not None:
+                            if self._tracer is not None:
+                                self._tracer.emit(
+                                    "wire",
+                                    "sse_event",
+                                    direction="inbound",
+                                    data={"event_type": event.event_type},
+                                )
                             yield event
 
                 if buffer.strip():
@@ -349,6 +367,10 @@ class OpenCodeConnection:
                     )
                     continue
                 if status in self._PATH_RETRY_STATUSES:
+                    trace_wire_recv(
+                        self._tracer, "http_probe", "",
+                        path=path, status=status, outcome="path_unavailable",
+                    )
                     last_error = (
                         f"OpenCode session endpoint unavailable on {path}: "
                         f"status={status} body={_summarize_body(body)}"
@@ -432,6 +454,10 @@ class OpenCodeConnection:
         tolerate_incomplete_body: bool = False,
     ) -> tuple[int, object | None, str]:
         client = await self._ensure_http_client()
+        trace_wire_send(
+            self._tracer, "http_post", json.dumps(dict(payload)),
+            path=path,
+        )
         async with client.post(self._url(path), json=dict(payload)) as response:
             status = int(response.status)
             content_type = str(response.headers.get("Content-Type", "")).lower()
@@ -456,6 +482,10 @@ class OpenCodeConnection:
                     return status, None, content_type
                 raise
         parsed_body = _parse_response_body(text_body)
+        trace_wire_recv(
+            self._tracer, "http_response", text_body,
+            path=path, status=status,
+        )
         return status, parsed_body, content_type
 
     async def _open_event_stream(self) -> Any:
@@ -488,12 +518,20 @@ class OpenCodeConnection:
                     )
                     continue
                 self._event_path = path
+                trace_wire_recv(
+                    self._tracer, "sse_connect", "",
+                    path=path, status=status,
+                )
                 return response
 
             body = await response.text()
             response.release()
 
             if status in self._PATH_RETRY_STATUSES:
+                trace_wire_recv(
+                    self._tracer, "http_probe", "",
+                    path=path, status=status, outcome="path_unavailable",
+                )
                 last_error = (
                     f"OpenCode event endpoint unavailable on {path}: "
                     f"status={status} body={_summarize_body(body)}"
@@ -565,6 +603,7 @@ class OpenCodeConnection:
             parsed = json.loads(json_text)
         except json.JSONDecodeError:
             logger.warning("Skipping malformed OpenCode stream line: %s", raw_text)
+            trace_parse_error(self._tracer, "opencode", raw_text, error="malformed_json")
             return None
 
         payload: dict[str, object]
@@ -665,6 +704,7 @@ class OpenCodeConnection:
         allowed = self._STATE_TRANSITIONS[self._state]
         if next_state not in allowed:
             raise RuntimeError(f"Invalid OpenCode state transition: {self._state} -> {next_state}")
+        trace_state_change(self._tracer, "opencode", self._state, next_state)
         self._state = next_state
 
 

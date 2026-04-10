@@ -267,6 +267,14 @@ def _spawn_create(
         str | None,
         Parameter(name="--fork", help="Fork from a session or spawn reference."),
     ] = None,
+    debug: Annotated[
+        bool,
+        Parameter(
+            name="--debug",
+            help="Enable wire-level debug tracing to debug.jsonl.",
+            show=False,
+        ),
+    ] = False,
 ) -> None:
     # Passthrough lives on GlobalOptions, not a function parameter — see
     # _split_passthrough_args() for why cyclopts can't handle ``--`` correctly.
@@ -334,6 +342,7 @@ def _spawn_create(
                 harness=global_harness
                 or (resolved_reference.harness if not requested_model else None),
                 passthrough_args=passthrough,
+                debug=debug,
                 session=SessionContinuation(
                     harness_session_id=resolved_reference.harness_session_id,
                     continue_harness=resolved_reference.harness,
@@ -389,6 +398,7 @@ def _spawn_create(
                 sandbox=sandbox,
                 harness=global_harness,
                 passthrough_args=passthrough,
+                debug=debug,
             ),
             sink=current_output_sink(),
         )

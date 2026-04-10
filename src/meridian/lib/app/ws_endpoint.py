@@ -8,7 +8,7 @@ import logging
 import re
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
-from typing import NotRequired, Protocol, TypedDict, cast
+from typing import TYPE_CHECKING, NotRequired, Protocol, TypedDict, cast
 
 from starlette.websockets import WebSocket
 
@@ -19,6 +19,9 @@ from meridian.lib.app.agui_mapping.extensions import make_capabilities_event
 from meridian.lib.core.types import SpawnId
 from meridian.lib.harness.connections.base import HarnessEvent
 from meridian.lib.streaming.spawn_manager import SpawnManager
+
+if TYPE_CHECKING:
+    from meridian.lib.observability.debug_tracer import DebugTracer
 
 
 class WebSocketMessage(TypedDict):
@@ -72,15 +75,18 @@ async def spawn_websocket(websocket: WebSocketClient, spawn_id: str, manager: Sp
         return
 
     mapper = get_agui_mapper(connection.harness_id)
+    tracer = manager.get_tracer(SpawnId(spawn_id))
 
     try:
         await _send_event(websocket, mapper.make_run_started(spawn_id))
         await _send_event(websocket, make_capabilities_event(connection.capabilities))
 
         outbound_task = asyncio.create_task(
-            _outbound_loop(websocket, event_queue, mapper, spawn_id)
+            _outbound_loop(websocket, event_queue, mapper, spawn_id, tracer)
         )
-        inbound_task = asyncio.create_task(_inbound_loop(websocket, SpawnId(spawn_id), manager))
+        inbound_task = asyncio.create_task(
+            _inbound_loop(websocket, SpawnId(spawn_id), manager, tracer)
+        )
 
         done, pending = await asyncio.wait(
             {outbound_task, inbound_task},
@@ -108,6 +114,7 @@ async def _outbound_loop(
     event_queue: asyncio.Queue[HarnessEvent | None],
     mapper: AGUIMapper,
     spawn_id: str,
+    tracer: DebugTracer | None = None,
 ) -> None:
     error_emitted = False
     while True:
@@ -117,14 +124,41 @@ async def _outbound_loop(
                 await _send_event(websocket, mapper.make_run_finished(spawn_id))
             return
 
-        for translated in mapper.translate(event):
+        if tracer is not None:
+            tracer.emit(
+                "mapper",
+                "translate_input",
+                direction="inbound",
+                data={"event_type": event.event_type, "harness_id": event.harness_id},
+            )
+        translated_events = list(mapper.translate(event))
+        if tracer is not None:
+            tracer.emit(
+                "mapper",
+                "translate_output",
+                data={
+                    "input_event_type": event.event_type,
+                    "output_count": len(translated_events),
+                },
+            )
+        for translated in translated_events:
             await _send_event(websocket, translated)
+            if tracer is not None:
+                tracer.emit(
+                    "websocket",
+                    "ws_send",
+                    direction="outbound",
+                    data={"event_type": getattr(translated, "type", "unknown")},
+                )
             if getattr(translated, "type", None) == "RUN_ERROR":
                 error_emitted = True
 
 
 async def _inbound_loop(
-    websocket: WebSocketClient, spawn_id: SpawnId, manager: SpawnManager
+    websocket: WebSocketClient,
+    spawn_id: SpawnId,
+    manager: SpawnManager,
+    tracer: DebugTracer | None = None,
 ) -> None:
     while True:
         message = await websocket.receive()
@@ -146,6 +180,12 @@ async def _inbound_loop(
                 await _send_error(websocket, "control frame bytes must be UTF-8")
                 continue
 
+        if tracer is not None:
+            tracer.emit(
+                "websocket", "ws_recv", direction="inbound",
+                data={"raw_text": raw_text},
+            )
+
         payload = _decode_json_object(raw_text)
         if payload is None:
             await _send_error(websocket, "control message must be a JSON object")
@@ -155,6 +195,12 @@ async def _inbound_loop(
         if not isinstance(message_type, str):
             await _send_error(websocket, "control message missing type")
             continue
+
+        if tracer is not None:
+            tracer.emit(
+                "websocket", "control_dispatch", direction="inbound",
+                data={"message_type": message_type},
+            )
 
         if message_type == "user_message":
             text = payload.get("text")

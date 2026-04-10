@@ -26,6 +26,7 @@ if TYPE_CHECKING:
         HarnessEvent,
         HarnessReceiver,
     )
+    from meridian.lib.observability.debug_tracer import DebugTracer
 
 logger = logging.getLogger(__name__)
 
@@ -50,14 +51,16 @@ class SpawnSession:
     control_server: ControlSocketServer
     started_monotonic: float
     completion_future: asyncio.Future[DrainOutcome]
+    debug_tracer: DebugTracer | None = None
 
 
 class SpawnManager:
     """Own active connections, durable drain loops, and control routing."""
 
-    def __init__(self, state_root: Path, repo_root: Path):
+    def __init__(self, state_root: Path, repo_root: Path, *, debug: bool = False):
         self._state_root = state_root
         self._repo_root = repo_root
+        self._debug = debug
         self._sessions: dict[SpawnId, SpawnSession] = {}
         self._completion_futures: dict[SpawnId, asyncio.Future[DrainOutcome]] = {}
         self._cleanup_tasks: set[asyncio.Task[None]] = set()
@@ -94,9 +97,24 @@ class SpawnManager:
         started_monotonic = time.monotonic()
         completion_future: asyncio.Future[DrainOutcome] = asyncio.get_running_loop().create_future()
         run_params = params or SpawnParams(prompt=config.prompt)
-        await connection.start(config, run_params)
 
-        drain_task = asyncio.create_task(self._drain_loop(spawn_id, connection))
+        tracer = config.debug_tracer
+        if tracer is None and self._debug:
+            from meridian.lib.observability.debug_tracer import DebugTracer as _DebugTracer
+
+            tracer = _DebugTracer(
+                spawn_id=str(spawn_id),
+                debug_path=self._spawn_dir(spawn_id) / "debug.jsonl",
+            )
+
+        try:
+            await connection.start(config, run_params)
+        except Exception:
+            if tracer is not None:
+                tracer.close()
+            raise
+
+        drain_task = asyncio.create_task(self._drain_loop(spawn_id, connection, tracer))
         control_server = ControlSocketServer(
             spawn_id=spawn_id,
             socket_path=self._spawn_dir(spawn_id) / "control.sock",
@@ -106,6 +124,8 @@ class SpawnManager:
         try:
             await control_server.start()
         except Exception:
+            if tracer is not None:
+                tracer.close()
             drain_task.cancel()
             with suppress(asyncio.CancelledError):
                 await drain_task
@@ -120,11 +140,14 @@ class SpawnManager:
             control_server=control_server,
             started_monotonic=started_monotonic,
             completion_future=completion_future,
+            debug_tracer=tracer,
         )
         self._completion_futures[spawn_id] = completion_future
         return connection
 
-    async def _drain_loop(self, spawn_id: SpawnId, receiver: HarnessReceiver) -> None:
+    async def _drain_loop(
+        self, spawn_id: SpawnId, receiver: HarnessReceiver, tracer: DebugTracer | None = None
+    ) -> None:
         """Durably append each harness event and fan out to the active subscriber.
 
         Writes a stable event envelope to output.jsonl so event type and harness
@@ -137,6 +160,13 @@ class SpawnManager:
         drain_error: Exception | None = None
         try:
             async for event in receiver.events():
+                if tracer is not None:
+                    tracer.emit(
+                        "drain",
+                        "event_received",
+                        direction="inbound",
+                        data={"event_type": event.event_type, "harness_id": event.harness_id},
+                    )
                 envelope: dict[str, object] = {
                     "event_type": event.event_type,
                     "harness_id": event.harness_id,
@@ -145,8 +175,24 @@ class SpawnManager:
                 try:
                     await self._append_jsonl(self._output_log_path(spawn_id), envelope)
                     consecutive_write_failures = 0
-                except Exception:
+                    if tracer is not None:
+                        tracer.emit(
+                            "drain",
+                            "event_persisted",
+                            data={"event_type": event.event_type},
+                        )
+                except Exception as persist_exc:
                     consecutive_write_failures += 1
+                    if tracer is not None:
+                        tracer.emit(
+                            "drain",
+                            "persist_error",
+                            data={
+                                "event_type": event.event_type,
+                                "error": str(persist_exc),
+                                "consecutive_failures": consecutive_write_failures,
+                            },
+                        )
                     logger.warning(
                         "Failed to persist event for spawn %s (%d/%d consecutive failures)",
                         spawn_id,
@@ -313,6 +359,12 @@ class SpawnManager:
             return None
         return session.connection
 
+    def get_tracer(self, spawn_id: SpawnId) -> DebugTracer | None:
+        """Return the active debug tracer for one spawn, if present."""
+
+        session = self._sessions.get(spawn_id)
+        return session.debug_tracer if session is not None else None
+
     async def stop_spawn(
         self,
         spawn_id: SpawnId,
@@ -336,6 +388,9 @@ class SpawnManager:
                 duration_secs=max(0.0, time.monotonic() - session.started_monotonic),
             ),
         )
+
+        if session.debug_tracer is not None:
+            session.debug_tracer.close()
 
         with suppress(Exception):
             await session.connection.stop()
@@ -393,8 +448,21 @@ class SpawnManager:
                     with suppress(asyncio.QueueEmpty):
                         session.subscriber.get_nowait()
                     continue
-        with suppress(asyncio.QueueFull):
+        try:
             session.subscriber.put_nowait(event)
+            if session.debug_tracer is not None:
+                session.debug_tracer.emit(
+                    "drain",
+                    "event_fanout",
+                    data={"event_type": event.event_type},
+                )
+        except asyncio.QueueFull:
+            if session.debug_tracer is not None:
+                session.debug_tracer.emit(
+                    "drain",
+                    "event_dropped",
+                    data={"event_type": event.event_type, "reason": "queue_full"},
+                )
 
     def _spawn_dir(self, spawn_id: SpawnId) -> Path:
         return self._state_root / "spawns" / str(spawn_id)
@@ -411,6 +479,8 @@ class SpawnManager:
         session = self._sessions.pop(spawn_id, None)
         if session is None:
             return
+        if session.debug_tracer is not None:
+            session.debug_tracer.close()
         with suppress(Exception):
             await session.connection.stop()
         with suppress(Exception):

@@ -46,6 +46,7 @@ class SpawnCreateInput(BaseModel):
     harness: str | None = None
     passthrough_args: tuple[str, ...] = ()
     session: SessionContinuation = SessionContinuation()
+    debug: bool = False
 
 
 class SpawnActionOutput(BaseModel):

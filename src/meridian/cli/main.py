@@ -510,12 +510,16 @@ def app_command(
         Parameter(name="--no-browser", help="Do not open a browser automatically."),
     ] = False,
     host: Annotated[str, Parameter(name="--host", help="Server host")] = "127.0.0.1",
+    debug: Annotated[
+        bool,
+        Parameter(name="--debug", help="Enable wire-level debug tracing."),
+    ] = False,
 ) -> None:
     """Start the Meridian app web UI server."""
 
     from meridian.cli.app_cmd import run_app
 
-    run_app(port=port, no_browser=no_browser, host=host)
+    run_app(port=port, no_browser=no_browser, host=host, debug=debug)
 
 
 def _resolve_mars_executable() -> str | None:
@@ -877,6 +881,10 @@ def streaming_serve_cmd(
         str | None,
         Parameter(name=["--agent", "-a"], help="Optional agent profile."),
     ] = None,
+    debug: Annotated[
+        bool,
+        Parameter(name="--debug", help="Enable wire-level debug tracing."),
+    ] = False,
 ) -> None:
     resolved_harness = (harness or get_global_options().harness or "").strip()
     if not resolved_harness:
@@ -889,6 +897,7 @@ def streaming_serve_cmd(
             prompt=prompt,
             model=model,
             agent=agent,
+            debug=debug,
         )
     )
 

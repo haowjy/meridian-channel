@@ -93,6 +93,7 @@ class BackgroundWorkerParams(BaseModel):
     appended_system_prompt: str | None = None
     autocompact: int | None = None
     execution_cwd: str | None = None
+    debug: bool = False
 
 
 def _optional_spawn_id(spawn_id: str | None) -> SpawnId | None:
@@ -374,6 +375,7 @@ async def _execute_existing_spawn(
     appended_system_prompt: str | None = None,
     autocompact: int | None = None,
     execution_cwd: str | None = None,
+    debug: bool = False,
     sink: OutputSink | None = None,
     ctx: RuntimeContext | None = None,
 ) -> int:
@@ -469,6 +471,7 @@ async def _execute_existing_spawn(
                 cwd=runtime.repo_root,
                 env_overrides=run_env_overrides,
                 harness_session_id_observer=session_context.harness_session_id_observer,
+                debug=debug,
             )
         return await execute_with_finalization(
             spawn,
@@ -567,6 +570,7 @@ def execute_spawn_background(
             appended_system_prompt=prepared.appended_system_prompt,
             autocompact=prepared.autocompact,
             execution_cwd=execution_cwd_str,
+            debug=payload.debug,
         )
         _persist_bg_worker_params(log_dir, bg_params)
     except Exception as exc:
@@ -777,6 +781,7 @@ def execute_spawn_blocking(
                     stream_stdout_to_terminal=stream_stdout_to_terminal,
                     stream_stderr_to_terminal=payload.stream,
                     harness_session_id_observer=session_context.harness_session_id_observer,
+                    debug=payload.debug,
                 )
             )
         else:
@@ -907,6 +912,7 @@ def _background_worker_main(
             appended_system_prompt=params.appended_system_prompt,
             autocompact=params.autocompact,
             execution_cwd=params.execution_cwd,
+            debug=params.debug,
             ctx=resolved_context,
         )
     )

@@ -10,7 +10,10 @@ import signal
 from asyncio.subprocess import PIPE, Process
 from collections.abc import AsyncIterator
 from io import BufferedWriter
-from typing import Final, cast
+from typing import TYPE_CHECKING, Final, cast
+
+if TYPE_CHECKING:
+    from meridian.lib.observability.debug_tracer import DebugTracer
 
 from meridian.lib.core.types import HarnessId, SpawnId
 from meridian.lib.harness.adapter import SpawnParams
@@ -23,6 +26,12 @@ from meridian.lib.harness.connections.base import (
     HarnessEvent,
 )
 from meridian.lib.launch.env import inherit_child_env
+from meridian.lib.observability.trace_helpers import (
+    trace_parse_error,
+    trace_state_change,
+    trace_wire_recv,
+    trace_wire_send,
+)
 from meridian.lib.state.paths import resolve_spawn_log_dir
 
 logger = logging.getLogger(__name__)
@@ -79,6 +88,7 @@ class ClaudeConnection(HarnessConnection):
         self._stderr_handle: BufferedWriter | None = None
         self._protocol_validated = False
         self._event_stream_started = False
+        self._tracer: DebugTracer | None = None
 
     @property
     def state(self) -> ConnectionState:
@@ -115,6 +125,7 @@ class ClaudeConnection(HarnessConnection):
 
         self._config = config
         self._spawn_id = config.spawn_id
+        self._tracer = config.debug_tracer
         self._set_state("starting")
 
         try:
@@ -197,6 +208,7 @@ class ClaudeConnection(HarnessConnection):
                 if not raw_text.strip():
                     continue
 
+                trace_wire_recv(self._tracer, "stdout_line", raw_text, bytes=len(line_bytes))
                 parsed_events = self._parse_stdout_line(raw_text)
                 if not self._protocol_validated:
                     if not parsed_events:
@@ -210,6 +222,13 @@ class ClaudeConnection(HarnessConnection):
                     self._protocol_validated = True
 
                 for event in parsed_events:
+                    if self._tracer is not None:
+                        self._tracer.emit(
+                            "wire",
+                            "parsed_event",
+                            direction="inbound",
+                            data={"event_type": event.event_type},
+                        )
                     yield event
         finally:
             pass
@@ -229,6 +248,7 @@ class ClaudeConnection(HarnessConnection):
                 "Invalid connection state transition: "
                 f"{self._state} -> {next_state}"
             )
+        trace_state_change(self._tracer, "claude", self._state, next_state)
         self._state = next_state
 
     def _mark_failed(self, reason: str) -> None:
@@ -333,6 +353,7 @@ class ClaudeConnection(HarnessConnection):
             raise ConnectionNotReady("Claude subprocess stdin is not available.")
 
         wire = json.dumps(payload, separators=(",", ":")) + "\n"
+        trace_wire_send(self._tracer, "stdin_write", wire, bytes=len(wire.encode("utf-8")))
         async with self._send_lock:
             process.stdin.write(wire.encode("utf-8"))
             await process.stdin.drain()
@@ -341,6 +362,7 @@ class ClaudeConnection(HarnessConnection):
         process = self._process
         if process is None or process.returncode is not None:
             return
+        trace_wire_send(self._tracer, "signal_sent", "", signal=sig.name)
         process.send_signal(sig)
 
     async def _cleanup_resources(self, *, terminate_process: bool) -> None:
@@ -381,9 +403,11 @@ class ClaudeConnection(HarnessConnection):
             payload_obj = json.loads(payload_text)
         except json.JSONDecodeError:
             logger.warning("Skipping malformed Claude stdout line: %s", payload_text)
+            trace_parse_error(self._tracer, "claude", payload_text, error="malformed_json")
             return []
         if not isinstance(payload_obj, dict):
             logger.warning("Skipping non-object Claude stdout line: %s", payload_text)
+            trace_parse_error(self._tracer, "claude", payload_text, error="non_object")
             return []
 
         payload = cast("dict[str, object]", payload_obj)
@@ -393,6 +417,7 @@ class ClaudeConnection(HarnessConnection):
                 "Skipping Claude stdout line without string 'type': %s",
                 payload_text,
             )
+            trace_parse_error(self._tracer, "claude", payload_text, error="missing_type")
             return []
 
         return [

@@ -5,10 +5,13 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 
 from meridian.lib.core.types import HarnessId, SpawnId
 from meridian.lib.harness.adapter import SpawnParams
+
+if TYPE_CHECKING:
+    from meridian.lib.observability.debug_tracer import DebugTracer
 
 
 @dataclass(frozen=True)
@@ -53,6 +56,7 @@ class ConnectionConfig:
     timeout_seconds: float | None = None
     ws_bind_host: str = "127.0.0.1"
     ws_port: int = 0
+    debug_tracer: DebugTracer | None = None
 
 
 @runtime_checkable
