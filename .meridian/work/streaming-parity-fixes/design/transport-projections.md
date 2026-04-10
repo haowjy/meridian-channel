@@ -4,6 +4,13 @@
 
 Define how each harness-specific launch spec becomes transport wire data. Projections are shared by subprocess and streaming paths where possible, and guarded so field drift fails at import time.
 
+Revision round 3 changes:
+
+- All reserved-flag stripping and the `_reserved_flags.py` module are deleted (D1). `extra_args` is forwarded verbatim to every transport.
+- `mcp_tools` is projected into harness-specific wire format (D4).
+- Projection modules are imported eagerly by `harness/__init__.py` so drift guards always execute (C2).
+- `project_codex_streaming.py` carries an explicit line-budget marker (C3).
+
 ## Projection Modules
 
 ```text
@@ -17,6 +24,25 @@ src/meridian/lib/harness/projections/
 ```
 
 Naming invariant: one module per `(harness, transport)` conceptual thing.
+
+`harness/projections/_reserved_flags.py` no longer exists. Any remaining `from ... _reserved_flags import ...` lines must be deleted during migration. S037 ("reserved-flag stripping") is retired and replaced by S045 ("extra_args forwarded verbatim to every transport").
+
+## Eager Import Bootstrapping (C2)
+
+`src/meridian/lib/harness/__init__.py` imports every projection module eagerly:
+
+```python
+# src/meridian/lib/harness/__init__.py
+from meridian.lib.harness.projections import (
+    project_claude,
+    project_codex_subprocess,
+    project_codex_streaming,
+    project_opencode_subprocess,
+    project_opencode_streaming,
+)
+```
+
+This is load-bearing: the drift guard in each projection module runs at module import time, so it only protects against drift if the module is actually imported. Dispatch lookups happen on demand, so without eager imports a buggy projection could linger undetected until the first spawn for that harness/transport. Eager import makes the drift check a package-load-time failure instead.
 
 ## Guard Helper
 
@@ -65,6 +91,7 @@ _PROJECTED_FIELDS: frozenset[str] = frozenset({
     "extra_args",
     "prompt",
     "interactive",
+    "mcp_tools",
 })
 
 _DELEGATED_FIELDS: frozenset[str] = frozenset()
@@ -72,15 +99,32 @@ _DELEGATED_FIELDS: frozenset[str] = frozenset()
 _check_projection_drift(ClaudeLaunchSpec, _PROJECTED_FIELDS, _DELEGATED_FIELDS)
 ```
 
-`project_claude_spec_to_cli_args(spec, base_command=...)` maintains one canonical order and one `--allowedTools` dedupe pass.
+`project_claude_spec_to_cli_args(spec, base_command=...)` rules:
 
-Policy for `--append-system-prompt` collisions: Meridian-managed flag appears in canonical position; user passthrough copy remains later in tail; user wins by last-wins behavior. Projection emits a warning when known managed flags appear in `extra_args`.
+- Maintains one canonical order for Meridian-managed flags, then appends `spec.extra_args` verbatim at the tail.
+- Reads `spec.permission_resolver.config` for sandbox/approval/allowed-tools intent and emits the corresponding Claude flags in canonical position.
+- Does **not** inspect `extra_args` for "reserved" flags. If the user passes `--allowedTools C,D` through `extra_args`, both the resolver-derived `--allowedTools A,B` and the user's `--allowedTools C,D` appear in the command. Claude's own flag-handling decides the effective behavior. Meridian logs a debug note when it detects a known managed flag also present in `extra_args`, to help the user understand why both are in the command line, but it does not merge or strip.
+- Resolver-internal `--allowedTools` dedupe still runs inside the resolver layer, because the resolver may merge multiple internal sources (parent-Claude forwarding + explicit user tools + profile defaults) and must not emit the same flag twice from its own output. This is internal consistency, not a policy on user passthrough.
+- `--append-system-prompt` collision policy: Meridian-managed flag appears in canonical position; user passthrough copy remains later in the tail; user wins by last-wins behavior. Projection emits a debug log noting the collision so users understand both flags appear.
+
+### MCP Projection
+
+```python
+def _project_mcp_tools_claude(mcp_tools: tuple[str, ...]) -> list[str]:
+    """Map mcp_tools to --mcp-config arguments.
+
+    For v2, mcp_tools entries are treated as paths or identifiers to an
+    mcp-config JSON file. Claude accepts one --mcp-config flag per entry.
+    Auto-packaging through mars is out of scope.
+    """
+    return [arg for tool in mcp_tools for arg in ("--mcp-config", tool)]
+```
 
 ## Codex Subprocess Projection (`project_codex_subprocess.py`)
 
 Post-D15, `CodexLaunchSpec` fields are:
 
-- base `ResolvedLaunchSpec` fields
+- base `ResolvedLaunchSpec` fields (including `mcp_tools`)
 - `report_output_path`
 
 No `sandbox_mode` or `approval_mode` field exists on the spec.
@@ -95,6 +139,7 @@ _PROJECTED_FIELDS: frozenset[str] = frozenset({
     "permission_resolver",
     "extra_args",
     "interactive",
+    "mcp_tools",
     "report_output_path",
 })
 
@@ -103,7 +148,28 @@ _DELEGATED_FIELDS: frozenset[str] = frozenset()
 _check_projection_drift(CodexLaunchSpec, _PROJECTED_FIELDS, _DELEGATED_FIELDS)
 ```
 
-Command projection reads permissions through resolver flags and applies reserved-flag filtering to passthrough args before append.
+Command projection reads permissions through `spec.permission_resolver.config` and appends `spec.extra_args` verbatim at the tail. No filtering.
+
+### MCP Projection
+
+```python
+def _project_mcp_tools_codex(mcp_tools: tuple[str, ...]) -> list[str]:
+    """Map mcp_tools to Codex `-c mcp.servers.<name>.command=<value>` args.
+
+    mcp_tools entries for Codex are name=command pairs (validated at
+    SpawnParams construction). This projection expands them into the
+    repeated `-c` TOML override form that codex understands.
+    """
+    out: list[str] = []
+    for entry in mcp_tools:
+        name, _, command = entry.partition("=")
+        if not name or not command:
+            # Malformed entries are a developer error, not a user error,
+            # because SpawnParams validates the shape. Surface loudly.
+            raise ValueError(f"Invalid mcp_tools entry: {entry!r}")
+        out.extend(("-c", f'mcp.servers.{name}.command="{command}"'))
+    return out
+```
 
 ## Codex Streaming Projection (`project_codex_streaming.py`)
 
@@ -111,6 +177,15 @@ This module replaces `codex_appserver.py` + `codex_jsonrpc.py` and exports:
 
 - `project_codex_spec_to_appserver_command(...)`
 - `project_codex_spec_to_thread_request(...)`
+
+### Line Budget (C3)
+
+`project_codex_streaming.py` is on a soft line budget of **400 lines**. If it exceeds the budget, split into:
+
+- `project_codex_streaming_appserver.py` (command assembly)
+- `project_codex_streaming_rpc.py` (thread request / payload builders)
+
+Document the split in `decisions.md` as a round-3 follow-up when triggered.
 
 ### Field Accounting Pattern (transport-wide)
 
@@ -125,6 +200,7 @@ Codex streaming was merged to one module (`project_codex_streaming.py`), so acco
 | `_METHOD_SELECTION_FIELDS` | `_select_thread_method(...)` | `harness/projections/project_codex_streaming.py` |
 | `_PROMPT_SENDER_FIELDS` | `_build_user_input_payload(...)` | `harness/projections/project_codex_streaming.py` |
 | `_ENV_FIELDS` | `build_codex_stream_env(...)` | `harness/projections/project_codex_streaming.py` |
+| `_MCP_FIELDS` | `_project_mcp_tools_codex(...)` reused from subprocess | `harness/projections/project_codex_streaming.py` |
 
 ```python
 # src/meridian/lib/harness/projections/project_codex_streaming.py
@@ -133,6 +209,8 @@ _APP_SERVER_ARG_FIELDS: frozenset[str] = frozenset({
     "extra_args",
     # consumed for debug-only "ignored by wire" audit behavior
     "report_output_path",
+    # MCP tools are attached via -c overrides on the app-server command
+    "mcp_tools",
 })
 
 _JSONRPC_PARAM_FIELDS: frozenset[str] = frozenset({
@@ -173,11 +251,6 @@ _check_projection_drift(
 ### App-Server Command Example
 
 ```python
-from meridian.lib.harness.projections._reserved_flags import (
-    _RESERVED_CODEX_ARGS,
-    strip_reserved_passthrough,
-)
-
 def project_codex_spec_to_appserver_command(
     spec: CodexLaunchSpec,
     *,
@@ -195,56 +268,80 @@ def project_codex_spec_to_appserver_command(
     if policy is not None:
         command.extend(("-c", f'approval_policy="{policy}"'))
 
+    command.extend(_project_mcp_tools_codex(spec.mcp_tools))
+
     if spec.report_output_path is not None:
         logger.debug(
             "Codex streaming ignores report_output_path; reports extracted from artifacts",
             path=spec.report_output_path,
         )
 
-    filtered_extra = strip_reserved_passthrough(
-        args=list(spec.extra_args),
-        reserved=_RESERVED_CODEX_ARGS,
-        logger=logger,
-    )
-    if filtered_extra:
-        logger.debug("Forwarding passthrough args to codex app-server", extra_args=list(filtered_extra))
-        command.extend(filtered_extra)
+    if spec.extra_args:
+        logger.debug(
+            "Forwarding passthrough args to codex app-server verbatim",
+            extra_args=list(spec.extra_args),
+        )
+        command.extend(spec.extra_args)
 
     return command
 ```
 
+Note: `spec.extra_args` is appended without any filtering. If the user passes `-c sandbox_mode=yolo` through `extra_args`, both the resolver-derived `-c sandbox_mode="read-only"` and the user's `-c sandbox_mode=yolo` are on the command line. Codex's own argument handling decides which wins. Meridian does not make that judgment call. This is the supported escape hatch for users who need to override meridian's permission projection temporarily.
+
+### Debug Log on Streaming (S033)
+
+`project_codex_spec_to_appserver_command(...)` emits one debug log line with the verbatim `extra_args` list (when non-empty). The `project_opencode_spec_to_serve_command(...)` path emits the equivalent.
+
 ## OpenCode Subprocess Projection (`project_opencode_subprocess.py`)
 
-Projects CLI args for `opencode run`. `permission_resolver` is consumed via env projection, not CLI flags.
+Projects CLI args for `opencode run`. `permission_resolver` is consumed via env projection, not CLI flags. `extra_args` is appended verbatim.
+
+```python
+_PROJECTED_FIELDS: frozenset[str] = frozenset({
+    "model",
+    "effort",
+    "prompt",
+    "continue_session_id",
+    "continue_fork",
+    "permission_resolver",
+    "extra_args",
+    "interactive",
+    "mcp_tools",
+    "agent_name",
+    "skills",
+})
+```
 
 ## OpenCode Streaming Projection (`project_opencode_streaming.py`)
 
 Exports both:
 
-- `project_opencode_spec_to_session_payload(...)`
-- `project_opencode_spec_to_serve_command(...)`
+- `project_opencode_spec_to_session_payload(...)` — includes `mcp` field in HTTP session payload when `spec.mcp_tools` is non-empty
+- `project_opencode_spec_to_serve_command(...)` — appends `spec.extra_args` verbatim and emits the passthrough debug log
 
-Passthrough debug logging lives in `project_opencode_spec_to_serve_command` (not session payload).
-
-## Reserved Flags Policy
-
-Projection modules strip reserved passthrough args and emit warning logs per stripped arg.
+### MCP Session Payload Field
 
 ```python
-# src/meridian/lib/harness/projections/_reserved_flags.py
-_RESERVED_CLAUDE_ARGS = frozenset({...})
-_RESERVED_CODEX_ARGS = frozenset({...})
+def _project_mcp_tools_opencode(mcp_tools: tuple[str, ...]) -> dict[str, object] | None:
+    """Map mcp_tools to OpenCode's HTTP session payload `mcp` field.
 
-def strip_reserved_passthrough(
-    args: list[str],
-    reserved: frozenset[str],
-    *,
-    logger: logging.Logger,
-) -> list[str]: ...
+    Returns None when mcp_tools is empty so the payload omits the key
+    entirely. Entries follow the OpenCode session-payload schema.
+    """
+    if not mcp_tools:
+        return None
+    return {"servers": list(mcp_tools)}
 ```
 
-- Codex reserved args: `sandbox`, `sandbox_mode`, `approval_policy`, `full-auto`, `ask-for-approval`
-- Claude reserved args: `--allowedTools`, `--disallowedTools` (merged/deduped, not overridden)
+## Verbatim Passthrough Policy (replaces reserved-flags policy)
+
+**Rule.** Every projection appends `spec.extra_args` verbatim at the tail of its command line (or inserts into its payload in the single agreed position). No projection inspects the contents of `extra_args` and decides to strip, merge, or rewrite.
+
+**Rationale.** `extra_args` is an escape hatch for the user to pass through arbitrary harness-specific flags. Meridian is not the security boundary for these flags — the harness is. A user could invoke the harness directly with the same arguments. Silently stripping something the user typed would be surprising and would provide a false sense of security. If a user wants to override meridian's permission intent by passing `-c sandbox_mode=yolo`, that is between them and Codex.
+
+**Debug logging** is still emitted when `extra_args` is non-empty, so the audit trail makes it obvious what passthrough arguments reached the harness.
+
+**Known-managed-flag collision warning** (Claude only) is a debug log, not a strip: when `project_claude_spec_to_cli_args` detects a known meridian-managed flag (e.g., `--append-system-prompt`) in `extra_args`, it emits a debug log noting that the flag appears in both positions and that last-wins semantics apply. This is user-friendly, not policy.
 
 ## Codex Approval Semantics
 
@@ -252,6 +349,6 @@ The matrix requirement is semantic behavior and auditability, not unique wire st
 
 ## Interaction with Other Docs
 
-- [launch-spec.md](launch-spec.md): authoritative spec fields.
-- [permission-pipeline.md](permission-pipeline.md): resolver config type and strict policy.
-- [typed-harness.md](typed-harness.md): dispatch guard and generic contracts.
+- [launch-spec.md](launch-spec.md): authoritative spec fields (including restored `mcp_tools`).
+- [permission-pipeline.md](permission-pipeline.md): resolver config type, immutable config, strict REST policy.
+- [typed-harness.md](typed-harness.md): dispatch guard, generic contracts, bundle registration.

@@ -274,3 +274,58 @@ If either exceeds budget after v2, raise L11 decomposition back into active scop
 - G8: Reworked Codex streaming accounting to per-consumer accounted sets tied to concrete consumer functions/modules, with explicit aggregation and clarified `interactive` ownership in env-building consumer.
 - G9: Inlined `agent_name` on `ClaudeLaunchSpec` and `OpenCodeLaunchSpec`; deleted `_AgentNameMixin` in design samples and updated D10 accordingly.
 - G10: Simplified Codex streaming drift check by removing one-off `_SPEC_DELEGATED_FIELDS` indirection and validating with `delegated=frozenset()`.
+
+## Revision Pass 3 (post p1433/p1434/p1435) — Reframe as Coordinator
+
+Three independent audits converged on the same picture: rounds 1–2 combined genuine internal-consistency gaps with overreach into user and harness behavior. Round 3 separates the two. Meridian is a coordinator, not a policy engine. Every strict check answers "does this protect against meridian's own internal drift?" If not, it's deleted.
+
+### Dropped — Overreach
+
+- H1 (D1): **Deleted** all reserved-flag machinery. `_RESERVED_CODEX_ARGS`, `_RESERVED_CLAUDE_ARGS`, `strip_reserved_passthrough`, the `projections/_reserved_flags.py` module, any `strip` / heuristic / probe-derived inventories. `extra_args` is forwarded verbatim to every transport. Meridian is not the security gate for passthrough flags; the harness is. Users can invoke the harness directly with the same flags — meridian silently stripping them is worse than forwarding them.
+- H2 (D2): **Rejected** adding a `@model_validator` that validates `PermissionConfig` combinations like `approval=confirm + sandbox=yolo`. If the harness accepts the combo, meridian accepts it. Meridian is not the authority on which combinations make semantic sense.
+- H3 (D3): **Rejected** any `_FORBIDDEN_FIELD_PREFIXES = frozenset({"mcp_"})`-style import-time check on `SpawnParams` field names. Special-casing against a specific string prefix is hacky; the existing projection drift guard already catches "field with no consumer".
+
+### Restored — Reversing round 2 overreach
+
+- H4 (D4): **Restored** `mcp_tools: tuple[str, ...] = ()` as a first-class field on `ResolvedLaunchSpec` (reversing round 2 D23). Projections map it to Claude `--mcp-config`, Codex `-c mcp.servers.X.command=...`, and OpenCode HTTP session payload `mcp` field. Auto-packaging through mars is still out of scope for v2; manual `mcp_tools` configuration works today. The projection drift guards count it as a normal field with no special handling.
+- H5 (D5): **Retained** `PermissionConfig` Literals for now, with a documented friction-free extension path: adding a new sandbox tier or approval mode is a one-line edit to the tuple plus per-harness projection mapping updates. No runtime probing, no `--help` parsing, no auto-detection. Literals are developer-facing documentation and type-checker support, not a runtime gate.
+
+### Kept — Real internal-consistency invariants
+
+- K1 (H6): Bundle dispatch is keyed on `(harness_id, transport_id)`. `HarnessBundle[SpecT]` carries a `connections: Mapping[TransportId, type[HarnessConnection[SpecT]]]` mapping. Adding Claude-over-HTTP in the future is a one-line bundle addition, not a rewiring of dispatch. `typed-harness.md §Dispatch Boundary` is updated; a new `TransportId` enum lives next to `HarnessId`.
+- K2 (H7): Bundle registration goes through a single `register_harness_bundle(bundle)` helper that raises `ValueError` on duplicate `harness_id`. `harness/__init__.py` imports every concrete adapter module eagerly so registration happens before the first dispatch. Unit test S039 asserts duplicate registration fails.
+- K3 (H8): `BaseSubprocessHarness.id` is `@abstractmethod`, reconciling the `HarnessAdapter` Protocol method set against the ABC abstract-method set. A subclass that forgets `id` now fails at instantiation with `TypeError` instead of crashing deep in dispatch with `AttributeError`. Unit test S040 cross-checks Protocol attributes vs ABC abstractmethods.
+- K4 (H9): `PermissionResolver.resolve_flags()` no longer takes a `harness` parameter. The old signature `resolve_flags(self, harness: HarnessId)` invited `if harness == CLAUDE` branching inside the resolver, re-introducing the harness-id dispatch `adapter.preflight()` was meant to eliminate. New shape: resolvers expose intent via `config`; projections translate per harness. Chose option (a) from the brief (drop the parameter entirely) because it cleanly forbids harness branching rather than relying on documented restraint.
+- K5 (H10): `RuntimeContext.child_context()` is the sole producer of `MERIDIAN_*` runtime overrides. `merge_env_overrides(...)` enforces the invariant: if `preflight.extra_env` contains any `MERIDIAN_*` key it raises `RuntimeError`. Scenario S046 exercises this.
+- K6 (H11): Pulled session-id extraction parity into v2 scope. Added `HarnessExtractor[SpecT]` to `HarnessBundle`. Subprocess and streaming both call `bundle.extractor.detect_session_id_from_artifacts(...)` for fallback detection from harness-specific artifacts (Claude project files, Codex rollout files, OpenCode logs). Closes the p1385 gap that streaming had no fallback session detection. Chose pull-in over explicit deferral because the design absorbed it without blowing scope.
+- K7 (H12): `PermissionConfig` is now `model_config = ConfigDict(frozen=True)`. `PreflightResult.extra_env` is wrapped in `MappingProxyType` at construction. `LaunchContext.env` / `env_overrides` are wrapped in `MappingProxyType`. This is about internal-state integrity (meridian's own coordination depends on stable values during merge + projection), not about validating values.
+- K8 (H13): Added explicit cancel/interrupt/SIGTERM semantics table to `typed-harness.md §Connection Contract`. `send_cancel` and `send_interrupt` are idempotent and converge to a single terminal spawn status. Runner signal handling is transport-neutral — SIGTERM/SIGINT translate into exactly one `send_cancel()` per active connection. Cancellation event emission is exactly-once per spawn, ordered before any subsequent error emission. Scenarios S041 (cancel idempotency), S042 (SIGTERM subprocess/streaming parity), S048 (race: cancel vs completion terminal status).
+- K9 (H14): Added per-adapter `handled_fields: frozenset[str]` declaration. `harness/launch_spec.py` aggregates the union across registered bundles and asserts it equals `SpawnParams.model_fields` at import time. A new `SpawnParams` field that slips past the global `_SPEC_HANDLED_FIELDS` check but isn't claimed by any adapter now fails at import. Scenario S044.
+
+### Clarifications
+
+- H15 (C1): `LaunchContext` parity claim narrowed to the deterministic subset — `run_params`, `spec`, `child_cwd`, `env_overrides`. The `env` field as a whole depends on ambient `os.environ` and is explicitly NOT in the parity contract. S024 updated to assert parity on the deterministic subset only.
+- H16 (C2): Added eager-import note to `transport-projections.md §Eager Import Bootstrapping`. `harness/__init__.py` imports every projection module so drift guards always execute at package load, not after the first dispatch.
+- H17 (C3): Added soft line-budget marker to `transport-projections.md §Codex Streaming Projection`. If `project_codex_streaming.py` exceeds 400 lines, split into `project_codex_streaming_appserver.py` + `project_codex_streaming_rpc.py`. Follow D19 precedent.
+
+### Retired scenarios
+
+- S037 (reserved-flag stripping) is **retired** and replaced by S045 ("extra_args forwarded verbatim"). E37 is removed from `edge-cases.md`. E48 is the new verbatim-passthrough edge case.
+- S023 (allowed-tools merged from resolver + extra_args) is **updated** to reflect verbatim forwarding: both flags appear, no merge, no strip.
+- S011 / S012 are **retained but scoped** to resolver-internal dedupe only (multi-source merge inside the resolver), not dedupe against user `extra_args`.
+
+### New scenarios
+
+- S039 — Duplicate bundle registration raises `ValueError`.
+- S040 — Protocol/ABC method-set reconciliation test.
+- S041 — `send_cancel` idempotency.
+- S042 — SIGTERM parity across subprocess and streaming.
+- S043 — Missing extractor in bundle fails at registration.
+- S044 — New `SpawnParams` field without an adapter owner fails at import time.
+- S045 — `extra_args` forwarded verbatim to every transport (replaces S037).
+- S046 — `preflight.extra_env` containing `MERIDIAN_*` raises in `merge_env_overrides`.
+- S047 — `mcp_tools` projects to every harness's wire format.
+- S048 — Cancel vs completion race: exactly-one terminal status persisted.
+- S049 — Streaming session-id fallback via `HarnessExtractor`.
+- S050 — `(harness, transport)` dispatch for unsupported transport raises `KeyError`.
+- S051 — `PermissionConfig` frozen: mutation raises.
