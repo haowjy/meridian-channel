@@ -5,7 +5,7 @@ model: codex
 effort: high
 skills: []
 tools: [Bash, Write, Edit]
-sandbox: workspace-write
+sandbox: danger-full-access
 ---
 
 # Coder

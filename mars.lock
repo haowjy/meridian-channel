@@ -36,8 +36,8 @@ dest_path = "agents/code-documenter.md"
 [items."agents/coder.md"]
 source = "meridian-dev-workflow"
 kind = "agent"
-source_checksum = "sha256:86d7d3e304f87923632cf324533d720413bfaa1811a2623d78f83475463229b4"
-installed_checksum = "sha256:86d7d3e304f87923632cf324533d720413bfaa1811a2623d78f83475463229b4"
+source_checksum = "sha256:c8169e558aa3c9140191b53140fc0581fccd114c79682b787b9b71244ec8b1f3"
+installed_checksum = "sha256:c8169e558aa3c9140191b53140fc0581fccd114c79682b787b9b71244ec8b1f3"
 dest_path = "agents/coder.md"
 
 [items."agents/design-orchestrator.md"]
@@ -141,8 +141,8 @@ dest_path = "agents/reviewer.md"
 [items."agents/smoke-tester.md"]
 source = "meridian-dev-workflow"
 kind = "agent"
-source_checksum = "sha256:9404ae81ad32685c9804afd5b3d68d459affc1a91bafd82176b43cabb1f44d4f"
-installed_checksum = "sha256:9404ae81ad32685c9804afd5b3d68d459affc1a91bafd82176b43cabb1f44d4f"
+source_checksum = "sha256:469ecd034d527ecb3dad2ff5266088bf64b421efc77bb674cd7b15ea1ad8158c"
+installed_checksum = "sha256:469ecd034d527ecb3dad2ff5266088bf64b421efc77bb674cd7b15ea1ad8158c"
 dest_path = "agents/smoke-tester.md"
 
 [items."agents/tech-writer.md"]

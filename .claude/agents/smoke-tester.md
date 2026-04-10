@@ -5,7 +5,7 @@ model: sonnet
 effort: medium
 skills: [smoke-test]
 tools: [Bash, Write, Edit]
-sandbox: workspace-write
+sandbox: danger-full-access
 ---
 
 # Smoke Tester
