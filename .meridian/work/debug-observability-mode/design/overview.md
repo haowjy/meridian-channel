@@ -36,12 +36,16 @@ Each boundary is an integration point where protocol mismatches hide. The debug 
 ## How It Flows
 
 1. **CLI flag** `--debug` on `meridian streaming serve` or `meridian app`.
-2. **ConnectionConfig** carries `debug_tracer: DebugTracer | None`. When `--debug`, a `FileDebugTracer` is created targeting `{spawn_dir}/debug.jsonl`.
-3. **Concrete connections** (Claude, Codex, OpenCode) check `self._tracer is not None` at each I/O site and emit structured events.
-4. **SpawnManager._drain_loop** receives the tracer from the connection config and traces event persistence and fan-out.
-5. **ws_endpoint._outbound_loop** traces around `mapper.translate()` and WebSocket sends without modifying the `AGUIMapper` Protocol.
+2. **ConnectionConfig** carries `debug_tracer: DebugTracer | None`. When `--debug`, a `DebugTracer` is created targeting `{spawn_dir}/debug.jsonl`.
+3. **Concrete connections** (Claude, Codex, OpenCode) check `self._tracer is not None` at each I/O site and emit structured events via shared trace helpers.
+4. **SpawnManager._drain_loop** receives the tracer as a direct parameter (not via SpawnSession lookup) and traces event persistence and fan-out.
+5. **ws_endpoint._outbound_loop** traces around `mapper.translate()` and WebSocket sends without modifying the `AGUIMapper` Protocol. Mapper traces include truncated payload for diagnosing why events are dropped.
 
 When debug is disabled (the default), `debug_tracer` is `None` and no instrumentation code runs beyond the `None` check.
+
+## Prerequisite
+
+Codex adapter needs a centralized `_transition()` method (matching Claude's `_set_state` and OpenCode's `_transition`) before tracer hooks go in. Currently mutates `self._state` directly at 7 sites. This is a separate refactor phase.
 
 ## Design Docs
 
