@@ -2,7 +2,7 @@ version = 1
 
 [dependencies.anthropic-skills]
 url = "https://github.com/anthropics/skills"
-commit = "98669c11ca63e9c81c11501e1437e5c47b556621"
+commit = "ca1e7dc13c0ab5e2dfaa6de71991cd951b8f1cf2"
 
 [dependencies.meridian-base]
 url = "https://github.com/haowjy/meridian-base"
