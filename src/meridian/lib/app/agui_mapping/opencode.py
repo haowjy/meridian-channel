@@ -12,6 +12,7 @@ from ag_ui.core import (
     ReasoningMessageContentEvent,
     ReasoningMessageEndEvent,
     ReasoningMessageStartEvent,
+    RunErrorEvent,
     RunFinishedEvent,
     RunStartedEvent,
     TextMessageContentEvent,
@@ -23,6 +24,7 @@ from ag_ui.core import (
     ToolCallStartEvent,
 )
 
+from meridian.lib.app.agui_mapping.extensions import make_run_error_event
 from meridian.lib.harness.connections.base import HarnessEvent
 
 logger = logging.getLogger(__name__)
@@ -58,8 +60,14 @@ class OpenCodeAGUIMapper:
         self._reasoning_message_id = None
         return RunFinishedEvent(thread_id=spawn_id, run_id=run_id)
 
+    def make_run_error(self, message: str) -> RunErrorEvent:
+        return make_run_error_event(message)
+
     def translate(self, event: HarnessEvent) -> list[BaseEvent]:
         try:
+            if event.event_type in {"error", "error/fatal", "session_error"}:
+                message = _extract_text(event.payload) or "Unknown error"
+                return [*self._close_open_messages(), self.make_run_error(message)]
             if event.event_type == "agent_message_chunk":
                 return self._close_reasoning_message() + self._translate_agent_message_chunk(
                     event.payload

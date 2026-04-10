@@ -143,6 +143,7 @@ class SpawnManager:
                         drain_error = RuntimeError(
                             "Aborted drain loop after repeated output persistence failures"
                         )
+                        self._fan_out_event(spawn_id, event)
                         break
                 self._fan_out_event(spawn_id, event)
         except asyncio.CancelledError:

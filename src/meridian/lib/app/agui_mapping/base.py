@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Protocol
 from meridian.lib.harness.connections.base import HarnessEvent
 
 if TYPE_CHECKING:
-    from ag_ui.core import BaseEvent, RunFinishedEvent, RunStartedEvent
+    from ag_ui.core import BaseEvent, RunErrorEvent, RunFinishedEvent, RunStartedEvent
 
 
 class AGUIMapper(Protocol):
@@ -18,6 +18,8 @@ class AGUIMapper(Protocol):
     def make_run_started(self, spawn_id: str) -> RunStartedEvent: ...
 
     def make_run_finished(self, spawn_id: str) -> RunFinishedEvent: ...
+
+    def make_run_error(self, message: str) -> RunErrorEvent: ...
 
 
 __all__ = ["AGUIMapper"]

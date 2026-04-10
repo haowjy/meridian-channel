@@ -12,6 +12,7 @@ from ag_ui.core import (
     ReasoningMessageContentEvent,
     ReasoningMessageEndEvent,
     ReasoningMessageStartEvent,
+    RunErrorEvent,
     RunFinishedEvent,
     RunStartedEvent,
     StepFinishedEvent,
@@ -24,6 +25,7 @@ from ag_ui.core import (
     ToolCallStartEvent,
 )
 
+from meridian.lib.app.agui_mapping.extensions import make_run_error_event
 from meridian.lib.harness.connections.base import HarnessEvent
 
 logger = logging.getLogger(__name__)
@@ -53,8 +55,16 @@ class CodexAGUIMapper:
         self._active_text_message_id = None
         return RunFinishedEvent(thread_id=spawn_id, run_id=run_id)
 
+    def make_run_error(self, message: str) -> RunErrorEvent:
+        return make_run_error_event(message)
+
     def translate(self, event: HarnessEvent) -> list[BaseEvent]:
         try:
+            if event.event_type == "error/connectionClosed":
+                message = event.payload.get("message", "Connection closed unexpectedly")
+                if not isinstance(message, str):
+                    message = str(message)
+                return [self.make_run_error(message)]
             if event.event_type == "item/agentMessage":
                 return self._translate_agent_message(event.payload)
             if event.event_type == "item/commandExecution":

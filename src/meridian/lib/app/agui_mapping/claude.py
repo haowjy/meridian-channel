@@ -12,6 +12,7 @@ from ag_ui.core import (
     ReasoningMessageContentEvent,
     ReasoningMessageEndEvent,
     ReasoningMessageStartEvent,
+    RunErrorEvent,
     RunFinishedEvent,
     RunStartedEvent,
     TextMessageContentEvent,
@@ -23,6 +24,7 @@ from ag_ui.core import (
     ToolCallStartEvent,
 )
 
+from meridian.lib.app.agui_mapping.extensions import make_run_error_event
 from meridian.lib.harness.connections.base import HarnessEvent
 
 logger = logging.getLogger(__name__)
@@ -63,8 +65,16 @@ class ClaudeAGUIMapper:
         self._current_run_id = None
         return RunFinishedEvent(thread_id=spawn_id, run_id=run_id)
 
+    def make_run_error(self, message: str) -> RunErrorEvent:
+        return make_run_error_event(message)
+
     def translate(self, event: HarnessEvent) -> list[BaseEvent]:
         try:
+            if event.event_type == "error":
+                message = event.payload.get("message", "Unknown error")
+                if not isinstance(message, str):
+                    message = str(message)
+                return [self.make_run_error(message)]
             if event.event_type == "stream_event":
                 return self._translate_stream_event(event.payload)
             if event.event_type in {"tool_use_summary", "tool_progress"}:

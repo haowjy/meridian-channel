@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
 from typing import NotRequired, Protocol, TypedDict, cast
@@ -50,6 +51,7 @@ class FastAPIApp(Protocol):
     def websocket(self, path: str) -> WebSocketRouteDecorator: ...
 
 logger = logging.getLogger(__name__)
+_ALLOWED_ORIGIN_RE = re.compile(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$")
 
 
 async def spawn_websocket(websocket: WebSocketClient, spawn_id: str, manager: SpawnManager) -> None:
@@ -107,14 +109,18 @@ async def _outbound_loop(
     mapper: AGUIMapper,
     spawn_id: str,
 ) -> None:
+    error_emitted = False
     while True:
         event = await event_queue.get()
         if event is None:
-            await _send_event(websocket, mapper.make_run_finished(spawn_id))
+            if not error_emitted:
+                await _send_event(websocket, mapper.make_run_finished(spawn_id))
             return
 
         for translated in mapper.translate(event):
             await _send_event(websocket, translated)
+            if isinstance(translated, RunErrorEvent):
+                error_emitted = True
 
 
 async def _inbound_loop(
@@ -202,6 +208,11 @@ def register_ws_routes(
     typed_app = cast("FastAPIApp", app)
 
     async def _spawn_ws_route(websocket: WebSocket, spawn_id: str) -> None:
+        origin = websocket.headers.get("origin")
+        if origin is not None and not _ALLOWED_ORIGIN_RE.match(origin):
+            await websocket.close(code=4403)
+            return
+
         typed_websocket = cast("WebSocketClient", websocket)
         try:
             typed_spawn_id = (
