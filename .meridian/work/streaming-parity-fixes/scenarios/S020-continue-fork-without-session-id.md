@@ -1,26 +1,23 @@
 # S020: `continue_fork=True` with no `continue_session_id`
 
-- **Source:** design/edge-cases.md E20 (defensive; v1 silently ignored)
+- **Source:** design/edge-cases.md E20
 - **Added by:** @design-orchestrator (design phase)
 - **Tester:** @unit-tester
 - **Status:** pending
 
 ## Given
-Caller constructs a `ClaudeLaunchSpec` with `continue_fork=True` and `continue_session_id=None`.
+Any launch-spec subclass is constructed with `continue_fork=True` and missing session id.
 
 ## When
-The spec is constructed (or the adapter factory is called with equivalent `SpawnParams` fields).
+Model validation runs.
 
 ## Then
 - Construction raises `ValueError("continue_fork=True requires continue_session_id")`.
-- No silent ignore. No launching a spawn that produces misleading behavior.
-- The validation lives as a Pydantic model validator on `ClaudeLaunchSpec` so the constraint cannot be bypassed by constructing via a different path.
+- Rule applies uniformly to Claude, Codex, and OpenCode via base-spec validator.
 
 ## Verification
-- Unit test: `with pytest.raises(ValueError, match="continue_fork"): ClaudeLaunchSpec(continue_fork=True, continue_session_id=None, ...)`.
-- Unit test: `continue_fork=True` with a real session id succeeds.
-- Unit test: `continue_fork=False` with or without session id succeeds.
-- Grep for any pre-v2 code path that swallowed this combination — must be removed.
+- Parametrize over all three subclasses and assert same failure.
+- Positive controls verify valid combinations still pass.
 
 ## Result (filled by tester)
 _pending_

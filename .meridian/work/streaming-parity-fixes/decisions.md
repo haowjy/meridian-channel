@@ -1,318 +1,262 @@
 # Decisions — Streaming Parity Fixes (v2)
 
-This log captures the v2 architectural decisions made during the design phase. Each decision states what was decided, why, what was rejected, and which v1 finding or requirement it addresses. v1 decisions are in `../work-archive/streaming-adapter-parity/decisions.md`; this log only records deltas from v1 or decisions that v1 did not make explicit.
+## D1 — Generic binding with runtime-checked dispatch narrow
 
----
+**Decision.** Use `SpecT`-bound generic adapters/connections and a single dispatch-site runtime guard:
 
-## D1 — Generic type binding via `TypeVar("SpecT", bound=ResolvedLaunchSpec)`
+- `if not isinstance(spec, bundle.spec_cls): raise TypeError(...)`
+- then `cast(SpecT, spec)` for `connection.start(...)`
 
-**Decision.** `HarnessAdapter[SpecT]` and `HarnessConnection[SpecT]` are parameterized over a `TypeVar("SpecT", bound=ResolvedLaunchSpec)`. Each concrete adapter and connection declares its own spec type at the class level (e.g., `class ClaudeConnection(HarnessConnection[ClaudeLaunchSpec])`).
+**Why.** Removes silent runtime drift while keeping one explicit narrow boundary.
 
-**Why.** v1 had `HarnessConnection.start(spec: ResolvedLaunchSpec)` with no type parameter, which is why `spawn_manager.py:99` could legally fall back to `ResolvedLaunchSpec(prompt=config.prompt)` and pass it to any connection. Typing `SpecT` makes the mismatch a pyright error at the call site. It also gives reviewers and refactor tooling a mechanical way to know which projection belongs to which spec type.
+**Addresses.** M1, M2, S002.
 
-**Rejected alternatives.**
-- *One big union type `Union[ClaudeLaunchSpec, CodexLaunchSpec, OpenCodeLaunchSpec]` with exhaustive isinstance.* Keeps the `isinstance` branching inside every connection — exactly the M1 pattern we are trying to delete. The whole point of v2 is removing those branches.
-- *Runtime-only type tagging (e.g., `spec.harness_kind`).* Runtime tagging does not help pyright catch drift at compile time, and the v1 experience proved runtime checks are easily bypassed by `cast` or a forgotten branch.
+## D2 — `HarnessBundle` paired registry
 
-**Addresses.** p1411 M1, M2, H4 (in combination with D5).
+**Decision.** Registry entries pair `adapter`, `connection_cls`, and `spec_cls` for each `HarnessId`.
 
----
+**Why.** Keeps dispatch invariant explicit and auditable.
 
-## D2 — `HarnessBundle` as the paired registry entry
+**Addresses.** M2, M8.
 
-**Decision.** Replace the v1 adapter-keyed registry with a `HarnessBundle(Generic[SpecT])` dataclass carrying `(adapter: HarnessAdapter[SpecT], connection_cls: type[HarnessConnection[SpecT]], spec_cls: type[SpecT])`. The registry maps harness name → bundle. There is **exactly one** `cast` declared at the dispatch boundary, and it is the only cast in the harness layer.
+## D3 — Abstract factory enforcement is ABC + Protocol
 
-**Why.** v1 separated adapter lookup from connection lookup, so nothing enforced that a given adapter's output spec would actually be accepted by the registered connection. Bundling them makes the three-way invariant explicit. The single declared cast at dispatch is the narrow waist — every call site downstream of dispatch is fully typed.
+**Decision.** `HarnessAdapter` remains Protocol for static structural checks, and `BaseSubprocessHarness(Generic[SpecT], ABC)` declares `@abstractmethod resolve_launch_spec(...)` for runtime instantiation rejection.
 
-**Rejected alternatives.**
-- *Keep adapter and connection registries separate but add runtime isinstance assertions.* Preserves drift risk (the registries can be inconsistent). Tries to solve a typing problem at runtime.
-- *Reflection-based bundle assembly at import time.* More magic, harder to read, no meaningful benefit over the explicit dataclass.
+**Why.** Protocol conformance alone does not raise instantiation-time `TypeError`.
 
-**Addresses.** p1411 M2, M8.
+**Addresses.** E1, S001.
 
----
+## D4 — Non-optional resolver contract
 
-## D3 — Remove `BaseSubprocessHarness.resolve_launch_spec` default
+**Decision.** `PermissionResolver` is non-optional and requires `.config`.
 
-**Decision.** `BaseSubprocessHarness` no longer provides a default `resolve_launch_spec` implementation. `resolve_launch_spec` is declared abstract (via `@abstractmethod` on the ABC or via `HarnessAdapter[SpecT]` Protocol conformance). Every concrete adapter must define its own.
+**Why.** Deletes cast-to-None entry points and silent fallback chains.
 
-**Why.** v1's default returned a generic `ResolvedLaunchSpec`, which hid the booby trap surfaced by p1411 M2: a new adapter could be wired up and silently produce generic specs that fell through to isinstance branches. Making this abstract turns "forgot to override" into an instantiation-time `TypeError`, caught before any spawn runs.
+**Addresses.** H3.
 
-**Rejected alternatives.**
-- *Keep the default but have it raise.* Subtly worse — the error would surface at spawn time (not class-construction time), and the trap would still tempt a future developer.
-- *Make `resolve_launch_spec` a `@property` that returns a callable.* Harder to type, no benefit.
+## D5 — Projection drift guard (both directions)
 
-**Addresses.** p1411 M2, E1.
-
----
-
-## D4 — `PermissionResolver` is non-optional and `.config` is a required Protocol property
-
-**Decision.** `PermissionResolver` is a `runtime_checkable Protocol` whose members include `resolve_flags(...)` AND a required `config: PermissionConfig` property. Every adapter signature is `resolve_launch_spec(self, run: SpawnParams, perms: PermissionResolver) -> SpecT`. There is no optional `perms: PermissionResolver | None` anywhere in the stack.
-
-**Why.** v1 used `cast("PermissionResolver", None)` in two sites (`streaming_runner.py:457`, `server.py:203`) — the cast was required precisely because the type allowed `None`. Promoting `.config` to a required Protocol member and making every signature non-optional means the `cast` sites cannot be rebuilt: pyright rejects them. Lenient callers must construct a real `NoOpPermissionResolver`.
-
-**Rejected alternatives.**
-- *Keep `PermissionResolver | None` and add a `_coalesce_perms(perms)` helper that wraps None.* Delegates the cast-hiding to a helper function — same bug, different layer. The type system still permits None at the call sites, which means future code can reintroduce the pattern.
-- *Make `.config` optional.* Defeats the point; `resolve_permission_config(perms)` would still need the getattr fallback.
-
-**Addresses.** p1411 H3, L6.
-
----
-
-## D5 — Import-time projection completeness guards via `ImportError`
-
-**Decision.** Every projection module (`projections/claude.py`, `projections/codex.py`, `projections/opencode.py`) declares a module-level `_PROJECTED_FIELDS: frozenset[str]` and a guard block at module scope:
+**Decision.** Use import-time helper `_check_projection_drift(...)` and compare expected vs accounted fields in both directions.
 
 ```python
-_expected = {name for name in ClaudeLaunchSpec.model_fields} - _SPEC_DELEGATED_FIELDS
-_missing = _expected - _PROJECTED_FIELDS
-if _missing:
-    raise ImportError(
-        f"ClaudeLaunchSpec fields not projected: {sorted(_missing)}. "
-        "Add them to projections/claude.py::_PROJECTED_FIELDS and handle them in project_claude_spec_to_cli_args."
-    )
+expected = set(spec_cls.model_fields)
+accounted = projected | delegated
+if expected != accounted:
+    missing = expected - accounted
+    stale = accounted - expected
+    raise ImportError(f"Projection drift: missing={sorted(missing)} stale={sorted(stale)}")
 ```
 
-**Why.** v1 promised D15 (a projection completeness check) but never shipped it — which is exactly the gap that let H1 (sandbox/approval dropped from streaming Codex) ship. An import-time guard means a future developer who adds a field to `ClaudeLaunchSpec` and forgets to update the projection cannot even run `meridian --help` without hitting the error. Import-time is the earliest detection point. `ImportError` (not `assert`) is required because `python -O` strips assertions — L1.
+**Why.** Catches both newly added fields and stale removed names.
 
-**Rejected alternatives.**
-- *Use `assert` and rely on tests.* v1 tried this pattern elsewhere (`launch_spec.py` L1). Assertions are stripped under `-O`, and the drift can still ship if the tests are not exhaustive.
-- *Use a pytest plugin that scans on test collection.* Runs too late — a developer who runs `meridian` without running the tests first could push code that fails in production.
-- *Use a runtime check inside the projection function.* Fires only when the field is non-None; silent drift for fields defaulting to None.
+**Addresses.** H4, L1.
 
-**Addresses.** p1411 H4, L1, E5, E6, E27, E30.
+## D6 — SpawnParams accounting split
 
----
+**Decision.** Keep `_SPEC_HANDLED_FIELDS` + `_SPEC_DELEGATED_FIELDS` accounting in `launch_spec.py`.
 
-## D6 — `_SPEC_HANDLED_FIELDS` + `_SPEC_DELEGATED_FIELDS` in `launch_spec.py`
+**Why.** Forces explicit ownership for every `SpawnParams` field.
 
-**Decision.** `launch_spec.py` declares two frozensets:
-- `_SPEC_HANDLED_FIELDS`: `SpawnParams` fields the factory maps to concrete spec fields.
-- `_SPEC_DELEGATED_FIELDS`: `SpawnParams` fields intentionally handled outside the spec pipeline (e.g., `prompt_mode` controls factory behavior; `mcp_tools` is forwarded as-is).
+**Addresses.** L2.
 
-An import-time guard compares `SpawnParams.model_fields` against the union and raises `ImportError` on drift.
+## D7 — Projection function set and naming
 
-**Why.** v1's `_SPEC_HANDLED_FIELDS` set included `mcp_tools` as a lie (L2) — the field was listed but the factory did nothing with it. Splitting into "handled" and "delegated" makes the lie impossible: if a field is delegated, it must be named in the set, and the developer must look at it consciously. The guard forces new `SpawnParams` fields into one of the two sets.
+**Decision.** Standardize projection modules/functions:
 
-**Rejected alternatives.**
-- *Single `_SPEC_HANDLED_FIELDS` set.* v1 did this. Encouraged the L2 lie.
-- *Per-adapter "handled" sets.* Moves the drift-detection problem into every adapter. v2's approach keeps it centralized in `launch_spec.py`.
+- `project_claude.py`
+- `project_codex_subprocess.py`
+- `project_codex_streaming.py`
+- `project_opencode_subprocess.py`
+- `project_opencode_streaming.py`
 
-**Addresses.** p1411 L2, E6.
+Use `project_opencode_spec_to_session_payload` (not `...http_payload`).
 
----
+**Why.** Consistent axis and lower blast radius.
 
-## D7 — Shared projection functions per harness
+**Addresses.** M3, M4, F9, F28, F35.
 
-**Decision.** Each harness has exactly one projection function shared by subprocess and streaming paths:
-- `project_claude_spec_to_cli_args(spec: ClaudeLaunchSpec, base: tuple[str, ...]) -> list[str]`
-- `project_codex_spec_to_cli_args(spec: CodexLaunchSpec, base: tuple[str, ...]) -> list[str]` (subprocess)
-- `project_codex_spec_to_appserver_command(spec: CodexLaunchSpec) -> list[str]` (streaming)
-- `project_opencode_spec_to_cli_args(spec: OpenCodeLaunchSpec, base: tuple[str, ...]) -> list[str]` (subprocess)
-- `project_opencode_spec_to_http_payload(spec: OpenCodeLaunchSpec) -> dict` (streaming)
+## D8 — Claude permission-flag dedupe at projection site
 
-Claude uses one function for both paths (same CLI binary, different base). Codex and OpenCode have distinct wire formats per transport, so they have distinct projections — but both projections share the same spec type, the same completeness guard, and the same helper utilities (arg merging, permission-flag emission).
+**Decision.** Deduplicate/merge `--allowedTools` and `--disallowedTools` in Claude projection.
 
-**Why.** v1 split Claude into two functions and M3 found they drifted (different arg orderings between subprocess and streaming). Codex and OpenCode have genuinely different wire formats, so splitting is appropriate — but the completeness guard must apply equally to both.
+**Why.** One authoritative merge point across transports.
 
-**Rejected alternatives.**
-- *One projection per harness regardless of transport.* Forces Codex subprocess and Codex app-server into a common shape that does not exist in reality. Would make the function full of transport branches — the exact anti-pattern we deleted from the connections.
-- *One projection per transport per harness (6 functions).* Splits Claude's subprocess and streaming paths, guaranteeing the M3 drift bug returns.
+**Addresses.** H2.
 
-**Addresses.** p1411 M3, H4.
+## D9 — Canonical Claude ordering
 
----
+**Decision.** One canonical projection order for subprocess and streaming Claude tails.
 
-## D8 — `--allowedTools` dedupe happens at the projection site
+**Why.** Prevents transport ordering drift.
 
-**Decision.** `project_claude_spec_to_cli_args` internally calls `_merge_allowed_tools(perm_flags, extra_args)` which emits exactly one `--allowedTools` flag containing the deduped union in canonical order. Neither the runner nor the preflight code emits `--allowedTools` directly to `extra_args`.
+**Addresses.** M3.
 
-**Why.** v1 H2 arose because the streaming runner applied `merge_allowed_tools_flag` to passthrough args pre-projection, then the connection injected another `--allowedTools` via `resolve_flags`, and no final dedupe existed. Putting dedupe inside the shared projection means the contract is: "by the time the projection returns, there is exactly one `--allowedTools` flag in the result." Both runners get this for free.
+## D10 — `_AgentNameMixin` scope
 
-**Rejected alternatives.**
-- *Runner-level dedupe post-projection.* Requires every runner to remember to do it. v1 subprocess did; v1 streaming did not; the bug happened.
-- *Preflight-level dedupe with no projection-level guard.* Same problem — future runners can forget.
+**Decision.** `_AgentNameMixin` is shared by `ClaudeLaunchSpec` and `OpenCodeLaunchSpec`.
 
-**Addresses.** p1411 H2, E11, E12, E23.
+**Why.** Same semantic field, avoid duplicated declarations.
 
----
+**Addresses.** L3 (not L5).
 
-## D9 — Canonical Claude arg ordering
+## D11 — `UnsafeNoOpPermissionResolver`
 
-**Decision.** `project_claude_spec_to_cli_args` emits flags in a canonical order:
-1. Base command (`claude` or `claude --output-format stream-json`)
-2. `--model`
-3. `--effort`
-4. `--agent`
-5. `--append-system-prompt`
-6. `--agents`
-7. `--resume` / `--fork-session`
-8. Permission flags merged with extra_args (deduped on `--allowedTools`, `--disallowedTools`)
-9. Any remaining extra_args preserving their original order
+**Decision.** Rename `NoOpPermissionResolver` to `UnsafeNoOpPermissionResolver`; retain loud warning semantics.
 
-**Why.** v1 had different orders on subprocess vs streaming (M3) because each runner built the command ad-hoc. One canonical order, enforced by one projection, means subprocess and streaming are byte-equal past the base command — which is the parity contract in executable form (S021).
+**Note.** Unit tests may pass `_suppress_warning=True` to reduce fixture noise.
 
-**Rejected alternatives.**
-- *Alphabetical order.* Breaks Claude's semantics where `--append-system-prompt` and `--allowedTools` are order-sensitive for last-wins.
-- *User-extensible order via config.* YAGNI; no user has asked for this, and it reintroduces divergence risk.
+**Why.** Name must encode risk; unsafe behavior must be explicit.
 
-**Addresses.** p1411 M3, E15, E21.
+**Addresses.** H3, F10, F36, F37.
 
----
+## D12 — Shared `LaunchContext`
 
-## D10 — `_AgentNameMixin` for shared `agent_name` field
+**Decision.** Both runners call `prepare_launch_context(...)` from `launch/context.py`.
 
-**Decision.** The `agent_name` field is lifted into a `_AgentNameMixin` mixin. Both `ClaudeLaunchSpec` and `CodexLaunchSpec` inherit from it (and `ResolvedLaunchSpec`). The mixin owns the Pydantic field declaration, validation, and default.
+**Why.** Centralizes launch-state assembly and removes runner duplication.
 
-**Why.** v1 declared `agent_name` on both subclasses independently, with slightly different defaults. A mixin keeps the declaration DRY and prevents drift. It also gives pyright one place to find the field's definition when navigating.
+**Addresses.** M6.
 
-**Rejected alternatives.**
-- *Promote `agent_name` into `ResolvedLaunchSpec` base.* Pollutes OpenCode (which does not use `agent_name`). The mixin is a narrower contract.
-- *Repeat in both subclasses with a matching test.* v1 pattern. Tests catch drift late; structure prevents it.
+## D13 — Constants/text util extraction
 
-**Addresses.** p1411 L5.
+**Decision.** Shared constants live in `launch/constants.py`; shared text helpers (`dedupe_nonempty`, `split_csv_entries`) live in `launch/text_utils.py`.
 
----
+**Why.** Closes per-harness utility duplication and addresses L5 smell.
 
-## D11 — `NoOpPermissionResolver` with loud construction-time warning
+**Addresses.** M6, L5.
 
-**Decision.** Introduce `NoOpPermissionResolver` as a concrete class implementing `PermissionResolver`. Its `config` property returns `PermissionConfig(sandbox="default", approval="default")`. Its `resolve_flags` returns `[]`. Its `__init__` emits a loud WARNING log: "NoOpPermissionResolver constructed — no permission enforcement will be applied".
+## D14 — Confirm-mode event ordering semantics
 
-**Why.** The server and streaming runner need a way to opt out of permissions without the v1 cast-to-None trick. An explicit class with a loud warning is the honest opt-out: the code is self-documenting, the log is auditable, and the usage is grep-able (`rg NoOpPermissionResolver`).
+**Decision.** Guarantee is: rejection event is enqueued before `send_error` is awaited.
 
-**Rejected alternatives.**
-- *Sentinel singleton (`PERMISSIONS_DISABLED`).* Hides the pattern behind a magic constant. The construction-time warning is harder to attach.
-- *Default-parameter `perms: PermissionResolver = NoOpPermissionResolver()`.* Shared mutable default is a Python footgun and encourages silent opt-out. Requiring explicit construction at call sites forces the developer to look at the log call.
+**Why.** Deterministic call ordering without wall-clock assumptions.
 
-**Addresses.** p1411 H3, L6.
+**Addresses.** M9, S032.
 
----
+## D15 — Codex spec shape
 
-## D12 — `LaunchContext` + `prepare_launch_context()` shared helper
+**Decision.** `CodexLaunchSpec` does not store `sandbox_mode` or `approval_mode`; projections read `spec.permission_resolver.config` directly.
 
-**Decision.** Introduce a frozen dataclass `LaunchContext(spec, env, run_params, child_cwd, env_overrides)` and a helper `prepare_launch_context(plan, ...) -> LaunchContext`. Both `runner.py` and `streaming_runner.py` call it to produce the context before handing off to subprocess.launch or connection.start.
+**Why.** Removes duplicate state and H1-style stale field hazards.
 
-**Why.** v1 M6 identified that the two runners built env and cwd independently, with subtle divergence. A single helper with a single return type forces parity. Frozen dataclass means once constructed, the context cannot be mutated — reviewers and testers can trust that a `LaunchContext` is the single source of truth for a given launch.
+**Addresses.** H1.
 
-**Rejected alternatives.**
-- *Keep separate helpers, add a parity test.* Tests catch drift late; the parallel implementations are the real problem.
-- *Full runner decomposition (split runner.py into small modules).* Correct direction but L11-scale; deferred to a follow-up refactor to keep this scope bounded.
+## D16 — `report_output_path` on Codex only
 
-**Addresses.** p1411 M6, E24, E25.
+**Decision.** Keep `report_output_path` only on `CodexLaunchSpec`.
 
----
+**Why.** Harness-specific feature.
 
-## D13 — Constants to `launch/constants.py`
+**Addresses.** M5.
 
-**Decision.** Move `DEFAULT_*_SECONDS`, `DEFAULT_INFRA_EXIT_CODE`, `_BLOCKED_CHILD_ENV_VARS`, and the per-harness `BASE_COMMAND` tuples into `src/meridian/lib/launch/constants.py`. Both runners import from this module.
+## D17 — OpenCode skills single-channel policy
 
-**Why.** v1 M6 also noted duplicate constant definitions. Centralizing them means one grep-able definition site, one changeset to update a timeout, and no possibility of drift.
+**Decision.** Skills delivery channel is chosen at spec construction; projections do not choose channel dynamically.
 
-**Rejected alternatives.**
-- *Per-runner constants with a linter check.* Adds process without removing duplication.
-- *Per-harness constants in each adapter.* The constants are cross-harness (timeouts, blocked env) or cross-transport (base commands), so per-harness placement does not fit.
+**Why.** Avoid double-injection.
 
-**Addresses.** p1411 M6, E26.
+**Addresses.** M4.
 
----
+## D18 — OpenCode connection inheritance
 
-## D14 — Approval rejection emits `HarnessEvent` before JSON-RPC error
+**Decision.** `OpenCodeConnection` inherits `HarnessConnection[OpenCodeLaunchSpec]`.
 
-**Decision.** When `codex_ws` rejects an approval request under `confirm` mode, it enqueues `HarnessEvent(kind="warning/approvalRejected", data={"reason": "confirm_mode", "method": method, "request_id": id})` to the event queue BEFORE writing the JSON-RPC error response frame.
+**Why.** Keep interface drift visible to type system.
 
-**Why.** v1 M9: the confirm-mode rejection was logged but not emitted as a structured event. Consumers watching the event stream only learned about it via downstream session failure. Emitting the event inline is the observable primitive the consumer needs.
+**Addresses.** M8.
 
-**Rejected alternatives.**
-- *Log-only (v1).* Opaque to programmatic consumers.
-- *Emit after the error response.* Introduces an ordering race where the downstream failure can be observed before the cause event.
+## D19 — Runner size budget + trigger
 
-**Addresses.** p1411 M9, E10, E32.
+**Decision.** Full decomposition remains out of v2 scope, but post-v2 budget is mandatory:
 
----
+- `runner.py <= 500` lines
+- `streaming_runner.py <= 500` lines
 
-## D15 — Codex streaming reads sandbox/approval from `permission_resolver.config` directly
+If either exceeds budget after v2, raise L11 decomposition back into active scope immediately.
 
-**Decision.** `CodexLaunchSpec` does **not** store `sandbox_mode` or `approval_mode` as independent fields. The projection reads them from `spec.permission_resolver.config.sandbox` and `.config.approval` at projection time and emits `-c sandbox_mode=<v>` / `-c approval_policy=<v>` (or the verified-at-impl equivalent) into the `codex app-server` launch command.
+**Why.** Enforces structural health signal, avoids indefinite deferral.
 
-**Why.** v1 H1 shipped because the `CodexLaunchSpec` fields existed but nobody read them — the `codex_ws` implementation dropped them. v2 eliminates the redundant fields: the resolver's config is the single source of truth, and the projection is the single consumer. There is nowhere for a developer to "forget to read" because the fields do not exist.
+**Addresses.** M6/L11 follow-through.
 
-**Rejected alternatives.**
-- *Keep the fields and add a runtime assertion that they match the resolver.* Two sources of truth, synchronization problem, assertion-strippable.
-- *Store a denormalized copy on the spec.* Same problem in a different shape.
+## D20 — Codex probe and fail-closed capability policy
 
-**Addresses.** p1411 H1, M1.
+**Decision.** Probe real `codex app-server --help` before finalizing mapping. If requested sandbox/approval semantics cannot be expressed, projection raises `HarnessCapabilityMismatch` and spawn fails before launch.
 
----
+**Why.** No silent downgrade at integration boundary.
 
-## D16 — `report_output_path` lives on `CodexLaunchSpec`, not base
+**Addresses.** H1, E38.
 
-**Decision.** `report_output_path` is declared on `CodexLaunchSpec` only. The base `ResolvedLaunchSpec` does not carry it.
+## D21 — Adapter-owned preflight contract
 
-**Why.** It is a Codex-only concept (`-o` flag on `codex exec`). v1 had it on the base class, polluting Claude and OpenCode with a field that was meaningless to them. On streaming Codex, the projection ignores it (with a debug log — S019) because `codex app-server` has no equivalent flag; the runner extracts reports from artifacts.
+**Decision.** Add `preflight(...) -> PreflightResult` to `HarnessAdapter`; base returns empty result; Claude overrides for parent-permission forwarding and `--add-dir` injection.
 
-**Rejected alternatives.**
-- *Leave on base "for future harnesses".* YAGNI and pollutes two current harnesses.
-- *Move to a `CodexSpecificFields` mixin.* Unnecessary indirection for a one-field mixin.
+**Why.** Removes harness-id branching from shared launch context and preserves Open/Closed boundaries.
 
-**Addresses.** p1411 M5.
+**Addresses.** F5.
 
----
+## D22 — Connection facet collapse
 
-## D17 — OpenCode skills single-injection policy at spec construction
+**Decision.** Remove `HarnessLifecycle` / `HarnessSender` / `HarnessReceiver` facet protocols in v2; keep single `HarnessConnection[SpecT]` ABC.
 
-**Decision.** The adapter factory decides the skills delivery path at spec construction time:
-- If `run_prompt_policy().include_skills is True`: prompt inlines skills, `spec.skills = ()`.
-- Otherwise: prompt does not inline, `spec.skills = (...original tuple...)`, projection carries skills in the HTTP payload / CLI flag.
+**Why.** Avoid duplicate interface declarations drifting out of sync.
 
-There is no runtime branch in the projection to choose between paths — the choice is locked in the spec.
+**Audit.** `rg "HarnessLifecycle|HarnessSender|HarnessReceiver" src/` showed negligible consumer value for keeping facets.
 
-**Why.** v1 M4 identified a risk that OpenCode could deliver skills twice (once inlined, once via the HTTP payload). Making the choice at spec-construction time means the spec itself is the single source of truth; both transports respect `spec.skills` without needing to coordinate with the prompt builder.
+**Addresses.** F20.
 
-**Rejected alternatives.**
-- *Runtime branch in the projection.* Same coordination bug waiting to happen.
-- *Always inline.* Forfeits the HTTP-payload path's flexibility.
+## D23 — Remove `mcp_tools` from `SpawnParams` in v2
 
-**Addresses.** p1411 M4, E18.
+**Decision.** Delete `mcp_tools` from launch-time spec/factory surface for v2.
 
----
+**Why.** MCP wiring is explicitly out of scope and current adapters return no MCP config.
 
-## D18 — `OpenCodeConnection` must inherit `HarnessConnection[OpenCodeLaunchSpec]`
+**Addresses.** F30.
 
-**Decision.** `OpenCodeConnection` is declared as `class OpenCodeConnection(HarnessConnection[OpenCodeLaunchSpec]):`. The v1 `class OpenCodeConnection:` (no base) is rejected.
+## D24 — Shared missing-binary error class
 
-**Why.** v1 M8: `OpenCodeConnection` duck-typed its way into the Protocol. When `HarnessConnection` evolves (new abstract method), pyright has no leverage to force `OpenCodeConnection` to implement it. Explicit inheritance gives the type system the leverage.
+**Decision.** Introduce `HarnessBinaryNotFound` in `src/meridian/lib/harness/errors.py` and use it across subprocess and streaming runners.
 
-**Rejected alternatives.**
-- *Runtime `runtime_checkable` Protocol conformance check.* Catches at runtime, not at compile time, and pyright cannot see through the duck.
-- *Register `OpenCodeConnection` with the Protocol via `Protocol.register`.* Does not exist in Python; Protocols are structural.
+**Why.** Structured parity for PATH/binary failures.
 
-**Addresses.** p1411 M8, E34, E35.
+**Addresses.** F33, S028.
 
----
+## Revision Pass 1 (post p1422/p1423/p1425/p1426)
 
-## D19 — Full runner decomposition (L11) deferred
-
-**Decision.** v2 does NOT attempt to split `runner.py` / `streaming_runner.py` into small modules per concern. The scope is: extract the shared core (LaunchContext, constants), delete the duplication, and ship. L11's broader decomposition is a follow-up refactor.
-
-**Why.** Scope control. The v1 review flagged the runners as "too big" but v2's goal is closing the HIGH/MEDIUM findings from p1411 without opening a new structural refactor. A full decomposition inside this work item risks not shipping any of the H-level fixes. The `LaunchContext` extraction is the minimum viable split that addresses M6; the rest can follow once v2 is in the tree.
-
-**Rejected alternatives.**
-- *Full decomposition now.* High risk of not converging.
-- *No extraction at all.* Leaves M6 unfixed.
-
-**Addresses.** Scope discipline for H1–H4 + M-series.
-
----
-
-## D20 — Probe `codex app-server --help` before committing to flag names
-
-**Decision.** The implementation for D15 (Codex sandbox/approval projection) MUST begin by running `codex app-server --help` against the real binary and recording the observed flag names and syntax in the design decision log (appended below this entry at implementation time). Only after that probe is complete does the coder write the projection.
-
-**Why.** v1 H1 shipped partly because the adapter was written against assumed flag names rather than observed ones. The dev-principles "Probe Before You Build at Integration Boundaries" rule applies directly. Recording the probe result in the decision log gives reviewers a verifiable anchor.
-
-**Rejected alternatives.**
-- *Guess based on `codex exec --help`.* Exactly the v1 failure mode.
-- *Probe but don't record.* Loses the audit trail.
-
-**Addresses.** dev-principles integration-boundary rule, p1411 H1 root cause.
+- F1: Unified `CodexLaunchSpec` shape; removed sandbox/approval fields from launch-spec examples and added D15 supersession note.
+- F2: Updated Codex projection field sets to post-D15 shape and added resolver-config read example.
+- F3: Clarified Protocol vs ABC roles; abstract-method instantiation enforcement now explicitly ABC-based.
+- F4: Replaced `cast(Any, spec)` guidance with dispatch `isinstance` guard plus `cast(SpecT, spec)`.
+- F5: Added adapter `preflight` contract and moved Claude preflight ownership behind adapter boundary.
+- F6: Expanded completeness model to transport-wide accounted-field unions across all consumers.
+- F7: Added reserved-flag policy and passthrough stripping/merge semantics with warning logs.
+- F8: Added fail-closed Codex capability mismatch policy for unrepresentable sandbox/approval semantics.
+- F9: Merged Codex streaming projections into `project_codex_streaming.py`.
+- F10: Switched REST default to strict rejection; unsafe fallback gated by `--allow-unsafe-no-permissions`.
+- F11: Corrected D5 sample to check both missing and stale drift directions.
+- F12: Corrected D10 finding label to L3; documented L5 closure via text-utils extraction.
+- F13: Reconciled S002 contract with dispatch-site runtime guard and no behavior-switching checks in connections.
+- F14: Updated scenario module enumeration to full renamed projection module set and added `_PROJECTED_FIELDS` match-count meta assertion.
+- F15: Corrected S033 OpenCode target function to `project_opencode_spec_to_serve_command`.
+- F16: Added Codex streaming debug log for ignored `report_output_path` and delegated-field annotation.
+- F17: Made continue-fork validator base-scoped so it applies to all harness specs.
+- F18: Standardized guard testing on `_check_projection_drift` helper with synthetic spec classes.
+- F19: Added `launch_types.py` DAG topology and moved shared leaf contracts there.
+- F20: Chose facet collapse; connection surface is now single ABC contract.
+- F21: Audited typed design guidance to remove `cast(Any, ...)` in favor of typed narrow casts.
+- F22: Set authoritative cast location to `SpawnManager.start_spawn`; removed conflicting shared-core wording.
+- F23: Reframed S016 requirement to semantic distinctness plus audit trail (not distinct wire strings per cell).
+- F24: Declared `PermissionConfig.approval` as a `Literal` domain.
+- F25: Tightened confirm-mode ordering guarantee to enqueue-before-await semantics.
+- F26: Reconciled append-system-prompt policy to "both flags appear; user wins; warning emitted".
+- F27: Added post-v2 runner line-budget target (500 each) with explicit L11 trigger.
+- F28: Renamed projection modules to consistent `project_<harness>_<transport>.py` pattern.
+- F29: Renamed shared launch module reference from `launch/core.py` to `launch/context.py`.
+- F30: Removed `mcp_tools` from v2 launch spec/factory surface and documented decision.
+- F31: Documented `_SPEC_HANDLED_FIELDS` limitation (global accounting, not per-adapter completeness).
+- F32: Added explicit `BaseSubprocessHarness` default-method audit requirement in typed migration shape.
+- F33: Added explicit `HarnessBinaryNotFound` structured error decision.
+- F34: Tightened S015 verification to require explicit field-to-wire mapping table assertions.
+- F35: Standardized OpenCode session payload function name to `project_opencode_spec_to_session_payload`.
+- F36: Renamed all design/scenario references from `NoOpPermissionResolver` to `UnsafeNoOpPermissionResolver`.
+- F37: Added `UnsafeNoOpPermissionResolver` warning-suppression note for unit-test fixtures.

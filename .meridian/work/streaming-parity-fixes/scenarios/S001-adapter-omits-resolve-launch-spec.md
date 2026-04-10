@@ -1,25 +1,25 @@
 # S001: Adapter omits `resolve_launch_spec` override
 
-- **Source:** design/edge-cases.md E1 + p1411 finding M2
+- **Source:** design/edge-cases.md E1 + p1411 M2
 - **Added by:** @design-orchestrator (design phase)
 - **Tester:** @unit-tester
 - **Status:** pending
 
 ## Given
-A developer adds a new harness adapter class subclassing the shared base (`BaseSubprocessHarness`) or implementing `HarnessAdapter[SpecT]` Protocol but forgets to define `resolve_launch_spec`.
+A new harness subclasses `BaseSubprocessHarness` but omits `resolve_launch_spec`.
 
 ## When
-The class is instantiated, or pyright runs against the module.
+Pyright runs and runtime instantiation is attempted.
 
 ## Then
-- Pyright reports that the class does not satisfy `HarnessAdapter[SpecT]` because `resolve_launch_spec` is unimplemented.
-- Runtime instantiation raises `TypeError: Can't instantiate abstract class ... with abstract method resolve_launch_spec` (or equivalent Protocol conformance failure).
-- No silent fallback to a generic `ResolvedLaunchSpec` occurs.
+- Pyright reports the missing method.
+- `NewHarness()` raises `TypeError: Can't instantiate abstract class ... with abstract method resolve_launch_spec`.
+- This runtime failure is from ABC abstract-method enforcement, not Protocol instantiation behavior.
 
 ## Verification
-- Write a pytest fixture class: `class NewHarness(BaseSubprocessHarness): ...` with no `resolve_launch_spec` override and no other differentiating fields.
-- Assert `NewHarness()` raises `TypeError`.
-- Run `uv run pyright` on the fixture file and assert the Protocol-unsatisfied error is present.
+- Fixture class: `class NewHarness(BaseSubprocessHarness[ResolvedLaunchSpec]): ...` with no override.
+- Assert runtime `TypeError` on instantiation.
+- Assert pyright reports unsatisfied abstract/Protocol contract.
 
 ## Result (filled by tester)
 _pending_
