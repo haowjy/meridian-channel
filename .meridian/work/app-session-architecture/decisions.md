@@ -136,3 +136,5 @@
 **Decision:** Use an atomic counter incremented on `POST /api/sessions` entry and decremented on completion (try/finally). Shutdown waits for counter == 0 with a 10s safety timeout.
 
 **Reasoning:** Re-reviewer (p1261) identified that the "wait up to 5s" approach was time-based and didn't account for actual in-flight state. A counter tracks exactly how many create requests are in progress. The timeout is a safety bound for truly stuck requests, not the primary synchronization mechanism.
+
+**Overruling reviewer on timeout completeness (p1265):** Reviewer p1265 flagged the 10s timeout as "not a true guarantee" since shutdown proceeds anyway after timeout. This is intentional: a local dev tool should not hang indefinitely on Ctrl-C because a spawn creation is stuck. The counter-based approach closes the normal-case race (creates that take <10s, which is all of them). The timeout handles the pathological case (stuck harness, network hang) by proceeding with a warning log. An indefinite wait would create a worse problem — an unresponsive shutdown requiring SIGKILL.

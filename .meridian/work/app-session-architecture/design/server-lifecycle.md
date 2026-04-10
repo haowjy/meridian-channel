@@ -124,7 +124,7 @@ The bound socket's port is read via `sock.getsockname()[1]` and written to the l
 
 ### Crash (SIGKILL / OOM / power loss)
 
-Lockfiles remain on disk. Next startup detects and cleans them via the PID-alive + health check validation in step 2 of the startup flow. This is crash-only design — recovery is startup behavior.
+Lockfiles remain on disk. Next startup detects and cleans them via the PID-alive check in step 2 of the startup flow (see "Stale Server Detection" above). This is crash-only design — recovery is startup behavior.
 
 ## Server Discovery (`meridian app list`)
 
@@ -133,13 +133,15 @@ Lockfiles remain on disk. Next startup detects and cleans them via the PID-alive
 2. For each file:
    a. Parse server metadata (pid, port, host, repo_root)
    b. Check if PID is alive (os.kill(pid, 0))
-   c. If PID alive, try GET http://host:port/api/health
-   d. If health check passes → server is live, include in output
-   e. If PID dead or health check fails → stale entry, delete file
+   c. If PID dead → stale entry, delete file
+   d. If PID alive → server is running, include in output
+      - Optionally try GET http://host:port/api/health for status info
+      - Health check result is displayed as status ("ready" vs "starting")
+        but does NOT determine validity — PID-alive is the sole criterion
 3. Print table of live servers:
-   REPO                      PORT   URL
-   /home/user/project-alpha  8420   http://127.0.0.1:8420
-   /home/user/project-beta   8421   http://127.0.0.1:8421
+   REPO                      PORT   URL                        STATUS
+   /home/user/project-alpha  8420   http://127.0.0.1:8420     ready
+   /home/user/project-beta   8421   http://127.0.0.1:8421     starting
 ```
 
 If no servers are running, print a message indicating that.
@@ -186,16 +188,16 @@ This endpoint is unauthenticated (even when `--host` auth is added later) so tha
 
 **User deletes `.meridian/app/` while server is running.** The server continues running with in-memory state. On next `meridian app` from another terminal, the missing lockfile causes a new server to start on the next available port. The old server is orphaned until killed. This is an edge case that doesn't need special handling — deleting state files while the process is running is user error.
 
-**Lockfile points to wrong port (manual edit or corruption).** Health check fails, lockfile is treated as stale, cleaned up, and a new server starts. Crash-only design handles this automatically.
+**Lockfile points to wrong port (manual edit or corruption).** PID is still alive (the server is running, just on a different port than the lockfile claims). The second invocation sees PID-alive, treats the server as running, and opens the browser to the lockfile's URL (which won't work). The user sees a broken page and can `meridian app stop` + restart. This is a manual-edit-of-state-files scenario that doesn't warrant special handling.
 
 **Crash between lockfile and registry write.** If the server crashes after writing `.meridian/app/server.json` but before writing `~/.meridian/app/servers/<hash>.json`, the repo-level lockfile exists but the user-level entry doesn't. `meridian app` for that repo still works (reads the repo-level lockfile). `meridian app list` won't show the server — it reads the user-level registry. Reconciliation rule: `meridian app list` also checks the current repo's lockfile (if running from a repo) and includes it if valid. This handles the "missing registry entry" case without adding complexity.
 
-**Orphan registry entry (repo lockfile deleted, registry entry remains).** `meridian app list` validates each registry entry with PID + health check. An orphan entry fails validation and is deleted. No special repair logic needed.
+**Orphan registry entry (repo lockfile deleted, registry entry remains).** `meridian app list` validates each registry entry with PID-alive check. If the PID is dead, the orphan entry is deleted. No special repair logic needed.
 
 ### Authoritative files
 
 - **`meridian app` (for current repo)**: `.meridian/app/server.json` is authoritative. It's the primary check for "is there a server for this repo."
-- **`meridian app list` (cross-repo discovery)**: `~/.meridian/app/servers/` is the primary index. Reconciled with PID + health check on each read.
+- **`meridian app list` (cross-repo discovery)**: `~/.meridian/app/servers/` is the primary index. Each entry validated with PID-alive on read.
 - **`meridian app stop`**: reads the authoritative file for the target repo (lockfile), falls back to registry if `--port` is used.
 
 ## File Layout
@@ -204,6 +206,7 @@ This endpoint is unauthenticated (even when `--host` auth is added later) so tha
 .meridian/
   app/
     server.json           # Server lockfile (runtime only, not tracked)
+    server.flock          # Startup serialization flock (runtime only)
     sessions.jsonl        # Session registry (see session-registry.md)
 
 ~/.meridian/
