@@ -103,6 +103,27 @@ scripts/release.sh minor          # 0.0.3 → 0.1.0
 scripts/release.sh 0.2.0 --push   # explicit version, push tag
 ```
 
+### Changelogs
+
+All three repos maintain a `CHANGELOG.md` at their root: `meridian-channel`, `meridian-base`, and `meridian-dev-workflow`. Format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), written in **caveman style** — terse, fragment-friendly, filler-free. Technical terms, agent names, file paths, and code blocks stay exact; only prose fluff gets compressed. See the `caveman` skill for the full ruleset.
+
+Write entries at commit time in an `[Unreleased]` section, not retroactively — reasoning flattens the longer you wait. When cutting a release, rename `[Unreleased]` to `[X.Y.Z] - YYYY-MM-DD` and open a fresh empty `[Unreleased]` above it. Entry style: focus on behavioral changes downstream users will notice. For agent/skill repos the "API" is the prompt shape, so describe what agents now do differently, not which lines moved.
+
+Standard shape at any tagged commit:
+
+```markdown
+# Changelog
+
+Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [SemVer](https://semver.org/). Versions before X.Y.Z in git history only.
+
+## [Unreleased]
+
+## [X.Y.Z] - YYYY-MM-DD
+### Added
+### Changed
+### Removed
+```
+
 ### Always Use `uv`
 
 This project uses `uv` exclusively for Python tooling. Never use `pip`, `pip install`, `python`, or `python -m` directly. Use `uv run`, `uv add`, and `uv sync` instead.

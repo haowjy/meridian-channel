@@ -1,7 +1,12 @@
 # Changelog
 
-All notable changes to Meridian are documented here.
-Format follows [Keep a Changelog](https://keepachangelog.com/).
+Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [SemVer](https://semver.org/). Versions `0.0.6` through `0.0.25` in git history only — changelog fell stale, resumed at `[Unreleased]`.
+
+## [Unreleased]
+
+### Added
+- `CHANGELOG.md` resumed after staleness. Now in caveman style.
+- `AGENTS.md` → "Changelogs" section. Convention for `meridian-channel`, `meridian-base`, `meridian-dev-workflow`. All three keep own `CHANGELOG.md`, all caveman.
 
 ## [0.0.5] - 2026-03-21
 
