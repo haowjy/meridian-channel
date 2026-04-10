@@ -20,8 +20,8 @@ appended_system_prompt → --append-system-prompt <value>
 agents_payload  → --agents <value>
 continue_session_id → --resume <value>
 continue_fork   → --fork-session        (only if continue_session_id set)
-permission_flags → appended directly    (e.g., --dangerously-skip-permissions)
-mcp_command_args → appended directly
+permission_config + permission_resolver → resolver.resolve_flags(HarnessId.CLAUDE) appended
+mcp_config      → mcp_config.command_args appended (currently None)
 extra_args      → appended directly
 prompt          → "-" (stdin mode) or first positional (interactive)
 interactive     → switches base command from [claude -p --output-format stream-json --verbose] to [claude]
@@ -47,7 +47,7 @@ appended_system_prompt → --append-system-prompt <value>
 agents_payload  → --agents <value>
 continue_session_id → --resume <value>
 continue_fork   → --fork-session
-permission_flags → appended directly
+permission_config + permission_resolver → resolver.resolve_flags(HarnessId.CLAUDE) appended
 extra_args      → appended directly
 ```
 
@@ -64,7 +64,7 @@ CodexLaunchSpec → CLI args (codex exec --json)
 ──────────────────────────────────────────
 model           → --model <value>
 effort          → -c model_reasoning_effort="<value>"
-permission_flags → appended directly    (--sandbox, --full-auto, --ask-for-approval, etc.)
+permission_config + permission_resolver → resolver.resolve_flags(HarnessId.CODEX) appended
 continue_session_id → subcommand: resume <value>
 report_output_path → -o <value>         (injected via extra_args)
 prompt          → "-" (stdin mode) or last positional
@@ -128,7 +128,7 @@ model           → --model <value>       (already normalized: opencode- prefix 
 effort          → --variant <value>
 continue_session_id → --session <value>
 continue_fork   → --fork
-permission_flags → (none currently; OPENCODE_PERMISSION goes via env)
+permission_config → env_overrides via adapter.env_overrides(config) (OPENCODE_PERMISSION)
 prompt          → "-" (stdin mode) or last positional
 extra_args      → appended before prompt
 ```
@@ -171,13 +171,14 @@ Both Codex and OpenCode use different subcommands for subprocess (`exec`/`run`) 
 
 ## ConnectionConfig Changes
 
-After the refactor, `ConnectionConfig` carries transport-level config only:
+After Phase 4, `ConnectionConfig` carries transport-level config only. During Phase 3, `model` stays for Codex/OpenCode backward compatibility (D11):
 
 ```python
 @dataclass(frozen=True)
 class ConnectionConfig:
     spawn_id: SpawnId
     harness_id: HarnessId
+    model: str | None        # stays until Phase 4 (D11)
     prompt: str              # still needed for initial message send
     repo_root: Path
     env_overrides: dict[str, str]
@@ -187,17 +188,19 @@ class ConnectionConfig:
     debug_tracer: DebugTracer | None = None
 ```
 
-The `model` field moves out of `ConnectionConfig` — it's now in the spec. The connection adapter receives both `ConnectionConfig` (transport concerns) and the harness-specific `ResolvedLaunchSpec` (semantic concerns).
-
-Updated `HarnessConnection.start()` signature:
+Updated `HarnessConnection.start()` signature (D12):
 
 ```python
 async def start(
     self,
     config: ConnectionConfig,
-    params: SpawnParams,   # → replaced by spec
     spec: ResolvedLaunchSpec,
 ) -> None:
 ```
 
-Note: `SpawnParams` is removed from `start()`. The spec replaces it entirely. The streaming runner constructs the spec using the harness adapter's `resolve_launch_spec()` before calling `connection.start()`.
+`SpawnParams` is removed from `start()`. The spec replaces it entirely. The streaming runner:
+1. Extracts `plan.execution.permission_resolver` (new plumbing — previously unused by streaming path).
+2. Calls `adapter.resolve_launch_spec(run_params, permission_resolver)`.
+3. Passes the spec to `connection.start(config, spec)`.
+
+`SpawnManager.start_spawn()` is updated to accept and forward the spec. SpawnManager does NOT construct specs — it's a transport coordinator. The streaming runner provides the spec.

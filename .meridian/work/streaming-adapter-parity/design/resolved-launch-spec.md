@@ -132,8 +132,8 @@ def resolve_launch_spec(self, run: SpawnParams, perms: PermissionResolver) -> Cl
     # Effort: normalize to Claude values
     effort = self._normalize_effort(run.effort)
 
-    # Permission flags
-    permission_flags = tuple(perms.resolve_flags(self.id))
+    # Permissions — semantic, not CLI flags (D9)
+    permission_config = perms.config if hasattr(perms, 'config') else PermissionConfig()
 
     # Session
     continue_session_id = (run.continue_harness_session_id or "").strip() or None
@@ -154,7 +154,8 @@ def resolve_launch_spec(self, run: SpawnParams, perms: PermissionResolver) -> Cl
         prompt=run.prompt,
         continue_session_id=continue_session_id,
         continue_fork=continue_fork,
-        permission_flags=permission_flags,
+        permission_config=permission_config,
+        permission_resolver=perms,
         extra_args=run.extra_args,
         report_output_path=run.report_output_path,
         interactive=run.interactive,

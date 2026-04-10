@@ -44,8 +44,9 @@ def test_spec_matches_command(harness, params, perms):
     if spec.effort:
         # harness-specific effort flag
         assert_effort_in_command(harness.id, spec.effort, command)
-    if spec.permission_flags:
-        for flag in spec.permission_flags:
+    if spec.permission_resolver:
+        expected_flags = spec.permission_resolver.resolve_flags(harness.id)
+        for flag in expected_flags:
             assert flag in command
     # ... etc for each field
 ```
