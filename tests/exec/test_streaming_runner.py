@@ -24,7 +24,8 @@ from meridian.lib.harness.connections.base import (
     ConnectionConfig,
     HarnessEvent,
 )
-from meridian.lib.harness.launch_spec import ResolvedLaunchSpec
+from meridian.lib.harness.launch_spec import OpenCodeLaunchSpec, ResolvedLaunchSpec
+from meridian.lib.harness.opencode import OpenCodeAdapter
 from meridian.lib.harness.registry import HarnessRegistry
 from meridian.lib.launch import streaming_runner as streaming_runner_module
 from meridian.lib.launch.streaming_runner import execute_with_streaming, run_streaming_spawn
@@ -56,6 +57,12 @@ def _fake_opencode_idle_connection_class(
     _harness_id: HarnessId,
 ) -> type[_OpenCodeIdleThenHangConnection]:
     return _OpenCodeIdleThenHangConnection
+
+
+def _fake_opencode_capture_spec_connection_class(
+    _harness_id: HarnessId,
+) -> type[_OpenCodeCaptureSpecThenIdleConnection]:
+    return _OpenCodeCaptureSpecThenIdleConnection
 
 
 class _DummyCodexHarness(BaseSubprocessHarness):
@@ -300,6 +307,14 @@ class _OpenCodeIdleThenHangConnection(_HangingAfterTurnCompletedConnection):
         )
         while True:
             await asyncio.sleep(3600)
+
+
+class _OpenCodeCaptureSpecThenIdleConnection(_OpenCodeIdleThenHangConnection):
+    seen_spec: ResolvedLaunchSpec | None = None
+
+    async def start(self, config: ConnectionConfig, spec: ResolvedLaunchSpec) -> None:
+        type(self).seen_spec = spec
+        await super().start(config, spec)
 
 
 def _build_plan(
@@ -633,3 +648,45 @@ async def test_execute_with_streaming_succeeds_when_opencode_idle_completes_but_
     assert row.exit_code == 0
     report = (state_root / "spawns" / str(run.spawn_id) / "report.md").read_text(encoding="utf-8")
     assert "OpenCode session became idle." in report
+
+
+@pytest.mark.asyncio
+async def test_execute_with_streaming_opencode_uses_adapter_normalized_launch_spec(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_root = resolve_state_paths(tmp_path).root_dir
+    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
+    registry = HarnessRegistry()
+    registry.register(OpenCodeAdapter())
+    monkeypatch.setattr(spawn_manager_module, "ControlSocketServer", _FakeControlSocketServer)
+    monkeypatch.setattr(
+        "meridian.lib.harness.connections.get_connection_class",
+        _fake_opencode_capture_spec_connection_class,
+    )
+    _OpenCodeCaptureSpecThenIdleConnection.seen_spec = None
+
+    run = Spawn(
+        spawn_id=SpawnId("r5"),
+        prompt="hello",
+        model=ModelId("opencode-gpt-5.3-codex"),
+        status="queued",
+    )
+
+    exit_code = await asyncio.wait_for(
+        execute_with_streaming(
+            run,
+            plan=_build_plan(HarnessId.OPENCODE, "opencode-gpt-5.3-codex"),
+            repo_root=tmp_path,
+            state_root=state_root,
+            artifacts=artifacts,
+            registry=registry,
+            cwd=tmp_path,
+        ),
+        timeout=0.5,
+    )
+
+    assert exit_code == 0
+    observed_spec = _OpenCodeCaptureSpecThenIdleConnection.seen_spec
+    assert isinstance(observed_spec, OpenCodeLaunchSpec)
+    assert observed_spec.model == "gpt-5.3-codex"

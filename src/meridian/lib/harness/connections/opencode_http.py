@@ -153,7 +153,6 @@ class OpenCodeConnection:
         try:
             await self._launch_process(config, spec)
             self._session_id = await self._create_session_with_retry(
-                config,
                 spec,
                 timeout_seconds=startup_timeout,
             )
@@ -303,7 +302,6 @@ class OpenCodeConnection:
 
     async def _create_session_with_retry(
         self,
-        config: ConnectionConfig,
         spec: ResolvedLaunchSpec,
         *,
         timeout_seconds: float,
@@ -314,7 +312,7 @@ class OpenCodeConnection:
             if self._process_exited():
                 raise RuntimeError("OpenCode process exited before becoming healthy")
             try:
-                session_id = await self._create_session(config, spec)
+                session_id = await self._create_session(spec)
                 self._last_health_ok = True
                 return session_id
             except Exception as exc:
@@ -326,13 +324,21 @@ class OpenCodeConnection:
                 ) from last_error
             await asyncio.sleep(0.2)
 
-    async def _create_session(self, config: ConnectionConfig, spec: ResolvedLaunchSpec) -> str:
+    async def _create_session(self, spec: ResolvedLaunchSpec) -> str:
         payload: dict[str, object] = {}
-        if config.model is not None:
-            payload["model"] = config.model
-            payload["modelID"] = config.model
+        if spec.model is not None:
+            payload["model"] = spec.model
+            payload["modelID"] = spec.model
+        normalized_effort = (spec.effort or "").strip()
+        if normalized_effort:
+            logger.debug(
+                "OpenCode streaming does not support effort override; ignoring effort=%s",
+                normalized_effort,
+            )
+        if spec.continue_fork:
+            logger.debug("OpenCode streaming does not support session fork; ignoring continue_fork")
         if isinstance(spec, OpenCodeLaunchSpec):
-            if spec.agent_name is not None:
+            if spec.agent_name:
                 payload["agent"] = spec.agent_name
             if spec.skills:
                 payload["skills"] = list(spec.skills)
