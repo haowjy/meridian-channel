@@ -28,7 +28,7 @@ from meridian.lib.harness.common import parse_json_stream_event, unwrap_event_pa
 from meridian.lib.harness.connections.base import ConnectionConfig, HarnessConnection
 from meridian.lib.harness.extractor import StreamingExtractor
 from meridian.lib.harness.launch_spec import ResolvedLaunchSpec
-from meridian.lib.harness.registry import HarnessRegistry
+from meridian.lib.harness.registry import HarnessRegistry, get_default_harness_registry
 from meridian.lib.launch.claude_preflight import (
     ensure_claude_session_accessible,
     merge_allowed_tools_flag,
@@ -61,6 +61,7 @@ from meridian.lib.state.spawn_store import (
 from meridian.lib.streaming.spawn_manager import DrainOutcome, SpawnManager
 
 if TYPE_CHECKING:
+    from meridian.lib.harness.adapter import PermissionResolver
     from meridian.lib.harness.connections.base import HarnessEvent
 
 OUTPUT_FILENAME = "output.jsonl"
@@ -452,16 +453,8 @@ async def run_streaming_spawn(
     consume_task: asyncio.Task[None] | None = None
     terminal_event_future: asyncio.Future[_TerminalEventOutcome] | None = None
     subscriber: asyncio.Queue[HarnessEvent | None] | None = None
-    run_spec = ResolvedLaunchSpec(
-        model=(str(params.model).strip() or None) if params.model else None,
-        effort=params.effort,
-        prompt=params.prompt,
-        continue_session_id=(params.continue_harness_session_id or "").strip() or None,
-        continue_fork=params.continue_fork,
-        extra_args=params.extra_args,
-        report_output_path=params.report_output_path,
-        interactive=params.interactive,
-    )
+    adapter = get_default_harness_registry().get_subprocess_harness(config.harness_id)
+    run_spec = adapter.resolve_launch_spec(params, cast("PermissionResolver", None))
     try:
         async with heartbeat_scope(heartbeat_path):
             connection = await manager.start_spawn(config, run_spec)

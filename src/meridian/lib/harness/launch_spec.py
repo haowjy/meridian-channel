@@ -77,7 +77,7 @@ _SPEC_HANDLED_FIELDS: frozenset[str] = frozenset(
         "adhoc_agent_payload",
         "extra_args",
         "repo_root",
-        "mcp_tools",
+        "mcp_tools",  # handled in env.py, not carried in the launch spec
         "interactive",
         "continue_harness_session_id",
         "continue_fork",
