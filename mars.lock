@@ -16,8 +16,8 @@ commit = "e5a7de45ea2617898a9adeb7aba5f07543de079d"
 
 [dependencies.meridian-dev-workflow]
 url = "https://github.com/meridian-flow/meridian-dev-workflow"
-version = "v0.0.16"
-commit = "0b2d12a581a72565bf395c71f1e55915e794c3e5"
+version = "v0.0.17"
+commit = "3e1b4b6801da4f9a9cd772b4f084c66febb961a7"
 
 [items."agents/architect.md"]
 source = "meridian-dev-workflow"
@@ -259,8 +259,9 @@ dest_path = "skills/dev-artifacts"
 [items."skills/dev-principles"]
 source = "meridian-dev-workflow"
 kind = "skill"
-source_checksum = "sha256:a178816a7b55a6a3b0380fc71ea7e459e2431778f306cb426cdfb785d39f2dd5"
-installed_checksum = "sha256:a178816a7b55a6a3b0380fc71ea7e459e2431778f306cb426cdfb785d39f2dd5"
+version = "v0.0.17"
+source_checksum = "sha256:cfaf7d2dcc4dfa914cb568bf86ad34feceaa8d868df0508d38325d8d345c857c"
+installed_checksum = "sha256:cfaf7d2dcc4dfa914cb568bf86ad34feceaa8d868df0508d38325d8d345c857c"
 dest_path = "skills/dev-principles"
 
 [items."skills/frontend-design"]
