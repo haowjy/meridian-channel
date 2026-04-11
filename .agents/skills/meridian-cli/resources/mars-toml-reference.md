@@ -41,9 +41,12 @@ links = [".claude"]     # directories linked via meridian mars link
 
 Without filters, every agent and skill discovered in a source is installed.
 
-- **`agents`/`skills`**: only install listed items
-- **`exclude`**: install everything except listed items
-- Both: `agents`/`skills` defines the set, `exclude` removes from it
+Filter modes are **mutually exclusive** — a source picks one. Precedence (highest first):
+
+- **`only_skills`** / **`only_agents`**: filter by kind, overrides all other filter fields
+- **`agents`** / **`skills`**: Include mode. Only items listed in these fields are installed. Both `agents` and `skills` combine into a single include set.
+- **`exclude`**: Exclude mode. Install everything except items listed here. Only takes effect when neither `agents` nor `skills` is set — adding `exclude` alongside `agents`/`skills` is silently ignored.
+- No filter fields set: install everything.
 
 ## Renames
 

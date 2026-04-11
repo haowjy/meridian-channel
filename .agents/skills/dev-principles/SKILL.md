@@ -63,6 +63,11 @@ Code that talks to external systems — CLI tools, APIs, wire protocols, servers
 - Treat "it compiles and the internal tests pass" as necessary but not sufficient for integration code. The only proof is running against the real external system.
 - When integration fails, the debug trace should show exactly what was sent, what came back, and where the mismatch is. If it can't, the observability is inadequate.
 
+# Keep Docs Current
+
+- Update docs in the same change as the behavior they describe — doc drift compounds silently and future readers trust stale docs until they break.
+- Reference material for external tools is a snapshot; re-verify against the tool when versions change.
+
 # Chesterton's Fence
 
 - Understand why code exists before removing it.

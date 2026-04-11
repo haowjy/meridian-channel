@@ -11,13 +11,13 @@ commit = "92f892f2b99744a4501f35bce9a2e384878e4877"
 
 [dependencies.meridian-base]
 url = "https://github.com/meridian-flow/meridian-base"
-version = "v0.0.13"
-commit = "e5a7de45ea2617898a9adeb7aba5f07543de079d"
+version = "v0.0.14"
+commit = "45d6e2e7195ccf7b0412435e5ba6b8cf4e3a0178"
 
 [dependencies.meridian-dev-workflow]
 url = "https://github.com/meridian-flow/meridian-dev-workflow"
-version = "v0.0.17"
-commit = "3e1b4b6801da4f9a9cd772b4f084c66febb961a7"
+version = "v0.0.18"
+commit = "47896e76da57c4638e1b0009619c907e23eeeab6"
 
 [items."agents/architect.md"]
 source = "meridian-dev-workflow"
@@ -259,9 +259,9 @@ dest_path = "skills/dev-artifacts"
 [items."skills/dev-principles"]
 source = "meridian-dev-workflow"
 kind = "skill"
-version = "v0.0.17"
-source_checksum = "sha256:cfaf7d2dcc4dfa914cb568bf86ad34feceaa8d868df0508d38325d8d345c857c"
-installed_checksum = "sha256:cfaf7d2dcc4dfa914cb568bf86ad34feceaa8d868df0508d38325d8d345c857c"
+version = "v0.0.18"
+source_checksum = "sha256:a8bd60caae739b8cd046733990da7cc4a938ec611a8ddb06753ec1bb6663e2ae"
+installed_checksum = "sha256:a8bd60caae739b8cd046733990da7cc4a938ec611a8ddb06753ec1bb6663e2ae"
 dest_path = "skills/dev-principles"
 
 [items."skills/frontend-design"]
@@ -281,9 +281,9 @@ dest_path = "skills/issues"
 [items."skills/meridian-cli"]
 source = "meridian-base"
 kind = "skill"
-version = "v0.0.13"
-source_checksum = "sha256:c03ad597253425082ad16a6191de01bbcf172c96de361de0f7c6a434891787fa"
-installed_checksum = "sha256:c03ad597253425082ad16a6191de01bbcf172c96de361de0f7c6a434891787fa"
+version = "v0.0.14"
+source_checksum = "sha256:91a58e40d92af4fe622cb179ad573f959d98d83d17fe4c482128eb80a1057e42"
+installed_checksum = "sha256:91a58e40d92af4fe622cb179ad573f959d98d83d17fe4c482128eb80a1057e42"
 dest_path = "skills/meridian-cli"
 
 [items."skills/meridian-privilege-escalation"]
