@@ -27,6 +27,10 @@ from meridian.lib.harness.connections.base import (
 from meridian.lib.harness.ids import HarnessId
 from meridian.lib.harness.launch_spec import ClaudeLaunchSpec
 from meridian.lib.harness.projections.project_claude import project_claude_spec_to_cli_args
+from meridian.lib.launch.constants import (
+    BASE_COMMAND_CLAUDE_STREAMING,
+    BLOCKED_CHILD_ENV_VARS,
+)
 from meridian.lib.launch.env import inherit_child_env
 from meridian.lib.launch.launch_types import ResolvedLaunchSpec
 from meridian.lib.observability.trace_helpers import (
@@ -47,7 +51,7 @@ _HARNESS_NAME: Final[str] = HarnessId.CLAUDE.value
 _BLOCKED_CHILD_ENV_VARS: Final[frozenset[str]] = frozenset(
     {
         "CLAUDECODE",
-        "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
+        *BLOCKED_CHILD_ENV_VARS,
     }
 )
 
@@ -336,15 +340,7 @@ class ClaudeConnection(HarnessConnection[ResolvedLaunchSpec]):
             )
         return project_claude_spec_to_cli_args(
             spec,
-            base_command=(
-                "claude",
-                "-p",
-                "--input-format",
-                "stream-json",
-                "--output-format",
-                "stream-json",
-                "--verbose",
-            ),
+            base_command=BASE_COMMAND_CLAUDE_STREAMING,
         )
 
     async def _send_user_turn(self, text: str) -> None:

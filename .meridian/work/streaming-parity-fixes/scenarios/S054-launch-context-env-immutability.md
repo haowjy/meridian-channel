@@ -3,7 +3,7 @@
 - **Source:** S051 split (impl phase 2 fix) + decisions.md E2.1
 - **Added by:** @impl-orchestrator (phase 2 fix pass)
 - **Tester:** @unit-tester
-- **Status:** pending
+- **Status:** verified
 
 ## Given
 `LaunchContext` exists (Phase 6 scope) and exposes `env` plus `env_overrides` as mapping views over resolved launch environment state.
@@ -27,4 +27,8 @@ Downstream code attempts mutation through either view:
 - Phase note: this scenario is intentionally Phase 6 because `LaunchContext` is introduced there (see `phase-6-shared-launch-context-and-env-invariants.md` and S024).
 
 ## Result (filled by tester)
-_pending_
+- **Date:** 2026-04-10
+- **Status:** verified
+- **Evidence:** [tests/test_launch_process.py](/home/jimyao/gitrepos/meridian-channel/tests/test_launch_process.py:245) asserts `ctx.env` and `ctx.env_overrides` are `MappingProxyType`, verifies positive reads from both mappings, and confirms both mutation attempts raise `TypeError`.
+- **Result:** pass
+- **Note:** Extra probe outside this scenario found frozen-dataclass bypass via `object.__setattr__(ctx, ...)`; mapping-view immutability still holds, but dataclass-level immutability is weaker than the scenario contract.

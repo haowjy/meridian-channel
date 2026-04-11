@@ -687,26 +687,28 @@ def test_claude_projection_field_mapping_table_covers_every_field() -> None:
 def test_claude_adapter_preflight_delegates_to_claude_preflight(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from meridian.lib.launch.launch_types import PreflightResult
+
     execution_cwd = Path("/tmp/execution")
     child_cwd = Path("/tmp/child")
     passthrough_args = ("--allowedTools", "Read")
     expected = ("--add-dir", str(execution_cwd), *passthrough_args)
     seen: dict[str, object] = {}
 
-    def _fake_expand(
+    def _fake_preflight_result(
         *,
         execution_cwd: Path,
         child_cwd: Path,
         passthrough_args: tuple[str, ...],
-    ) -> tuple[str, ...]:
+    ) -> PreflightResult:
         seen["execution_cwd"] = execution_cwd
         seen["child_cwd"] = child_cwd
         seen["passthrough_args"] = passthrough_args
-        return expected
+        return PreflightResult.build(expanded_passthrough_args=expected)
 
     monkeypatch.setattr(
-        "meridian.lib.harness.claude.expand_claude_passthrough_args",
-        _fake_expand,
+        "meridian.lib.harness.claude.build_claude_preflight_result",
+        _fake_preflight_result,
     )
 
     result = ClaudeAdapter().preflight(

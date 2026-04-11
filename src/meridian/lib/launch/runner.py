@@ -21,23 +21,29 @@ from meridian.lib.core.spawn_lifecycle import (
 )
 from meridian.lib.core.types import HarnessId, SpawnId
 from meridian.lib.harness.adapter import (
-    SpawnParams,
     StreamEvent,
 )
 from meridian.lib.harness.claude_preflight import ensure_claude_session_accessible
 from meridian.lib.harness.registry import HarnessRegistry
-from meridian.lib.launch.cwd import resolve_child_execution_cwd
-from meridian.lib.launch.launch_types import PreflightResult
 from meridian.lib.safety.budget import Budget, BudgetBreach, LiveBudgetTracker
 from meridian.lib.safety.guardrails import GuardrailFailure, run_guardrails
 from meridian.lib.safety.redaction import SecretSpec, redact_secret_bytes
 from meridian.lib.state import spawn_store
 from meridian.lib.state.artifact_store import ArtifactStore, make_artifact_key
 from meridian.lib.state.atomic import atomic_write_bytes, atomic_write_text
-from meridian.lib.state.paths import resolve_spawn_log_dir, resolve_state_paths
+from meridian.lib.state.paths import resolve_spawn_log_dir
 from meridian.lib.state.spawn_store import FOREGROUND_LAUNCH_MODE
 
-from .env import build_harness_child_env
+from .constants import (
+    DEFAULT_INFRA_EXIT_CODE,
+    OUTPUT_FILENAME,
+    POST_EXIT_PIPE_DRAIN_TIMEOUT_SECONDS,
+    REPORT_FILENAME,
+    STDERR_FILENAME,
+    SUBPROCESS_REPORT_WATCHDOG_POLL_SECONDS,
+    TOKENS_FILENAME,
+)
+from .context import prepare_launch_context
 from .errors import ErrorCategory, classify_error, should_retry
 from .extract import (
     FinalizeExtraction,
@@ -68,12 +74,6 @@ from .timeout import (
 if TYPE_CHECKING:
     from meridian.lib.ops.spawn.plan import PreparedSpawnPlan
 
-OUTPUT_FILENAME = "output.jsonl"
-STDERR_FILENAME = "stderr.log"
-TOKENS_FILENAME = "tokens.json"
-REPORT_FILENAME = "report.md"
-DEFAULT_INFRA_EXIT_CODE = 2
-POST_EXIT_PIPE_DRAIN_TIMEOUT_SECONDS = 1.0
 _DEFAULT_CONFIG = MeridianConfig()
 DEFAULT_GUARDRAIL_TIMEOUT_SECONDS = _DEFAULT_CONFIG.guardrail_timeout_minutes * 60.0
 logger = structlog.get_logger(__name__)
@@ -165,7 +165,7 @@ async def _report_watchdog(
     If the process is still alive after grace, terminates it via the
     existing terminate_process() helper.
     """
-    poll_interval = 5.0
+    poll_interval = SUBPROCESS_REPORT_WATCHDOG_POLL_SECONDS
     while not report_path.exists():
         if process.returncode is not None:
             return False  # Process exited cleanly, no watchdog needed
@@ -511,14 +511,6 @@ async def execute_with_finalization(
     output_log_path = log_dir / OUTPUT_FILENAME
     report_path = log_dir / REPORT_FILENAME
 
-    # Workaround: when running inside Claude Code, a child `claude -p` CLI
-    # shares the same CWD-derived task directory and deletes the parent's
-    # task output file during its own startup cleanup.  Using a distinct CWD
-    # for the child gives it a separate task directory and avoids the
-    # collision.  The project root is re-injected via `--add-dir` so the
-    # child can still access project files.
-    child_cwd = execution_cwd
-
     resolved_harness_id = harness_id or HarnessId(plan.harness_id)
     harness = registry.get_subprocess_harness(resolved_harness_id)
 
@@ -526,53 +518,27 @@ async def execute_with_finalization(
     kill_grace_seconds = plan.execution.kill_grace_secs
     max_retries = plan.execution.max_retries
     retry_backoff_seconds = plan.execution.retry_backoff_secs
-    resolved_cwd = resolve_child_execution_cwd(
-        repo_root=execution_cwd,
-        spawn_id=run.spawn_id,
-        harness_id=harness.id.value,
+    launch_context = prepare_launch_context(
+        spawn_id=str(run.spawn_id),
+        run_prompt=run.prompt,
+        run_model=str(run.model) if str(run.model).strip() else None,
+        plan=plan,
+        harness=harness,
+        execution_cwd=execution_cwd,
+        state_root=state_root,
+        plan_overrides=env_overrides or {},
+        report_output_path=report_path,
     )
-    if resolved_cwd != execution_cwd:
-        child_cwd = resolved_cwd
-        child_cwd.mkdir(parents=True, exist_ok=True)
+    child_cwd = launch_context.child_cwd
+    run_params = launch_context.run_params
 
-    try:
-        preflight = harness.preflight(
-            execution_cwd=execution_cwd,
-            child_cwd=child_cwd,
-            passthrough_args=plan.passthrough_args,
-        )
-    except AttributeError:
-        preflight = PreflightResult.build(expanded_passthrough_args=plan.passthrough_args)
-    run_params = SpawnParams(
-        prompt=run.prompt,
-        model=run.model if str(run.model).strip() else None,
-        effort=plan.effort,
-        skills=plan.skills,
-        agent=plan.agent_name,
-        adhoc_agent_payload=plan.adhoc_agent_payload,
-        extra_args=preflight.expanded_passthrough_args,
-        repo_root=child_cwd.as_posix(),
-        mcp_tools=plan.mcp_tools,
-        continue_harness_session_id=plan.session.harness_session_id,
-        continue_fork=plan.session.continue_fork,
-        report_output_path=report_path.as_posix(),
-        appended_system_prompt=plan.appended_system_prompt,
-    )
     # Codex fork materialization is resolved during plan construction:
     # - Child spawns: ops/spawn/prepare.py
     # - Primary launches: launch/process.py
     # runner.py executes the prepared plan and must not re-fork.
     prompt_stdin = run.prompt if harness.capabilities.supports_stdin_prompt else None
 
-    resolved_perms = plan.execution.permission_resolver
-    resolved_permission_config = plan.execution.permission_config
-    runtime_env_overrides = {
-        "MERIDIAN_REPO_ROOT": execution_cwd.as_posix(),
-        "MERIDIAN_STATE_ROOT": resolve_state_paths(repo_root).root_dir.resolve().as_posix(),
-    }
-    merged_env_overrides = dict(env_overrides or {})
-    merged_env_overrides.update(runtime_env_overrides)
-    merged_env_overrides.update(preflight.extra_env)
+    resolved_perms = launch_context.perms
     spawn_row = spawn_store.get_spawn(state_root, run.spawn_id)
     raw_launch_mode = (
         (spawn_row.launch_mode or "").strip().lower()
@@ -622,13 +588,7 @@ async def execute_with_finalization(
         execution_cwd=str(child_cwd),
     )
 
-    child_env = build_harness_child_env(
-        base_env=os.environ,
-        adapter=harness,
-        run_params=run_params,
-        permission_config=resolved_permission_config,
-        runtime_env_overrides=merged_env_overrides,
-    )
+    child_env = dict(launch_context.env)
 
     def _record_worker_started(worker_pid: int) -> None:
         spawn_store.mark_spawn_running(

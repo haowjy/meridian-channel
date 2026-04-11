@@ -7,6 +7,8 @@ from typing import cast
 from meridian.lib.harness.adapter import SpawnParams, SubprocessHarness, resolve_mcp_config
 from meridian.lib.safety.permissions import PermissionConfig
 
+from .constants import BLOCKED_CHILD_ENV_VARS
+
 _CHILD_ENV_ALLOWLIST = frozenset(
     {
         "PATH",
@@ -22,11 +24,6 @@ _CHILD_ENV_ALLOWLIST = frozenset(
 )
 _CHILD_ENV_ALLOWLIST_PREFIXES = ("LC_", "XDG_", "UV_")
 _CHILD_ENV_SECRET_SUFFIXES = ("_TOKEN", "_KEY", "_SECRET")
-_NON_PROPAGATING_CHILD_ENV = frozenset(
-    {
-        "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
-    }
-)
 
 
 def _is_allowlisted_child_env_var(key: str) -> bool:
@@ -85,7 +82,7 @@ def inherit_child_env(
     base_env: Mapping[str, str],
     env_overrides: Mapping[str, str] | None,
     *,
-    blocked: Collection[str] = _NON_PROPAGATING_CHILD_ENV,
+    blocked: Collection[str] = BLOCKED_CHILD_ENV_VARS,
 ) -> dict[str, str]:
     """Return an inherited child environment with targeted non-propagation."""
 
@@ -114,6 +111,35 @@ def build_harness_env_overrides(
     return merged
 
 
+def merge_env_overrides(
+    *,
+    plan_overrides: Mapping[str, str],
+    runtime_overrides: Mapping[str, str],
+    preflight_overrides: Mapping[str, str],
+) -> dict[str, str]:
+    """Merge env overrides and reject `MERIDIAN_*` leaks from plan/preflight."""
+
+    forbidden: list[tuple[str, str]] = []
+    for key in plan_overrides:
+        if key.startswith("MERIDIAN_"):
+            forbidden.append((key, "plan_overrides"))
+    for key in preflight_overrides:
+        if key.startswith("MERIDIAN_"):
+            forbidden.append((key, "preflight_overrides"))
+
+    if forbidden:
+        rendered = ", ".join(f"{key} via {source}" for key, source in sorted(forbidden))
+        raise RuntimeError(
+            "MERIDIAN_* keys may only be set by RuntimeContext.child_context(); "
+            f"found leaks: {rendered}"
+        )
+
+    merged = dict(plan_overrides)
+    merged.update(preflight_overrides)
+    merged.update(runtime_overrides)
+    return merged
+
+
 def build_harness_child_env(
     *,
     base_env: Mapping[str, str],
@@ -139,5 +165,5 @@ def build_harness_child_env(
     return inherit_child_env(
         base_env=base_env,
         env_overrides=merged_env,
-        blocked=_NON_PROPAGATING_CHILD_ENV | adapter_blocked,
+        blocked=BLOCKED_CHILD_ENV_VARS | adapter_blocked,
     )

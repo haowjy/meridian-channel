@@ -13,7 +13,12 @@ from meridian.lib.core.types import HarnessId, ModelId
 from meridian.lib.harness.adapter import SpawnParams, resolve_permission_flags
 from meridian.lib.harness.claude import ClaudeAdapter
 from meridian.lib.launch.command import build_launch_env
-from meridian.lib.launch.env import build_harness_child_env, inherit_child_env, sanitize_child_env
+from meridian.lib.launch.env import (
+    build_harness_child_env,
+    inherit_child_env,
+    merge_env_overrides,
+    sanitize_child_env,
+)
 from meridian.lib.launch.launch_types import PermissionResolver, PreflightResult
 from meridian.lib.launch.types import LaunchRequest
 from meridian.lib.safety.permissions import (
@@ -31,6 +36,14 @@ from meridian.lib.safety.permissions import (
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _PYRIGHT_BIN = _REPO_ROOT / ".venv" / "bin" / "pyright"
+_MERIDIAN_RUNTIME_KEYS = (
+    "MERIDIAN_REPO_ROOT",
+    "MERIDIAN_STATE_ROOT",
+    "MERIDIAN_DEPTH",
+    "MERIDIAN_CHAT_ID",
+    "MERIDIAN_FS_DIR",
+    "MERIDIAN_WORK_DIR",
+)
 
 
 def _scan_files_for_pattern(
@@ -285,6 +298,129 @@ def test_build_harness_child_env_uses_claude_specific_blocklist() -> None:
     assert child_env["MERIDIAN_DEPTH"] == "2"
     assert "CLAUDECODE" not in child_env
     assert "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE" not in child_env
+
+
+def test_merge_env_overrides_rejects_meridian_leak_from_preflight() -> None:
+    with pytest.raises(RuntimeError, match=r"MERIDIAN_DEPTH.*preflight_overrides"):
+        merge_env_overrides(
+            plan_overrides={"CUSTOM_TOOL_HOME": "/tmp/tool"},
+            runtime_overrides={"MERIDIAN_DEPTH": "2"},
+            preflight_overrides={"MERIDIAN_DEPTH": "42"},
+        )
+
+
+@pytest.mark.parametrize("key", _MERIDIAN_RUNTIME_KEYS)
+def test_merge_env_overrides_rejects_all_runtime_meridian_keys_from_preflight(
+    key: str,
+) -> None:
+    with pytest.raises(RuntimeError, match=rf"{key} via preflight_overrides"):
+        merge_env_overrides(
+            plan_overrides={},
+            runtime_overrides={"MERIDIAN_DEPTH": "2"},
+            preflight_overrides={key: "blocked"},
+        )
+
+
+def test_merge_env_overrides_rejects_meridian_leak_from_plan() -> None:
+    with pytest.raises(RuntimeError, match=r"MERIDIAN_CHAT_ID.*plan_overrides"):
+        merge_env_overrides(
+            plan_overrides={"MERIDIAN_CHAT_ID": "spoofed"},
+            runtime_overrides={"MERIDIAN_CHAT_ID": "c1"},
+            preflight_overrides={},
+        )
+
+
+@pytest.mark.parametrize("key", _MERIDIAN_RUNTIME_KEYS)
+def test_merge_env_overrides_rejects_all_runtime_meridian_keys_from_plan(
+    key: str,
+) -> None:
+    with pytest.raises(RuntimeError, match=rf"{key} via plan_overrides"):
+        merge_env_overrides(
+            plan_overrides={key: "blocked"},
+            runtime_overrides={"MERIDIAN_DEPTH": "2"},
+            preflight_overrides={},
+        )
+
+
+def test_merge_env_overrides_reports_both_plan_and_preflight_leaks() -> None:
+    with pytest.raises(RuntimeError) as exc_info:
+        merge_env_overrides(
+            plan_overrides={"MERIDIAN_CHAT_ID": "spoofed"},
+            runtime_overrides={"MERIDIAN_DEPTH": "2"},
+            preflight_overrides={"MERIDIAN_DEPTH": "42"},
+        )
+
+    message = str(exc_info.value)
+    assert "MERIDIAN_CHAT_ID" in message
+    assert "plan_overrides" in message
+    assert "MERIDIAN_DEPTH" in message
+    assert "preflight_overrides" in message
+
+
+def test_merge_env_overrides_returns_deterministic_empty_mapping_for_empty_inputs() -> None:
+    assert merge_env_overrides(
+        plan_overrides={},
+        runtime_overrides={},
+        preflight_overrides={},
+    ) == {}
+
+
+def test_merge_env_overrides_accepts_runtime_meridian_keys() -> None:
+    runtime_overrides = {
+        "MERIDIAN_REPO_ROOT": "/repo",
+        "MERIDIAN_STATE_ROOT": "/repo/.meridian",
+        "MERIDIAN_DEPTH": "2",
+        "MERIDIAN_CHAT_ID": "c-parent",
+        "MERIDIAN_FS_DIR": "/repo/.meridian/fs",
+        "MERIDIAN_WORK_DIR": "/repo/.meridian/work/current",
+    }
+
+    merged = merge_env_overrides(
+        plan_overrides={},
+        runtime_overrides=runtime_overrides,
+        preflight_overrides={},
+    )
+
+    assert merged == runtime_overrides
+
+
+def test_merge_env_overrides_allows_non_meridian_plan_and_preflight_keys() -> None:
+    merged = merge_env_overrides(
+        plan_overrides={"CUSTOM_TOOL_HOME": "/tmp/tool"},
+        runtime_overrides={"MERIDIAN_DEPTH": "2"},
+        preflight_overrides={"CODEX_HOME": "/tmp/codex"},
+    )
+
+    assert merged == {
+        "CUSTOM_TOOL_HOME": "/tmp/tool",
+        "CODEX_HOME": "/tmp/codex",
+        "MERIDIAN_DEPTH": "2",
+    }
+
+
+def test_merge_env_overrides_prefers_preflight_over_plan_for_non_meridian_collisions() -> None:
+    merged = merge_env_overrides(
+        plan_overrides={"FOO": "plan"},
+        runtime_overrides={"MERIDIAN_DEPTH": "2"},
+        preflight_overrides={"FOO": "preflight"},
+    )
+
+    assert merged["FOO"] == "preflight"
+    assert merged["MERIDIAN_DEPTH"] == "2"
+
+
+def test_merge_env_overrides_preserves_empty_and_multiline_values() -> None:
+    merged = merge_env_overrides(
+        plan_overrides={
+            "EMPTY_VALUE": "",
+            "MULTILINE_VALUE": "line-1\nline-2",
+        },
+        runtime_overrides={"MERIDIAN_DEPTH": "2"},
+        preflight_overrides={},
+    )
+
+    assert merged["EMPTY_VALUE"] == ""
+    assert merged["MULTILINE_VALUE"] == "line-1\nline-2"
 
 
 def test_build_launch_env_never_exports_permission_tier(

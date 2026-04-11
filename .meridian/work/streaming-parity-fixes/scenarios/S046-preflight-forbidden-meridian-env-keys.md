@@ -3,7 +3,7 @@
 - **Source:** design/edge-cases.md E44 + decisions.md K5 (revision round 3)
 - **Added by:** @design-orchestrator (revision round 3)
 - **Tester:** @unit-tester
-- **Status:** pending
+- **Status:** verified
 
 ## Given
 A fixture adapter whose `preflight(...)` returns `PreflightResult.build(expanded_passthrough_args=(), extra_env={"MERIDIAN_DEPTH": "42", "CODEX_HOME": "/tmp/codex"})`. `RuntimeContext.child_context()` normally produces the canonical `MERIDIAN_DEPTH` value for the child spawn.
@@ -25,4 +25,8 @@ A fixture adapter whose `preflight(...)` returns `PreflightResult.build(expanded
 - Cross-check: search the `harness/` package for any `extra_env["MERIDIAN_*"]` patterns in real adapters — there should be zero.
 
 ## Result (filled by tester)
-_pending_
+- **Date:** 2026-04-10
+- **Status:** verified
+- **Evidence:** [tests/exec/test_permissions.py](/home/jimyao/gitrepos/meridian-channel/tests/exec/test_permissions.py:303) checks the base `MERIDIAN_DEPTH` preflight leak path; [tests/exec/test_permissions.py](/home/jimyao/gitrepos/meridian-channel/tests/exec/test_permissions.py:312) parameterizes all allowed runtime `MERIDIAN_*` keys and asserts each preflight leak raises with `preflight_overrides` in the error; [tests/exec/test_permissions.py](/home/jimyao/gitrepos/meridian-channel/tests/exec/test_permissions.py:387) confirms non-`MERIDIAN_*` preflight keys still survive merge.
+- **Result:** pass
+- **Cross-check:** `rg -n 'extra_env.*MERIDIAN_|MERIDIAN_.*extra_env' src/meridian/lib/harness` returned 0 matches on 2026-04-10.

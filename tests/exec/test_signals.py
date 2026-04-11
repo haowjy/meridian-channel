@@ -21,6 +21,7 @@ from meridian.lib.harness.adapter import (
     resolve_permission_flags,
 )
 from meridian.lib.harness.registry import HarnessRegistry
+from meridian.lib.launch.launch_types import ResolvedLaunchSpec
 from meridian.lib.launch.runner import execute_with_finalization
 from meridian.lib.launch.signals import (
     SignalCoordinator,
@@ -57,6 +58,18 @@ class MockHarnessAdapter:
 
     def mcp_config(self, run: SpawnParams) -> None:
         return None
+
+    def resolve_launch_spec(
+        self,
+        run: SpawnParams,
+        perms: PermissionResolver,
+    ) -> ResolvedLaunchSpec:
+        return ResolvedLaunchSpec(
+            model=str(run.model) if run.model is not None else None,
+            prompt=run.prompt,
+            permission_resolver=perms,
+            extra_args=run.extra_args,
+        )
 
     def build_adhoc_agent_payload(self, *, name: str, description: str, prompt: str) -> str:
         _ = name, description, prompt

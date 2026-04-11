@@ -3,7 +3,7 @@
 - **Source:** design/edge-cases.md E44 + decisions.md K5 (revision round 3 convergence pass, F9)
 - **Added by:** @design-orchestrator (revision round 3 convergence pass)
 - **Tester:** @unit-tester
-- **Status:** pending
+- **Status:** verified
 
 ## Given
 K5 makes `RuntimeContext.child_context()` the sole producer of `MERIDIAN_*` runtime overrides. S046 covers the `preflight_overrides` leak path. This scenario covers the **symmetric** leak path from `plan_overrides` — a plan builder (e.g., REST request handler, CLI plan assembler, profile materializer) that accidentally or maliciously injects a `MERIDIAN_CHAT_ID`, `MERIDIAN_DEPTH`, or similar key into the plan's env override set.
@@ -30,4 +30,8 @@ A `PreparedSpawnPlan` whose `env_overrides` contains `{"MERIDIAN_CHAT_ID": "spoo
 - Regression: grep `src/meridian/lib/` for any place that builds `PreparedSpawnPlan.env_overrides` — every builder must be verified clean of `MERIDIAN_*` key construction, and a comment pointing at K5 must sit next to any env-override assembly that accepts untrusted input.
 
 ## Result (filled by tester)
-_pending_
+- **Date:** 2026-04-10
+- **Status:** verified
+- **Evidence:** [tests/exec/test_permissions.py](/home/jimyao/gitrepos/meridian-channel/tests/exec/test_permissions.py:324) checks the base `MERIDIAN_CHAT_ID` plan-side leak path; [tests/exec/test_permissions.py](/home/jimyao/gitrepos/meridian-channel/tests/exec/test_permissions.py:333) parameterizes all allowed runtime `MERIDIAN_*` keys and asserts each plan-side leak raises with `plan_overrides` in the error; [tests/exec/test_permissions.py](/home/jimyao/gitrepos/meridian-channel/tests/exec/test_permissions.py:345) verifies combined plan+preflight leaks are reported together; [tests/exec/test_permissions.py](/home/jimyao/gitrepos/meridian-channel/tests/exec/test_permissions.py:387) confirms non-`MERIDIAN_*` plan keys still pass through untouched.
+- **Result:** pass
+- **Note:** Merge order for non-`MERIDIAN_*` collisions is plan, then preflight, then runtime; [tests/exec/test_permissions.py](/home/jimyao/gitrepos/meridian-channel/tests/exec/test_permissions.py:401) confirms preflight beats plan for the same key, and [tests/exec/test_permissions.py](/home/jimyao/gitrepos/meridian-channel/tests/exec/test_permissions.py:368) confirms runtime remains the only accepted `MERIDIAN_*` producer.

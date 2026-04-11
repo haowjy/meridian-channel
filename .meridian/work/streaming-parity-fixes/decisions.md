@@ -557,3 +557,41 @@ Both subprocess and streaming projections consume the resolved `spec.model` verb
 **Why:** The "resolver-internal dedupe allowed; cross-dedupe with user extra_args forbidden (last-wins)" contract requires visibility into the collision. Log at DEBUG (not WARNING) because the user tail-wins behavior is intentional, not a fault. The logging is telemetry for troubleshooting double-flag situations, not an error signal.
 
 **Gates at closure:** all seven gates green (ruff, pyright, `test_opencode_http.py`, `test_launch_spec.py -k opencode`, `test_launch_spec_parity.py`, `test_streaming_runner.py`, full pytest excluding smoke). Scenarios S017, S018, S034 all marked `verified` with extra coverage in `test_launch_spec.py`, `test_opencode_http.py`, and `test_launch_spec_parity.py`.
+
+## E6 — Phase 6 execution decisions
+
+### E6.1 — `prepare_launch_context(...)` is the single shared prep path
+
+**What:** Both `src/meridian/lib/launch/runner.py` and `src/meridian/lib/launch/streaming_runner.py` now go through `prepare_launch_context(...)` to produce the deterministic `(run_params, spec, child_cwd, env_overrides)` tuple. `LaunchContext` holds the resolved state with `env` and `env_overrides` as `MappingProxyType` views.
+
+**Why:** Phase 6 parity contract (S024) plus K5 fail-closed merge behavior required a single authoritative prep path. Shared constants now live in `src/meridian/lib/launch/constants.py`; no private duplicates remain in either runner (S026 verified by @verifier p1473).
+
+### E6.2 — `MERIDIAN_*` child overrides are produced only by `RuntimeContext.child_context()`
+
+**What:** `merge_env_overrides(...)` raises when either `plan_overrides` or `preflight.extra_env` contains any `MERIDIAN_*` key. Fail-closed boundary on both channels (S046 and S046b). Spawn-side code in `src/meridian/lib/ops/spawn/execute.py` was updated so `plan_overrides` no longer carry `MERIDIAN_*` keys at the source.
+
+**Why:** K5 fail-closed; preserves the invariant that the runtime channel is the sole producer of `MERIDIAN_*` child overrides. Silent filtering was rejected because a missing override is a silent behavior change, not a recoverable state.
+
+### E6.3 — `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` stays on the plan-overrides channel for Phase 6
+
+**What:** The E3.1 deferred consolidation (routing this env var through `preflight.extra_env`) was not completed in Phase 6. The env var remains on the plan-overrides channel with its existing routing preserved. Because `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` is not a `MERIDIAN_*` key, the fail-closed boundary does not reject it, and downstream behavior is unchanged.
+
+**Why:** Moving the env var to `preflight.extra_env` without touching the surrounding preflight/plan-override callers is non-trivial and crosses Claude adapter-internal state that is easier to consolidate alongside Phase 7's projection/bootstrap convergence. Defer the rename to Phase 7 with no behavioral change in Phase 6.
+
+**Addresses.** E3.1 (deferred, not resolved).
+
+### E6.4 — Unit tester observations worth tracking (non-blocking)
+
+- `merge_env_overrides(...)` preserves non-string values verbatim rather than rejecting or coercing. Today every call site passes strings, so this is a latent loose-schema issue, not a current defect.
+- `LaunchContext` is declared frozen but can still be mutated with `object.__setattr__`. Python's frozen dataclass / Pydantic `frozen=True` only blocks normal attribute assignment; the C-API backdoor is not sealed. For Phase 6's contract this is acceptable because the `env` and `env_overrides` mapping views themselves are `MappingProxyType` (the real immutability boundary, per S054).
+
+Both are flagged for the final review loop, not for an intra-phase fix.
+
+### E6.5 — Smoke tester observations worth tracking (non-blocking)
+
+- Parent allowlist duplicate entries (`A,A,B`) are deduped before launch on both runner paths. Parity holds (both paths behave identically), so S025 is verified. The contractual question of whether parent-env forwarded permission data counts as "user data subject to last-wins / no-dedupe" is deferred to the final review loop; today it is treated as adapter-internal resolver data.
+- `CLAUDECODE` env var is scrubbed from child Claude launches on both paths. Scenario S025 text was stale (predated the scrub); the actual behavior is parity-preserving.
+
+### E6.6 — Verifier observation (minor cleanup)
+
+- `src/meridian/lib/harness/connections/claude_ws.py:51` still names the blocked-env set `_BLOCKED_CHILD_ENV_VARS`, a private module constant. It does not duplicate `constants.py` values (verified), but the naming is close enough to the shared constants that a future refactor should consider consolidating or at least renaming for audit clarity. Deferred to final review loop / Phase 7.

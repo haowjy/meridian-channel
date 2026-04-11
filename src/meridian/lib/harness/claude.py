@@ -16,11 +16,10 @@ from meridian.lib.harness.adapter import (
     HarnessCapabilities,
     McpConfig,
     PermissionResolver,
-    PreflightResult,
     RunPromptPolicy,
     SpawnParams,
 )
-from meridian.lib.harness.claude_preflight import expand_claude_passthrough_args
+from meridian.lib.harness.claude_preflight import build_claude_preflight_result
 from meridian.lib.harness.common import (
     extract_claude_report,
     extract_session_id_from_artifacts,
@@ -30,6 +29,11 @@ from meridian.lib.harness.ids import HarnessId
 from meridian.lib.harness.launch_spec import ClaudeLaunchSpec
 from meridian.lib.harness.launch_types import PromptPolicy, SessionSeed
 from meridian.lib.harness.projections.project_claude import project_claude_spec_to_cli_args
+from meridian.lib.launch.constants import (
+    BASE_COMMAND_CLAUDE_SUBPROCESS,
+    PRIMARY_BASE_COMMAND_CLAUDE,
+)
+from meridian.lib.launch.launch_types import PreflightResult
 from meridian.lib.safety.permissions import PermissionConfig
 
 logger = logging.getLogger(__name__)
@@ -196,14 +200,8 @@ def _tool_call_from_payload(payload: dict[str, object]) -> ToolCall | None:
 class ClaudeAdapter(BaseHarnessAdapter[ClaudeLaunchSpec]):
     """SubprocessHarness implementation for `claude`."""
 
-    BASE_COMMAND: ClassVar[tuple[str, ...]] = (
-        "claude",
-        "-p",
-        "--output-format",
-        "stream-json",
-        "--verbose",  # required by Claude CLI when using stream-json with -p
-    )
-    PRIMARY_BASE_COMMAND: ClassVar[tuple[str, ...]] = ("claude",)
+    BASE_COMMAND: ClassVar[tuple[str, ...]] = BASE_COMMAND_CLAUDE_SUBPROCESS
+    PRIMARY_BASE_COMMAND: ClassVar[tuple[str, ...]] = PRIMARY_BASE_COMMAND_CLAUDE
     _CONSUMED_FIELDS: ClassVar[frozenset[str]] = frozenset(
         {
             "prompt",
@@ -293,12 +291,10 @@ class ClaudeAdapter(BaseHarnessAdapter[ClaudeLaunchSpec]):
         child_cwd: Path,
         passthrough_args: tuple[str, ...],
     ) -> PreflightResult:
-        return PreflightResult.build(
-            expanded_passthrough_args=expand_claude_passthrough_args(
-                execution_cwd=execution_cwd,
-                child_cwd=child_cwd,
-                passthrough_args=passthrough_args,
-            )
+        return build_claude_preflight_result(
+            execution_cwd=execution_cwd,
+            child_cwd=child_cwd,
+            passthrough_args=passthrough_args,
         )
 
     def build_command(self, run: SpawnParams, perms: PermissionResolver) -> list[str]:

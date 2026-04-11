@@ -3,7 +3,7 @@
 - **Source:** design/edge-cases.md E24 + p1411 finding M6 + decisions.md C1 (revision round 3 — parity narrowed to deterministic subset)
 - **Added by:** @design-orchestrator (design phase, updated in revision round 3 convergence pass)
 - **Tester:** @unit-tester
-- **Status:** pending
+- **Status:** verified
 
 ## Given
 A single `SpawnPlan` (canonical test fixture with all fields populated — env vars, cwd, harness, model, prompt, etc.).
@@ -30,4 +30,7 @@ A single `SpawnPlan` (canonical test fixture with all fields populated — env v
 - Regression guard: a comment in the test explains **why** `env` is excluded and points at C1 in decisions.md so future refactors do not "fix" the apparent gap.
 
 ## Result (filled by tester)
-_pending_
+- **Date:** 2026-04-10
+- **Status:** verified
+- **Evidence:** [tests/test_launch_process.py](/home/jimyao/gitrepos/meridian-channel/tests/test_launch_process.py:245) verifies deterministic-subset equality, immutable env views, and the explicit `env` exclusion note; [tests/test_launch_process.py](/home/jimyao/gitrepos/meridian-channel/tests/test_launch_process.py:299) verifies the deterministic tuple changes when `continue_fork` changes; [tests/test_launch_process.py](/home/jimyao/gitrepos/meridian-channel/tests/test_launch_process.py:343) invokes both runner entrypoints with stubbed launch flow and asserts equal deterministic tuples; [tests/test_launch_process.py](/home/jimyao/gitrepos/meridian-channel/tests/test_launch_process.py:426) confirms both runners reference `prepare_launch_context(...)`.
+- **Result:** pass

@@ -16,6 +16,7 @@ from meridian.lib.harness.projections.project_codex_subprocess import (
     map_codex_sandbox_mode,
     project_codex_mcp_config_flags,
 )
+from meridian.lib.launch.constants import BASE_COMMAND_CODEX_STREAMING
 
 logger = logging.getLogger(__name__)
 
@@ -106,8 +107,7 @@ def project_codex_spec_to_appserver_command(
     _consume_streaming_lifecycle_fields(spec)
 
     command: list[str] = [
-        "codex",
-        "app-server",
+        *BASE_COMMAND_CODEX_STREAMING,
         "--listen",
         f"ws://{host}:{port}",
     ]

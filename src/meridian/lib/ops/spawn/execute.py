@@ -95,16 +95,6 @@ class BackgroundWorkerParams(BaseModel):
     execution_cwd: str | None = None
     debug: bool = False
 
-
-def _optional_spawn_id(spawn_id: str | None) -> SpawnId | None:
-    if spawn_id is None:
-        return None
-    normalized = spawn_id.strip()
-    if not normalized:
-        return None
-    return SpawnId(normalized)
-
-
 def depth_limits(max_depth: int, *, ctx: RuntimeContext | None = None) -> tuple[int, int]:
     current_depth = runtime_context(ctx).depth
     if max_depth < 0:
@@ -148,43 +138,10 @@ def _spawn_child_env(
     autocompact: int | None = None,
     ctx: RuntimeContext | None = None,
 ) -> dict[str, str]:
-    resolved_context = runtime_context(ctx)
-    # Preserve Meridian spawn context across nesting without forwarding unrelated
-    # parent process environment variables.
-    child_env = {key: value for key, value in os.environ.items() if key.startswith("MERIDIAN_")}
-    resolved_spawn_id = _optional_spawn_id(spawn_id)
-    if resolved_spawn_id is not None:
-        child_context = resolved_context.child_context(spawn_id=resolved_spawn_id)
-    else:
-        child_context = RuntimeContext(
-            spawn_id=resolved_spawn_id,
-            parent_spawn_id=resolved_context.spawn_id
-            if resolved_context.spawn_id is not None
-            else None,
-            depth=resolved_context.depth + 1,
-            repo_root=resolved_context.repo_root,
-            state_root=state_root or resolved_context.state_root,
-            chat_id=resolved_context.chat_id,
-            work_id=resolved_context.work_id,
-        )
-    resolved_work_id = (work_id or "").strip() or child_context.work_id
-    if resolved_work_id != child_context.work_id or (
-        state_root is not None and state_root != child_context.state_root
-    ):
-        child_context = child_context.model_copy(
-            update={
-                "state_root": state_root if state_root is not None else child_context.state_root,
-                "work_id": resolved_work_id,
-            }
-        )
-    child_env.update(child_context.to_env_overrides())
-    if resolved_context.spawn_id is None:
-        child_env.pop("MERIDIAN_PARENT_SPAWN_ID", None)
-    if resolved_spawn_id is None:
-        child_env.pop("MERIDIAN_SPAWN_ID", None)
-    if not resolved_work_id:
-        child_env.pop("MERIDIAN_WORK_ID", None)
-        child_env.pop("MERIDIAN_WORK_DIR", None)
+    _ = spawn_id, work_id, state_root, ctx
+    child_env: dict[str, str] = {}
+    # K5 boundary: RuntimeContext.child_context() in launch/context.py is the sole
+    # producer of MERIDIAN_* child overrides. Plan overrides stay non-MERIDIAN.
     if autocompact is not None:
         child_env["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"] = str(autocompact)
     return child_env

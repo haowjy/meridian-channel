@@ -29,8 +29,16 @@ from meridian.lib.harness.common import parse_json_stream_event, unwrap_event_pa
 from meridian.lib.harness.connections.base import ConnectionConfig, HarnessConnection
 from meridian.lib.harness.extractor import StreamingExtractor
 from meridian.lib.harness.registry import HarnessRegistry, get_default_harness_registry
-from meridian.lib.launch.cwd import resolve_child_execution_cwd
-from meridian.lib.launch.env import build_harness_child_env
+from meridian.lib.launch.constants import (
+    DEFAULT_INFRA_EXIT_CODE,
+    OUTPUT_FILENAME,
+    REPORT_FILENAME,
+    REPORT_WATCHDOG_GRACE_SECONDS,
+    REPORT_WATCHDOG_POLL_SECONDS,
+    STDERR_FILENAME,
+    TOKENS_FILENAME,
+)
+from meridian.lib.launch.context import prepare_launch_context
 from meridian.lib.launch.errors import ErrorCategory, classify_error, should_retry
 from meridian.lib.launch.extract import (
     FinalizeExtraction,
@@ -38,7 +46,7 @@ from meridian.lib.launch.extract import (
     reset_finalize_attempt_artifacts,
 )
 from meridian.lib.launch.heartbeat import heartbeat_scope
-from meridian.lib.launch.launch_types import PreflightResult, ResolvedLaunchSpec
+from meridian.lib.launch.launch_types import ResolvedLaunchSpec
 from meridian.lib.launch.session_ids import extract_latest_session_id
 from meridian.lib.launch.signals import signal_coordinator, signal_to_exit_code
 from meridian.lib.ops.spawn.plan import PreparedSpawnPlan
@@ -49,7 +57,7 @@ from meridian.lib.safety.redaction import SecretSpec, redact_secret_bytes
 from meridian.lib.state import spawn_store
 from meridian.lib.state.artifact_store import ArtifactStore, make_artifact_key
 from meridian.lib.state.atomic import atomic_write_bytes, atomic_write_text
-from meridian.lib.state.paths import resolve_spawn_log_dir, resolve_state_paths
+from meridian.lib.state.paths import resolve_spawn_log_dir
 from meridian.lib.state.spawn_store import (
     BACKGROUND_LAUNCH_MODE,
     FOREGROUND_LAUNCH_MODE,
@@ -60,13 +68,6 @@ from meridian.lib.streaming.spawn_manager import DrainOutcome, SpawnManager
 if TYPE_CHECKING:
     from meridian.lib.harness.connections.base import HarnessEvent
 
-OUTPUT_FILENAME = "output.jsonl"
-STDERR_FILENAME = "stderr.log"
-TOKENS_FILENAME = "tokens.json"
-REPORT_FILENAME = "report.md"
-DEFAULT_INFRA_EXIT_CODE = 2
-REPORT_WATCHDOG_POLL_SECONDS = 1.0
-REPORT_WATCHDOG_GRACE_SECONDS = 60.0
 _DEFAULT_CONFIG = MeridianConfig()
 DEFAULT_GUARDRAIL_TIMEOUT_SECONDS = _DEFAULT_CONFIG.guardrail_timeout_minutes * 60.0
 logger = structlog.get_logger(__name__)
@@ -728,26 +729,20 @@ async def execute_with_streaming(
     max_retries = plan.execution.max_retries
     retry_backoff_seconds = plan.execution.retry_backoff_secs
 
-    child_cwd = execution_cwd
-    resolved_cwd = resolve_child_execution_cwd(
-        repo_root=execution_cwd,
-        spawn_id=run.spawn_id,
-        harness_id=harness.id.value,
+    launch_context = prepare_launch_context(
+        spawn_id=str(run.spawn_id),
+        run_prompt=run.prompt,
+        run_model=str(run.model) if str(run.model).strip() else None,
+        plan=plan,
+        harness=harness,
+        execution_cwd=execution_cwd,
+        state_root=state_root,
+        plan_overrides=env_overrides or {},
+        report_output_path=report_path,
     )
-    if resolved_cwd != execution_cwd:
-        child_cwd = resolved_cwd
-        child_cwd.mkdir(parents=True, exist_ok=True)
-
-    try:
-        preflight = harness.preflight(
-            execution_cwd=execution_cwd,
-            child_cwd=child_cwd,
-            passthrough_args=tuple(plan.passthrough_args),
-        )
-    except AttributeError:
-        preflight = PreflightResult.build(
-            expanded_passthrough_args=tuple(plan.passthrough_args)
-        )
+    child_cwd = launch_context.child_cwd
+    spec = launch_context.spec
+    child_env = dict(launch_context.env)
 
     spawn_store.update_spawn(
         state_root,
@@ -765,38 +760,6 @@ async def execute_with_streaming(
             source_cwd=Path(plan.session.source_execution_cwd),
             child_cwd=child_cwd,
         )
-
-    run_params = SpawnParams(
-        prompt=run.prompt,
-        model=run.model if str(run.model).strip() else None,
-        effort=plan.effort,
-        skills=plan.skills,
-        agent=plan.agent_name,
-        adhoc_agent_payload=plan.adhoc_agent_payload,
-        extra_args=preflight.expanded_passthrough_args,
-        repo_root=child_cwd.as_posix(),
-        mcp_tools=plan.mcp_tools,
-        continue_harness_session_id=plan.session.harness_session_id,
-        continue_fork=plan.session.continue_fork,
-        report_output_path=report_path.as_posix(),
-        appended_system_prompt=plan.appended_system_prompt,
-    )
-    spec = harness.resolve_launch_spec(run_params, plan.execution.permission_resolver)
-
-    runtime_env_overrides = {
-        "MERIDIAN_REPO_ROOT": execution_cwd.as_posix(),
-        "MERIDIAN_STATE_ROOT": resolve_state_paths(repo_root).root_dir.resolve().as_posix(),
-    }
-    merged_env_overrides = dict(env_overrides or {})
-    merged_env_overrides.update(runtime_env_overrides)
-    merged_env_overrides.update(preflight.extra_env)
-    child_env = build_harness_child_env(
-        base_env=os.environ,
-        adapter=harness,
-        run_params=run_params,
-        permission_config=plan.execution.permission_config,
-        runtime_env_overrides=merged_env_overrides,
-    )
     tracer: DebugTracer | None = None
     if debug:
         from meridian.lib.observability.debug_tracer import DebugTracer

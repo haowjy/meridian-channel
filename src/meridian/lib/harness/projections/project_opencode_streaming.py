@@ -12,6 +12,7 @@ from meridian.lib.harness.launch_spec import OpenCodeLaunchSpec
 from meridian.lib.harness.projections.project_opencode_subprocess import (
     HarnessCapabilityMismatch,
 )
+from meridian.lib.launch.constants import BASE_COMMAND_OPENCODE_STREAMING
 
 logger = logging.getLogger(__name__)
 
@@ -83,8 +84,7 @@ def project_opencode_spec_to_serve_command(
     _consume_streaming_lifecycle_fields(spec)
 
     command: list[str] = [
-        "opencode",
-        "serve",
+        *BASE_COMMAND_OPENCODE_STREAMING,
         "--hostname",
         host,
         "--port",

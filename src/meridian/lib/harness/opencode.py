@@ -28,6 +28,10 @@ from meridian.lib.harness.launch_types import PromptPolicy, SessionSeed
 from meridian.lib.harness.projections.project_opencode_subprocess import (
     project_opencode_spec_to_cli_args,
 )
+from meridian.lib.launch.constants import (
+    BASE_COMMAND_OPENCODE_SUBPROCESS,
+    PRIMARY_BASE_COMMAND_OPENCODE,
+)
 from meridian.lib.safety.permissions import PermissionConfig
 
 logger = logging.getLogger(__name__)
@@ -136,8 +140,8 @@ def _owns_session(repo_root: Path, session_ref: str) -> bool:
 class OpenCodeAdapter(BaseHarnessAdapter[OpenCodeLaunchSpec]):
     """SubprocessHarness implementation for `opencode`."""
 
-    BASE_COMMAND: ClassVar[tuple[str, ...]] = ("opencode", "run")
-    PRIMARY_BASE_COMMAND: ClassVar[tuple[str, ...]] = ("opencode",)
+    BASE_COMMAND: ClassVar[tuple[str, ...]] = BASE_COMMAND_OPENCODE_SUBPROCESS
+    PRIMARY_BASE_COMMAND: ClassVar[tuple[str, ...]] = PRIMARY_BASE_COMMAND_OPENCODE
     SESSION_ID_KEYS: ClassVar[tuple[str, ...]] = (
         "session_id",
         "sessionId",

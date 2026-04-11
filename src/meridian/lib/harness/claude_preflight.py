@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
 import structlog
 
+from meridian.lib.launch.launch_types import PreflightResult
 from meridian.lib.launch.text_utils import dedupe_nonempty
 
 logger = structlog.get_logger(__name__)
@@ -145,8 +147,28 @@ def expand_claude_passthrough_args(
     return tuple(expanded_args)
 
 
+def build_claude_preflight_result(
+    *,
+    execution_cwd: Path,
+    child_cwd: Path,
+    passthrough_args: tuple[str, ...],
+    extra_env: Mapping[str, str] | None = None,
+) -> PreflightResult:
+    """Build Claude preflight output with immutable env overrides."""
+
+    return PreflightResult.build(
+        expanded_passthrough_args=expand_claude_passthrough_args(
+            execution_cwd=execution_cwd,
+            child_cwd=child_cwd,
+            passthrough_args=passthrough_args,
+        ),
+        extra_env=dict(extra_env or {}),
+    )
+
+
 __all__ = [
     "CLAUDE_PARENT_ALLOWED_TOOLS_FLAG",
+    "build_claude_preflight_result",
     "ensure_claude_session_accessible",
     "expand_claude_passthrough_args",
     "project_slug",

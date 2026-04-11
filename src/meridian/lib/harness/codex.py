@@ -33,6 +33,10 @@ from meridian.lib.harness.launch_types import PromptPolicy
 from meridian.lib.harness.projections.project_codex_subprocess import (
     project_codex_spec_to_cli_args,
 )
+from meridian.lib.launch.constants import (
+    BASE_COMMAND_CODEX_SUBPROCESS,
+    PRIMARY_BASE_COMMAND_CODEX,
+)
 from meridian.lib.safety.permissions import PermissionConfig
 
 logger = logging.getLogger(__name__)
@@ -261,8 +265,8 @@ def _owns_session(repo_root: Path, session_ref: str) -> bool:
 class CodexAdapter(BaseHarnessAdapter[CodexLaunchSpec]):
     """SubprocessHarness implementation for `codex`."""
 
-    BASE_COMMAND: ClassVar[tuple[str, ...]] = ("codex", "exec", "--json")
-    PRIMARY_BASE_COMMAND: ClassVar[tuple[str, ...]] = ("codex",)
+    BASE_COMMAND: ClassVar[tuple[str, ...]] = BASE_COMMAND_CODEX_SUBPROCESS
+    PRIMARY_BASE_COMMAND: ClassVar[tuple[str, ...]] = PRIMARY_BASE_COMMAND_CODEX
     SESSION_ID_KEYS: ClassVar[tuple[str, ...]] = (
         "session_id",
         "sessionId",
