@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 from pathlib import Path
 from typing import ClassVar
 
@@ -16,6 +17,7 @@ from meridian.lib.harness.adapter import (
     PermissionResolver,
     SpawnParams,
 )
+from meridian.lib.harness.codex import CodexAdapter
 from meridian.lib.harness.common import (
     extract_session_id_from_artifacts,
     extract_usage_from_artifacts,
@@ -25,17 +27,23 @@ from meridian.lib.harness.connections.base import (
     ConnectionConfig,
     HarnessEvent,
 )
-from meridian.lib.harness.launch_spec import OpenCodeLaunchSpec, ResolvedLaunchSpec
+from meridian.lib.harness.launch_spec import (
+    CodexLaunchSpec,
+    OpenCodeLaunchSpec,
+    ResolvedLaunchSpec,
+)
 from meridian.lib.harness.opencode import OpenCodeAdapter
 from meridian.lib.harness.registry import HarnessRegistry
-from meridian.lib.launch import streaming_runner as streaming_runner_module
-from meridian.lib.launch.streaming_runner import execute_with_streaming, run_streaming_spawn
 from meridian.lib.ops.spawn.plan import ExecutionPolicy, PreparedSpawnPlan, SessionContinuation
 from meridian.lib.safety.permissions import PermissionConfig, TieredPermissionResolver
 from meridian.lib.state import spawn_store
 from meridian.lib.state.artifact_store import LocalStore
 from meridian.lib.state.paths import resolve_spawn_log_dir, resolve_state_paths
 from meridian.lib.streaming import spawn_manager as spawn_manager_module
+
+streaming_runner_module = importlib.import_module("meridian.lib.launch.streaming_runner")
+execute_with_streaming = streaming_runner_module.execute_with_streaming
+run_streaming_spawn = streaming_runner_module.run_streaming_spawn
 
 
 def _fake_connection_class(_harness_id: HarnessId) -> type[_HangingAfterTurnCompletedConnection]:
@@ -64,6 +72,12 @@ def _fake_opencode_capture_spec_connection_class(
     _harness_id: HarnessId,
 ) -> type[_OpenCodeCaptureSpecThenIdleConnection]:
     return _OpenCodeCaptureSpecThenIdleConnection
+
+
+def _fake_codex_capture_spec_connection_class(
+    _harness_id: HarnessId,
+) -> type[_CodexCaptureSpecThenIdleConnection]:
+    return _CodexCaptureSpecThenIdleConnection
 
 
 class _DummyCodexHarness(BaseSubprocessHarness):
@@ -324,6 +338,14 @@ class _OpenCodeCaptureSpecThenIdleConnection(_OpenCodeIdleThenHangConnection):
         await super().start(config, spec)
 
 
+class _CodexCaptureSpecThenIdleConnection(_HangingAfterTurnCompletedConnection):
+    seen_spec: ResolvedLaunchSpec | None = None
+
+    async def start(self, config: ConnectionConfig, spec: ResolvedLaunchSpec) -> None:
+        type(self).seen_spec = spec
+        await super().start(config, spec)
+
+
 def _build_plan(
     harness_id: HarnessId = HarnessId.CODEX,
     model: str = "gpt-5.3-codex",
@@ -498,6 +520,63 @@ async def test_execute_with_streaming_succeeds_after_report_watchdog_cleanup(
     assert row.exit_code == 0
     report = (state_root / "spawns" / str(run.spawn_id) / "report.md").read_text(encoding="utf-8")
     assert "Watchdog fallback completed." in report
+
+
+@pytest.mark.asyncio
+async def test_execute_with_streaming_codex_uses_adapter_resolved_launch_spec(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_root = resolve_state_paths(tmp_path).root_dir
+    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
+    registry = HarnessRegistry()
+    registry.register(CodexAdapter())
+    monkeypatch.setattr(spawn_manager_module, "ControlSocketServer", _FakeControlSocketServer)
+    monkeypatch.setattr(
+        "meridian.lib.harness.connections.get_connection_class",
+        _fake_codex_capture_spec_connection_class,
+    )
+    _CodexCaptureSpecThenIdleConnection.seen_spec = None
+
+    run = Spawn(
+        spawn_id=SpawnId("r2b"),
+        prompt="hello",
+        model=ModelId("gpt-5.3-codex"),
+        status="queued",
+    )
+
+    permission_config = PermissionConfig(sandbox="read-only", approval="auto")
+    plan = _build_plan().model_copy(
+        update={
+            "execution": _build_plan().execution.model_copy(
+                update={
+                    "permission_config": permission_config,
+                    "permission_resolver": TieredPermissionResolver(config=permission_config),
+                }
+            )
+        }
+    )
+
+    exit_code = await asyncio.wait_for(
+        execute_with_streaming(
+            run,
+            plan=plan,
+            repo_root=tmp_path,
+            state_root=state_root,
+            artifacts=artifacts,
+            registry=registry,
+            cwd=tmp_path,
+        ),
+        timeout=0.5,
+    )
+
+    assert exit_code == 0
+    observed_spec = _CodexCaptureSpecThenIdleConnection.seen_spec
+    assert isinstance(observed_spec, CodexLaunchSpec)
+    assert observed_spec.model == "gpt-5.3-codex"
+    assert observed_spec.permission_resolver.config == permission_config
+    assert observed_spec.report_output_path is not None
+    assert observed_spec.report_output_path.endswith("/report.md")
 
 
 @pytest.mark.asyncio

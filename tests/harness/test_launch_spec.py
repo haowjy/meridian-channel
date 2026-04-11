@@ -65,6 +65,23 @@ def test_codex_resolve_launch_spec_uses_permission_config_values() -> None:
     assert spec.permission_resolver.config.sandbox == "workspace-write"
 
 
+def test_codex_launch_spec_keeps_report_output_path_as_codex_only_field() -> None:
+    codex_fields = set(CodexLaunchSpec.model_fields)
+
+    assert "report_output_path" in codex_fields
+    assert "permission_resolver" in codex_fields
+    assert "sandbox_mode" not in codex_fields
+    assert "approval_mode" not in codex_fields
+
+
+def test_codex_adapter_accounts_for_every_spawn_param_field() -> None:
+    adapter = CodexAdapter()
+
+    assert adapter.handled_fields == frozenset(SpawnParams.model_fields)
+    assert adapter.consumed_fields | adapter.explicitly_ignored_fields == adapter.handled_fields
+    assert adapter.consumed_fields & adapter.explicitly_ignored_fields == frozenset()
+
+
 def test_opencode_resolve_launch_spec_strips_prefix_and_maps_fields() -> None:
     resolver = _resolver()
     run = SpawnParams(

@@ -415,3 +415,75 @@ Four independent reviewers (gpt-5.4, gpt-5.2, claude-opus-4-6, refactor-reviewer
 **Why:** The split currently lives in two unrelated places, but that is still consistent with the subprocess/streaming parity thesis. Consolidate when Phase 6 introduces shared launch-context env helpers or Phase 7 handles projection convergence.
 
 **Impact:** No Phase 3 action. Tracked as handoff to Phase 6/7.
+
+## E4 — Phase 4 execution decisions
+
+### E4.1 — `codex exec` approval flag surface changed; config override is canonical
+
+**What:** Re-probed `codex-cli 0.118.0` and confirmed `codex exec` rejects both `--ask-for-approval` and `-a` as unknown arguments. `-c approval_policy=...` is accepted and is the only stable approval-policy control on this binary surface.
+
+**Why:** D16/D20/G8 require fail-closed projection instead of silent downgrade when requested permission semantics cannot be represented. With no top-level approval flag, Meridian must project approval intent via `-c approval_policy=...`.
+
+**Wire quirk rediscovered:** `--full-auto` help text still references `-a on-request` even though `-a` is no longer accepted on this CLI build.
+
+### E4.2 — Codex approval/sandbox mapping pinned to app-server/thread schema enums
+
+**What:** Generated app-server JSON schema (`codex app-server generate-json-schema --out <dir>`) and pinned streaming request mappings to v2 thread params:
+- `approvalPolicy`: `untrusted | on-failure | on-request | never`
+- `sandbox`: `read-only | workspace-write | danger-full-access`
+
+Meridian mapping now uses:
+- `approval=auto -> on-request`
+- `approval=confirm -> untrusted`
+- `approval=yolo -> never`
+- `approval=default -> no override`
+
+- `sandbox=default -> no override`
+- non-default sandbox modes pass through as-is.
+
+**Why:** Keeps subprocess (`codex exec`) and streaming (`thread/*`) on one canonical semantic mapping.
+
+### E4.3 — Fail-closed boundary implemented in both Codex projection paths
+
+**What:** Added `HarnessCapabilityMismatch` and wired it into both:
+- `project_codex_spec_to_cli_args(...)` (subprocess)
+- `project_codex_spec_to_thread_request(...)` (streaming bootstrap)
+
+If a requested approval/sandbox mode cannot be mapped on this Codex surface, projection raises before launch.
+
+**Why:** This is D20/E38’s load-bearing boundary: no silent downgrade from requested permission semantics.
+
+### E4.4 — Streaming app-server command now projects permission config directly
+
+**What:** Streaming now builds `codex app-server` command via shared projection and includes:
+- `-c sandbox_mode=...` when non-default
+- `-c approval_policy=...` when non-default
+- projected Codex MCP `-c mcp.servers.<name>.command=...` entries
+- passthrough `extra_args` verbatim at the tail
+
+**Why:** Removes hand-built command drift between connection and adapter paths.
+
+### E4.5 — Confirm-mode approval rejection emits queue event before JSON-RPC error
+
+**What:** In `codex_ws` request-approval handling, Meridian now enqueues
+`warning/approvalRejected` before awaiting `_send_jsonrpc_error(...)`.
+
+**Why:** Implements D14/D20/S032 ordering semantics using call sequence (enqueue-before-await), not timing.
+
+### E4.6 — `report_output_path` split pinned: subprocess-only wire, streaming debug-ignore
+
+**What:**
+- Subprocess Codex projection keeps `-o <path>` when non-interactive.
+- Streaming Codex projection does not emit a wire field for `report_output_path` and logs:
+  `Codex streaming ignores report_output_path; reports extracted from artifacts`
+
+**Why:** Implements D16/S019 exactly without leaking Codex subprocess-only behavior into streaming wire protocol.
+
+### E4.7 — Phase 4 closure note — unit tester blocker superseded by smoke tester
+
+**Phase 4 closure note — unit tester blocker superseded by smoke tester.** Unit tester p1462 observed `Operation not permitted (os error 1)` when trying to launch `codex app-server` from within its sandbox, and honestly flipped S007/S009 to `blocked` since it could not run a live round trip. Smoke tester p1463, running with full capability, booted `codex app-server` in three parametrized configs (`sandbox=read-only`, `sandbox=workspace-write`, `default/default`), completed JSON-RPC `initialize` + `thread/start` sessions, and obtained real `threadId`s for each. The projection is correct on both layers (command line + bootstrap payload); the unit tester's blocker was environmental, not a defect. Scenarios S007 and S009 are closed as `verified` on the strength of the smoke tester's real-binary evidence.
+
+Recorded non-blocking observations from the smoke tester worth tracking:
+- `PermissionConfig` has two layers of fail-closed: Pydantic Literal rejects invalid modes at construction time, and the projection mapper raises `HarnessCapabilityMismatch` against future drift. Tests monkeypatch the mapper to exercise the lower layer.
+- `logger.debug(...)` is used for the `report_output_path` streaming-ignore note; users at INFO level will not see it. Consistent with the scenario contract, but flag if a future review wants more visible telemetry.
+- `--full-auto` help text still references the stale `-a on-request` wording even though `-a` is no longer a real top-level flag. Cosmetic only.

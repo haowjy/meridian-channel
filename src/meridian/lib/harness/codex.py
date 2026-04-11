@@ -21,7 +21,6 @@ from meridian.lib.harness.adapter import (
     PermissionResolver,
     RunPromptPolicy,
     SpawnParams,
-    resolve_permission_flags,
 )
 from meridian.lib.harness.common import (
     extract_codex_report,
@@ -31,6 +30,9 @@ from meridian.lib.harness.common import (
 from meridian.lib.harness.ids import HarnessId
 from meridian.lib.harness.launch_spec import CodexLaunchSpec
 from meridian.lib.harness.launch_types import PromptPolicy
+from meridian.lib.harness.projections.project_codex_subprocess import (
+    project_codex_spec_to_cli_args,
+)
 from meridian.lib.safety.permissions import PermissionConfig
 
 logger = logging.getLogger(__name__)
@@ -338,38 +340,8 @@ class CodexAdapter(BaseHarnessAdapter[CodexLaunchSpec]):
 
     def build_command(self, run: SpawnParams, perms: PermissionResolver) -> list[str]:
         spec = self.resolve_launch_spec(run, perms)
-        harness_session_id = (spec.continue_session_id or "").strip()
-        if spec.interactive:
-            # Prompt injection here is a compatibility workaround: Codex does
-            # not expose a true system prompt channel, so Meridian appends a
-            # user-visible guard for fresh sessions only.
-            guarded_prompt = spec.prompt
-            if guarded_prompt and not harness_session_id:
-                guarded_prompt = f"{guarded_prompt}\n\nDO NOT DO ANYTHING. WAIT FOR USER INPUT."
-            command = list(self.PRIMARY_BASE_COMMAND)
-        else:
-            # Codex supports prompt-from-stdin via "-" and this avoids argv length limits.
-            command = list(self.BASE_COMMAND)
-            # Codex -o writes the agent's final response to a file, giving us a clean
-            # report without fragile JSONL parsing.
-            guarded_prompt = "-"
-        if spec.model is not None:
-            command.extend(["--model", spec.model])
-        if spec.effort is not None:
-            normalized_effort = str(spec.effort).strip()
-            if normalized_effort:
-                command.extend(["-c", f'model_reasoning_effort="{normalized_effort}"'])
-        permission_resolver = spec.permission_resolver
-        command.extend(resolve_permission_flags(permission_resolver, self.id))
-        if harness_session_id:
-            command.extend(["resume", harness_session_id])
-        extra_args = list(spec.extra_args)
-        if not spec.interactive and spec.report_output_path:
-            extra_args.extend(["-o", spec.report_output_path])
-        command.extend(extra_args)
-        if guarded_prompt:
-            command.append(guarded_prompt)
-        return command
+        base_command = self.PRIMARY_BASE_COMMAND if spec.interactive else self.BASE_COMMAND
+        return project_codex_spec_to_cli_args(spec, base_command=base_command)
 
     def mcp_config(self, run: SpawnParams) -> McpConfig | None:
         # MCP injection is off by default — agents use the CLI instead.

@@ -3,7 +3,7 @@
 - **Source:** design/edge-cases.md E29 + p1411 finding M7
 - **Added by:** @design-orchestrator (design phase)
 - **Tester:** @smoke-tester
-- **Status:** pending
+- **Status:** verified
 
 ## Given
 Codex streaming spawn with `extra_args=("--invalid-flag",)`. Real `codex app-server` is available (it does NOT accept `--invalid-flag`).
@@ -26,4 +26,18 @@ The streaming runner launches Codex and forwards extra_args.
 - Delta test: remove the pre-launch debug log and confirm diagnosing the failure becomes harder (this is qualitative — the test exists to lock in the debug log presence).
 
 ## Result (filled by tester)
-_pending_
+Verified 2026-04-10 with extra coverage.
+
+- `tests/harness/test_codex_ws.py:276` proves the streaming projection logs passthrough forwarding and preserves `extra_args` verbatim at the command tail.
+- `tests/harness/test_codex_ws.py:355` adds the collision case and proves passthrough config args are logged and not stripped even when they duplicate managed flags.
+- Live local CLI check on `codex-cli 0.118.0` with `codex app-server --listen ws://127.0.0.1:7782 --invalid-flag` returned exit code `2` with `error: unexpected argument '--invalid-flag' found`, which confirms Codex surfaces the bad passthrough arg directly.
+
+### Smoke-tester re-verification (p1463, 2026-04-10)
+- Projected streaming command with `extra_args=("--obviously-bogus",)`: `['codex', 'app-server', '--listen', 'stdio://', '--obviously-bogus']`. Debug log emitted pre-launch: `Forwarding passthrough args to codex app-server: ['--obviously-bogus']`.
+- Ran the real binary with the projected command — `rc=2`, stderr contained:
+  ```
+  error: unexpected argument '--obviously-bogus' found
+  Usage: codex app-server --listen <URL>
+  ```
+- Projected subprocess command: `['codex', 'exec', '--json', '--obviously-bogus', '-']`. Real `codex exec` returned `rc=2` with the same `unexpected argument` error plus the `tip: to pass '--obviously-bogus' as a value, use '-- --obviously-bogus'` suggestion.
+- **Both paths**: Codex rejects the unknown arg itself; Meridian does not swallow, mask, or rewrite it. The debug log pre-launch + Codex's post-launch error provide the exact diagnostic the scenario requires.

@@ -32,8 +32,11 @@ from meridian.lib.harness.connections.base import (
 )
 from meridian.lib.harness.ids import HarnessId
 from meridian.lib.harness.launch_spec import CodexLaunchSpec
+from meridian.lib.harness.projections.project_codex_streaming import (
+    project_codex_spec_to_appserver_command,
+    project_codex_spec_to_thread_request,
+)
 from meridian.lib.launch.env import inherit_child_env
-from meridian.lib.launch.launch_types import ResolvedLaunchSpec
 from meridian.lib.observability.trace_helpers import (
     trace_parse_error,
     trace_state_change,
@@ -125,7 +128,7 @@ async def _aiohttp_connect(ws_url: str) -> _AiohttpWebSocketCompat:
     return _AiohttpWebSocketCompat(session, ws)
 
 
-class CodexConnection(HarnessConnection[ResolvedLaunchSpec]):
+class CodexConnection(HarnessConnection[CodexLaunchSpec]):
     """JSON-RPC 2.0 bridge between Meridian and Codex app-server."""
 
     _ALLOWED_TRANSITIONS: Final[dict[ConnectionState, set[ConnectionState]]] = {
@@ -141,7 +144,7 @@ class CodexConnection(HarnessConnection[ResolvedLaunchSpec]):
         self._state: ConnectionState = "created"
         self._spawn_id: SpawnId = SpawnId("")
         self._config: ConnectionConfig | None = None
-        self._launch_spec: ResolvedLaunchSpec | None = None
+        self._launch_spec: CodexLaunchSpec | None = None
 
         self._process: Process | None = None
         self._ws: Any | None = None
@@ -191,7 +194,7 @@ class CodexConnection(HarnessConnection[ResolvedLaunchSpec]):
             return None
         return process.pid
 
-    async def start(self, config: ConnectionConfig, spec: ResolvedLaunchSpec) -> None:
+    async def start(self, config: ConnectionConfig, spec: CodexLaunchSpec) -> None:
         if self._state not in {"created", "stopped", "failed"}:
             raise RuntimeError(f"Cannot start CodexConnection from state '{self._state}'")
 
@@ -216,12 +219,13 @@ class CodexConnection(HarnessConnection[ResolvedLaunchSpec]):
         self._stderr_handle = (spawn_dir / "stderr.log").open("ab")
 
         try:
+            appserver_command = project_codex_spec_to_appserver_command(
+                spec,
+                host=host,
+                port=port,
+            )
             self._process = await asyncio.create_subprocess_exec(
-                "codex",
-                "app-server",
-                "--listen",
-                ws_url,
-                *spec.extra_args,
+                *appserver_command,
                 cwd=str(config.repo_root),
                 env=env,
                 stdout=asyncio.subprocess.DEVNULL,
@@ -620,6 +624,17 @@ class CodexConnection(HarnessConnection[ResolvedLaunchSpec]):
                     "Rejecting Codex server approval request in confirm mode: %s",
                     method,
                 )
+                await self._event_queue.put(
+                    HarnessEvent(
+                        event_type="warning/approvalRejected",
+                        payload={
+                            "reason": "confirm_mode",
+                            "method": method,
+                        },
+                        harness_id=self.harness_id.value,
+                        raw_text=None,
+                    )
+                )
                 await self._send_jsonrpc_error(
                     request_id,
                     code=-32000,
@@ -688,40 +703,18 @@ class CodexConnection(HarnessConnection[ResolvedLaunchSpec]):
             return timeout_seconds
         return _DEFAULT_CONNECT_TIMEOUT_SECONDS
 
-    async def _bootstrap_thread(self, spec: ResolvedLaunchSpec) -> dict[str, object]:
+    async def _bootstrap_thread(self, spec: CodexLaunchSpec) -> dict[str, object]:
         method, payload = self._thread_bootstrap_request(spec)
         return await self._request(method, payload)
 
     def _thread_bootstrap_request(
         self,
-        spec: ResolvedLaunchSpec,
+        spec: CodexLaunchSpec,
     ) -> tuple[str, dict[str, object]]:
         config = self._config
         if config is None:
             raise RuntimeError("Codex connection config is unavailable for thread bootstrap")
-
-        payload: dict[str, object] = {"cwd": str(config.repo_root)}
-        if spec.model:
-            payload["model"] = spec.model
-
-        if isinstance(spec, CodexLaunchSpec):
-            normalized_effort = (spec.effort or "").strip()
-            if normalized_effort:
-                payload["config"] = {"model_reasoning_effort": normalized_effort}
-        elif (spec.effort or "").strip():
-            logger.debug(
-                "Skipping Codex bootstrap effort for non-Codex spec type: %s",
-                type(spec).__name__,
-            )
-
-        resume_thread_id = (spec.continue_session_id or "").strip()
-        if not resume_thread_id:
-            return ("thread/start", payload)
-
-        payload["threadId"] = resume_thread_id
-        if spec.continue_fork:
-            return ("thread/fork", payload)
-        return ("thread/resume", payload)
+        return project_codex_spec_to_thread_request(spec, cwd=str(config.repo_root))
 
     def _update_turn_state(self, *, method: str, payload: dict[str, object]) -> None:
         if method == "turn/completed":

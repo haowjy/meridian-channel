@@ -22,11 +22,17 @@ from meridian.lib.harness.connections.base import ConnectionConfig
 from meridian.lib.harness.connections.claude_ws import ClaudeConnection
 from meridian.lib.harness.connections.codex_ws import CodexConnection
 from meridian.lib.harness.connections.opencode_http import OpenCodeConnection
-from meridian.lib.harness.launch_spec import ClaudeLaunchSpec, ResolvedLaunchSpec
+from meridian.lib.harness.launch_spec import ClaudeLaunchSpec, CodexLaunchSpec, ResolvedLaunchSpec
 from meridian.lib.harness.opencode import OpenCodeAdapter
 from meridian.lib.harness.projections.project_claude import (
     _check_projection_drift,
     project_claude_spec_to_cli_args,
+)
+from meridian.lib.harness.projections.project_codex_streaming import (
+    _check_projection_drift as _check_codex_streaming_projection_drift,
+)
+from meridian.lib.harness.projections.project_codex_subprocess import (
+    _check_projection_drift as _check_codex_subprocess_projection_drift,
 )
 from meridian.lib.safety.permissions import PermissionConfig
 
@@ -89,7 +95,7 @@ class _TestableCodexConnection(CodexConnection):
     def build_bootstrap_request(
         self,
         config: ConnectionConfig,
-        spec: ResolvedLaunchSpec,
+        spec: CodexLaunchSpec,
     ) -> tuple[str, dict[str, object]]:
         self._config = config
         return self._thread_bootstrap_request(spec)
@@ -139,6 +145,20 @@ def _reasoning_effort_from_codex_command(command: list[str]) -> str | None:
     return None
 
 
+def _values_for_codex_config_setting(command: list[str], key: str) -> list[str]:
+    values: list[str] = []
+    for index, arg in enumerate(command):
+        if arg != "-c":
+            continue
+        if index + 1 >= len(command):
+            continue
+        setting = command[index + 1]
+        prefix = f"{key}="
+        if setting.startswith(prefix):
+            values.append(setting[len(prefix) :])
+    return values
+
+
 def test_claude_projection_drift_guard_happy_path() -> None:
     class _Spec(BaseModel):
         alpha: str = ""
@@ -186,6 +206,94 @@ import meridian.lib.harness.projections.project_claude
     assert result.returncode != 0
     assert "ImportError" in result.stderr
     assert "missing=['future_field']" in result.stderr
+
+
+def test_codex_subprocess_projection_drift_guard_happy_path() -> None:
+    class _Spec(BaseModel):
+        alpha: str = ""
+        beta: str = ""
+
+    _check_codex_subprocess_projection_drift(
+        _Spec,
+        frozenset({"alpha"}),
+        frozenset({"beta"}),
+    )
+
+
+def test_codex_subprocess_projection_drift_guard_missing_field() -> None:
+    class _Spec(BaseModel):
+        alpha: str = ""
+        beta: str = ""
+
+    with pytest.raises(ImportError, match=r"missing=\['beta'\]"):
+        _check_codex_subprocess_projection_drift(_Spec, frozenset({"alpha"}), frozenset())
+
+
+def test_codex_streaming_projection_drift_guard_missing_field() -> None:
+    class _Spec(BaseModel):
+        alpha: str = ""
+        beta: str = ""
+
+    with pytest.raises(ImportError, match=r"missing=\['beta'\]"):
+        _check_codex_streaming_projection_drift(_Spec, frozenset({"alpha"}), frozenset())
+
+
+def test_codex_subprocess_projection_import_fails_when_new_model_field_is_unaccounted() -> None:
+    code = """
+import sys
+from pydantic import Field
+import meridian.lib.harness.launch_spec as launch_spec
+
+launch_spec.CodexLaunchSpec.model_fields = dict(launch_spec.CodexLaunchSpec.model_fields)
+launch_spec.CodexLaunchSpec.model_fields["future_field"] = Field(default=None)
+sys.modules.pop("meridian.lib.harness.projections.project_codex_subprocess", None)
+import meridian.lib.harness.projections.project_codex_subprocess
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "ImportError" in result.stderr
+    assert "missing=['future_field']" in result.stderr
+
+
+def test_codex_streaming_projection_import_fails_when_new_model_field_is_unaccounted() -> None:
+    code = """
+import sys
+from pydantic import Field
+import meridian.lib.harness.launch_spec as launch_spec
+
+launch_spec.CodexLaunchSpec.model_fields = dict(launch_spec.CodexLaunchSpec.model_fields)
+launch_spec.CodexLaunchSpec.model_fields["future_field"] = Field(default=None)
+sys.modules.pop("meridian.lib.harness.projections.project_codex_streaming", None)
+import meridian.lib.harness.projections.project_codex_streaming
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "ImportError" in result.stderr
+    assert "missing=['future_field']" in result.stderr
+
+
+def test_codex_streaming_projection_drift_guard_rejects_dropped_delegated_field() -> None:
+    class _Spec(BaseModel):
+        delegated: str = ""
+
+    _check_codex_streaming_projection_drift(_Spec, frozenset(), frozenset({"delegated"}))
+
+    with pytest.raises(ImportError, match=r"missing=\['delegated'\]"):
+        _check_codex_streaming_projection_drift(_Spec, frozenset(), frozenset())
 
 
 def test_claude_build_command_parity_cases() -> None:
@@ -696,6 +804,79 @@ def test_codex_build_command_effort_levels(
         expected.extend(["-c", f'model_reasoning_effort="{expected_effort}"'])
     expected.append("-")
     assert command == expected
+
+
+def test_codex_build_command_keeps_resolver_flags_when_extra_args_empty() -> None:
+    command = CodexAdapter().build_command(
+        _spawn(),
+        _StaticPermissionResolver(("--perm-codex",)),
+    )
+
+    assert command == ["codex", "exec", "--json", "--perm-codex", "-"]
+
+
+def test_codex_build_command_keeps_colliding_approval_override_in_tail() -> None:
+    command = CodexAdapter().build_command(
+        _spawn(extra_args=("-c", 'approval_policy="untrusted"')),
+        _StaticPermissionResolver(config=PermissionConfig(approval="auto")),
+    )
+
+    assert _values_for_codex_config_setting(command, "approval_policy") == [
+        '"on-request"',
+        '"untrusted"',
+    ]
+    assert command[-3:] == ["-c", 'approval_policy="untrusted"', "-"]
+
+
+@pytest.mark.parametrize(
+    ("sandbox", "approval", "expected_sandbox", "expected_approval_policy"),
+    [
+        ("default", "default", [], []),
+        ("read-only", "default", ["read-only"], []),
+        ("workspace-write", "default", ["workspace-write"], []),
+        ("danger-full-access", "default", ["danger-full-access"], []),
+        ("default", "auto", [], ['"on-request"']),
+        ("default", "confirm", [], ['"untrusted"']),
+        ("default", "yolo", [], ['"never"']),
+        ("read-only", "auto", ["read-only"], ['"on-request"']),
+        ("workspace-write", "confirm", ["workspace-write"], ['"untrusted"']),
+        ("danger-full-access", "yolo", ["danger-full-access"], ['"never"']),
+    ],
+)
+def test_codex_build_command_permission_matrix_projection(
+    sandbox: str,
+    approval: str,
+    expected_sandbox: list[str],
+    expected_approval_policy: list[str],
+) -> None:
+    resolver = _StaticPermissionResolver(
+        config=PermissionConfig(sandbox=sandbox, approval=approval)
+    )
+
+    command = CodexAdapter().build_command(
+        _spawn(model=ModelId("gpt-5.3-codex")),
+        resolver,
+    )
+
+    assert _values_for_flag(command, "--sandbox") == expected_sandbox
+    assert _values_for_codex_config_setting(command, "approval_policy") == expected_approval_policy
+
+
+def test_codex_build_command_fails_closed_when_approval_mode_unmappable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from meridian.lib.harness.projections import (
+        project_codex_subprocess as codex_subprocess_projection,
+    )
+    from meridian.lib.harness.projections.project_codex_subprocess import (
+        HarnessCapabilityMismatch,
+    )
+
+    monkeypatch.setitem(codex_subprocess_projection._APPROVAL_POLICY_BY_MODE, "confirm", None)
+
+    resolver = _StaticPermissionResolver(config=PermissionConfig(approval="confirm"))
+    with pytest.raises(HarnessCapabilityMismatch, match="approval mode 'confirm'"):
+        CodexAdapter().build_command(_spawn(), resolver)
 
 
 def test_opencode_build_command_parity_cases() -> None:
