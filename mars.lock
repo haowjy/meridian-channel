@@ -16,8 +16,8 @@ commit = "e5a7de45ea2617898a9adeb7aba5f07543de079d"
 
 [dependencies.meridian-dev-workflow]
 url = "https://github.com/meridian-flow/meridian-dev-workflow"
-version = "v0.0.15"
-commit = "5868bcd5b2250535ff3276cf2ed88844f70a49a4"
+version = "v0.0.16"
+commit = "0b2d12a581a72565bf395c71f1e55915e794c3e5"
 
 [items."agents/architect.md"]
 source = "meridian-dev-workflow"
@@ -103,9 +103,9 @@ dest_path = "agents/impl-orchestrator.md"
 [items."agents/internet-researcher.md"]
 source = "meridian-dev-workflow"
 kind = "agent"
-version = "v0.0.15"
-source_checksum = "sha256:06b5a662a43a57f585c4af375ec7f0c7579a2b37e4ac62e73d2ea75a749b2e4e"
-installed_checksum = "sha256:06b5a662a43a57f585c4af375ec7f0c7579a2b37e4ac62e73d2ea75a749b2e4e"
+version = "v0.0.16"
+source_checksum = "sha256:ff206696df2a364a7df0115b6cd607294b362ea416e5863639cefff19cfc31e0"
+installed_checksum = "sha256:ff206696df2a364a7df0115b6cd607294b362ea416e5863639cefff19cfc31e0"
 dest_path = "agents/internet-researcher.md"
 
 [items."agents/investigator.md"]
