@@ -808,3 +808,13 @@ Why this closes the regression: users now see actionable missing-binary diagnost
 - **L-6 — dead `except AttributeError` in `context.py` deferred.** Defensive branch appears unreachable with `BaseHarnessAdapter.preflight` default, but cleanup is postponed.
 - **L-7 — `TransportId.SUBPROCESS` unused deferred.** Enum value remains aspirational and non-harmful.
 - **L-8 — S042 narrowing recorded.** Scenario notes now explicitly state user flow reaches streaming only; subprocess variant remains library-level coverage. Scenario result status is unchanged.
+
+### E9.12 — Residual F2 same-wakeup race: completion branch now gates signal cancellation
+
+Residual race from p1521: when `completion_task` and `signal_task` were both ready in the same `asyncio.wait(...)` wakeup but `terminal_event_future` was still pending, `_run_streaming_attempt(...)` and `run_streaming_spawn(...)` took the signal branch first. That skipped the bounded completion-grace helper and could overwrite an already-emitted terminal frame as `cancelled`.
+
+Decision: branch priority is now `terminal_event_future` -> `completion_task` -> `signal_task` (and then other stop conditions). Inside the completion branch, we always run `_await_terminal_outcome_after_completion(...)` first. If grace observes a terminal outcome, it wins; if grace times out, pending signal cancellation is honored.
+
+Coverage: added `test_execute_with_streaming_completion_grace_on_same_wakeup_signal`, which forces `wait_for_completion(...)` to set SIGTERM at completion return time while terminal future resolution is delayed into the grace window. Assertion verifies final row stays terminal-success (`succeeded`, exit `0`) rather than `cancelled`.
+
+F3 cosmetic structured-field extension (`binary_name`, `searched_path` on persisted rows) was not included in this pass; user-visible diagnostics remain functional via `error` text.

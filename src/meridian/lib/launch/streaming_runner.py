@@ -461,15 +461,10 @@ async def run_streaming_spawn(
                     exit_code=terminal_outcome.exit_code,
                     error=terminal_outcome.error,
                 )
-            elif signal_task in done and shutdown_event.is_set():
-                signal_exit = signal_to_exit_code(received_signal[0]) or 130
-                await manager.stop_spawn(
-                    spawn_id,
-                    status="cancelled",
-                    exit_code=signal_exit,
-                    error="cancelled",
-                )
             elif completion_task in done:
+                # Completion and signal can resolve in the same wakeup while a terminal
+                # frame is still queued; run completion grace first to preserve terminal
+                # precedence when that frame lands shortly after drain completion.
                 terminal_outcome = await _await_terminal_outcome_after_completion(
                     completion_task=completion_task,
                     terminal_event_future=terminal_event_future,
@@ -481,6 +476,22 @@ async def run_streaming_spawn(
                         exit_code=terminal_outcome.exit_code,
                         error=terminal_outcome.error,
                     )
+                elif signal_task in done and shutdown_event.is_set():
+                    signal_exit = signal_to_exit_code(received_signal[0]) or 130
+                    await manager.stop_spawn(
+                        spawn_id,
+                        status="cancelled",
+                        exit_code=signal_exit,
+                        error="cancelled",
+                    )
+            elif signal_task in done and shutdown_event.is_set():
+                signal_exit = signal_to_exit_code(received_signal[0]) or 130
+                await manager.stop_spawn(
+                    spawn_id,
+                    status="cancelled",
+                    exit_code=signal_exit,
+                    error="cancelled",
+                )
 
             outcome = await completion_task
             if outcome is None:
@@ -607,15 +618,6 @@ async def _run_streaming_attempt(
             )
             drain_exit_code = terminal_outcome.exit_code
             drain_error = terminal_outcome.error
-        elif signal_task in done and signal_event.is_set():
-            signal_exit = signal_to_exit_code(received_signal[0]) or 130
-            await manager.stop_spawn(
-                run.spawn_id,
-                status="cancelled",
-                exit_code=signal_exit,
-                error="cancelled",
-            )
-            drain_exit_code = signal_exit
         elif budget_task is not None and budget_task in done and budget_signal.is_set():
             await manager.stop_spawn(
                 run.spawn_id,
@@ -636,6 +638,8 @@ async def _run_streaming_attempt(
         elif watchdog_task in done:
             terminated_by_report_watchdog = bool(watchdog_task.result())
         elif completion_task in done:
+            # If completion and signal resolve together, always run the bounded
+            # terminal grace window before honoring cancellation.
             terminal_outcome = await _await_terminal_outcome_after_completion(
                 completion_task=completion_task,
                 terminal_event_future=terminal_event_future,
@@ -649,6 +653,24 @@ async def _run_streaming_attempt(
                 )
                 drain_exit_code = terminal_outcome.exit_code
                 drain_error = terminal_outcome.error
+            elif signal_task in done and signal_event.is_set():
+                signal_exit = signal_to_exit_code(received_signal[0]) or 130
+                await manager.stop_spawn(
+                    run.spawn_id,
+                    status="cancelled",
+                    exit_code=signal_exit,
+                    error="cancelled",
+                )
+                drain_exit_code = signal_exit
+        elif signal_task in done and signal_event.is_set():
+            signal_exit = signal_to_exit_code(received_signal[0]) or 130
+            await manager.stop_spawn(
+                run.spawn_id,
+                status="cancelled",
+                exit_code=signal_exit,
+                error="cancelled",
+            )
+            drain_exit_code = signal_exit
 
         drain_outcome = await completion_task
         if drain_outcome is not None and terminal_outcome is None:

@@ -897,6 +897,124 @@ async def test_execute_with_streaming_prefers_terminal_over_same_wakeup_signal(
 
 
 @pytest.mark.asyncio
+async def test_execute_with_streaming_completion_grace_on_same_wakeup_signal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_root = resolve_state_paths(tmp_path).root_dir
+    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
+    registry = HarnessRegistry()
+    registry.register(_DummyCodexHarness())
+    monkeypatch.setattr(spawn_manager_module, "ControlSocketServer", _FakeControlSocketServer)
+    monkeypatch.setattr(
+        "meridian.lib.harness.connections.get_connection_class",
+        _fake_turn_completed_then_close_connection_class,
+    )
+
+    signal_state: dict[str, object] = {}
+
+    def _capture_signal_handlers(
+        loop: asyncio.AbstractEventLoop,
+        shutdown_event: asyncio.Event,
+        received_signal: list[signal.Signals | None],
+    ) -> list[signal.Signals]:
+        _ = loop
+        signal_state["shutdown_event"] = shutdown_event
+        signal_state["received_signal"] = received_signal
+        return []
+
+    monkeypatch.setattr(
+        streaming_runner_module,
+        "_install_signal_handlers",
+        _capture_signal_handlers,
+    )
+
+    original_wait_for_completion = spawn_manager_module.SpawnManager.wait_for_completion
+
+    async def _wait_for_completion_then_raise_sigterm(
+        manager: spawn_manager_module.SpawnManager,
+        spawn_id: SpawnId,
+    ) -> spawn_manager_module.DrainOutcome | None:
+        outcome = await original_wait_for_completion(manager, spawn_id)
+        received_signal_holder = signal_state.get("received_signal")
+        shutdown_event = signal_state.get("shutdown_event")
+        assert isinstance(received_signal_holder, list)
+        assert isinstance(shutdown_event, asyncio.Event)
+        received_signal_holder[0] = signal.SIGTERM
+        shutdown_event.set()
+        return outcome
+
+    monkeypatch.setattr(
+        spawn_manager_module.SpawnManager,
+        "wait_for_completion",
+        _wait_for_completion_then_raise_sigterm,
+    )
+
+    async def _delayed_terminal_consume(
+        *,
+        subscriber: asyncio.Queue[HarnessEvent | None],
+        budget_tracker: object,
+        budget_signal: asyncio.Event,
+        budget_breach_holder: list[object | None],
+        event_observer: object,
+        stream_stdout_to_terminal: bool,
+        terminal_event_future: asyncio.Future[object] | None = None,
+    ) -> None:
+        _ = (
+            budget_tracker,
+            budget_signal,
+            budget_breach_holder,
+            event_observer,
+            stream_stdout_to_terminal,
+        )
+        while True:
+            event = await subscriber.get()
+            if event is None:
+                return
+            if terminal_event_future is None or terminal_event_future.done():
+                continue
+            terminal_outcome = streaming_runner_module._terminal_event_outcome(event)
+            if terminal_outcome is None:
+                continue
+            # Keep terminal pending long enough for completion+signal to be observed first.
+            await asyncio.sleep(0.05)
+            terminal_event_future.set_result(terminal_outcome)
+
+    monkeypatch.setattr(
+        streaming_runner_module,
+        "_consume_subscriber_events",
+        _delayed_terminal_consume,
+    )
+
+    run = Spawn(
+        spawn_id=SpawnId("r-f2b"),
+        prompt="hello",
+        model=ModelId("gpt-5.3-codex"),
+        status="queued",
+    )
+
+    exit_code = await asyncio.wait_for(
+        execute_with_streaming(
+            run,
+            plan=_build_plan(),
+            repo_root=tmp_path,
+            state_root=state_root,
+            artifacts=artifacts,
+            registry=registry,
+            cwd=tmp_path,
+        ),
+        timeout=1.0,
+    )
+
+    assert exit_code == 0
+    row = spawn_store.get_spawn(state_root, run.spawn_id)
+    assert row is not None
+    assert row.status == "succeeded"
+    assert row.exit_code == 0
+    assert row.error is None
+
+
+@pytest.mark.asyncio
 async def test_execute_with_streaming_persists_missing_binary_diagnostics(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
