@@ -792,11 +792,17 @@ async def test_execute_with_streaming_opencode_uses_adapter_normalized_launch_sp
         model=ModelId("opencode-gpt-5.3-codex"),
         status="queued",
     )
+    plan = _build_plan(HarnessId.OPENCODE, "opencode-gpt-5.3-codex").model_copy(
+        update={
+            "skills": ("skill-a",),
+            "mcp_tools": ("tool-a=echo a",),
+        }
+    )
 
     exit_code = await asyncio.wait_for(
         execute_with_streaming(
             run,
-            plan=_build_plan(HarnessId.OPENCODE, "opencode-gpt-5.3-codex"),
+            plan=plan,
             repo_root=tmp_path,
             state_root=state_root,
             artifacts=artifacts,
@@ -810,3 +816,5 @@ async def test_execute_with_streaming_opencode_uses_adapter_normalized_launch_sp
     observed_spec = _OpenCodeCaptureSpecThenIdleConnection.seen_spec
     assert isinstance(observed_spec, OpenCodeLaunchSpec)
     assert observed_spec.model == "gpt-5.3-codex"
+    assert observed_spec.skills == ()
+    assert observed_spec.mcp_tools == ("tool-a=echo a",)

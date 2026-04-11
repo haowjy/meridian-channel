@@ -1,10 +1,12 @@
 """Resolved launch spec tests for harness adapters."""
 
+import logging
+
 import pytest
 from pydantic import ValidationError
 
 from meridian.lib.core.types import ModelId
-from meridian.lib.harness.adapter import SpawnParams, SubprocessHarness
+from meridian.lib.harness.adapter import RunPromptPolicy, SpawnParams, SubprocessHarness
 from meridian.lib.harness.claude import ClaudeAdapter
 from meridian.lib.harness.codex import CodexAdapter
 from meridian.lib.harness.launch_spec import (
@@ -15,6 +17,16 @@ from meridian.lib.harness.launch_spec import (
     ResolvedLaunchSpec,
 )
 from meridian.lib.harness.opencode import OpenCodeAdapter
+from meridian.lib.harness.projections.project_opencode_streaming import (
+    _ACCOUNTED_FIELDS as _OPENCODE_STREAMING_ACCOUNTED_FIELDS,
+)
+from meridian.lib.harness.projections.project_opencode_subprocess import (
+    _PROJECTED_FIELDS as _OPENCODE_SUBPROCESS_PROJECTED_FIELDS,
+)
+from meridian.lib.harness.projections.project_opencode_subprocess import (
+    HarnessCapabilityMismatch,
+    project_opencode_spec_to_cli_args,
+)
 from meridian.lib.safety.permissions import PermissionConfig, TieredPermissionResolver
 
 
@@ -97,8 +109,125 @@ def test_opencode_resolve_launch_spec_strips_prefix_and_maps_fields() -> None:
     assert spec.model == "gpt-5.3-codex"
     assert spec.effort == "high"
     assert spec.agent_name == "worker"
-    assert spec.skills == ("skill-a", "skill-b")
+    assert spec.skills == ()
     assert spec.permission_resolver.config == resolver.config
+
+
+def test_opencode_resolve_launch_spec_normalizes_provider_model_once() -> None:
+    resolver = _resolver()
+    run_prefixed = SpawnParams(
+        prompt="test prompt",
+        model=ModelId("opencode-openrouter/qwen/qwen3-coder:free"),
+    )
+    run_unprefixed = SpawnParams(
+        prompt="test prompt",
+        model=ModelId("openrouter/qwen/qwen3-coder:free"),
+    )
+
+    prefixed_spec = OpenCodeAdapter().resolve_launch_spec(run_prefixed, resolver)
+    unprefixed_spec = OpenCodeAdapter().resolve_launch_spec(run_unprefixed, resolver)
+
+    assert prefixed_spec.model == "openrouter/qwen/qwen3-coder:free"
+    assert unprefixed_spec.model == "openrouter/qwen/qwen3-coder:free"
+
+
+@pytest.mark.parametrize(
+    ("raw_model", "expected_model"),
+    (
+        (ModelId("gpt-5.3-codex"), "gpt-5.3-codex"),
+        (ModelId("anthropic/claude-sonnet-4-5"), "anthropic/claude-sonnet-4-5"),
+        (ModelId("opencode-anthropic/claude-sonnet-4-5"), "anthropic/claude-sonnet-4-5"),
+        (
+            ModelId("opencode-openrouter/anthropic/claude-sonnet-4-5"),
+            "openrouter/anthropic/claude-sonnet-4-5",
+        ),
+        (
+            ModelId("opencode-opencode-anthropic/claude-sonnet-4-5"),
+            "opencode-anthropic/claude-sonnet-4-5",
+        ),
+        (ModelId(""), None),
+        (None, None),
+    ),
+)
+def test_opencode_resolve_launch_spec_handles_model_shapes_exactly_once(
+    raw_model: ModelId | None,
+    expected_model: str | None,
+) -> None:
+    resolver = _resolver()
+    run = SpawnParams(prompt="test prompt", model=raw_model)
+
+    spec = OpenCodeAdapter().resolve_launch_spec(run, resolver)
+
+    assert spec.model == expected_model
+
+
+def test_opencode_resolve_launch_spec_preserves_skills_when_policy_disables_inline() -> None:
+    class _NoInlineSkillsOpenCodeAdapter(OpenCodeAdapter):
+        def run_prompt_policy(self) -> RunPromptPolicy:
+            return RunPromptPolicy(include_skills=False)
+
+    resolver = _resolver()
+    run = SpawnParams(
+        prompt="test prompt",
+        model=ModelId("opencode-gpt-5.3-codex"),
+        skills=("skill-a", "skill-b"),
+    )
+
+    spec = _NoInlineSkillsOpenCodeAdapter().resolve_launch_spec(run, resolver)
+
+    assert spec.skills == ("skill-a", "skill-b")
+
+
+def test_opencode_subprocess_rejects_mcp_tools() -> None:
+    resolver = _resolver()
+    run = SpawnParams(
+        prompt="test prompt",
+        model=ModelId("opencode-gpt-5.3-codex"),
+        mcp_tools=("tool-a=echo a",),
+    )
+
+    with pytest.raises(HarnessCapabilityMismatch, match="does not support per-spawn mcp_tools"):
+        OpenCodeAdapter().build_command(run, resolver)
+
+
+def test_opencode_projection_field_accounting_covers_spawn_and_launch_spec_fields() -> None:
+    adapter = OpenCodeAdapter()
+    launch_spec_fields = frozenset(OpenCodeLaunchSpec.model_fields)
+
+    assert adapter.handled_fields == frozenset(SpawnParams.model_fields)
+    assert adapter.consumed_fields | adapter.explicitly_ignored_fields == adapter.handled_fields
+    assert adapter.consumed_fields & adapter.explicitly_ignored_fields == frozenset()
+    assert launch_spec_fields == _OPENCODE_SUBPROCESS_PROJECTED_FIELDS
+    assert launch_spec_fields == _OPENCODE_STREAMING_ACCOUNTED_FIELDS
+
+
+def test_opencode_build_command_does_not_emit_dangerous_skip_permissions() -> None:
+    command = OpenCodeAdapter().build_command(
+        SpawnParams(prompt="test prompt", model=ModelId("opencode-gpt-5.3-codex")),
+        _resolver(approval="yolo"),
+    )
+
+    assert "--dangerously-skip-permissions" not in command
+
+
+def test_opencode_subprocess_projection_logs_model_flag_collision_and_keeps_tail(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    spec = OpenCodeLaunchSpec(
+        prompt="test prompt",
+        model="anthropic/claude-sonnet-4-5",
+        extra_args=("-m", "override-model"),
+        permission_resolver=_resolver(),
+    )
+
+    with caplog.at_level(
+        logging.DEBUG, logger="meridian.lib.harness.projections.project_opencode_subprocess"
+    ):
+        command = project_opencode_spec_to_cli_args(spec, base_command=("opencode", "run"))
+
+    assert command[-3:] == ["-m", "override-model", "-"]
+    assert "model" in caplog.text.lower()
+    assert "extra" in caplog.text.lower()
 
 
 @pytest.mark.parametrize(

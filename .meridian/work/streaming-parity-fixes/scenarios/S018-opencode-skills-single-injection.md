@@ -3,7 +3,7 @@
 - **Source:** design/edge-cases.md E18 + p1411 finding M4
 - **Added by:** @design-orchestrator (design phase)
 - **Tester:** @smoke-tester
-- **Status:** pending
+- **Status:** verified
 
 ## Given
 OpenCode streaming spawn with `skills=("skill-a", "skill-b")` and `run_prompt_policy().include_skills = True` (the default). Real `opencode serve` is available on PATH.
@@ -24,4 +24,12 @@ The adapter constructs the `OpenCodeLaunchSpec` and the streaming runner sends t
 - Delta test: force the v1 "double-inject" path (return `spec.skills` populated AND inline them in the prompt) and confirm the smoke test fails.
 
 ## Result (filled by tester)
-_pending_
+Verified with extra coverage on 2026-04-10.
+
+- `tests/harness/test_launch_spec.py:97` confirms the default policy path (`include_skills=True`) clears `spec.skills` to avoid duplicate wire injection.
+- `tests/harness/test_launch_spec.py:164` confirms the alternate policy path (`include_skills=False`) preserves `spec.skills` for native transport delivery.
+- `tests/harness/test_opencode_http.py:108` adds an explicit default-path assertion that the streaming `POST /session` payload omits `skills` when the prompt-inline channel is active.
+- `tests/harness/test_opencode_http.py:126` confirms the non-inline path still carries `skills` in the HTTP payload when `OpenCodeLaunchSpec.skills` is populated.
+- `tests/harness/test_launch_spec_parity.py:1140` confirms default streaming payload omits `skills`, so prompt-inline remains the sole channel in default launches.
+- `tests/exec/test_streaming_runner.py:769` confirms plan skills are threaded through adapter resolution while the final OpenCode launch spec keeps `skills=()` under the default single-channel policy.
+- Live protocol probe (`opencode serve --pure`, 2026-04-10) confirmed `POST /session` accepts a `skills` field, so the non-inline path remains representable when explicitly selected.

@@ -1,0 +1,160 @@
+"""OpenCode streaming projections for serve command and session payload."""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pydantic import BaseModel
+
+from meridian.lib.harness.launch_spec import OpenCodeLaunchSpec
+from meridian.lib.harness.projections.project_opencode_subprocess import (
+    HarnessCapabilityMismatch,
+)
+
+logger = logging.getLogger(__name__)
+
+_SERVE_COMMAND_FIELDS: frozenset[str] = frozenset(
+    {
+        "extra_args",
+        "interactive",
+        "prompt",
+        "permission_resolver",
+    }
+)
+
+_SESSION_PAYLOAD_FIELDS: frozenset[str] = frozenset(
+    {
+        "model",
+        "effort",
+        "continue_session_id",
+        "continue_fork",
+        "agent_name",
+        "skills",
+        "mcp_tools",
+    }
+)
+
+_ACCOUNTED_FIELDS: frozenset[str] = _SERVE_COMMAND_FIELDS | _SESSION_PAYLOAD_FIELDS
+_DELEGATED_FIELDS: frozenset[str] = frozenset()
+
+
+def _check_projection_drift(
+    spec_cls: type[BaseModel],
+    projected_fields: frozenset[str],
+    delegated_fields: frozenset[str],
+) -> None:
+    expected = set(spec_cls.model_fields)
+    accounted = set(projected_fields | delegated_fields)
+    missing = expected - accounted
+    stale = accounted - expected
+    if missing or stale:
+        raise ImportError(
+            f"Projection drift for {spec_cls.__name__}: "
+            f"missing={sorted(missing)} stale={sorted(stale)}"
+        )
+
+
+def _consume_streaming_lifecycle_fields(spec: OpenCodeLaunchSpec) -> None:
+    _ = spec.prompt
+    if spec.interactive:
+        logger.debug(
+            "OpenCode streaming ignores interactive launch flag; "
+            "HTTP transport remains interactive"
+        )
+
+    config = spec.permission_resolver.config
+    if config.approval != "default" or config.sandbox != "default":
+        logger.debug(
+            "OpenCode streaming ignores permission resolver overrides; "
+            "opencode serve has no launch-time permission mapping"
+        )
+
+
+def project_opencode_spec_to_serve_command(
+    spec: OpenCodeLaunchSpec,
+    *,
+    host: str,
+    port: int,
+) -> list[str]:
+    """Build one ``opencode serve`` command from ``OpenCodeLaunchSpec``."""
+
+    _consume_streaming_lifecycle_fields(spec)
+
+    command: list[str] = [
+        "opencode",
+        "serve",
+        "--hostname",
+        host,
+        "--port",
+        str(port),
+    ]
+
+    if spec.extra_args:
+        logger.debug(
+            "Forwarding passthrough args to opencode serve: %s",
+            list(spec.extra_args),
+        )
+        command.extend(spec.extra_args)
+
+    return command
+
+
+def project_opencode_spec_to_session_payload(spec: OpenCodeLaunchSpec) -> dict[str, object]:
+    """Build session-creation payload for the OpenCode HTTP API."""
+
+    _consume_streaming_lifecycle_fields(spec)
+
+    if spec.continue_fork:
+        raise HarnessCapabilityMismatch(
+            "OpenCode streaming cannot express continue_fork semantics over "
+            "the current /session API."
+        )
+
+    payload: dict[str, object] = {}
+
+    if spec.model is not None:
+        payload["model"] = spec.model
+        payload["modelID"] = spec.model
+
+    normalized_effort = (spec.effort or "").strip()
+    if normalized_effort:
+        logger.debug(
+            "OpenCode streaming does not support effort override; ignoring effort=%s",
+            normalized_effort,
+        )
+
+    if spec.agent_name:
+        payload["agent"] = spec.agent_name
+
+    if spec.skills:
+        payload["skills"] = list(spec.skills)
+
+    projected_mcp_tools = [entry.strip() for entry in spec.mcp_tools if entry.strip()]
+    if projected_mcp_tools:
+        payload["mcp"] = projected_mcp_tools
+
+    if spec.continue_session_id is not None:
+        payload["sessionID"] = spec.continue_session_id
+
+    return payload
+
+
+_check_projection_drift(
+    OpenCodeLaunchSpec,
+    _ACCOUNTED_FIELDS,
+    _DELEGATED_FIELDS,
+)
+
+
+__all__ = [
+    "_ACCOUNTED_FIELDS",
+    "_DELEGATED_FIELDS",
+    "_SERVE_COMMAND_FIELDS",
+    "_SESSION_PAYLOAD_FIELDS",
+    "HarnessCapabilityMismatch",
+    "_check_projection_drift",
+    "project_opencode_spec_to_serve_command",
+    "project_opencode_spec_to_session_payload",
+]

@@ -3,7 +3,7 @@
 - **Source:** design/edge-cases.md E34 + p1411 finding M8
 - **Added by:** @design-orchestrator (design phase)
 - **Tester:** @verifier (+ @unit-tester for pyright)
-- **Status:** pending
+- **Status:** verified
 
 ## Given
 The v2 design declares `class HarnessConnection(Generic[SpecT], ABC):` with abstract methods defining the lifecycle/sender/receiver contract.
@@ -27,4 +27,10 @@ The runtime imports `meridian.lib.harness.connections.opencode_http` and pyright
 - Grep assertion: `rg "^class OpenCodeConnection:" src/` returns zero matches.
 
 ## Result (filled by tester)
-_pending_
+Verified with extra coverage on 2026-04-10.
+
+- `tests/harness/test_opencode_http.py:229` asserts `issubclass(OpenCodeConnection, HarnessConnection)` and `HarnessConnection in OpenCodeConnection.__mro__`.
+- `tests/harness/test_opencode_http.py:234` adds a stronger generic-binding assertion via `OpenCodeConnection.__orig_bases__`, confirming the explicit base is `HarnessConnection[OpenCodeLaunchSpec]`.
+- `tests/harness/test_opencode_http.py:245` instantiates a subclass missing one abstract method (`send_cancel`) and confirms `TypeError` is raised.
+- `src/meridian/lib/harness/connections/opencode_http.py:46` declares `class OpenCodeConnection(HarnessConnection[OpenCodeLaunchSpec]):`.
+- `uv run pyright` returned `0 errors, 0 warnings, 0 informations`.

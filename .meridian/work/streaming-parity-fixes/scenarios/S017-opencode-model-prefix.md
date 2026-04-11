@@ -3,7 +3,7 @@
 - **Source:** design/edge-cases.md E17 (inherited v1 D3 constraint)
 - **Added by:** @design-orchestrator (design phase)
 - **Tester:** @unit-tester
-- **Status:** pending
+- **Status:** verified
 
 ## Given
 Caller sets `model="opencode-claude-3-5-sonnet"` on a spawn routed to the OpenCode adapter.
@@ -25,4 +25,10 @@ Caller sets `model="opencode-claude-3-5-sonnet"` on a spawn routed to the OpenCo
 - Unit test: assert the streaming projection passes the stripped value in the HTTP payload.
 
 ## Result (filled by tester)
-_pending_
+Verified with extra coverage on 2026-04-10.
+
+- `tests/harness/test_launch_spec.py:97` confirms `opencode-` prefix stripping in `OpenCodeAdapter.resolve_launch_spec(...)`.
+- `tests/harness/test_launch_spec.py:116` confirms prefixed and already-normalized `provider/model` inputs converge to the same `spec.model`.
+- `tests/harness/test_launch_spec.py:134` adds edge cases for bare models, already-normalized models, a double-prefixed value (strip exactly once), `model=""`, and `model=None`.
+- `tests/harness/test_opencode_http.py:78` confirms streaming session creation consumes the already-normalized `spec.model` directly, with no projection-side rewrite.
+- `tests/harness/test_launch_spec_parity.py:1140` confirms cross-transport wire parity on the normalized model value (`--model` for subprocess and `model`/`modelID` in the streaming payload).

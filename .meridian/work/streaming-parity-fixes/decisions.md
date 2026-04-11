@@ -487,3 +487,73 @@ Recorded non-blocking observations from the smoke tester worth tracking:
 - `PermissionConfig` has two layers of fail-closed: Pydantic Literal rejects invalid modes at construction time, and the projection mapper raises `HarnessCapabilityMismatch` against future drift. Tests monkeypatch the mapper to exercise the lower layer.
 - `logger.debug(...)` is used for the `report_output_path` streaming-ignore note; users at INFO level will not see it. Consistent with the scenario contract, but flag if a future review wants more visible telemetry.
 - `--full-auto` help text still references the stale `-a on-request` wording even though `-a` is no longer a real top-level flag. Cosmetic only.
+
+## E5 — Phase 5 execution decisions
+
+### E5.1 — `opencode serve` HTTP contract re-probed and pinned (2026-04-10)
+
+**What:** Re-probed `opencode run --help`, `opencode serve --help`, and a live `opencode serve --pure` instance (`version: 1.4.3`) before finalizing OpenCode projection wiring.
+
+**Observed contract:**
+- Health: `GET /global/health` returns JSON (`{"healthy":true,...}`); `GET /health` returns the web UI HTML shell.
+- Session creation: `POST /session` with JSON body returns JSON object containing `id` (session id).
+- Message posting: `POST /session/{id}/message` requires `parts: [...]`; `{text: ...}` / `{message: ...}` return `400 invalid_type` for missing `parts`.
+- Event stream: `GET /global/event` (and `/event`) returns `text/event-stream`; `/session/{id}/events` returns HTML shell.
+- Alternate plural paths (`/sessions`, `/sessions/{id}/...`) return HTML shell rather than API JSON.
+- Session action: `POST /session/{id}/abort` returns JSON `true`; `cancel`/`interrupt` path variants return HTML shell.
+
+**Impact:** Streaming connection keeps path probing fallback logic, but projection now treats `/session`, `/session/{id}/message`, and `/global/event` as canonical OpenCode HTTP surfaces.
+
+### E5.2 — Skills single-channel policy pinned at spec construction
+
+**What:** OpenCode `resolve_launch_spec(...)` now chooses one authoritative skills channel per launch:
+- default (`run_prompt_policy().include_skills=True`): skills are prompt-inlined by shared prompt composition, and `OpenCodeLaunchSpec.skills=()`.
+- optional non-inline mode (`include_skills=False`): `OpenCodeLaunchSpec.skills` is populated and only the streaming session payload carries `skills`.
+
+**Why:** Fixes double-send drift where skills were both inline in prompt and duplicated in HTTP payload.
+
+### E5.3 — OpenCode subprocess/streaming MCP split is fail-closed
+
+**What:**
+- Subprocess projection (`opencode run`) now raises `HarnessCapabilityMismatch` when `mcp_tools` is non-empty.
+- Streaming session payload projects `mcp_tools` into `mcp: [...]` on `POST /session`.
+
+**Why:** `opencode run` has no per-spawn MCP wire format; silently dropping requested MCP tools is incorrect.
+
+### E5.4 — Continue/fork transport semantics are explicit
+
+**What:**
+- Subprocess keeps explicit `--session ... --fork` behavior.
+- Streaming session payload builder raises `HarnessCapabilityMismatch` when `continue_fork=True`.
+
+**Why:** The current `opencode serve` `/session` API does not expose fork-on-continue semantics. Phase 5 requires fail-closed behavior rather than silent resume/new-session fallback.
+
+### E5.5 — OpenCode model normalization occurs exactly once
+
+**What:** OpenCode adapter normalizes model identifiers in `resolve_launch_spec(...)` only:
+- strip one leading `opencode-` prefix when present
+- normalize `provider/model` shape by splitting once on `/` and trimming
+
+Both subprocess and streaming projections consume the resolved `spec.model` verbatim.
+
+### E5.6 — Smoke tester real-binary observations (2026-04-11)
+
+**Binary version:** `opencode 1.4.3` (confirmed by `opencode --version`).
+
+**`POST /session` response shape:** `{"id": "ses_...", "slug": "...", "version": "1.4.3", "projectID": "global", "directory": "...", ...}`. Session ID key is `"id"`, not `"sessionId"` or `"sessionID"`. The `_extract_session_id_from_mapping` helper covers this correctly via its `("session_id", "sessionId", "sessionID", "id")` lookup chain.
+
+**Unknown payload keys accepted silently:** `skills`, `mcp`, and invalid `sessionID` references all return HTTP 200 with a newly created session — server does not reject unknown fields. Invalid `sessionID` causes a fresh session rather than an error; callers should not rely on server-side rejection for invalid resumes.
+
+**Health is `/global/health`:** Returns `{"healthy": true, ...}` (JSON). `/health` returns the web UI HTML shell — the server's path probing fallback order is critical.
+
+**Server logs to stderr:** Confirms `stdout=DEVNULL, stderr=<file>` wiring in `_launch_process` is correct. Log format: `INFO  <ISO-TS> +<ms>ms service=<name> ...`.
+
+**Failing test identified:** `tests/harness/test_launch_spec.py::test_opencode_subprocess_projection_logs_model_flag_collision_and_keeps_tail` FAILS. The test expects a DEBUG log when `extra_args` contains a `-m`/`--model` collision with the already-projected `--model` flag. The projection does append `extra_args` verbatim (assertion on `command[-3:]` passes), but `project_opencode_spec_to_cli_args` never emits the expected collision log. Fix needed in `project_opencode_subprocess.py`.
+
+### E5.7 — Phase 5 fix loop closed the collision-log gap
+
+**What:** Phase 5 initial implementation (p1465) wired subprocess projection, streaming projection, single-skills channel, model normalization, and `HarnessConnection[OpenCodeLaunchSpec]` inheritance. Parallel testers (unit p1466, smoke p1467) converged on one real gap: `project_opencode_spec_to_cli_args` appended colliding `extra_args` verbatim at the tail (correct) but emitted no DEBUG collision log (incorrect per Claude/Codex pattern). Fix coder p1468 added `_has_flag` / `_log_collision_if_needed` helpers covering `--model`/`-m`, `--variant`, `--agent`, `--session`/`-s`, `--continue`/`-c`, and `--fork`, mirroring the Claude projection's collision detection shape.
+
+**Why:** The "resolver-internal dedupe allowed; cross-dedupe with user extra_args forbidden (last-wins)" contract requires visibility into the collision. Log at DEBUG (not WARNING) because the user tail-wins behavior is intentional, not a fault. The logging is telemetry for troubleshooting double-flag situations, not an error signal.
+
+**Gates at closure:** all seven gates green (ruff, pyright, `test_opencode_http.py`, `test_launch_spec.py -k opencode`, `test_launch_spec_parity.py`, `test_streaming_runner.py`, full pytest excluding smoke). Scenarios S017, S018, S034 all marked `verified` with extra coverage in `test_launch_spec.py`, `test_opencode_http.py`, and `test_launch_spec_parity.py`.

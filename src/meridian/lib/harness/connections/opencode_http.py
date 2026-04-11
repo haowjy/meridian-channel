@@ -27,8 +27,11 @@ from meridian.lib.harness.connections.base import (
 )
 from meridian.lib.harness.ids import HarnessId
 from meridian.lib.harness.launch_spec import OpenCodeLaunchSpec
+from meridian.lib.harness.projections.project_opencode_streaming import (
+    project_opencode_spec_to_serve_command,
+    project_opencode_spec_to_session_payload,
+)
 from meridian.lib.launch.env import inherit_child_env
-from meridian.lib.launch.launch_types import ResolvedLaunchSpec
 from meridian.lib.observability.trace_helpers import (
     trace_parse_error,
     trace_state_change,
@@ -40,7 +43,7 @@ from meridian.lib.state.paths import resolve_spawn_log_dir
 logger = logging.getLogger(__name__)
 
 
-class OpenCodeConnection(HarnessConnection[ResolvedLaunchSpec]):
+class OpenCodeConnection(HarnessConnection[OpenCodeLaunchSpec]):
     """Bidirectional OpenCode connection over the OpenCode HTTP API."""
 
     _CAPABILITIES: ClassVar[ConnectionCapabilities] = ConnectionCapabilities(
@@ -66,8 +69,8 @@ class OpenCodeConnection(HarnessConnection[ResolvedLaunchSpec]):
         "/sessions/{session_id}/message",
     )
     _EVENT_PATHS: ClassVar[tuple[str, ...]] = (
-        "/event",
         "/global/event",
+        "/event",
         "/session/{session_id}/events",
     )
     _INTERRUPT_PATH_TEMPLATES: ClassVar[tuple[str, ...]] = (
@@ -138,7 +141,7 @@ class OpenCodeConnection(HarnessConnection[ResolvedLaunchSpec]):
             return None
         return process.pid
 
-    async def start(self, config: ConnectionConfig, spec: ResolvedLaunchSpec) -> None:
+    async def start(self, config: ConnectionConfig, spec: OpenCodeLaunchSpec) -> None:
         if self._state != "created":
             raise RuntimeError(f"Cannot start OpenCode connection from state '{self._state}'")
 
@@ -287,10 +290,14 @@ class OpenCodeConnection(HarnessConnection[ResolvedLaunchSpec]):
                 return
             await asyncio.sleep(self._EVENT_RETRY_DELAY_SECONDS)
 
-    async def _launch_process(self, config: ConnectionConfig, spec: ResolvedLaunchSpec) -> None:
+    async def _launch_process(self, config: ConnectionConfig, spec: OpenCodeLaunchSpec) -> None:
         port = _find_free_port()
         self._base_url = f"http://127.0.0.1:{port}"
-        command = ["opencode", "serve", "--port", str(port), *spec.extra_args]
+        command = project_opencode_spec_to_serve_command(
+            spec,
+            host="127.0.0.1",
+            port=port,
+        )
         env = inherit_child_env(os.environ, config.env_overrides)
         spawn_dir = resolve_spawn_log_dir(config.repo_root, config.spawn_id)
         spawn_dir.mkdir(parents=True, exist_ok=True)
@@ -305,7 +312,7 @@ class OpenCodeConnection(HarnessConnection[ResolvedLaunchSpec]):
 
     async def _create_session_with_retry(
         self,
-        spec: ResolvedLaunchSpec,
+        spec: OpenCodeLaunchSpec,
         *,
         timeout_seconds: float,
     ) -> str:
@@ -327,28 +334,8 @@ class OpenCodeConnection(HarnessConnection[ResolvedLaunchSpec]):
                 ) from last_error
             await asyncio.sleep(0.2)
 
-    async def _create_session(self, spec: ResolvedLaunchSpec) -> str:
-        payload: dict[str, object] = {}
-        if spec.model is not None:
-            payload["model"] = spec.model
-            payload["modelID"] = spec.model
-        normalized_effort = (spec.effort or "").strip()
-        if normalized_effort:
-            logger.debug(
-                "OpenCode streaming does not support effort override; ignoring effort=%s",
-                normalized_effort,
-            )
-        if spec.continue_fork:
-            logger.debug("OpenCode streaming does not support session fork; ignoring continue_fork")
-        if isinstance(spec, OpenCodeLaunchSpec):
-            if spec.agent_name:
-                payload["agent"] = spec.agent_name
-            if spec.skills:
-                payload["skills"] = list(spec.skills)
-        if spec.continue_session_id is not None:
-            payload["session_id"] = spec.continue_session_id
-            payload["continue_session_id"] = spec.continue_session_id
-
+    async def _create_session(self, spec: OpenCodeLaunchSpec) -> str:
+        payload = project_opencode_spec_to_session_payload(spec)
         payload_variants: tuple[dict[str, object], ...] = (payload, {}) if payload else ({},)
 
         last_error: str | None = None

@@ -22,7 +22,12 @@ from meridian.lib.harness.connections.base import ConnectionConfig
 from meridian.lib.harness.connections.claude_ws import ClaudeConnection
 from meridian.lib.harness.connections.codex_ws import CodexConnection
 from meridian.lib.harness.connections.opencode_http import OpenCodeConnection
-from meridian.lib.harness.launch_spec import ClaudeLaunchSpec, CodexLaunchSpec, ResolvedLaunchSpec
+from meridian.lib.harness.launch_spec import (
+    ClaudeLaunchSpec,
+    CodexLaunchSpec,
+    OpenCodeLaunchSpec,
+    ResolvedLaunchSpec,
+)
 from meridian.lib.harness.opencode import OpenCodeAdapter
 from meridian.lib.harness.projections.project_claude import (
     _check_projection_drift,
@@ -33,6 +38,15 @@ from meridian.lib.harness.projections.project_codex_streaming import (
 )
 from meridian.lib.harness.projections.project_codex_subprocess import (
     _check_projection_drift as _check_codex_subprocess_projection_drift,
+)
+from meridian.lib.harness.projections.project_opencode_streaming import (
+    HarnessCapabilityMismatch,
+)
+from meridian.lib.harness.projections.project_opencode_streaming import (
+    _check_projection_drift as _check_opencode_streaming_projection_drift,
+)
+from meridian.lib.harness.projections.project_opencode_subprocess import (
+    _check_projection_drift as _check_opencode_subprocess_projection_drift,
 )
 from meridian.lib.safety.permissions import PermissionConfig
 
@@ -294,6 +308,72 @@ def test_codex_streaming_projection_drift_guard_rejects_dropped_delegated_field(
 
     with pytest.raises(ImportError, match=r"missing=\['delegated'\]"):
         _check_codex_streaming_projection_drift(_Spec, frozenset(), frozenset())
+
+
+def test_opencode_subprocess_projection_drift_guard_missing_field() -> None:
+    class _Spec(BaseModel):
+        alpha: str = ""
+        beta: str = ""
+
+    with pytest.raises(ImportError, match=r"missing=\['beta'\]"):
+        _check_opencode_subprocess_projection_drift(_Spec, frozenset({"alpha"}), frozenset())
+
+
+def test_opencode_streaming_projection_drift_guard_missing_field() -> None:
+    class _Spec(BaseModel):
+        alpha: str = ""
+        beta: str = ""
+
+    with pytest.raises(ImportError, match=r"missing=\['beta'\]"):
+        _check_opencode_streaming_projection_drift(_Spec, frozenset({"alpha"}), frozenset())
+
+
+def test_opencode_subprocess_projection_import_fails_when_new_model_field_is_unaccounted() -> None:
+    code = """
+import sys
+from pydantic import Field
+import meridian.lib.harness.launch_spec as launch_spec
+
+launch_spec.OpenCodeLaunchSpec.model_fields = dict(launch_spec.OpenCodeLaunchSpec.model_fields)
+launch_spec.OpenCodeLaunchSpec.model_fields["future_field"] = Field(default=None)
+sys.modules.pop("meridian.lib.harness.projections.project_opencode_subprocess", None)
+import meridian.lib.harness.projections.project_opencode_subprocess
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "ImportError" in result.stderr
+    assert "missing=['future_field']" in result.stderr
+
+
+def test_opencode_streaming_projection_import_fails_when_new_model_field_is_unaccounted() -> None:
+    code = """
+import sys
+from pydantic import Field
+import meridian.lib.harness.launch_spec as launch_spec
+
+launch_spec.OpenCodeLaunchSpec.model_fields = dict(launch_spec.OpenCodeLaunchSpec.model_fields)
+launch_spec.OpenCodeLaunchSpec.model_fields["future_field"] = Field(default=None)
+sys.modules.pop("meridian.lib.harness.projections.project_opencode_streaming", None)
+import meridian.lib.harness.projections.project_opencode_streaming
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "ImportError" in result.stderr
+    assert "missing=['future_field']" in result.stderr
 
 
 def test_claude_build_command_parity_cases() -> None:
@@ -1066,13 +1146,14 @@ async def test_opencode_cross_transport_parity_with_known_streaming_asymmetries(
         model=ModelId("opencode-gpt-5.3-codex"),
         effort="medium",
         continue_harness_session_id="sess-1",
-        continue_fork=True,
     )
     spec = adapter.resolve_launch_spec(run, perms)
     subprocess_command = adapter.build_command(run, perms)
 
     connection = _TestableOpenCodeConnection(responses=[(200, {"session_id": "sess-1"}, "")])
-    with caplog.at_level(logging.DEBUG, logger="meridian.lib.harness.connections.opencode_http"):
+    with caplog.at_level(
+        logging.DEBUG, logger="meridian.lib.harness.projections.project_opencode_streaming"
+    ):
         await connection._create_session(spec)
 
     assert connection.requests
@@ -1081,11 +1162,27 @@ async def test_opencode_cross_transport_parity_with_known_streaming_asymmetries(
     assert payload["model"] == "gpt-5.3-codex"
     assert payload["modelID"] == "gpt-5.3-codex"
     assert "--session" in subprocess_command and "sess-1" in subprocess_command
-    assert payload["session_id"] == "sess-1"
-    assert payload["continue_session_id"] == "sess-1"
+    assert payload["sessionID"] == "sess-1"
+    assert "skills" not in payload
 
-    # Known asymmetry: streaming OpenCode currently has no effort/fork transport fields.
+    # Known asymmetry: streaming OpenCode currently has no effort transport field.
     assert _value_for_flag(subprocess_command, "--variant") == "medium"
-    assert "--fork" in subprocess_command
     assert "does not support effort override" in caplog.text
-    assert "does not support session fork" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_opencode_streaming_rejects_continue_fork_when_api_cannot_express_it() -> None:
+    adapter = OpenCodeAdapter()
+    spec = adapter.resolve_launch_spec(
+        _spawn(
+            model=ModelId("opencode-gpt-5.3-codex"),
+            continue_harness_session_id="sess-1",
+            continue_fork=True,
+        ),
+        _StaticPermissionResolver(),
+    )
+    assert isinstance(spec, OpenCodeLaunchSpec)
+
+    connection = _TestableOpenCodeConnection(responses=[(200, {"session_id": "sess-1"}, "")])
+    with pytest.raises(HarnessCapabilityMismatch, match="continue_fork"):
+        await connection._create_session(spec)

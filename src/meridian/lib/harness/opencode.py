@@ -16,7 +16,6 @@ from meridian.lib.harness.adapter import (
     PermissionResolver,
     RunPromptPolicy,
     SpawnParams,
-    resolve_permission_flags,
 )
 from meridian.lib.harness.common import (
     extract_opencode_report,
@@ -26,6 +25,9 @@ from meridian.lib.harness.common import (
 from meridian.lib.harness.ids import HarnessId
 from meridian.lib.harness.launch_spec import OpenCodeLaunchSpec
 from meridian.lib.harness.launch_types import PromptPolicy, SessionSeed
+from meridian.lib.harness.projections.project_opencode_subprocess import (
+    project_opencode_spec_to_cli_args,
+)
 from meridian.lib.safety.permissions import PermissionConfig
 
 logger = logging.getLogger(__name__)
@@ -38,6 +40,18 @@ OPENCODE_SESSION_CREATED_RE = re.compile(
 
 def _strip_opencode_prefix(model: str) -> str:
     return model[len("opencode-") :] if model.startswith("opencode-") else model
+
+
+def _normalize_opencode_model(model: str) -> str:
+    stripped = _strip_opencode_prefix(model.strip())
+    provider, separator, model_name = stripped.partition("/")
+    if not separator:
+        return stripped
+    provider = provider.strip()
+    model_name = model_name.strip()
+    if not provider or not model_name:
+        return stripped
+    return f"{provider}/{model_name}"
 
 
 def _detect_primary_session_id(
@@ -190,8 +204,10 @@ class OpenCodeAdapter(BaseHarnessAdapter[OpenCodeLaunchSpec]):
     ) -> OpenCodeLaunchSpec:
         normalized_model: str | None = None
         if run.model:
-            normalized_model = _strip_opencode_prefix(str(run.model).strip())
+            normalized_model = _normalize_opencode_model(str(run.model))
         continue_session_id = (run.continue_harness_session_id or "").strip() or None
+        use_prompt_skill_channel = self.run_prompt_policy().include_skills
+        projected_skills = () if use_prompt_skill_channel else run.skills
         return OpenCodeLaunchSpec(
             model=normalized_model,
             effort=run.effort,
@@ -203,33 +219,13 @@ class OpenCodeAdapter(BaseHarnessAdapter[OpenCodeLaunchSpec]):
             interactive=run.interactive,
             mcp_tools=run.mcp_tools,
             agent_name=run.agent,
-            skills=run.skills,
+            skills=projected_skills,
         )
 
     def build_command(self, run: SpawnParams, perms: PermissionResolver) -> list[str]:
         spec = self.resolve_launch_spec(run, perms)
-        command = list(self.PRIMARY_BASE_COMMAND if spec.interactive else self.BASE_COMMAND)
-        if spec.model is not None:
-            command.extend(["--model", spec.model])
-        if spec.effort is not None:
-            normalized_effort = str(spec.effort).strip()
-            if normalized_effort:
-                command.extend(["--variant", normalized_effort])
-        permission_resolver = spec.permission_resolver
-        command.extend(resolve_permission_flags(permission_resolver, self.id))
-        command.extend(spec.extra_args)
-        if spec.interactive:
-            if spec.prompt:
-                command.append(spec.prompt)
-        else:
-            command.append("-")
-        harness_session_id = (spec.continue_session_id or "").strip()
-        if not harness_session_id:
-            return command
-        command.extend(["--session", harness_session_id])
-        if spec.continue_fork:
-            command.append("--fork")
-        return command
+        base_command = self.PRIMARY_BASE_COMMAND if spec.interactive else self.BASE_COMMAND
+        return project_opencode_spec_to_cli_args(spec, base_command=base_command)
 
     def mcp_config(self, run: SpawnParams) -> McpConfig | None:
         # MCP injection is off by default — agents use the CLI instead.
