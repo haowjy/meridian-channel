@@ -25,6 +25,10 @@ The runner process receives `SIGTERM` (or `SIGINT`).
 - Assert all six fixtures converge to identical terminal status and event shape.
 - Regression fixture: fake cancellation that does NOT emit the event (temporarily disable the event emit) and verify the smoke test fails loudly.
 
+## Notes
+- User-facing `meridian spawn` currently routes through `execute_with_streaming` for all shipped harnesses because each declares `supports_bidirectional=True`.
+- The subprocess runner path (`execute_with_finalization`) remains library-level coverage and is not reachable from normal user flow unless a harness ships with `supports_bidirectional=False`.
+
 ## Result (filled by tester)
 
 **failed** — @smoke-tester p1491 on claude-opus-4-6 (2026-04-11)

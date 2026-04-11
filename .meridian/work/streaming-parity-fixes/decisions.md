@@ -729,3 +729,82 @@ Why this closes the race: branch reordering alone was insufficient because outer
 Decision: carry launch-failure diagnostics through to the terminal row verbatim (at minimum), so `spawn show` preserves details like `binary_name` and `searched_path` from `HarnessBinaryNotFound`.
 
 Why this closes the regression: users now see actionable missing-binary diagnostics in persisted spawn state instead of an unhelpful generic failure reason.
+
+### E9.4 — H1 (p1518): extracted duplicated runner helpers into `launch/runner_helpers.py`
+
+**What changed:** moved these six byte-identical helpers out of both runners into `src/meridian/lib/launch/runner_helpers.py`, then imported them from both `runner.py` and `streaming_runner.py`:
+
+- `spawn_kind`
+- `append_budget_exceeded_event`
+- `guardrail_failure_text`
+- `append_text_to_stderr_artifact`
+- `artifact_is_zero_bytes`
+- `write_structured_failure_artifact`
+
+**Finding closed:** p1518 / H1.
+
+**Tradeoff:** no behavioral change intended; this is a pure move that reduces duplicated maintenance surface and trims both runner modules.
+
+### E9.5 — H2 (p1518): removed dead `extract_session_id_from_artifacts` alias
+
+**What changed:** deleted `extract_session_id_from_artifacts(...)` from `src/meridian/lib/harness/common.py` and switched Claude call sites to `extract_session_id_from_artifacts_with_patterns(...)` directly (`src/meridian/lib/harness/claude.py`, `src/meridian/lib/harness/extractors/claude.py`). Updated exec tests that imported the alias.
+
+**Finding closed:** p1518 / H2.
+
+**Tradeoff:** none; alias was one-line passthrough and created duplicate API surface.
+
+### E9.6 — M1 (p1518 + p1516): deduped extractor mapping scanner in base module
+
+**What changed:** added `session_from_mapping_with_keys(payload, keys)` to `src/meridian/lib/harness/extractors/base.py` and rewired Claude/Codex/OpenCode event extraction to pass harness-specific key tuples.
+
+**Finding closed:** p1518 / M1.
+
+**Tradeoff:** key selection remains harness-local data; recursion logic is centralized.
+
+### E9.7 — M4 (p1518): codex adapter extract methods are still production-coupled
+
+**What changed:** verified callers in `src/meridian` and kept `CodexAdapter.extract_session_id(...)` / `CodexAdapter.extract_report(...)` in place.
+
+**Why kept:** subprocess/primary flows still call adapter-level extraction via `SubprocessHarness` paths, including:
+
+- `src/meridian/lib/launch/process.py` (`extract_latest_session_id(extractor=plan.adapter, ...)`)
+- `src/meridian/lib/launch/runner.py` (`enrich_finalize(extractor=harness, ...)`, `extract_latest_session_id(extractor=harness, ...)`)
+
+**Finding status:** p1518 / M4 closed by verification; deletion deferred because coupling is still live in production code paths.
+
+### E9.8 — Types M-1 + M-2 (p1516): codex contract alignment
+
+**What changed:**
+
+- `HarnessCapabilityMismatch` in `project_codex_subprocess.py` now subclasses `ValueError` (OpenCode parity).
+- codex tool-flag stripping now logs dropped `--allowedTools` tokens in addition to existing `--disallowedTools` warning.
+
+**Findings closed:** p1516 / M-1 and M-2.
+
+**Tradeoff:** keep drop behavior (Codex cannot enforce `--allowedTools`), but make downgrade observable.
+
+### E9.9 — Types M-3 (p1516): hardened external registry mutability
+
+**What changed:** `get_bundle_registry()` now returns `MappingProxyType(_REGISTRY)` and `_REGISTRY` is removed from `bundle.__all__`.
+
+**Finding closed:** p1516 / M-3.
+
+**Tradeoff:** internal registration remains mutable through `register_harness_bundle(...)`; external callers lose direct mutation access.
+
+### E9.10 — Design M-3 (p1517): narrowed bootstrap retry ImportError suppression
+
+**What changed:** `src/meridian/lib/harness/__init__.py` retry path now only swallows `ImportError` if `_is_expected_partial_init(...)` returns true; unexpected retry `ImportError` is re-raised.
+
+**Finding closed:** p1517 / Design M-3.
+
+**Tradeoff:** stricter startup failure behavior in exchange for preserving K9 drift-guard visibility.
+
+### E9.11 — Final-review deferrals accepted for v3
+
+- **D19 / C1 / Design M-1 — D19 budget breach accepted for v3.** `runner.py` and `streaming_runner.py` still exceed the 500-line target after helper extraction. Full L11 decomposition is deferred to a follow-up work item because: (a) decomposition is a pure refactor with no behavior change, (b) runtime correctness fixes in this review loop had priority, (c) clean split requires design-level phaseing not present in v3. Follow-up should open with: *split `runner.py` and `streaming_runner.py` into <=500 line units along finalize/retry/event-pump axes*.
+- **Design M-2 — Dual adapter registry accepted for v3.** `HarnessRegistry` and bundle registry both retain adapter references. Not a current correctness bug because adapters are effectively stateless; defer unification to a follow-up that routes adapter lookup through `get_harness_bundle(harness_id).adapter`.
+- **L-4 — `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` consolidation deferred.** Marked "won't fix in v3"; both routing channels are idempotent and functionally equivalent.
+- **L-5 — S033 log-shape inconsistency deferred.** Contract passes as written; managed-flag collision detection remains Claude-specific for now.
+- **L-6 — dead `except AttributeError` in `context.py` deferred.** Defensive branch appears unreachable with `BaseHarnessAdapter.preflight` default, but cleanup is postponed.
+- **L-7 — `TransportId.SUBPROCESS` unused deferred.** Enum value remains aspirational and non-harmful.
+- **L-8 — S042 narrowing recorded.** Scenario notes now explicitly state user flow reaches streaming only; subprocess variant remains library-level coverage. Scenario result status is unchanged.

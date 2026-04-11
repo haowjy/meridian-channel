@@ -5,8 +5,6 @@
 
 from __future__ import annotations
 
-from contextlib import suppress
-
 _bootstrapped = False
 _bootstrap_imports: tuple[object, ...] = ()
 
@@ -95,8 +93,11 @@ except ImportError as exc:
             importlib.import_module(module_name)
         except Exception:
             continue
-    with suppress(ImportError):
+    try:
         _run_bootstrap()
+    except ImportError as retry_exc:
+        if not _is_expected_partial_init(retry_exc):
+            raise
 
 
 __all__ = ["ensure_bootstrap"]

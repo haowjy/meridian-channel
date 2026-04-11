@@ -103,7 +103,7 @@ def get_harness_bundle(harness_id: HarnessId) -> HarnessBundle[Any]:
 def get_bundle_registry() -> Mapping[HarnessId, HarnessBundle[Any]]:
     """Return the active harness bundle registry mapping."""
 
-    return _REGISTRY
+    return MappingProxyType(_REGISTRY)
 
 
 def get_connection_cls(
@@ -122,7 +122,6 @@ def get_connection_cls(
 
 
 __all__ = [
-    "_REGISTRY",
     "HarnessBundle",
     "get_bundle_registry",
     "get_connection_cls",

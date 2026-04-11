@@ -16,7 +16,7 @@ from meridian.lib.launch.launch_types import PermissionResolver
 logger = logging.getLogger(__name__)
 
 
-class HarnessCapabilityMismatch(RuntimeError):
+class HarnessCapabilityMismatch(ValueError):
     """Raised when requested launch semantics cannot be represented on Codex."""
 
 
@@ -100,6 +100,7 @@ def _coerce_permission_flags(raw: object) -> tuple[str, ...]:
 
 def _strip_tool_flags_for_codex(flags: tuple[str, ...]) -> tuple[str, ...]:
     filtered: list[str] = []
+    saw_allowed_tools = False
     saw_disallowed_tools = False
 
     index = 0
@@ -107,9 +108,11 @@ def _strip_tool_flags_for_codex(flags: tuple[str, ...]) -> tuple[str, ...]:
         token = flags[index]
 
         if token == "--allowedTools":
+            saw_allowed_tools = True
             index += 2
             continue
         if token.startswith("--allowedTools="):
+            saw_allowed_tools = True
             index += 1
             continue
 
@@ -129,6 +132,11 @@ def _strip_tool_flags_for_codex(flags: tuple[str, ...]) -> tuple[str, ...]:
         logger.warning(
             "Codex does not support disallowed-tools resolver flags; "
             "dropping resolver-emitted --disallowedTools tokens"
+        )
+    if saw_allowed_tools:
+        logger.warning(
+            "Codex does not support allowed-tools resolver flags; "
+            "dropping resolver-emitted --allowedTools tokens"
         )
 
     return tuple(filtered)
