@@ -25,7 +25,7 @@ from meridian.lib.harness.adapter import (
 )
 from meridian.lib.harness.claude_preflight import expand_claude_passthrough_args
 from meridian.lib.harness.common import (
-    extract_session_id_from_artifacts,
+    extract_session_id_from_artifacts_with_patterns,
     extract_usage_from_artifacts,
 )
 from meridian.lib.harness.registry import HarnessRegistry
@@ -91,7 +91,7 @@ class ClaudeLikeAdapter(BaseSubprocessHarness):
         return extract_usage_from_artifacts(artifacts, spawn_id)
 
     def extract_session_id(self, artifacts: HarnessArtifactStore, spawn_id: SpawnId) -> str | None:
-        return extract_session_id_from_artifacts(artifacts, spawn_id)
+        return extract_session_id_from_artifacts_with_patterns(artifacts, spawn_id)
 
 
 def _write_cwd_reporter_script(path: Path, output_path: Path) -> None:

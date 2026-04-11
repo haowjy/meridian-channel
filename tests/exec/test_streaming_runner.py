@@ -21,7 +21,7 @@ from meridian.lib.harness.adapter import (
 )
 from meridian.lib.harness.codex import CodexAdapter
 from meridian.lib.harness.common import (
-    extract_session_id_from_artifacts,
+    extract_session_id_from_artifacts_with_patterns,
     extract_usage_from_artifacts,
 )
 from meridian.lib.harness.connections.base import (
@@ -141,7 +141,7 @@ class _DummyCodexHarness(BaseSubprocessHarness):
         return extract_usage_from_artifacts(artifacts, spawn_id)
 
     def extract_session_id(self, artifacts: HarnessArtifactStore, spawn_id: SpawnId) -> str | None:
-        return extract_session_id_from_artifacts(artifacts, spawn_id)
+        return extract_session_id_from_artifacts_with_patterns(artifacts, spawn_id)
 
 
 class _DummyClaudeHarness(_DummyCodexHarness):

@@ -430,10 +430,6 @@ def extract_usage_from_artifacts(artifacts: ArtifactStore, spawn_id: SpawnId) ->
     )
 
 
-def extract_session_id_from_artifacts(artifacts: ArtifactStore, spawn_id: SpawnId) -> str | None:
-    return extract_session_id_from_artifacts_with_patterns(artifacts, spawn_id)
-
-
 def extract_session_id_from_artifacts_with_patterns(
     artifacts: ArtifactStore,
     spawn_id: SpawnId,

@@ -22,7 +22,7 @@ from meridian.lib.harness.adapter import (
     SpawnParams,
 )
 from meridian.lib.harness.common import (
-    extract_session_id_from_artifacts,
+    extract_session_id_from_artifacts_with_patterns,
     extract_usage_from_artifacts,
 )
 from meridian.lib.harness.registry import HarnessRegistry
@@ -81,7 +81,7 @@ class RecursiveHarnessAdapter(BaseSubprocessHarness):
         return extract_usage_from_artifacts(artifacts, spawn_id)
 
     def extract_session_id(self, artifacts: HarnessArtifactStore, spawn_id: SpawnId) -> str | None:
-        return extract_session_id_from_artifacts(artifacts, spawn_id)
+        return extract_session_id_from_artifacts_with_patterns(artifacts, spawn_id)
 
 
 def _write_recursive_harness_script(path: Path) -> None:
@@ -106,7 +106,7 @@ def _write_recursive_harness_script(path: Path) -> None:
                 SpawnParams,
             )
             from meridian.lib.harness.common import (
-                extract_session_id_from_artifacts,
+                extract_session_id_from_artifacts_with_patterns,
                 extract_usage_from_artifacts,
             )
             from meridian.lib.harness.registry import HarnessRegistry
@@ -173,7 +173,7 @@ def _write_recursive_harness_script(path: Path) -> None:
                     artifacts: HarnessArtifactStore,
                     spawn_id: SpawnId,
                 ) -> str | None:
-                    return extract_session_id_from_artifacts(artifacts, spawn_id)
+                    return extract_session_id_from_artifacts_with_patterns(artifacts, spawn_id)
 
 
             def _make_runtime(repo_root: Path) -> OperationRuntime:

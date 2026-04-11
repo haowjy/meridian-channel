@@ -48,11 +48,29 @@ from meridian.lib.launch.extract import (
 )
 from meridian.lib.launch.heartbeat import heartbeat_scope
 from meridian.lib.launch.launch_types import PermissionResolver, ResolvedLaunchSpec
+from meridian.lib.launch.runner_helpers import (
+    append_budget_exceeded_event as _append_budget_exceeded_event,
+)
+from meridian.lib.launch.runner_helpers import (
+    append_text_to_stderr_artifact as _append_text_to_stderr_artifact,
+)
+from meridian.lib.launch.runner_helpers import (
+    artifact_is_zero_bytes as _artifact_is_zero_bytes,
+)
+from meridian.lib.launch.runner_helpers import (
+    guardrail_failure_text as _guardrail_failure_text,
+)
+from meridian.lib.launch.runner_helpers import (
+    spawn_kind as _spawn_kind,
+)
+from meridian.lib.launch.runner_helpers import (
+    write_structured_failure_artifact as _write_structured_failure_artifact,
+)
 from meridian.lib.launch.session_ids import extract_latest_session_id
 from meridian.lib.launch.signals import signal_coordinator, signal_to_exit_code
 from meridian.lib.ops.spawn.plan import PreparedSpawnPlan
 from meridian.lib.safety.budget import Budget, BudgetBreach, LiveBudgetTracker
-from meridian.lib.safety.guardrails import GuardrailFailure, run_guardrails
+from meridian.lib.safety.guardrails import run_guardrails
 from meridian.lib.safety.redaction import SecretSpec, redact_secret_bytes
 from meridian.lib.state import spawn_store
 from meridian.lib.state.artifact_store import ArtifactStore, make_artifact_key
@@ -92,82 +110,6 @@ class _TerminalEventOutcome:
     status: SpawnStatus
     exit_code: int
     error: str | None = None
-
-
-def _spawn_kind(state_root: Path, spawn_id: SpawnId) -> str:
-    row = spawn_store.get_spawn(state_root, spawn_id)
-    if row is None:
-        return "child"
-    normalized = row.kind.strip().lower()
-    if normalized in {"primary", "child"}:
-        return normalized
-    return "child"
-
-
-def _append_budget_exceeded_event(*, run: Spawn, breach: BudgetBreach) -> None:
-    logger.warning(
-        "Spawn budget exceeded.",
-        spawn_id=str(run.spawn_id),
-        scope=breach.scope,
-        observed_usd=breach.observed_usd,
-        limit_usd=breach.limit_usd,
-    )
-
-
-def _guardrail_failure_text(failures: tuple[GuardrailFailure, ...]) -> str:
-    lines = ["Guardrail validation failed:"]
-    for failure in failures:
-        lines.append(
-            f"- {failure.script} (exit {failure.exit_code})"
-            + (f": {failure.stderr}" if failure.stderr else "")
-        )
-    return "\n".join(lines)
-
-
-def _append_text_to_stderr_artifact(
-    *,
-    artifacts: ArtifactStore,
-    spawn_id: SpawnId,
-    text: str,
-    secrets: tuple[SecretSpec, ...],
-) -> None:
-    key = make_artifact_key(spawn_id, STDERR_FILENAME)
-    existing = artifacts.get(key).decode("utf-8", errors="ignore") if artifacts.exists(key) else ""
-    prefix = "\n" if existing and not existing.endswith("\n") else ""
-    combined = f"{existing}{prefix}{text}\n"
-    artifacts.put(key, redact_secret_bytes(combined.encode("utf-8"), secrets))
-
-
-def _artifact_is_zero_bytes(
-    *,
-    artifacts: ArtifactStore,
-    spawn_id: SpawnId,
-    filename: str,
-) -> bool:
-    key = make_artifact_key(spawn_id, filename)
-    if not artifacts.exists(key):
-        return True
-    return len(artifacts.get(key)) == 0
-
-
-def _write_structured_failure_artifact(
-    *,
-    artifacts: ArtifactStore,
-    spawn_id: SpawnId,
-    output_log_path: Path,
-    exit_code: int,
-    failure_reason: str | None,
-    timed_out: bool,
-) -> None:
-    payload = {
-        "error_code": "harness_empty_output",
-        "failure_reason": failure_reason or "empty_output",
-        "exit_code": exit_code,
-        "timed_out": timed_out,
-    }
-    encoded = f"{json.dumps(payload, sort_keys=True)}\n".encode()
-    artifacts.put(make_artifact_key(spawn_id, OUTPUT_FILENAME), encoded)
-    atomic_write_bytes(output_log_path, encoded)
 
 
 def _install_signal_handlers(

@@ -25,7 +25,7 @@ from meridian.lib.harness.opencode_storage import (
     resolve_opencode_storage_root,
 )
 
-from .base import HarnessExtractor
+from .base import HarnessExtractor, session_from_mapping_with_keys
 
 _SESSION_ID_TEXT_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(
@@ -50,19 +50,6 @@ _PATH_HINT_KEYS: frozenset[str] = frozenset(
         "projectDir",
     }
 )
-
-
-def _session_from_mapping(payload: Mapping[str, object]) -> str | None:
-    for key in ("session_id", "sessionId", "sessionID", "id"):
-        value = payload.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    for nested in payload.values():
-        if isinstance(nested, dict):
-            found = _session_from_mapping(cast("dict[str, object]", nested))
-            if found:
-                return found
-    return None
 
 
 def _resolve_logs_root(launch_env: Mapping[str, str]) -> Path:
@@ -297,7 +284,10 @@ class OpenCodeHarnessExtractor(HarnessExtractor[OpenCodeLaunchSpec]):
     """Extractor implementation for OpenCode artifacts and events."""
 
     def detect_session_id_from_event(self, event: HarnessEvent) -> str | None:
-        return _session_from_mapping(event.payload)
+        return session_from_mapping_with_keys(
+            event.payload,
+            ("session_id", "sessionId", "sessionID", "id"),
+        )
 
     def detect_session_id_from_artifacts(
         self,

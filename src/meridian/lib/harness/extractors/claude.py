@@ -13,26 +13,13 @@ from meridian.lib.core.types import SpawnId
 from meridian.lib.harness.adapter import ArtifactStore
 from meridian.lib.harness.common import (
     extract_claude_report,
-    extract_session_id_from_artifacts,
+    extract_session_id_from_artifacts_with_patterns,
     extract_usage_from_artifacts,
 )
 from meridian.lib.harness.connections.base import HarnessEvent
 from meridian.lib.harness.launch_spec import ClaudeLaunchSpec
 
-from .base import HarnessExtractor
-
-
-def _session_from_mapping(payload: Mapping[str, object]) -> str | None:
-    for key in ("session_id", "sessionId", "sessionID"):
-        value = payload.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    for nested in payload.values():
-        if isinstance(nested, dict):
-            found = _session_from_mapping(cast("dict[str, object]", nested))
-            if found:
-                return found
-    return None
+from .base import HarnessExtractor, session_from_mapping_with_keys
 
 
 def _project_slug(path: Path) -> str:
@@ -85,7 +72,10 @@ class ClaudeHarnessExtractor(HarnessExtractor[ClaudeLaunchSpec]):
     """Extractor implementation for Claude artifacts and events."""
 
     def detect_session_id_from_event(self, event: HarnessEvent) -> str | None:
-        return _session_from_mapping(event.payload)
+        return session_from_mapping_with_keys(
+            event.payload,
+            ("session_id", "sessionId", "sessionID"),
+        )
 
     def detect_session_id_from_artifacts(
         self,
@@ -104,7 +94,7 @@ class ClaudeHarnessExtractor(HarnessExtractor[ClaudeLaunchSpec]):
         return extract_usage_from_artifacts(artifacts, spawn_id)
 
     def extract_session_id(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> str | None:
-        return extract_session_id_from_artifacts(artifacts, spawn_id)
+        return extract_session_id_from_artifacts_with_patterns(artifacts, spawn_id)
 
     def extract_report(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> str | None:
         return extract_claude_report(artifacts, spawn_id)

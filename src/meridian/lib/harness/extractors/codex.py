@@ -19,7 +19,7 @@ from meridian.lib.harness.common import (
 from meridian.lib.harness.connections.base import HarnessEvent
 from meridian.lib.harness.launch_spec import CodexLaunchSpec
 
-from .base import HarnessExtractor
+from .base import HarnessExtractor, session_from_mapping_with_keys
 
 _SESSION_ID_TEXT_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bcodex\s+resume\s+([A-Za-z0-9][A-Za-z0-9._:-]{5,})\b", re.IGNORECASE),
@@ -28,27 +28,6 @@ _SESSION_ID_TEXT_PATTERNS: tuple[re.Pattern[str], ...] = (
 _ROLLOUT_FILENAME_RE = re.compile(
     r"^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-(?P<session_id>[0-9a-fA-F-]{36})\.jsonl$"
 )
-
-
-def _session_from_mapping(payload: Mapping[str, object]) -> str | None:
-    for key in (
-        "threadId",
-        "thread_id",
-        "session_id",
-        "sessionId",
-        "sessionID",
-        "conversation_id",
-        "conversationId",
-    ):
-        value = payload.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    for nested in payload.values():
-        if isinstance(nested, dict):
-            found = _session_from_mapping(cast("dict[str, object]", nested))
-            if found:
-                return found
-    return None
 
 
 def _resolve_rollout_session_id(path: Path, repo_root: Path) -> str | None:
@@ -158,7 +137,18 @@ class CodexHarnessExtractor(HarnessExtractor[CodexLaunchSpec]):
     """Extractor implementation for Codex artifacts and events."""
 
     def detect_session_id_from_event(self, event: HarnessEvent) -> str | None:
-        return _session_from_mapping(event.payload)
+        return session_from_mapping_with_keys(
+            event.payload,
+            (
+                "threadId",
+                "thread_id",
+                "session_id",
+                "sessionId",
+                "sessionID",
+                "conversation_id",
+                "conversationId",
+            ),
+        )
 
     def detect_session_id_from_artifacts(
         self,

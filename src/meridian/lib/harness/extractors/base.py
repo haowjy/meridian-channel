@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Generic, Protocol, TypeVar, runtime_checkable
+from typing import Generic, Protocol, TypeVar, cast, runtime_checkable
 
 from meridian.lib.core.domain import TokenUsage
 from meridian.lib.core.types import SpawnId
@@ -47,4 +47,20 @@ class HarnessExtractor(SpawnExtractor, Protocol, Generic[ExtractorSpecT]):
         ...
 
 
-__all__ = ["HarnessExtractor"]
+def session_from_mapping_with_keys(
+    payload: Mapping[str, object],
+    keys: tuple[str, ...],
+) -> str | None:
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    for nested in payload.values():
+        if isinstance(nested, dict):
+            found = session_from_mapping_with_keys(cast("dict[str, object]", nested), keys)
+            if found:
+                return found
+    return None
+
+
+__all__ = ["HarnessExtractor", "session_from_mapping_with_keys"]
