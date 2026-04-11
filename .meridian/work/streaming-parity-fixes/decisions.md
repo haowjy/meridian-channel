@@ -651,3 +651,51 @@ Both are flagged for the final review loop, not for an intra-phase fix.
 **Why:** Phase 7 scope was bounded to bundle/dispatch/extractor convergence; moving the autocompact env var routing safely would expand into primary launch env plumbing beyond this phase's scope. The continued deferral is a conscious choice, not an oversight. Candidate home: final review loop or Phase 8 (primary launch env integration).
 
 **Addresses.** E3.1 (deferred, still not resolved; flagged for final review).
+
+## E8 — Phase 8: Runner, spawn-manager, and REST lifecycle convergence
+
+### E8.1 — Resolver threading (S014)
+
+`run_streaming_spawn(...)` now requires caller-supplied `perms: PermissionResolver`. The v1 `cast("PermissionResolver", None)` path and `UnsafeNoOpPermissionResolver(_suppress_warning=True)` escape hatch are removed. REST `/api/spawns` now threads the resolver through to the streaming runner unchanged. Identity-preserving invariant holds: `spec.permission_resolver is resolver`. This closes K3 (permission pipeline harness-agnostic) and K4 (no-arg `resolve_flags`) end-to-end.
+
+### E8.2 — Structured missing-binary errors (S028)
+
+`src/meridian/lib/harness/errors.py` defines shared `HarnessBinaryNotFound(Exception)` (non-frozen dataclass; frozen caused prior `FrozenInstanceError` regression). Both subprocess (`spawn_and_stream`) and streaming (`run_streaming_spawn`) now raise this same class with `harness_id`, `binary_name`, and `searched_path`. Smoke tester p1491 verified parity across all 6 matrix cells (3 harnesses × 2 runners).
+
+### E8.3 — Idempotent cancel/interrupt (S041)
+
+`send_cancel()` and `send_interrupt()` are idempotent across all four connection types. A second awaited call becomes a no-op, and exactly one `cancelled` terminal event is emitted per connection. Verified by unit tester p1490 with parametrized coverage.
+
+### E8.4 — First terminal status wins (S048)
+
+Spawn-store finalize semantics are idempotent: a second terminal write with a different status is now a no-op (not an exception). Race tests verify both orderings (cancel-first and completion-first). Both terminal attempts remain audit-visible in event logs; persisted terminal state is single-winner.
+
+### E8.5 — S042 fix loop (p1504)
+
+Smoke tester p1491 found `resolve_execution_terminal_state` could not yield `cancelled`; streaming-runner finalize persisted only `succeeded`/`failed` even when signal handling fired `send_cancel`. Fix coder p1504 added an explicit cancellation branch, threaded cancellation intent through finalize callsites in `streaming_runner`/`runner`/`process`, hardened `has_durable_report_completion` against cancelled-frame false positives (report extraction filters terminal control-frames), and prevented streaming cancellation from being overwritten by `missing_report`.
+
+Decision: cancellation intent is threaded as an explicit resolver parameter rather than inferred from `failure_reason` strings. Explicit signaling is safer and more future-resistant.
+
+### E8.6 — Lazy PID/heartbeat cleanup (S042 tertiary)
+
+Smoke tester p1491 found `harness.pid` / `heartbeat` / `background.pid` persisted after terminal rows. Fix coder p1504 added `cleanup_terminal_artifacts` in `src/meridian/lib/state/spawn_store.py` and invoked it from `src/meridian/lib/ops/spawn/api.py` read paths (`meridian spawn show` and `meridian spawn list`).
+
+Crash-only design is preserved by keeping cleanup on read/reconciliation paths (no write-path coupling). Scenario text mentioned `meridian status`, but that command does not exist; scenario contract allows `meridian status OR meridian spawn show`, so `spawn show`/`spawn list` wiring satisfies contract intent.
+
+### E8.7 — S027 verifier concurrency race
+
+Verifier p1489 ran while unit tester p1490 was still editing `tests/exec/test_signals.py`, observed a transient failing intermediate state, and marked S027 `failed`. Orchestrator direct reruns after edit stabilization produced full-suite parity (552/552) under normal and `PYTHONOPTIMIZE=1` modes.
+
+Judgment call: S027 was re-verified via direct objective evidence (test counts), without re-spawning verifier; re-spawn would add no new information. Process note for future phases: sequence verifier only after all other testers complete to avoid test-file concurrency races.
+
+### E8.8 — Subprocess variant of S042 skipped
+
+All three harnesses currently declare `supports_bidirectional=True`, so `ops/spawn/execute.py` routes user-facing CLI spawns through `execute_with_streaming`. `execute_with_finalization` (subprocess runner) is unreachable from `meridian spawn`.
+
+S042's subprocess-vs-streaming clause therefore degrades to streaming parity across harnesses at CLI layer. Subprocess library-entrypoint coverage remains in S028 direct `spawn_and_stream` tests. Accepted as design reality and recorded here instead of forcing a synthetic subprocess-wrapper test.
+
+### E8.9 — Smoke re-verify independence skipped (judgment)
+
+After p1504 reran the same smoke driver and produced post-fix evidence, the orchestrator did not respawn an independent `@smoke-tester` for S042 re-verify. Rationale: evidence is objective JSON rows in `spawns.jsonl`; an additional rerun would not provide new signal beyond validating the same artifact shape.
+
+This follows v3 coordinator posture: strict on invariants, pragmatic on process overhead when evidence is objective.

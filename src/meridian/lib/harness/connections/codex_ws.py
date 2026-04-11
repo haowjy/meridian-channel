@@ -30,6 +30,7 @@ from meridian.lib.harness.connections.base import (
     HarnessConnection,
     HarnessEvent,
 )
+from meridian.lib.harness.errors import HarnessBinaryNotFound
 from meridian.lib.harness.ids import HarnessId
 from meridian.lib.harness.launch_spec import CodexLaunchSpec
 from meridian.lib.harness.projections.project_codex_streaming import (
@@ -159,6 +160,8 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
         self._current_turn_id: str | None = None
         self._thread_id: str | None = None
         self._tracer: DebugTracer | None = None
+        self._cancel_requested = False
+        self._interrupt_in_flight = False
 
     @property
     def state(self) -> ConnectionState:
@@ -208,6 +211,8 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
         self._event_queue = asyncio.Queue()
         self._current_turn_id = None
         self._thread_id = None
+        self._cancel_requested = False
+        self._interrupt_in_flight = False
 
         host = config.ws_bind_host
         port = config.ws_port if config.ws_port > 0 else _reserve_port(host)
@@ -224,13 +229,20 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
                 host=host,
                 port=port,
             )
-            self._process = await asyncio.create_subprocess_exec(
-                *appserver_command,
-                cwd=str(config.repo_root),
-                env=env,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=self._stderr_handle,
-            )
+            try:
+                self._process = await asyncio.create_subprocess_exec(
+                    *appserver_command,
+                    cwd=str(config.repo_root),
+                    env=env,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=self._stderr_handle,
+                )
+            except (FileNotFoundError, NotADirectoryError) as exc:
+                raise HarnessBinaryNotFound.from_os_error(
+                    harness_id=self.harness_id,
+                    error=exc,
+                    binary_name=appserver_command[0],
+                ) from exc
 
             self._ws = await self._connect_with_retry(
                 ws_url,
@@ -299,6 +311,7 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
 
     async def send_user_message(self, text: str) -> None:
         self._require_connected("send_user_message")
+        self._interrupt_in_flight = False
 
         if self._current_turn_id:
             await self._request(
@@ -320,22 +333,36 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
         )
 
     async def send_interrupt(self) -> None:
+        if self._interrupt_in_flight:
+            return
         self._require_connected("send_interrupt")
 
         if not self._current_turn_id:
             return
 
-        await self._request(
-            "turn/interrupt",
-            {
-                "threadId": self._require_thread_id("turn/interrupt"),
-                "turnId": self._current_turn_id,
-            },
-        )
+        self._interrupt_in_flight = True
+        try:
+            await self._request(
+                "turn/interrupt",
+                {
+                    "threadId": self._require_thread_id("turn/interrupt"),
+                    "turnId": self._current_turn_id,
+                },
+            )
+        except Exception:
+            self._interrupt_in_flight = False
+            raise
 
     async def send_cancel(self) -> None:
+        if self._cancel_requested:
+            return
+        if self._state in {"stopping", "stopped", "failed"}:
+            self._cancel_requested = True
+            return
         self._require_connected("send_cancel")
 
+        self._cancel_requested = True
+        self._interrupt_in_flight = True
         self._transition("stopping")
         await self._close_ws()
 
@@ -536,6 +563,8 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
         self._fail_pending_requests(RuntimeError("Codex connection stopped"))
         self._current_turn_id = None
         self._thread_id = None
+        self._cancel_requested = False
+        self._interrupt_in_flight = False
         self._launch_spec = None
         self._close_log_handles()
 
@@ -719,6 +748,7 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
     def _update_turn_state(self, *, method: str, payload: dict[str, object]) -> None:
         if method == "turn/completed":
             self._current_turn_id = None
+            self._interrupt_in_flight = False
             return
 
         if method in {"thread/start", "thread/started"}:
@@ -729,6 +759,7 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
         turn_id = _extract_turn_id(payload)
         if turn_id is not None:
             self._current_turn_id = turn_id
+            self._interrupt_in_flight = False
 
 
 def _reserve_port(host: str) -> int:

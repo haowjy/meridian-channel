@@ -51,6 +51,7 @@ FOREGROUND_LAUNCH_MODE: LaunchMode = "foreground"
 
 ACTIVE_SPAWN_STATUSES = _ACTIVE_SPAWN_STATUSES
 is_active_spawn_status = _is_active_spawn_status
+_TERMINAL_RUNTIME_ARTIFACTS: tuple[str, ...] = ("harness.pid", "heartbeat", "background.pid")
 
 
 # ---------------------------------------------------------------------------
@@ -464,27 +465,19 @@ def _record_from_events(events: list[SpawnEvent]) -> dict[str, SpawnRecord]:
             )
             continue
 
-        # Terminal state resolution: "succeeded" always wins over other
-        # terminal states (the work was completed). Among non-success
-        # terminal states, the first one wins (most relevant failure
-        # reason). Metadata (duration, cost, tokens) is always merged
-        # from all finalize events so no data is lost regardless of
-        # which writer wins the race.
+        # Terminal state resolution is first-wins and idempotent:
+        # once a spawn reaches any terminal state, later finalize
+        # events cannot change status/exit_code/error. Metadata
+        # (duration, cost, tokens) is still merged from every finalize
+        # event so audit details are preserved.
         already_terminal = current.status in _TERMINAL_SPAWN_STATUSES
-        event_status = event.status if event.status is not None else current.status
-        if already_terminal and event_status != "succeeded":
-            # Current state is terminal and new event is not an upgrade
-            # to succeeded — keep the existing terminal verdict locked.
+        if already_terminal:
             resolved_status = current.status
             resolved_exit_code = current.exit_code
             resolved_error = current.error
-        elif already_terminal and event_status == "succeeded":
-            # Upgrade to succeeded — success always wins.
-            resolved_status = "succeeded"
-            resolved_exit_code = event.exit_code if event.exit_code is not None else 0
-            resolved_error = None
         else:
             # First terminal event.
+            event_status = event.status if event.status is not None else current.status
             resolved_status = event_status
             resolved_exit_code = (
                 event.exit_code if event.exit_code is not None else current.exit_code
@@ -558,6 +551,37 @@ def list_spawns(state_root: Path, filters: Mapping[str, Any] | None = None) -> l
         spawns = filtered
 
     return sorted(spawns, key=_spawn_sort_key)
+
+
+def cleanup_terminal_spawn_runtime_artifacts(
+    state_root: Path,
+    spawn_id: SpawnId | str,
+    *,
+    status: SpawnStatus | Literal["unknown"] | None = None,
+) -> tuple[str, ...]:
+    """Best-effort cleanup for stale runtime files left behind after terminalization."""
+
+    resolved_status = status
+    if resolved_status is None:
+        record = get_spawn(state_root, spawn_id)
+        if record is None:
+            return ()
+        resolved_status = record.status
+    if resolved_status not in _TERMINAL_SPAWN_STATUSES:
+        return ()
+
+    spawn_dir = state_root / "spawns" / str(spawn_id)
+    removed: list[str] = []
+    for filename in _TERMINAL_RUNTIME_ARTIFACTS:
+        target = spawn_dir / filename
+        try:
+            target.unlink()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            continue
+        removed.append(filename)
+    return tuple(removed)
 
 
 def get_spawn(state_root: Path, spawn_id: SpawnId | str) -> SpawnRecord | None:

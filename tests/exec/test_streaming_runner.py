@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import os
 from pathlib import Path
 from typing import ClassVar
 
@@ -27,6 +28,7 @@ from meridian.lib.harness.connections.base import (
     ConnectionConfig,
     HarnessEvent,
 )
+from meridian.lib.harness.errors import HarnessBinaryNotFound
 from meridian.lib.harness.launch_spec import (
     ClaudeLaunchSpec,
     CodexLaunchSpec,
@@ -357,6 +359,62 @@ class _CodexCaptureSpecThenIdleConnection(_HangingAfterTurnCompletedConnection):
         await super().start(config, spec)
 
 
+class _MissingBinaryConnection:
+    def __init__(self) -> None:
+        self.state = "created"
+        self.capabilities = ConnectionCapabilities(
+            mid_turn_injection="interrupt_restart",
+            supports_steer=True,
+            supports_interrupt=True,
+            supports_cancel=True,
+            runtime_model_switch=False,
+            structured_reasoning=True,
+        )
+
+    @property
+    def harness_id(self) -> HarnessId:
+        return HarnessId.CODEX
+
+    @property
+    def spawn_id(self) -> SpawnId:
+        return SpawnId("p-missing")
+
+    @property
+    def session_id(self) -> str | None:
+        return None
+
+    @property
+    def subprocess_pid(self) -> int | None:
+        return None
+
+    async def start(self, config: ConnectionConfig, spec: ResolvedLaunchSpec) -> None:
+        _ = config, spec
+        raise FileNotFoundError(2, "No such file or directory", "codex")
+
+    async def stop(self) -> None:
+        return None
+
+    def health(self) -> bool:
+        return False
+
+    async def send_user_message(self, text: str) -> None:
+        _ = text
+
+    async def send_interrupt(self) -> None:
+        return None
+
+    async def send_cancel(self) -> None:
+        return None
+
+    async def events(self):  # type: ignore[no-untyped-def]
+        if False:
+            yield HarnessEvent(
+                event_type="noop",
+                harness_id="codex",
+                payload={},
+            )
+
+
 def _build_plan(
     harness_id: HarnessId = HarnessId.CODEX,
     model: str = "gpt-5.3-codex",
@@ -409,6 +467,7 @@ async def test_run_streaming_spawn_finishes_on_turn_completed_without_connection
                 env_overrides={},
             ),
             params=SpawnParams(prompt="hello"),
+            perms=TieredPermissionResolver(config=PermissionConfig()),
             state_root=state_root,
             repo_root=tmp_path,
             spawn_id=SpawnId("p1"),
@@ -418,6 +477,80 @@ async def test_run_streaming_spawn_finishes_on_turn_completed_without_connection
 
     assert outcome.status == "succeeded"
     assert outcome.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_run_streaming_spawn_threads_caller_permission_resolver_without_swapping(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_root = resolve_state_paths(tmp_path).root_dir
+    monkeypatch.setattr(spawn_manager_module, "ControlSocketServer", _FakeControlSocketServer)
+    monkeypatch.setattr(
+        "meridian.lib.harness.connections.get_connection_class",
+        _fake_codex_capture_spec_connection_class,
+    )
+    _CodexCaptureSpecThenIdleConnection.seen_spec = None
+    resolver = TieredPermissionResolver(
+        config=PermissionConfig(sandbox="read-only", approval="auto")
+    )
+
+    outcome = await asyncio.wait_for(
+        run_streaming_spawn(
+            config=ConnectionConfig(
+                spawn_id=SpawnId("p-resolver"),
+                harness_id=HarnessId.CODEX,
+                prompt="hello",
+                repo_root=tmp_path,
+                env_overrides={},
+            ),
+            params=SpawnParams(prompt="hello", model=ModelId("gpt-5.3-codex")),
+            perms=resolver,
+            state_root=state_root,
+            repo_root=tmp_path,
+            spawn_id=SpawnId("p-resolver"),
+        ),
+        timeout=0.5,
+    )
+
+    assert outcome.status == "succeeded"
+    observed_spec = _CodexCaptureSpecThenIdleConnection.seen_spec
+    assert isinstance(observed_spec, CodexLaunchSpec)
+    assert observed_spec.permission_resolver is resolver
+
+
+@pytest.mark.asyncio
+async def test_run_streaming_spawn_raises_structured_missing_binary_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_root = resolve_state_paths(tmp_path).root_dir
+    monkeypatch.setattr(spawn_manager_module, "ControlSocketServer", _FakeControlSocketServer)
+    monkeypatch.setattr(
+        "meridian.lib.harness.connections.get_connection_class",
+        lambda _harness_id: _MissingBinaryConnection,
+    )
+
+    with pytest.raises(HarnessBinaryNotFound) as exc_info:
+        await run_streaming_spawn(
+            config=ConnectionConfig(
+                spawn_id=SpawnId("p-missing"),
+                harness_id=HarnessId.CODEX,
+                prompt="hello",
+                repo_root=tmp_path,
+                env_overrides={},
+            ),
+            params=SpawnParams(prompt="hello"),
+            perms=TieredPermissionResolver(config=PermissionConfig()),
+            state_root=state_root,
+            repo_root=tmp_path,
+            spawn_id=SpawnId("p-missing"),
+        )
+
+    err = exc_info.value
+    assert err.harness_id == "codex"
+    assert err.binary_name == "codex"
+    assert err.searched_path == str(os.environ.get("PATH", ""))
 
 
 @pytest.mark.asyncio
@@ -612,6 +745,7 @@ async def test_run_streaming_spawn_finishes_on_claude_result_without_connection_
                 env_overrides={},
             ),
             params=SpawnParams(prompt="hello"),
+            perms=TieredPermissionResolver(config=PermissionConfig()),
             state_root=state_root,
             repo_root=tmp_path,
             spawn_id=SpawnId("p2"),
@@ -689,6 +823,7 @@ async def test_run_streaming_spawn_finishes_on_opencode_idle_without_connection_
                 env_overrides={},
             ),
             params=SpawnParams(prompt="hello"),
+            perms=TieredPermissionResolver(config=PermissionConfig()),
             state_root=state_root,
             repo_root=tmp_path,
             spawn_id=SpawnId("p3"),
@@ -723,6 +858,7 @@ async def test_run_streaming_spawn_preserves_none_model_in_launch_spec(
                 env_overrides={},
             ),
             params=SpawnParams(prompt="hello", model=None),
+            perms=TieredPermissionResolver(config=PermissionConfig()),
             state_root=state_root,
             repo_root=tmp_path,
             spawn_id=SpawnId("p4"),

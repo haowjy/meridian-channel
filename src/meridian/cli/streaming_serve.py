@@ -11,6 +11,7 @@ from meridian.lib.harness.adapter import SpawnParams
 from meridian.lib.harness.connections.base import ConnectionConfig
 from meridian.lib.launch.streaming_runner import run_streaming_spawn, signal_coordinator
 from meridian.lib.ops.runtime import resolve_runtime_root_and_config
+from meridian.lib.safety.permissions import PermissionConfig, TieredPermissionResolver
 from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_state_paths
 
@@ -81,6 +82,7 @@ async def streaming_serve(
         model=ModelId(normalized_model) if normalized_model else None,
         agent=normalized_agent,
     )
+    perms = TieredPermissionResolver(config=PermissionConfig())
 
     output_path = state_root / "spawns" / str(spawn_id) / "output.jsonl"
     socket_path = state_root / "spawns" / str(spawn_id) / "control.sock"
@@ -96,6 +98,7 @@ async def streaming_serve(
         outcome = await run_streaming_spawn(
             config=config,
             params=params,
+            perms=perms,
             state_root=state_root,
             repo_root=repo_root,
             spawn_id=spawn_id,

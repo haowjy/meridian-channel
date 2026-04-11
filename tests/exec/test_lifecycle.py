@@ -1,10 +1,11 @@
 import asyncio
 import json
+import os
 import signal
 import sys
 import textwrap
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, get_args, get_origin
 
 import pytest
 
@@ -23,10 +24,20 @@ from meridian.lib.harness.common import (
     extract_session_id_from_artifacts,
     extract_usage_from_artifacts,
 )
+from meridian.lib.harness.connections.base import HarnessConnection
+from meridian.lib.harness.connections.claude_ws import ClaudeConnection
+from meridian.lib.harness.connections.codex_ws import CodexConnection
+from meridian.lib.harness.connections.opencode_http import OpenCodeConnection
+from meridian.lib.harness.errors import HarnessBinaryNotFound
+from meridian.lib.harness.launch_spec import (
+    ClaudeLaunchSpec,
+    CodexLaunchSpec,
+    OpenCodeLaunchSpec,
+)
 from meridian.lib.harness.registry import HarnessRegistry
 from meridian.lib.launch import runner as launch_runner
 from meridian.lib.launch.launch_types import ResolvedLaunchSpec
-from meridian.lib.launch.runner import execute_with_finalization
+from meridian.lib.launch.runner import execute_with_finalization, spawn_and_stream
 from meridian.lib.ops.spawn.plan import ExecutionPolicy, PreparedSpawnPlan, SessionContinuation
 from meridian.lib.safety.permissions import PermissionConfig, TieredPermissionResolver
 from meridian.lib.state import spawn_store
@@ -132,6 +143,137 @@ def _build_plan(
         ),
         cli_command=(),
     )
+
+
+def test_all_streaming_connections_bind_harness_connection_protocol() -> None:
+    expected = (
+        (ClaudeConnection, ClaudeLaunchSpec),
+        (CodexConnection, CodexLaunchSpec),
+        (OpenCodeConnection, OpenCodeLaunchSpec),
+    )
+    for connection_cls, expected_spec in expected:
+        assert issubclass(connection_cls, HarnessConnection)
+        matching_bases = [
+            base
+            for base in getattr(connection_cls, "__orig_bases__", ())
+            if get_origin(base) is HarnessConnection
+        ]
+        assert matching_bases
+        assert get_args(matching_bases[0]) == (expected_spec,)
+        connection_cls()
+
+
+@pytest.mark.asyncio
+async def test_claude_connection_cancel_interrupt_are_idempotent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = ClaudeConnection()
+    connection._state = "connected"
+    signal_calls: list[signal.Signals] = []
+
+    async def _fake_signal(sig: signal.Signals) -> None:
+        signal_calls.append(sig)
+
+    monkeypatch.setattr(connection, "_signal_process", _fake_signal)
+
+    await connection.send_interrupt()
+    await connection.send_interrupt()
+    await connection.send_cancel()
+    await connection.send_cancel()
+
+    assert signal_calls == [signal.SIGINT, signal.SIGINT]
+    assert connection.state == "stopping"
+
+
+@pytest.mark.asyncio
+async def test_codex_connection_cancel_interrupt_are_idempotent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = CodexConnection()
+    connection._state = "connected"
+    connection._thread_id = "thread-1"
+    connection._current_turn_id = "turn-1"
+    request_methods: list[str] = []
+    close_calls = 0
+
+    async def _fake_request(
+        method: str,
+        params: dict[str, object] | None = None,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> dict[str, object]:
+        _ = params, timeout_seconds
+        request_methods.append(method)
+        return {}
+
+    async def _fake_close_ws() -> None:
+        nonlocal close_calls
+        close_calls += 1
+
+    monkeypatch.setattr(connection, "_request", _fake_request)
+    monkeypatch.setattr(connection, "_close_ws", _fake_close_ws)
+
+    await connection.send_interrupt()
+    await connection.send_interrupt()
+    await connection.send_cancel()
+    await connection.send_cancel()
+
+    assert request_methods == ["turn/interrupt"]
+    assert close_calls == 1
+    assert connection.state == "stopping"
+
+
+@pytest.mark.asyncio
+async def test_opencode_connection_cancel_interrupt_are_idempotent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = OpenCodeConnection()
+    connection._state = "connected"
+    connection._session_id = "session-1"
+    action_calls = 0
+
+    async def _fake_post_session_action(
+        *,
+        path_templates: tuple[str, ...],
+        payload_variants: tuple[dict[str, object], ...],
+        accepted_statuses: frozenset[int],
+    ) -> None:
+        _ = path_templates, payload_variants, accepted_statuses
+        nonlocal action_calls
+        action_calls += 1
+
+    monkeypatch.setattr(connection, "_post_session_action", _fake_post_session_action)
+
+    await connection.send_interrupt()
+    await connection.send_interrupt()
+    await connection.send_cancel()
+    await connection.send_cancel()
+
+    assert action_calls == 2
+    assert connection.state == "stopping"
+
+
+@pytest.mark.asyncio
+async def test_spawn_and_stream_raises_structured_missing_binary_error(tmp_path: Path) -> None:
+    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
+    spawn_id = SpawnId("p-missing-binary")
+
+    with pytest.raises(HarnessBinaryNotFound) as exc_info:
+        await spawn_and_stream(
+            spawn_id=spawn_id,
+            command=("definitely-missing-binary-phase8-test",),
+            cwd=tmp_path,
+            artifacts=artifacts,
+            output_log_path=tmp_path / "output.jsonl",
+            stderr_log_path=tmp_path / "stderr.log",
+            timeout_seconds=1.0,
+            harness_id=HarnessId.CODEX,
+        )
+
+    err = exc_info.value
+    assert err.harness_id == "codex"
+    assert err.binary_name == "definitely-missing-binary-phase8-test"
+    assert err.searched_path == str(os.environ.get("PATH", ""))
 
 
 @pytest.mark.asyncio
@@ -458,7 +600,7 @@ async def test_execute_sets_cancelled_failure_reason(tmp_path: Path) -> None:
 
     assert exit_code == 130
     row = _fetch_run_row(state_root, run.spawn_id)
-    assert row.status == "failed"
+    assert row.status == "cancelled"
     assert row.error == "cancelled"
 
 
@@ -468,7 +610,13 @@ async def test_execute_sets_cancelled_failure_reason(tmp_path: Path) -> None:
     [
         pytest.param(signal.SIGTERM, True, "succeeded", 0, id="forwarded-sigterm-with-report"),
         pytest.param(None, True, "succeeded", 0, id="raw-sigterm-with-report"),
-        pytest.param(signal.SIGTERM, False, "failed", 143, id="forwarded-sigterm-without-report"),
+        pytest.param(
+            signal.SIGTERM,
+            False,
+            "cancelled",
+            143,
+            id="forwarded-sigterm-without-report",
+        ),
     ],
 )
 async def test_execute_resolves_sigterm_after_report_regardless_of_received_signal(

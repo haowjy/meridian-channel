@@ -24,6 +24,7 @@ from meridian.lib.harness.adapter import (
     StreamEvent,
 )
 from meridian.lib.harness.claude_preflight import ensure_claude_session_accessible
+from meridian.lib.harness.errors import HarnessBinaryNotFound
 from meridian.lib.harness.registry import HarnessRegistry
 from meridian.lib.safety.budget import Budget, BudgetBreach, LiveBudgetTracker
 from meridian.lib.safety.guardrails import GuardrailFailure, run_guardrails
@@ -211,21 +212,29 @@ async def spawn_and_stream(
     log_dir: Path | None = None,
     report_watchdog_path: Path | None = None,
     on_process_started: Callable[[int], None] | None = None,
+    harness_id: HarnessId | str = "unknown",
 ) -> SpawnResult:
     """Spawn one process, stream/capture output, and return mapped exit metadata."""
 
     if not command:
         raise ValueError("Cannot spawn process: command is empty.")
 
-    process = await asyncio.create_subprocess_exec(
-        *command,
-        cwd=str(cwd),
-        env=env,
-        start_new_session=True,
-        stdin=asyncio.subprocess.PIPE if stdin_text is not None else None,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            cwd=str(cwd),
+            env=env,
+            start_new_session=True,
+            stdin=asyncio.subprocess.PIPE if stdin_text is not None else None,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        raise HarnessBinaryNotFound.from_os_error(
+            harness_id=harness_id,
+            error=exc,
+            binary_name=command[0],
+        ) from exc
     if process.stdout is None or process.stderr is None:
         raise RuntimeError("Subprocess did not expose stdout/stderr pipes.")
 
@@ -672,6 +681,7 @@ async def execute_with_finalization(
                     log_dir=log_dir,
                     report_watchdog_path=report_path,
                     on_process_started=_record_worker_started,
+                    harness_id=harness.id,
                 )
                 exit_code = spawn_result.exit_code
                 last_raw_return_code = spawn_result.raw_return_code
@@ -885,9 +895,14 @@ async def execute_with_finalization(
                     or last_received_signal == signal.SIGTERM
                 )
             )
+            cancelled = (
+                failure_reason in {"cancelled", "terminated"}
+                or last_received_signal in {signal.SIGINT, signal.SIGTERM}
+            )
             status, exit_code, failure_reason = resolve_execution_terminal_state(
                 exit_code=exit_code,
                 failure_reason=failure_reason,
+                cancelled=cancelled,
                 durable_report_completion=durable_report_completion,
                 terminated_after_completion=terminated_after_completion,
             )

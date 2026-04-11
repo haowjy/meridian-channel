@@ -363,6 +363,12 @@ async def test_spawn_manager_stop_spawn_returns_cancelled_outcome_without_finali
         async def events(self):  # type: ignore[no-untyped-def]
             while True:
                 await asyncio.sleep(3600)
+                if False:
+                    yield HarnessEvent(
+                        event_type="noop",
+                        harness_id="codex",
+                        payload={},
+                    )
 
     monkeypatch.setattr(spawn_manager_module, "ControlSocketServer", FakeControlSocketServer)
     monkeypatch.setattr(
@@ -403,6 +409,262 @@ async def test_spawn_manager_stop_spawn_returns_cancelled_outcome_without_finali
     assert row.status == "running"
     assert row.exit_code is None
     assert manager.get_connection(spawn_id) is None
+
+
+@pytest.mark.asyncio
+async def test_spawn_manager_stop_spawn_cancel_emits_single_terminal_cancelled_event(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path
+    state_root = resolve_state_paths(repo_root).root_dir
+
+    class FakeControlSocketServer:
+        def __init__(self, spawn_id: str, socket_path: Path, manager: SpawnManager) -> None:
+            _ = spawn_id, manager
+            self.socket_path = socket_path
+
+        async def start(self) -> None:
+            self.socket_path.parent.mkdir(parents=True, exist_ok=True)
+
+        async def stop(self) -> None:
+            pass
+
+    class FakeConnection:
+        send_cancel_calls = 0
+        stop_calls = 0
+
+        def __init__(self) -> None:
+            self._spawn_id = ""
+            self.state = "created"
+            self.capabilities = ConnectionCapabilities(
+                mid_turn_injection="queue",
+                supports_steer=True,
+                supports_interrupt=True,
+                supports_cancel=True,
+                runtime_model_switch=False,
+                structured_reasoning=False,
+            )
+
+        @property
+        def harness_id(self) -> HarnessId:
+            return HarnessId.CODEX
+
+        @property
+        def spawn_id(self) -> str:
+            return self._spawn_id
+
+        async def start(self, config: ConnectionConfig, spec: ResolvedLaunchSpec) -> None:
+            _ = spec
+            self._spawn_id = config.spawn_id
+            self.state = "connected"
+
+        async def stop(self) -> None:
+            type(self).stop_calls += 1
+            self.state = "stopped"
+
+        def health(self) -> bool:
+            return True
+
+        async def send_user_message(self, text: str) -> None:
+            _ = text
+
+        async def send_interrupt(self) -> None:
+            return None
+
+        async def send_cancel(self) -> None:
+            type(self).send_cancel_calls += 1
+
+        async def events(self):  # type: ignore[no-untyped-def]
+            while True:
+                await asyncio.sleep(3600)
+                if False:
+                    yield HarnessEvent(
+                        event_type="noop",
+                        harness_id="codex",
+                        payload={},
+                    )
+
+    monkeypatch.setattr(spawn_manager_module, "ControlSocketServer", FakeControlSocketServer)
+    monkeypatch.setattr(
+        "meridian.lib.harness.connections.get_connection_class",
+        lambda harness_id: FakeConnection,
+    )
+
+    spawn_id = start_spawn(
+        state_root,
+        chat_id="c1",
+        model="gpt-5.3-codex",
+        agent="coder",
+        harness="codex",
+        kind="streaming",
+        prompt="hello",
+        launch_mode="foreground",
+        status="running",
+    )
+    manager = SpawnManager(state_root=state_root, repo_root=repo_root)
+    await manager.start_spawn(_build_config(spawn_id, repo_root))
+
+    await manager.stop_spawn(spawn_id, status="cancelled", exit_code=143, error="cancelled")
+    await manager.stop_spawn(spawn_id, status="cancelled", exit_code=143, error="cancelled")
+
+    assert FakeConnection.send_cancel_calls == 1
+    output = _read_output_lines(state_root, spawn_id)
+    cancelled = [entry for entry in output if entry.get("event_type") == "cancelled"]
+    assert len(cancelled) == 1
+    assert cancelled[0]["payload"]["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("ordering", "expected_terminal"),
+    [
+        ("cancel_first", "cancelled"),
+        ("completion_first", "succeeded"),
+    ],
+)
+async def test_spawn_manager_cancel_vs_completion_race_emits_both_events_and_first_terminal_wins(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    ordering: str,
+    expected_terminal: str,
+) -> None:
+    repo_root = tmp_path
+    state_root = resolve_state_paths(repo_root).root_dir
+    release_completion = asyncio.Event()
+    cleanup_started = asyncio.Event()
+    release_cleanup = asyncio.Event()
+
+    class FakeControlSocketServer:
+        def __init__(self, spawn_id: str, socket_path: Path, manager: SpawnManager) -> None:
+            _ = spawn_id, manager
+            self.socket_path = socket_path
+
+        async def start(self) -> None:
+            self.socket_path.parent.mkdir(parents=True, exist_ok=True)
+
+        async def stop(self) -> None:
+            pass
+
+    class FakeConnection:
+        def __init__(self) -> None:
+            self._spawn_id = ""
+            self.state = "created"
+            self.capabilities = ConnectionCapabilities(
+                mid_turn_injection="queue",
+                supports_steer=True,
+                supports_interrupt=True,
+                supports_cancel=True,
+                runtime_model_switch=False,
+                structured_reasoning=False,
+            )
+
+        @property
+        def harness_id(self) -> HarnessId:
+            return HarnessId.CODEX
+
+        @property
+        def spawn_id(self) -> str:
+            return self._spawn_id
+
+        async def start(self, config: ConnectionConfig, spec: ResolvedLaunchSpec) -> None:
+            _ = spec
+            self._spawn_id = config.spawn_id
+            self.state = "connected"
+
+        async def stop(self) -> None:
+            self.state = "stopped"
+
+        def health(self) -> bool:
+            return True
+
+        async def send_user_message(self, text: str) -> None:
+            _ = text
+
+        async def send_interrupt(self) -> None:
+            return None
+
+        async def send_cancel(self) -> None:
+            return None
+
+        async def events(self):  # type: ignore[no-untyped-def]
+            yield HarnessEvent(
+                event_type="item.completed",
+                harness_id="codex",
+                payload={
+                    "type": "item.completed",
+                    "item": {"type": "agent_message", "text": "done"},
+                },
+            )
+            await release_completion.wait()
+
+    monkeypatch.setattr(spawn_manager_module, "ControlSocketServer", FakeControlSocketServer)
+    monkeypatch.setattr(
+        "meridian.lib.harness.connections.get_connection_class",
+        lambda harness_id: FakeConnection,
+    )
+
+    spawn_id = start_spawn(
+        state_root,
+        chat_id="c1",
+        model="gpt-5.3-codex",
+        agent="coder",
+        harness="codex",
+        kind="streaming",
+        prompt="hello",
+        launch_mode="foreground",
+        status="running",
+    )
+    manager = SpawnManager(state_root=state_root, repo_root=repo_root)
+    original_cleanup = manager._cleanup_completed_session
+
+    async def gated_cleanup(spawn_id: SpawnId) -> None:
+        cleanup_started.set()
+        await release_cleanup.wait()
+        await original_cleanup(spawn_id)
+
+    monkeypatch.setattr(manager, "_cleanup_completed_session", gated_cleanup)
+
+    await manager.start_spawn(_build_config(spawn_id, repo_root))
+    completion_task = asyncio.create_task(manager.wait_for_completion(spawn_id))
+    output_path = state_root / "spawns" / spawn_id / "output.jsonl"
+
+    def _output_has_item_completed() -> bool:
+        if not output_path.exists():
+            return False
+        return any(
+            entry.get("event_type") == "item.completed"
+            for entry in _read_output_lines(state_root, spawn_id)
+        )
+
+    await _wait_until(_output_has_item_completed)
+
+    try:
+        if ordering == "completion_first":
+            release_completion.set()
+            await cleanup_started.wait()
+            completion = await completion_task
+            assert completion is not None
+            assert completion.status == "succeeded"
+            outcome = await manager.stop_spawn(spawn_id, status="cancelled", exit_code=1)
+            assert outcome == completion
+        else:
+            outcome = await manager.stop_spawn(spawn_id, status="cancelled", exit_code=1)
+            completion = await completion_task
+            assert outcome is not None
+            assert completion is not None
+            assert outcome == completion
+
+        assert outcome is not None
+        assert outcome.status == expected_terminal
+
+        output = _read_output_lines(state_root, spawn_id)
+        event_types = [entry.get("event_type") for entry in output]
+        assert "item.completed" in event_types
+        assert "cancelled" in event_types
+        assert len([t for t in event_types if t == "cancelled"]) == 1
+    finally:
+        release_cleanup.set()
 
 
 @pytest.mark.asyncio

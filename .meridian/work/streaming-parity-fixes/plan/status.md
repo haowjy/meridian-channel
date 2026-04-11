@@ -9,4 +9,4 @@
 | 5 | OpenCode transport parity | Done | — |
 | 6 | Shared launch context and env invariants | Done | — |
 | 7 | Bundle bootstrap, extractors, and projection convergence | Done | — |
-| 8 | Runner, spawn-manager, and REST lifecycle convergence | Not started | Phase 7 |
+| 8 | Runner, spawn-manager, and REST lifecycle convergence | Done | — |

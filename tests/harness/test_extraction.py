@@ -276,6 +276,23 @@ def test_extract_or_fallback_report_tolerates_malformed_jsonl_and_blank_adapter_
     assert extracted.source == "assistant_message"
 
 
+def test_extract_or_fallback_report_ignores_cancelled_control_frame_fallback() -> None:
+    artifacts = InMemoryStore()
+    spawn_id = SpawnId("r-report-cancel-control-frame")
+    artifacts.put(
+        make_artifact_key(spawn_id, "output.jsonl"),
+        (
+            b'{"event_type":"cancelled","payload":{"status":"cancelled","exit_code":143,'
+            b'"error":"cancelled"}}\n'
+        ),
+    )
+
+    extracted = extract_or_fallback_report(artifacts, spawn_id, extractor=None)
+
+    assert extracted.content is None
+    assert extracted.source is None
+
+
 def test_unwrap_event_payload_extracts_envelope_payload() -> None:
     line = {
         "event_type": "assistant",

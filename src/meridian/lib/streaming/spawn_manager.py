@@ -16,6 +16,8 @@ from meridian.lib.core.domain import SpawnStatus
 from meridian.lib.core.types import SpawnId
 from meridian.lib.harness.adapter import SpawnParams
 from meridian.lib.harness.bundle import get_harness_bundle
+from meridian.lib.harness.connections.base import HarnessEvent
+from meridian.lib.harness.errors import HarnessBinaryNotFound
 from meridian.lib.launch.launch_types import ResolvedLaunchSpec
 from meridian.lib.safety.permissions import UnsafeNoOpPermissionResolver
 from meridian.lib.state.atomic import append_text_line
@@ -26,7 +28,6 @@ if TYPE_CHECKING:
     from meridian.lib.harness.connections.base import (
         ConnectionConfig,
         HarnessConnection,
-        HarnessEvent,
     )
     from meridian.lib.observability.debug_tracer import DebugTracer
 
@@ -54,6 +55,8 @@ class SpawnSession:
     started_monotonic: float
     completion_future: asyncio.Future[DrainOutcome]
     debug_tracer: DebugTracer | None = None
+    cancel_sent: bool = False
+    cancel_event_emitted: bool = False
 
 
 def _ensure_harness_bootstrap() -> None:
@@ -82,7 +85,13 @@ async def dispatch_start(
     connection_class = get_connection_class(config.harness_id)
     connection_factory = cast("Callable[[], HarnessConnection[Any]]", connection_class)
     connection = connection_factory()
-    await connection.start(config, spec)
+    try:
+        await connection.start(config, spec)
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        raise HarnessBinaryNotFound.from_os_error(
+            harness_id=config.harness_id,
+            error=exc,
+        ) from exc
     return connection
 
 
@@ -417,6 +426,19 @@ class SpawnManager:
         if session is None:
             return None
 
+        if status == "cancelled" and not session.cancel_sent:
+            session.cancel_sent = True
+            with suppress(Exception):
+                await session.connection.send_cancel()
+            if not session.cancel_event_emitted:
+                session.cancel_event_emitted = True
+                await self._emit_cancelled_terminal_event(
+                    spawn_id=spawn_id,
+                    session=session,
+                    exit_code=exit_code,
+                    error=error,
+                )
+
         outcome = self._resolve_completion_future(
             session,
             DrainOutcome(
@@ -444,6 +466,34 @@ class SpawnManager:
         self._sessions.pop(spawn_id, None)
         self._completion_futures.pop(spawn_id, None)
         return outcome
+
+    async def _emit_cancelled_terminal_event(
+        self,
+        *,
+        spawn_id: SpawnId,
+        session: SpawnSession,
+        exit_code: int,
+        error: str | None,
+    ) -> None:
+        terminal_event = HarnessEvent(
+            event_type="cancelled",
+            payload={
+                "type": "cancelled",
+                "status": "cancelled",
+                "exit_code": exit_code,
+                "error": error,
+            },
+            harness_id=session.connection.harness_id.value,
+            raw_text=None,
+        )
+        envelope: dict[str, object] = {
+            "event_type": terminal_event.event_type,
+            "harness_id": terminal_event.harness_id,
+            "payload": terminal_event.payload,
+        }
+        with suppress(Exception):
+            await self._append_jsonl(self._output_log_path(spawn_id), envelope)
+        self._fan_out_event(spawn_id, terminal_event)
 
     async def shutdown(
         self,

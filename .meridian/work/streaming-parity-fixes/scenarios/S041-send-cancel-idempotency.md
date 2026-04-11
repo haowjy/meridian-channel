@@ -3,7 +3,7 @@
 - **Source:** design/edge-cases.md E41 + decisions.md K8 (revision round 3)
 - **Added by:** @design-orchestrator (revision round 3)
 - **Tester:** @unit-tester
-- **Status:** pending
+- **Status:** verified
 
 ## Given
 An active `HarnessConnection[SpecT]` instance — tested once for subprocess, once for streaming Claude, once for streaming Codex, once for streaming OpenCode (four fixtures total).
@@ -24,4 +24,15 @@ An active `HarnessConnection[SpecT]` instance — tested once for subprocess, on
 - Cross-transport test: parameterize on all four connection classes registered in `HarnessBundle.connections` for each harness.
 
 ## Result (filled by tester)
-_pending_
+verified
+
+Evidence:
+- Connection-level idempotency (transport call occurs once, second call no-op, no raise):
+  - `tests/exec/test_lifecycle.py::test_claude_connection_cancel_interrupt_are_idempotent`
+  - `tests/exec/test_lifecycle.py::test_codex_connection_cancel_interrupt_are_idempotent`
+  - `tests/exec/test_lifecycle.py::test_opencode_connection_cancel_interrupt_are_idempotent`
+- Manager-level cancelled terminal event is emitted once even if stop invoked twice:
+  - `tests/test_spawn_manager.py::test_spawn_manager_stop_spawn_cancel_emits_single_terminal_cancelled_event`
+- Regression run: `uv run pytest-llm tests/test_spawn_manager.py tests/exec/test_lifecycle.py -v` passed.
+
+Exploratory note (beyond scenario): calling `send_cancel()` before `start()` currently raises `ConnectionNotReady` for Claude/Codex/OpenCode (state=`created` requires `connected`).

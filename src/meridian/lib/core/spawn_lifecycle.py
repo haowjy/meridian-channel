@@ -5,6 +5,9 @@ signal after a final report already exists, that cleanup must not downgrade the
 spawn from succeeded to failed.
 """
 
+import json
+from typing import cast
+
 from meridian.lib.core.domain import SpawnStatus
 
 ACTIVE_SPAWN_STATUSES: frozenset[str] = frozenset({"queued", "running"})
@@ -29,13 +32,43 @@ def validate_transition(from_status: SpawnStatus, to_status: SpawnStatus) -> Non
 def has_durable_report_completion(report_text: str | None) -> bool:
     """Return True when a non-empty final report is available on disk."""
 
-    return bool(report_text and report_text.strip())
+    if not report_text or not report_text.strip():
+        return False
+
+    stripped = report_text.strip()
+    try:
+        payload_obj = json.loads(stripped)
+    except json.JSONDecodeError:
+        return True
+    if not isinstance(payload_obj, dict):
+        return True
+
+    payload = cast("dict[str, object]", payload_obj)
+    event_name = str(
+        payload.get("event_type", payload.get("event", payload.get("type", "")))
+    ).strip().lower()
+    if event_name in {"cancelled", "error"}:
+        return False
+
+    nested = payload.get("payload")
+    if isinstance(nested, dict):
+        nested_payload = cast("dict[str, object]", nested)
+        nested_name = str(
+            nested_payload.get(
+                "event_type",
+                nested_payload.get("event", nested_payload.get("type", "")),
+            )
+        ).strip().lower()
+        if nested_name in {"cancelled", "error"}:
+            return False
+    return True
 
 
 def resolve_execution_terminal_state(
     *,
     exit_code: int,
     failure_reason: str | None,
+    cancelled: bool = False,
     durable_report_completion: bool = False,
     terminated_after_completion: bool = False,
 ) -> tuple[SpawnStatus, int, str | None]:
@@ -43,6 +76,9 @@ def resolve_execution_terminal_state(
 
     if durable_report_completion and terminated_after_completion:
         return "succeeded", 0, None
+    if cancelled:
+        resolved_exit_code = exit_code if exit_code != 0 else 130
+        return "cancelled", resolved_exit_code, failure_reason
     if exit_code == 0:
         return "succeeded", 0, failure_reason
     return "failed", exit_code, failure_reason

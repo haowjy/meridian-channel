@@ -157,6 +157,12 @@ def spawn_list_sync(
 
     state_root = resolve_state_root(repo_root)
     spawns = list(reversed(reconcile_spawns(state_root, spawn_store.list_spawns(state_root))))
+    for row in spawns:
+        spawn_store.cleanup_terminal_spawn_runtime_artifacts(
+            state_root,
+            row.id,
+            status=row.status,
+        )
 
     # When statuses is empty tuple, show all statuses but cap intelligently:
     # always include all active spawns, pad with recent non-active up to limit.
@@ -363,6 +369,11 @@ def spawn_show_sync(
     row = read_spawn_row(repo_root, spawn_id)
     if row is None:
         raise ValueError(f"Spawn '{spawn_id}' not found")
+    spawn_store.cleanup_terminal_spawn_runtime_artifacts(
+        resolve_state_root(repo_root),
+        row.id,
+        status=row.status,
+    )
     return detail_from_row(
         repo_root=repo_root,
         row=row,

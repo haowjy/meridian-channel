@@ -12,6 +12,7 @@ import pytest
 
 from meridian.lib.app import server as server_module
 from meridian.lib.core.types import HarnessId, SpawnId
+from meridian.lib.harness.adapter import SpawnParams
 from meridian.lib.harness.connections.base import ConnectionCapabilities, ConnectionConfig
 from meridian.lib.harness.launch_spec import ResolvedLaunchSpec
 from meridian.lib.state.paths import resolve_state_paths
@@ -306,3 +307,54 @@ async def test_app_server_allows_unsafe_no_permissions_when_opted_in(
     completion_ready.set()
     await _wait_until(lambda: len(_read_spawn_events(state_root)) == 2)
     assert wait_calls == [SpawnId("p1")]
+
+
+@pytest.mark.asyncio
+async def test_app_server_threads_permission_resolver_into_streaming_spec(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    completion_ready = asyncio.Event()
+    wait_calls: list[SpawnId] = []
+
+    class _CaptureAdapter:
+        def __init__(self) -> None:
+            self.seen_resolver: object | None = None
+
+        def resolve_launch_spec(self, run: SpawnParams, perms: object) -> ResolvedLaunchSpec:
+            self.seen_resolver = perms
+            return ResolvedLaunchSpec(prompt=run.prompt, permission_resolver=cast("Any", perms))
+
+    class _CaptureRegistry:
+        def __init__(self, adapter: _CaptureAdapter) -> None:
+            self._adapter = adapter
+
+        def get_subprocess_harness(self, harness_id: HarnessId) -> _CaptureAdapter:
+            _ = harness_id
+            return self._adapter
+
+    adapter = _CaptureAdapter()
+    registry = _CaptureRegistry(adapter)
+    monkeypatch.setattr(server_module, "get_default_harness_registry", lambda: registry)
+    create_spawn_handler = _create_spawn_handler(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        completion_ready=completion_ready,
+        wait_calls=wait_calls,
+    )
+
+    await create_spawn_handler(
+        server_module.SpawnCreateRequest(
+            harness="codex",
+            prompt="hello",
+            permissions=server_module.PermissionRequest(
+                sandbox="read-only",
+                approval="auto",
+            ),
+        )
+    )
+
+    resolver = adapter.seen_resolver
+    assert resolver is not None
+    assert cast("Any", resolver).config.sandbox == "read-only"
+    assert cast("Any", resolver).config.approval == "auto"

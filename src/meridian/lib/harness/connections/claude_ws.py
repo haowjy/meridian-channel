@@ -24,6 +24,7 @@ from meridian.lib.harness.connections.base import (
     HarnessConnection,
     HarnessEvent,
 )
+from meridian.lib.harness.errors import HarnessBinaryNotFound
 from meridian.lib.harness.ids import HarnessId
 from meridian.lib.harness.launch_spec import ClaudeLaunchSpec
 from meridian.lib.harness.projections.project_claude import project_claude_spec_to_cli_args
@@ -32,7 +33,6 @@ from meridian.lib.launch.constants import (
     BLOCKED_CHILD_ENV_VARS,
 )
 from meridian.lib.launch.env import inherit_child_env
-from meridian.lib.launch.launch_types import ResolvedLaunchSpec
 from meridian.lib.observability.trace_helpers import (
     trace_parse_error,
     trace_state_change,
@@ -56,7 +56,7 @@ _BLOCKED_CHILD_ENV_VARS: Final[frozenset[str]] = frozenset(
 )
 
 
-class ClaudeConnection(HarnessConnection[ResolvedLaunchSpec]):
+class ClaudeConnection(HarnessConnection[ClaudeLaunchSpec]):
     """Bidirectional Claude harness connection via stdin/stdout stream-json.
 
     Launches ``claude -p --input-format stream-json --output-format stream-json``
@@ -96,6 +96,8 @@ class ClaudeConnection(HarnessConnection[ResolvedLaunchSpec]):
         self._protocol_validated = False
         self._event_stream_started = False
         self._tracer: DebugTracer | None = None
+        self._cancel_requested = False
+        self._interrupt_in_flight = False
 
     @property
     def state(self) -> ConnectionState:
@@ -124,7 +126,7 @@ class ClaudeConnection(HarnessConnection[ResolvedLaunchSpec]):
             return None
         return process.pid
 
-    async def start(self, config: ConnectionConfig, spec: ResolvedLaunchSpec) -> None:
+    async def start(self, config: ConnectionConfig, spec: ClaudeLaunchSpec) -> None:
         """Launch Claude subprocess and send the initial user prompt via stdin."""
 
         if self._state != "created":
@@ -133,6 +135,8 @@ class ClaudeConnection(HarnessConnection[ResolvedLaunchSpec]):
         self._config = config
         self._spawn_id = config.spawn_id
         self._tracer = config.debug_tracer
+        self._cancel_requested = False
+        self._interrupt_in_flight = False
         self._set_state("starting")
 
         try:
@@ -156,6 +160,8 @@ class ClaudeConnection(HarnessConnection[ResolvedLaunchSpec]):
                 self._set_state("stopping")
 
             await self._cleanup_resources(terminate_process=True)
+            self._cancel_requested = False
+            self._interrupt_in_flight = False
             self._set_state("stopped")
 
     def health(self) -> bool:
@@ -163,17 +169,29 @@ class ClaudeConnection(HarnessConnection[ResolvedLaunchSpec]):
 
     async def send_user_message(self, text: str) -> None:
         self._ensure_connected()
+        self._interrupt_in_flight = False
         await self._send_user_turn(text)
 
     async def send_interrupt(self) -> None:
         """Send SIGINT to the Claude subprocess to interrupt the current turn."""
+        if self._interrupt_in_flight:
+            return
         self._ensure_connected()
+        self._interrupt_in_flight = True
         await self._signal_process(signal.SIGINT)
 
     async def send_cancel(self) -> None:
         """Signal cancellation by transitioning state and sending SIGINT."""
+        if self._cancel_requested:
+            return
+        if self._state in {"stopping", "stopped", "failed"}:
+            self._cancel_requested = True
+            return
         self._ensure_connected()
-        self._set_state("stopping")
+        self._cancel_requested = True
+        self._interrupt_in_flight = True
+        if self._state != "stopping":
+            self._set_state("stopping")
         await self._signal_process(signal.SIGINT)
 
     async def events(self) -> AsyncIterator[HarnessEvent]:
@@ -229,6 +247,8 @@ class ClaudeConnection(HarnessConnection[ResolvedLaunchSpec]):
                     self._protocol_validated = True
 
                 for event in parsed_events:
+                    if event.event_type == "result":
+                        self._interrupt_in_flight = False
                     if self._tracer is not None:
                         self._tracer.emit(
                             "wire",
@@ -306,7 +326,7 @@ class ClaudeConnection(HarnessConnection[ResolvedLaunchSpec]):
                 return token.strip()
         return None
 
-    async def _start_subprocess(self, config: ConnectionConfig, spec: ResolvedLaunchSpec) -> None:
+    async def _start_subprocess(self, config: ConnectionConfig, spec: ClaudeLaunchSpec) -> None:
         spawn_dir = resolve_spawn_log_dir(config.repo_root, config.spawn_id)
         spawn_dir.mkdir(parents=True, exist_ok=True)
 
@@ -321,23 +341,25 @@ class ClaudeConnection(HarnessConnection[ResolvedLaunchSpec]):
             blocked=_BLOCKED_CHILD_ENV_VARS,
         )
 
-        self._process = await asyncio.create_subprocess_exec(
-            *command,
-            cwd=str(config.repo_root),
-            env=env,
-            stdin=PIPE,
-            stdout=PIPE,
-            stderr=self._stderr_handle,
-            limit=_STDOUT_READLINE_LIMIT,
-        )
-
-    def _build_command(self, config: ConnectionConfig, spec: ResolvedLaunchSpec) -> list[str]:
-        _ = config
-        if not isinstance(spec, ClaudeLaunchSpec):
-            raise TypeError(
-                "ClaudeConnection requires ClaudeLaunchSpec, "
-                f"got {type(spec).__name__}"
+        try:
+            self._process = await asyncio.create_subprocess_exec(
+                *command,
+                cwd=str(config.repo_root),
+                env=env,
+                stdin=PIPE,
+                stdout=PIPE,
+                stderr=self._stderr_handle,
+                limit=_STDOUT_READLINE_LIMIT,
             )
+        except (FileNotFoundError, NotADirectoryError) as exc:
+            raise HarnessBinaryNotFound.from_os_error(
+                harness_id=self.harness_id,
+                error=exc,
+                binary_name=command[0],
+            ) from exc
+
+    def _build_command(self, config: ConnectionConfig, spec: ClaudeLaunchSpec) -> list[str]:
+        _ = config
         return project_claude_spec_to_cli_args(
             spec,
             base_command=BASE_COMMAND_CLAUDE_STREAMING,

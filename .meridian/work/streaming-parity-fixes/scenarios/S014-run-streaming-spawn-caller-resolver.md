@@ -3,7 +3,7 @@
 - **Source:** design/edge-cases.md E14 + p1411 findings H3 + H1
 - **Added by:** @design-orchestrator (design phase)
 - **Tester:** @smoke-tester (+ @unit-tester)
-- **Status:** pending
+- **Status:** verified
 
 ## Given
 An external caller invokes `run_streaming_spawn(config, params, perms=my_resolver, ...)` where `my_resolver.config.sandbox = "read-only"` and `my_resolver.config.approval = "auto"`. Harness is Codex.
@@ -23,4 +23,14 @@ The streaming runner routes through the adapter factory to produce a `CodexLaunc
 - `rg "cast\\(.*PermissionResolver" src/meridian/lib/launch/streaming_runner.py` returns zero.
 
 ## Result (filled by tester)
-_pending_
+
+**verified** — @smoke-tester p1491 on claude-opus-4-6 (2026-04-11)
+
+- Grep gate `rg "cast\\(.*PermissionResolver" src/meridian/lib/launch/streaming_runner.py` returned **zero matches** — the v1 `cast("PermissionResolver", None)` is gone.
+- `run_streaming_spawn` signature now requires a caller-supplied `perms: PermissionResolver` (was `= None` previously). Confirmed at `src/meridian/lib/launch/streaming_runner.py:429`.
+- Line 455 `run_spec = adapter.resolve_launch_spec(params, perms)` passes the caller resolver into the adapter unchanged.
+- Unit test verifying identity-threading (`observed_spec.permission_resolver is resolver`):
+  - `tests/exec/test_streaming_runner.py::test_run_streaming_spawn_threads_caller_permission_resolver_without_swapping` ✅ PASSES.
+- Smoke sanity: `uv run pytest-llm tests/exec/test_streaming_runner.py::test_run_streaming_spawn_threads_caller_permission_resolver_without_swapping -q` → `1 passed`.
+
+Caller-supplied `PermissionResolver` now reaches `CodexAdapter.resolve_launch_spec` unmodified; no cast, no silent swap.

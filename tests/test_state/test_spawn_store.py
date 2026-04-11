@@ -1,7 +1,13 @@
 import json
 from pathlib import Path
 
-from meridian.lib.state.spawn_store import finalize_spawn, get_spawn, list_spawns, start_spawn
+from meridian.lib.state.spawn_store import (
+    cleanup_terminal_spawn_runtime_artifacts,
+    finalize_spawn,
+    get_spawn,
+    list_spawns,
+    start_spawn,
+)
 
 
 def _state_root(tmp_path: Path) -> Path:
@@ -134,8 +140,10 @@ def test_get_spawn_survives_mixed_malformed_rows(tmp_path: Path) -> None:
     assert row.status == "running"
 
 
-def test_succeeded_finalize_clears_stale_error(tmp_path: Path) -> None:
-    """A succeeded finalize event must clear any stale error from a prior failed finalize."""
+def test_first_terminal_finalize_preserves_error_when_later_succeeds(
+    tmp_path: Path,
+) -> None:
+    """First terminal status wins, even when a later finalize reports success."""
     state_root = _state_root(tmp_path)
 
     spawn_id = start_spawn(
@@ -154,13 +162,13 @@ def test_succeeded_finalize_clears_stale_error(tmp_path: Path) -> None:
     assert row.status == "failed"
     assert row.error == "orphan_run"
 
-    # Second finalize: runner writes the real succeeded status (error=None, dropped by exclude_none)
+    # Second finalize: later writer reports success.
     finalize_spawn(state_root, spawn_id, status="succeeded", exit_code=0)
     row = get_spawn(state_root, spawn_id)
     assert row is not None
-    assert row.status == "succeeded"
-    assert row.exit_code == 0
-    assert row.error is None, f"Expected error=None after succeeded finalize, got {row.error!r}"
+    assert row.status == "failed"
+    assert row.exit_code == 1
+    assert row.error == "orphan_run"
 
 
 def test_finalize_spawn_returns_ownership_and_always_writes(tmp_path: Path) -> None:
@@ -189,9 +197,9 @@ def test_finalize_spawn_returns_ownership_and_always_writes(tmp_path: Path) -> N
 
     row = get_spawn(state_root, spawn_id)
     assert row is not None
-    assert row.status == "succeeded"
-    assert row.exit_code == 0
-    assert row.error is None
+    assert row.status == "failed"
+    assert row.exit_code == 1
+    assert row.error == "orphan_run"
     assert row.duration_secs == 100.0
 
 
@@ -260,3 +268,123 @@ def test_failed_cannot_be_overwritten_by_another_failed(tmp_path: Path) -> None:
     assert row.status == "failed"
     assert row.exit_code == 1  # first failure's exit code
     assert row.error == "timeout"  # first failure's error reason is locked
+
+
+def test_terminal_status_first_wins_cancelled_then_succeeded_audit_visible(
+    tmp_path: Path,
+) -> None:
+    state_root = _state_root(tmp_path)
+
+    spawn_id = start_spawn(
+        state_root,
+        chat_id="c1",
+        model="gpt-5.4",
+        agent="coder",
+        harness="codex",
+        prompt="hello",
+    )
+
+    assert (
+        finalize_spawn(state_root, spawn_id, status="cancelled", exit_code=130, error="cancelled")
+        is True
+    )
+    assert finalize_spawn(state_root, spawn_id, status="succeeded", exit_code=0) is False
+
+    row = get_spawn(state_root, spawn_id)
+    assert row is not None
+    assert row.status == "cancelled"
+    assert row.exit_code == 130
+    assert row.error == "cancelled"
+
+    events = [
+        json.loads(line)
+        for line in (state_root / "spawns.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    finalize_statuses = [
+        event.get("status")
+        for event in events
+        if event.get("event") == "finalize" and event.get("id") == str(spawn_id)
+    ]
+    assert finalize_statuses == ["cancelled", "succeeded"]
+
+
+def test_terminal_status_first_wins_succeeded_then_cancelled_audit_visible(
+    tmp_path: Path,
+) -> None:
+    state_root = _state_root(tmp_path)
+
+    spawn_id = start_spawn(
+        state_root,
+        chat_id="c1",
+        model="gpt-5.4",
+        agent="coder",
+        harness="codex",
+        prompt="hello",
+    )
+
+    assert finalize_spawn(state_root, spawn_id, status="succeeded", exit_code=0) is True
+    assert (
+        finalize_spawn(state_root, spawn_id, status="cancelled", exit_code=130, error="cancelled")
+        is False
+    )
+
+    row = get_spawn(state_root, spawn_id)
+    assert row is not None
+    assert row.status == "succeeded"
+    assert row.exit_code == 0
+    assert row.error is None
+
+    events = [
+        json.loads(line)
+        for line in (state_root / "spawns.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    finalize_statuses = [
+        event.get("status")
+        for event in events
+        if event.get("event") == "finalize" and event.get("id") == str(spawn_id)
+    ]
+    assert finalize_statuses == ["succeeded", "cancelled"]
+
+
+def test_cleanup_terminal_spawn_runtime_artifacts_only_unlinks_terminal_rows(
+    tmp_path: Path,
+) -> None:
+    state_root = _state_root(tmp_path)
+
+    terminal_id = start_spawn(
+        state_root,
+        spawn_id="p10",
+        chat_id="c1",
+        model="gpt-5.4",
+        agent="coder",
+        harness="codex",
+        prompt="hello",
+    )
+    running_id = start_spawn(
+        state_root,
+        spawn_id="p11",
+        chat_id="c1",
+        model="gpt-5.4",
+        agent="coder",
+        harness="codex",
+        prompt="hello",
+    )
+    finalize_spawn(state_root, terminal_id, status="failed", exit_code=1, error="failed")
+
+    for spawn_id in (str(terminal_id), str(running_id)):
+        spawn_dir = state_root / "spawns" / spawn_id
+        spawn_dir.mkdir(parents=True, exist_ok=True)
+        for name in ("harness.pid", "heartbeat", "background.pid"):
+            (spawn_dir / name).write_text("123\n", encoding="utf-8")
+
+    removed = cleanup_terminal_spawn_runtime_artifacts(state_root, terminal_id)
+    assert set(removed) == {"harness.pid", "heartbeat", "background.pid"}
+
+    active_removed = cleanup_terminal_spawn_runtime_artifacts(state_root, running_id)
+    assert active_removed == ()
+    running_dir = state_root / "spawns" / str(running_id)
+    assert (running_dir / "harness.pid").exists()
+    assert (running_dir / "heartbeat").exists()
+    assert (running_dir / "background.pid").exists()

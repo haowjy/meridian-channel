@@ -23,6 +23,35 @@ class ExtractedReport(BaseModel):
     source: ReportSource | None
 
 
+def _event_name(payload: dict[str, object]) -> str:
+    return str(
+        payload.get("event_type", payload.get("event", payload.get("type", "")))
+    ).strip().lower()
+
+
+def _is_terminal_control_frame(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return False
+    try:
+        payload_obj = json.loads(stripped)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(payload_obj, dict):
+        return False
+
+    payload = cast("dict[str, object]", payload_obj)
+    if _event_name(payload) in {"cancelled", "error"}:
+        return True
+
+    nested = payload.get("payload")
+    if isinstance(nested, dict):
+        nested_payload = cast("dict[str, object]", nested)
+        if _event_name(nested_payload) in {"cancelled", "error"}:
+            return True
+    return False
+
+
 def _text_from_value(value: object) -> str:
     if isinstance(value, str):
         return value.strip()
@@ -117,7 +146,7 @@ def extract_or_fallback_report(
     """Extract report text from assistant output, preferring report.md when available."""
 
     report_content = read_artifact_text(artifacts, spawn_id, "report.md").strip()
-    if report_content:
+    if report_content and not _is_terminal_control_frame(report_content):
         return ExtractedReport(content=report_content, source="report_md")
 
     if extractor is not None:
@@ -131,12 +160,12 @@ def extract_or_fallback_report(
             )
         else:
             adapted_text = adapted_report.strip() if adapted_report else ""
-            if adapted_text:
+            if adapted_text and not _is_terminal_control_frame(adapted_text):
                 return ExtractedReport(content=adapted_text, source="assistant_message")
 
     output_lines = read_artifact_text(artifacts, spawn_id, "output.jsonl")
     assistant_message = _extract_last_assistant_message(output_lines)
     assistant_report = assistant_message.strip() if assistant_message else ""
-    if not assistant_report:
+    if not assistant_report or _is_terminal_control_frame(assistant_report):
         return ExtractedReport(content=None, source=None)
     return ExtractedReport(content=assistant_report, source="assistant_message")

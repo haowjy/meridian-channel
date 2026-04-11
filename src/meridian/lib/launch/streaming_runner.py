@@ -47,13 +47,12 @@ from meridian.lib.launch.extract import (
     reset_finalize_attempt_artifacts,
 )
 from meridian.lib.launch.heartbeat import heartbeat_scope
-from meridian.lib.launch.launch_types import ResolvedLaunchSpec
+from meridian.lib.launch.launch_types import PermissionResolver, ResolvedLaunchSpec
 from meridian.lib.launch.session_ids import extract_latest_session_id
 from meridian.lib.launch.signals import signal_coordinator, signal_to_exit_code
 from meridian.lib.ops.spawn.plan import PreparedSpawnPlan
 from meridian.lib.safety.budget import Budget, BudgetBreach, LiveBudgetTracker
 from meridian.lib.safety.guardrails import GuardrailFailure, run_guardrails
-from meridian.lib.safety.permissions import UnsafeNoOpPermissionResolver
 from meridian.lib.safety.redaction import SecretSpec, redact_secret_bytes
 from meridian.lib.state import spawn_store
 from meridian.lib.state.artifact_store import ArtifactStore, make_artifact_key
@@ -431,6 +430,7 @@ async def run_streaming_spawn(
     *,
     config: ConnectionConfig,
     params: SpawnParams,
+    perms: PermissionResolver,
     state_root: Path,
     repo_root: Path,
     spawn_id: SpawnId,
@@ -452,10 +452,7 @@ async def run_streaming_spawn(
     terminal_event_future: asyncio.Future[_TerminalEventOutcome] | None = None
     subscriber: asyncio.Queue[HarnessEvent | None] | None = None
     adapter = get_default_harness_registry().get_subprocess_harness(config.harness_id)
-    run_spec = adapter.resolve_launch_spec(
-        params,
-        UnsafeNoOpPermissionResolver(_suppress_warning=True),
-    )
+    run_spec = adapter.resolve_launch_spec(params, perms)
     try:
         async with heartbeat_scope(heartbeat_path):
             connection = await manager.start_spawn(config, run_spec)
@@ -896,12 +893,15 @@ async def execute_with_streaming(
                         text=attempt.start_error,
                         secrets=secrets,
                     )
+                attempt_cancelled = False
                 if attempt.timed_out:
                     failure_reason = "timeout"
                 if attempt.received_signal == signal.SIGINT:
                     failure_reason = "cancelled"
-                elif attempt.received_signal == signal.SIGTERM and failure_reason is None:
+                    attempt_cancelled = True
+                elif attempt.received_signal == signal.SIGTERM:
                     failure_reason = "terminated"
+                    attempt_cancelled = True
                 elif exit_code != 0 and failure_reason is None and attempt.drain_error is not None:
                     failure_reason = attempt.drain_error
 
@@ -963,6 +963,11 @@ async def execute_with_streaming(
                             harness_id=str(harness.id),
                             exc_info=True,
                         )
+
+                if attempt_cancelled:
+                    if attempt.received_signal is not None:
+                        exit_code = signal_to_exit_code(attempt.received_signal) or 130
+                    break
 
                 if attempt.budget_breach is not None:
                     failure_reason = "budget_exceeded"
@@ -1123,9 +1128,14 @@ async def execute_with_streaming(
             durable_report_completion = extracted is not None and has_durable_report_completion(
                 extracted.report.content
             )
+            cancelled = (
+                failure_reason in {"cancelled", "terminated"}
+                or received_signal[0] in {signal.SIGINT, signal.SIGTERM}
+            )
             status, exit_code, failure_reason = resolve_execution_terminal_state(
                 exit_code=exit_code,
                 failure_reason=failure_reason,
+                cancelled=cancelled,
                 durable_report_completion=durable_report_completion,
                 terminated_after_completion=terminated_after_completion,
             )

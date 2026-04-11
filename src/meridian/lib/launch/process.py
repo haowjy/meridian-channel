@@ -413,6 +413,7 @@ def run_harness_process(
                 status, exit_code, _failure_reason = resolve_execution_terminal_state(
                     exit_code=exit_code,
                     failure_reason=None,
+                    cancelled=False,
                     durable_report_completion=durable_report,
                     terminated_after_completion=terminated_after_completion,
                 )
