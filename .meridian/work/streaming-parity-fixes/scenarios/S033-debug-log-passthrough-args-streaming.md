@@ -3,7 +3,7 @@
 - **Source:** design/edge-cases.md E33 + p1411 M7
 - **Added by:** @design-orchestrator (design phase)
 - **Tester:** @verifier (+ @unit-tester)
-- **Status:** pending
+- **Status:** verified
 
 ## Given
 Streaming spec has non-empty `extra_args`.
@@ -23,4 +23,10 @@ Projection functions run:
 - Negative case with empty args.
 
 ## Result (filled by tester)
-_pending_
+verified 2026-04-11
+
+- Evidence:
+  - `tests/harness/test_launch_spec_parity.py:1254` — `test_codex_streaming_projection_logs_passthrough_args_once_and_skips_empty_tail`
+  - `tests/harness/test_launch_spec_parity.py:1475` — `test_opencode_streaming_projection_logs_passthrough_args_once_and_skips_empty_tail`
+- Notes:
+  - Both streaming projections log once for non-empty `extra_args` and emit no passthrough log for empty tails.

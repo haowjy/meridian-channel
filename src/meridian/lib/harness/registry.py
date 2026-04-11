@@ -9,6 +9,7 @@ from meridian.lib.harness.adapter import (
     InProcessHarness,
     SubprocessHarness,
 )
+from meridian.lib.harness.bundle import get_connection_cls, get_harness_bundle
 from meridian.lib.harness.ids import HarnessId
 
 type HarnessEntry = SubprocessHarness | InProcessHarness
@@ -27,6 +28,11 @@ class HarnessRegistry(BaseModel):
 
     @classmethod
     def with_defaults(cls) -> Self:
+        # Load-bearing package bootstrap: registers bundles and executes import-time
+        # projection/accounting guards.
+        from meridian.lib.harness import ensure_bootstrap
+
+        ensure_bootstrap()
         from meridian.lib.harness.claude import ClaudeAdapter
         from meridian.lib.harness.codex import CodexAdapter
         from meridian.lib.harness.direct import DirectAdapter
@@ -84,3 +90,12 @@ def get_default_harness_registry() -> HarnessRegistry:
     if _default_registry is None:
         _default_registry = HarnessRegistry.with_defaults()
     return _default_registry
+
+
+__all__ = [
+    "HarnessEntry",
+    "HarnessRegistry",
+    "get_connection_cls",
+    "get_default_harness_registry",
+    "get_harness_bundle",
+]

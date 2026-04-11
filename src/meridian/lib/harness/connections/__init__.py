@@ -1,37 +1,36 @@
-"""Bidirectional harness connection registry."""
+"""Connection lookup helpers backed by the typed harness bundle registry."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from meridian.lib.harness.connections.claude_ws import ClaudeConnection
-from meridian.lib.harness.connections.codex_ws import CodexConnection
-from meridian.lib.harness.connections.opencode_http import OpenCodeConnection
-from meridian.lib.harness.ids import HarnessId
-
-if TYPE_CHECKING:
-    from meridian.lib.harness.connections.base import HarnessConnection
-
-_CONNECTION_REGISTRY: dict[HarnessId, type[HarnessConnection[Any]]] = {}
+from meridian.lib.harness.connections.base import HarnessConnection
+from meridian.lib.harness.ids import HarnessId, TransportId
 
 
-def register_connection(harness_id: HarnessId, cls: type[HarnessConnection[Any]]) -> None:
-    """Register one bidirectional harness connection implementation."""
+def register_connection(
+    harness_id: HarnessId,
+    cls: type[HarnessConnection[Any]],
+) -> None:
+    """Deprecated compatibility shim for the removed flat connection registry."""
 
-    _CONNECTION_REGISTRY[harness_id] = cls
-
-
-def get_connection_class(harness_id: HarnessId) -> type[HarnessConnection[Any]]:
-    """Return the registered connection class for one harness ID."""
-
-    if harness_id not in _CONNECTION_REGISTRY:
-        raise ValueError(f"No bidirectional connection registered for {harness_id}")
-    return _CONNECTION_REGISTRY[harness_id]
+    _ = harness_id, cls
+    raise RuntimeError(
+        "register_connection() is retired; register via register_harness_bundle()"
+    )
 
 
-register_connection(HarnessId.CODEX, CodexConnection)
-register_connection(HarnessId.CLAUDE, ClaudeConnection)
-register_connection(HarnessId.OPENCODE, OpenCodeConnection)
+def get_connection_class(
+    harness_id: HarnessId,
+    transport_id: TransportId = TransportId.STREAMING,
+) -> type[HarnessConnection[Any]]:
+    """Return one connection class from the typed bundle registry."""
+
+    from meridian.lib.harness import ensure_bootstrap
+    from meridian.lib.harness.bundle import get_connection_cls
+
+    ensure_bootstrap()
+    return get_connection_cls(harness_id, transport_id)
 
 
 __all__ = ["get_connection_class", "register_connection"]

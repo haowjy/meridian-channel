@@ -1,8 +1,15 @@
 """Session log parser regressions."""
 
 import json
+from pathlib import Path
 
-from meridian.lib.ops.session_log import _extract_from_event, parse_session_file
+from meridian.lib.ops.session_log import (
+    SessionLogInput,
+    _extract_from_event,
+    parse_session_file,
+    session_log_sync,
+)
+from meridian.lib.state import spawn_store
 
 
 def test_parse_session_file_splits_segments_on_compaction_boundary(tmp_path) -> None:
@@ -84,3 +91,48 @@ def test_extract_from_event_codex_response_and_exec_events() -> None:
     assert [(message.role, message.content) for message in exec_messages] == [
         ("assistant", "codex exec")
     ]
+
+
+def test_session_log_resolves_opencode_storage_session_file(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    state_root = repo_root / ".meridian"
+    state_root.mkdir()
+
+    xdg_data_home = tmp_path / "xdg-data"
+    session_id = "ses_fixture_session_12345"
+    session_file = (
+        xdg_data_home / "opencode" / "storage" / "session_diff" / f"{session_id}.json"
+    )
+    session_file.parent.mkdir(parents=True)
+    session_file.write_text("[]\n", encoding="utf-8")
+    monkeypatch.setenv("XDG_DATA_HOME", xdg_data_home.as_posix())
+
+    spawn_store.start_spawn(
+        state_root,
+        chat_id="c1",
+        model="opencode-gpt-5.3-codex",
+        agent="coder",
+        harness="opencode",
+        prompt="hello",
+        spawn_id="p1",
+        harness_session_id=session_id,
+        started_at="2026-04-11T00:00:00Z",
+    )
+
+    output = session_log_sync(
+        SessionLogInput(
+            ref="p1",
+            repo_root=repo_root.as_posix(),
+            compaction=0,
+            last_n=5,
+            offset=0,
+        )
+    )
+
+    assert output.session_id == session_id
+    assert output.segment_messages == 0
+    assert output.messages == ()

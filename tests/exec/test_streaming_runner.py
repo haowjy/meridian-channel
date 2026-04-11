@@ -28,6 +28,7 @@ from meridian.lib.harness.connections.base import (
     HarnessEvent,
 )
 from meridian.lib.harness.launch_spec import (
+    ClaudeLaunchSpec,
     CodexLaunchSpec,
     OpenCodeLaunchSpec,
     ResolvedLaunchSpec,
@@ -94,7 +95,17 @@ class _DummyCodexHarness(BaseSubprocessHarness):
         run: SpawnParams,
         perms: PermissionResolver,
     ) -> ResolvedLaunchSpec:
-        return ResolvedLaunchSpec(
+        if self.id == HarnessId.CLAUDE:
+            return ClaudeLaunchSpec(
+                prompt=run.prompt or "",
+                permission_resolver=perms,
+            )
+        if self.id == HarnessId.OPENCODE:
+            return OpenCodeLaunchSpec(
+                prompt=run.prompt or "",
+                permission_resolver=perms,
+            )
+        return CodexLaunchSpec(
             prompt=run.prompt or "",
             permission_resolver=perms,
         )

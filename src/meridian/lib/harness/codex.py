@@ -22,12 +22,15 @@ from meridian.lib.harness.adapter import (
     RunPromptPolicy,
     SpawnParams,
 )
+from meridian.lib.harness.bundle import HarnessBundle, register_harness_bundle
 from meridian.lib.harness.common import (
     extract_codex_report,
     extract_session_id_from_artifacts_with_patterns,
     extract_usage_from_artifacts,
 )
-from meridian.lib.harness.ids import HarnessId
+from meridian.lib.harness.connections.codex_ws import CodexConnection
+from meridian.lib.harness.extractors.codex import CODEX_EXTRACTOR
+from meridian.lib.harness.ids import HarnessId, TransportId
 from meridian.lib.harness.launch_spec import CodexLaunchSpec
 from meridian.lib.harness.launch_types import PromptPolicy
 from meridian.lib.harness.projections.project_codex_subprocess import (
@@ -493,3 +496,14 @@ class CodexAdapter(BaseHarnessAdapter[CodexLaunchSpec]):
 
     def extract_report(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> str | None:
         return extract_codex_report(artifacts, spawn_id)
+
+
+register_harness_bundle(
+    HarnessBundle(
+        harness_id=HarnessId.CODEX,
+        adapter=CodexAdapter(),
+        spec_cls=CodexLaunchSpec,
+        extractor=CODEX_EXTRACTOR,
+        connections={TransportId.STREAMING: CodexConnection},
+    )
+)

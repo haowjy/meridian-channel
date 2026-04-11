@@ -3,7 +3,7 @@
 - **Source:** design/edge-cases.md E39 + decisions.md K2 (revision round 3)
 - **Added by:** @design-orchestrator (revision round 3)
 - **Tester:** @unit-tester
-- **Status:** pending
+- **Status:** verified
 
 ## Given
 Two calls to `register_harness_bundle(...)` with the same `harness_id` (e.g., `HarnessId.CLAUDE`). The adapters may differ; the test does not care which "wins".
@@ -23,4 +23,9 @@ The second `register_harness_bundle(...)` call runs.
 - Regression guard: a "double-import" fixture that imports a module twice via `importlib.reload` — the second import must either be a no-op or raise.
 
 ## Result (filled by tester)
-_pending_
+verified 2026-04-11
+
+- Evidence:
+  - `tests/harness/test_launch_spec_parity.py:487` — `test_duplicate_bundle_registration_raises`
+- Notes:
+  - Second registration raises `ValueError`, preserves first-registration-wins state, and the error names both adapter classes.

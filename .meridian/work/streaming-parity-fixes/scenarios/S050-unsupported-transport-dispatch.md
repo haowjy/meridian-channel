@@ -3,7 +3,7 @@
 - **Source:** design/edge-cases.md E45 + decisions.md K1 (revision round 3)
 - **Added by:** @design-orchestrator (revision round 3)
 - **Tester:** @unit-tester
-- **Status:** pending
+- **Status:** verified
 
 ## Given
 A registered `HarnessBundle` for a harness whose `connections: Mapping[TransportId, ...]` only contains some transports (e.g., Claude supports subprocess and streaming; a hypothetical fourth transport `TransportId.HTTP` is not registered).
@@ -22,4 +22,12 @@ Dispatch calls `get_connection_cls(HarnessId.CLAUDE, TransportId.HTTP)` or the d
 - Regression: remove the `TransportId.STREAMING` entry from the Codex bundle, run the dispatch for a streaming spawn, assert `KeyError` at dispatch — not a downstream crash.
 
 ## Result (filled by tester)
-_pending_
+verified 2026-04-11
+
+- Evidence:
+  - `tests/harness/test_launch_spec_parity.py:564` — `test_get_connection_cls_rejects_unsupported_transport`
+  - `tests/test_spawn_manager.py:546` — `test_spawn_manager_dispatch_raises_keyerror_when_streaming_transport_missing`
+  - `tests/harness/test_launch_spec_parity.py:587` — `test_bundle_registration_rejects_empty_connections`
+  - `tests/harness/test_launch_spec_parity.py:545` — `test_bundle_registration_rejects_unsupported_transport_key`
+- Notes:
+  - Unsupported `(harness, transport)` lookups fail with `KeyError` at bundle lookup, and registration blocks empty or invalid transport maps before dispatch.

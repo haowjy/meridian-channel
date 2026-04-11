@@ -3,7 +3,7 @@
 - **Source:** design/edge-cases.md E47 + decisions.md H4 (revision round 3 — restore `mcp_tools` as first-class forwarded field, supersedes round 2 D23)
 - **Added by:** @design-orchestrator (revision round 3)
 - **Tester:** @unit-tester
-- **Status:** pending
+- **Status:** verified
 
 ## Given
 A `ResolvedLaunchSpec` (per harness) with `mcp_tools = ("codex-mcp=/usr/local/bin/codex-mcp", "other=/opt/other")` (two entries in the Codex name=command form). For Claude, the same conceptual input uses path-style entries. For OpenCode streaming, the session-payload server list form. For OpenCode subprocess, the non-empty case is a **reject** path — the subprocess CLI has no wire encoding for MCP configuration.
@@ -28,4 +28,14 @@ Each of the six projection functions runs on its respective spec subclass.
 - Drift guard: `_check_projection_drift` fails if any projection omits `mcp_tools`.
 
 ## Result (filled by tester)
-_pending_
+verified 2026-04-11
+
+- Evidence:
+  - `tests/harness/test_launch_spec_parity.py:982` — `test_claude_projection_projects_mcp_tools_for_subprocess_and_streaming`
+  - `tests/harness/test_launch_spec_parity.py:1342` — `test_codex_projection_projects_mcp_tools_for_subprocess_and_streaming`
+  - `tests/harness/test_launch_spec.py:181` — `test_opencode_subprocess_rejects_mcp_tools`
+  - `tests/harness/test_launch_spec_parity.py:1512` — `test_opencode_streaming_projection_projects_mcp_tools_in_session_payload`
+  - `tests/harness/test_launch_spec_parity.py:1529` — `test_empty_mcp_tools_emit_no_wire_state_across_all_supported_projections`
+  - `tests/harness/test_launch_spec_parity.py:1579` — `test_mcp_tools_is_accounted_for_by_all_projections_and_adapters`
+- Notes:
+  - Claude and Codex project `mcp_tools`; OpenCode subprocess fails closed with `HarnessCapabilityMismatch` (now a `ValueError` subtype), and OpenCode streaming uses `mcp: {servers: [...]}`.

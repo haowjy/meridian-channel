@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 from meridian.lib.core.domain import SpawnStatus
 from meridian.lib.core.types import SpawnId
+from meridian.lib.harness.adapter import SpawnParams
+from meridian.lib.harness.bundle import get_harness_bundle
 from meridian.lib.launch.launch_types import ResolvedLaunchSpec
 from meridian.lib.safety.permissions import UnsafeNoOpPermissionResolver
 from meridian.lib.state.atomic import append_text_line
@@ -54,6 +56,36 @@ class SpawnSession:
     debug_tracer: DebugTracer | None = None
 
 
+def _ensure_harness_bootstrap() -> None:
+    from meridian.lib.harness import ensure_bootstrap
+
+    ensure_bootstrap()
+
+
+async def dispatch_start(
+    config: ConnectionConfig,
+    spec: ResolvedLaunchSpec,
+) -> HarnessConnection[Any]:
+    """Dispatch one start call through bundle lookup and runtime type guard."""
+
+    from meridian.lib.harness.connections import get_connection_class
+
+    _ensure_harness_bootstrap()
+    bundle = get_harness_bundle(config.harness_id)
+    if not isinstance(spec, bundle.spec_cls):
+        raise TypeError(
+            f"HarnessBundle invariant violated: adapter for "
+            f"{bundle.harness_id} returned {type(spec).__name__}, "
+            f"expected {bundle.spec_cls.__name__}"
+        )
+
+    connection_class = get_connection_class(config.harness_id)
+    connection_factory = cast("Callable[[], HarnessConnection[Any]]", connection_class)
+    connection = connection_factory()
+    await connection.start(config, spec)
+    return connection
+
+
 class SpawnManager:
     """Own active connections, durable drain loops, and control routing."""
 
@@ -89,17 +121,17 @@ class SpawnManager:
             msg = f"Spawn {spawn_id} is already active"
             raise ValueError(msg)
 
-        from meridian.lib.harness.connections import get_connection_class
-
-        connection_class = get_connection_class(config.harness_id)
-        connection_factory = cast("Callable[[], HarnessConnection[Any]]", connection_class)
-        connection = connection_factory()
         started_monotonic = time.monotonic()
         completion_future: asyncio.Future[DrainOutcome] = asyncio.get_running_loop().create_future()
-        resolved_spec = spec or ResolvedLaunchSpec(
-            prompt=config.prompt,
-            permission_resolver=UnsafeNoOpPermissionResolver(_suppress_warning=True),
-        )
+        _ensure_harness_bootstrap()
+        bundle = get_harness_bundle(config.harness_id)
+        if spec is None:
+            resolved_spec = bundle.adapter.resolve_launch_spec(
+                SpawnParams(prompt=config.prompt),
+                UnsafeNoOpPermissionResolver(_suppress_warning=True),
+            )
+        else:
+            resolved_spec = spec
 
         tracer = config.debug_tracer
         if tracer is None and self._debug:
@@ -111,7 +143,7 @@ class SpawnManager:
             )
 
         try:
-            await connection.start(config, resolved_spec)
+            connection = await dispatch_start(config, resolved_spec)
         except Exception:
             if tracer is not None:
                 tracer.close()
@@ -505,4 +537,4 @@ class SpawnManager:
         return outcome
 
 
-__all__ = ["DrainOutcome", "SpawnManager", "SpawnSession"]
+__all__ = ["DrainOutcome", "SpawnManager", "SpawnSession", "dispatch_start"]

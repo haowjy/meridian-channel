@@ -24,6 +24,7 @@ from meridian.lib.core.spawn_lifecycle import (
 )
 from meridian.lib.core.types import HarnessId, SpawnId
 from meridian.lib.harness.adapter import SpawnParams, StreamEvent
+from meridian.lib.harness.bundle import get_harness_bundle
 from meridian.lib.harness.claude_preflight import ensure_claude_session_accessible
 from meridian.lib.harness.common import parse_json_stream_event, unwrap_event_payload
 from meridian.lib.harness.connections.base import ConnectionConfig, HarnessConnection
@@ -743,6 +744,7 @@ async def execute_with_streaming(
     child_cwd = launch_context.child_cwd
     spec = launch_context.spec
     child_env = dict(launch_context.env)
+    harness_bundle = get_harness_bundle(resolved_harness_id)
 
     spawn_store.update_spawn(
         state_root,
@@ -916,7 +918,11 @@ async def execute_with_streaming(
 
                 streaming_extractor = StreamingExtractor(
                     connection=attempt.connection,
-                    harness_id=resolved_harness_id,
+                    bundle=harness_bundle,
+                    spec=spec,
+                    launch_env=child_env,
+                    child_cwd=child_cwd,
+                    state_root=state_root,
                 )
                 extracted = enrich_finalize(
                     artifacts=artifacts,

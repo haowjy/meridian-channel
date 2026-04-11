@@ -5,23 +5,37 @@ from __future__ import annotations
 import logging
 import subprocess
 import sys
+from collections.abc import Mapping
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from pydantic import BaseModel
 
+from meridian.lib.core.domain import TokenUsage
 from meridian.lib.core.types import HarnessId, ModelId, SpawnId
-from meridian.lib.harness.adapter import PermissionResolver, SpawnParams
+from meridian.lib.harness.adapter import ArtifactStore, PermissionResolver, SpawnParams
+from meridian.lib.harness.bundle import (
+    _REGISTRY as _BUNDLE_REGISTRY,
+)
+from meridian.lib.harness.bundle import (
+    HarnessBundle,
+    get_connection_cls,
+    get_harness_bundle,
+    register_harness_bundle,
+)
 from meridian.lib.harness.claude import ClaudeAdapter
 from meridian.lib.harness.claude_preflight import (
     CLAUDE_PARENT_ALLOWED_TOOLS_FLAG,
     expand_claude_passthrough_args,
 )
 from meridian.lib.harness.codex import CodexAdapter
-from meridian.lib.harness.connections.base import ConnectionConfig
+from meridian.lib.harness.connections.base import ConnectionConfig, HarnessEvent
 from meridian.lib.harness.connections.claude_ws import ClaudeConnection
 from meridian.lib.harness.connections.codex_ws import CodexConnection
 from meridian.lib.harness.connections.opencode_http import OpenCodeConnection
+from meridian.lib.harness.extractors.base import HarnessExtractor
+from meridian.lib.harness.ids import TransportId
 from meridian.lib.harness.launch_spec import (
     ClaudeLaunchSpec,
     CodexLaunchSpec,
@@ -34,19 +48,42 @@ from meridian.lib.harness.projections.project_claude import (
     project_claude_spec_to_cli_args,
 )
 from meridian.lib.harness.projections.project_codex_streaming import (
+    _PROJECTED_FIELDS as _CODEX_STREAMING_PROJECTED_FIELDS,
+)
+from meridian.lib.harness.projections.project_codex_streaming import (
     _check_projection_drift as _check_codex_streaming_projection_drift,
+)
+from meridian.lib.harness.projections.project_codex_streaming import (
+    project_codex_spec_to_appserver_command,
+)
+from meridian.lib.harness.projections.project_codex_subprocess import (
+    _PROJECTED_FIELDS as _CODEX_SUBPROCESS_PROJECTED_FIELDS,
 )
 from meridian.lib.harness.projections.project_codex_subprocess import (
     _check_projection_drift as _check_codex_subprocess_projection_drift,
 )
+from meridian.lib.harness.projections.project_codex_subprocess import (
+    project_codex_spec_to_cli_args,
+)
+from meridian.lib.harness.projections.project_opencode_streaming import (
+    _PROJECTED_FIELDS as _OPENCODE_STREAMING_PROJECTED_FIELDS,
+)
 from meridian.lib.harness.projections.project_opencode_streaming import (
     HarnessCapabilityMismatch,
+    project_opencode_spec_to_serve_command,
+    project_opencode_spec_to_session_payload,
 )
 from meridian.lib.harness.projections.project_opencode_streaming import (
     _check_projection_drift as _check_opencode_streaming_projection_drift,
 )
 from meridian.lib.harness.projections.project_opencode_subprocess import (
+    _PROJECTED_FIELDS as _OPENCODE_SUBPROCESS_PROJECTED_FIELDS,
+)
+from meridian.lib.harness.projections.project_opencode_subprocess import (
     _check_projection_drift as _check_opencode_subprocess_projection_drift,
+)
+from meridian.lib.harness.projections.project_opencode_subprocess import (
+    project_opencode_spec_to_cli_args,
 )
 from meridian.lib.safety.permissions import PermissionConfig
 
@@ -67,6 +104,45 @@ class _StaticPermissionResolver(PermissionResolver):
 
     def resolve_flags(self) -> tuple[str, ...]:
         return self._flags
+
+
+class _StubHarnessExtractor(HarnessExtractor[ResolvedLaunchSpec]):
+    def detect_session_id_from_event(self, event: HarnessEvent) -> str | None:
+        _ = event
+        return None
+
+    def detect_session_id_from_artifacts(
+        self,
+        *,
+        spec: ResolvedLaunchSpec,
+        launch_env: Mapping[str, str],
+        child_cwd: Path,
+        state_root: Path,
+    ) -> str | None:
+        _ = spec, launch_env, child_cwd, state_root
+        return None
+
+    def extract_usage(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> TokenUsage:
+        _ = artifacts, spawn_id
+        return TokenUsage()
+
+    def extract_session_id(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> str | None:
+        _ = artifacts, spawn_id
+        return None
+
+    def extract_report(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> str | None:
+        _ = artifacts, spawn_id
+        return None
+
+
+@pytest.fixture
+def _restore_bundle_registry() -> None:
+    snapshot = dict(_BUNDLE_REGISTRY)
+    try:
+        yield
+    finally:
+        _BUNDLE_REGISTRY.clear()
+        _BUNDLE_REGISTRY.update(snapshot)
 
 
 def _spawn(**kwargs: object) -> SpawnParams:
@@ -171,6 +247,16 @@ def _values_for_codex_config_setting(command: list[str], key: str) -> list[str]:
         if setting.startswith(prefix):
             values.append(setting[len(prefix) :])
     return values
+
+
+def _projection_files_with_projected_fields() -> set[str]:
+    projection_root = Path(__file__).resolve().parents[2] / "src/meridian/lib/harness/projections"
+    matches: set[str] = set()
+    for path in projection_root.glob("project_*.py"):
+        text = path.read_text(encoding="utf-8")
+        if "_PROJECTED_FIELDS" in text:
+            matches.add(path.name)
+    return matches
 
 
 def test_claude_projection_drift_guard_happy_path() -> None:
@@ -376,6 +462,196 @@ import meridian.lib.harness.projections.project_opencode_streaming
     assert "missing=['future_field']" in result.stderr
 
 
+def test_bundle_registry_round_trip_lookup_by_harness_id(
+    _restore_bundle_registry: None,
+) -> None:
+    adapter = SimpleNamespace(
+        handled_fields=frozenset(SpawnParams.model_fields),
+        owns_untracked_session=lambda **kwargs: False,
+    )
+    bundle = HarnessBundle(
+        harness_id=HarnessId.DIRECT,
+        adapter=adapter,
+        spec_cls=ResolvedLaunchSpec,
+        extractor=_StubHarnessExtractor(),
+        connections={TransportId.STREAMING: CodexConnection},
+    )
+    register_harness_bundle(bundle)
+
+    registered = get_harness_bundle(HarnessId.DIRECT)
+    assert registered.spec_cls is ResolvedLaunchSpec
+    assert registered.adapter is adapter
+    assert get_connection_cls(HarnessId.DIRECT, TransportId.STREAMING) is CodexConnection
+
+
+def test_duplicate_bundle_registration_raises(
+    _restore_bundle_registry: None,
+) -> None:
+    class AdapterA:
+        handled_fields = frozenset(SpawnParams.model_fields)
+
+        def owns_untracked_session(self, *, repo_root: Path, session_ref: str) -> bool:
+            _ = repo_root, session_ref
+            return False
+
+    class AdapterB:
+        handled_fields = frozenset(SpawnParams.model_fields)
+
+        def owns_untracked_session(self, *, repo_root: Path, session_ref: str) -> bool:
+            _ = repo_root, session_ref
+            return False
+
+    first = HarnessBundle(
+        harness_id=HarnessId.DIRECT,
+        adapter=AdapterA(),
+        spec_cls=ResolvedLaunchSpec,
+        extractor=_StubHarnessExtractor(),
+        connections={TransportId.STREAMING: CodexConnection},
+    )
+    second = HarnessBundle(
+        harness_id=HarnessId.DIRECT,
+        adapter=AdapterB(),
+        spec_cls=ResolvedLaunchSpec,
+        extractor=_StubHarnessExtractor(),
+        connections={TransportId.STREAMING: OpenCodeConnection},
+    )
+    register_harness_bundle(first)
+    with pytest.raises(
+        ValueError,
+        match=r"existing adapter=AdapterA, incoming adapter=AdapterB",
+    ):
+        register_harness_bundle(second)
+
+    assert get_harness_bundle(HarnessId.DIRECT).adapter is first.adapter
+
+
+def test_bundle_registration_requires_extractor(_restore_bundle_registry: None) -> None:
+    adapter = SimpleNamespace(
+        handled_fields=frozenset(SpawnParams.model_fields),
+        owns_untracked_session=lambda **kwargs: False,
+    )
+    bundle = HarnessBundle(
+        harness_id=HarnessId.DIRECT,
+        adapter=adapter,
+        spec_cls=ResolvedLaunchSpec,
+        extractor=None,  # type: ignore[arg-type]
+        connections={TransportId.STREAMING: CodexConnection},
+    )
+
+    with pytest.raises(TypeError, match=r"missing extractor"):
+        register_harness_bundle(bundle)
+
+
+def test_bundle_registration_rejects_unsupported_transport_key(
+    _restore_bundle_registry: None,
+) -> None:
+    adapter = SimpleNamespace(
+        handled_fields=frozenset(SpawnParams.model_fields),
+        owns_untracked_session=lambda **kwargs: False,
+    )
+    bundle = HarnessBundle(
+        harness_id=HarnessId.DIRECT,
+        adapter=adapter,
+        spec_cls=ResolvedLaunchSpec,
+        extractor=_StubHarnessExtractor(),
+        connections={"http": CodexConnection},  # type: ignore[dict-item]
+    )
+
+    with pytest.raises(ValueError, match=r"unsupported transport key"):
+        register_harness_bundle(bundle)
+
+
+def test_get_connection_cls_rejects_unsupported_transport(
+    _restore_bundle_registry: None,
+) -> None:
+    adapter = SimpleNamespace(
+        handled_fields=frozenset(SpawnParams.model_fields),
+        owns_untracked_session=lambda **kwargs: False,
+    )
+    bundle = HarnessBundle(
+        harness_id=HarnessId.DIRECT,
+        adapter=adapter,
+        spec_cls=ResolvedLaunchSpec,
+        extractor=_StubHarnessExtractor(),
+        connections={TransportId.STREAMING: CodexConnection},
+    )
+    register_harness_bundle(bundle)
+
+    with pytest.raises(
+        KeyError,
+        match=r"harness direct has no connection for transport subprocess",
+    ):
+        get_connection_cls(HarnessId.DIRECT, TransportId.SUBPROCESS)
+
+
+def test_bundle_registration_rejects_empty_connections(
+    _restore_bundle_registry: None,
+) -> None:
+    adapter = SimpleNamespace(
+        handled_fields=frozenset(SpawnParams.model_fields),
+        owns_untracked_session=lambda **kwargs: False,
+    )
+    bundle = HarnessBundle(
+        harness_id=HarnessId.DIRECT,
+        adapter=adapter,
+        spec_cls=ResolvedLaunchSpec,
+        extractor=_StubHarnessExtractor(),
+        connections={},
+    )
+
+    with pytest.raises(ValueError, match=r"has no connections"):
+        register_harness_bundle(bundle)
+
+
+def test_registered_harness_bundles_have_extractors_and_connections() -> None:
+    import meridian.lib.harness as harness
+
+    harness.ensure_bootstrap()
+
+    registered = {
+        harness_id: get_harness_bundle(harness_id)
+        for harness_id in (HarnessId.CLAUDE, HarnessId.CODEX, HarnessId.OPENCODE)
+    }
+
+    for harness_id, bundle in registered.items():
+        assert isinstance(bundle.extractor, HarnessExtractor), harness_id
+        assert bundle.connections, harness_id
+        assert TransportId.STREAMING in bundle.connections, harness_id
+
+
+def test_projection_package_exposes_projected_fields_for_each_projection_module() -> None:
+    assert _projection_files_with_projected_fields() == {
+        "project_claude.py",
+        "project_codex_subprocess.py",
+        "project_codex_streaming.py",
+        "project_opencode_subprocess.py",
+        "project_opencode_streaming.py",
+    }
+
+
+def test_fresh_interpreter_import_harness_runs_bootstrap_accounting() -> None:
+    code = """
+import meridian.lib.harness as harness
+from meridian.lib.harness.bundle import get_bundle_registry
+
+harness.ensure_bootstrap()
+print(int(harness._bootstrapped))
+print(len(get_bundle_registry()))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.strip().splitlines()
+    assert lines[0] == "1"
+    assert int(lines[1]) >= 3
+
+
 def test_claude_build_command_parity_cases() -> None:
     adapter = ClaudeAdapter()
 
@@ -558,6 +834,25 @@ def test_claude_projection_resolver_and_user_allowed_tools_are_both_forwarded(
     assert "known managed flag --allowedTools also present in extra_args" in caplog.text
 
 
+def test_claude_projection_forwards_extra_args_verbatim_across_transports() -> None:
+    spec = ClaudeLaunchSpec(
+        prompt="prompt text",
+        permission_resolver=_StaticPermissionResolver(("--allowedTools", "A,B")),
+        extra_args=("--dangerous-flag", "--allowedTools", "C,D"),
+    )
+
+    subprocess_command = project_claude_spec_to_cli_args(spec, base_command=("claude",))
+    streaming_command = project_claude_spec_to_cli_args(
+        spec,
+        base_command=("claude", "--input-format", "stream-json"),
+    )
+
+    assert subprocess_command[-3:] == ["--dangerous-flag", "--allowedTools", "C,D"]
+    assert streaming_command[-3:] == ["--dangerous-flag", "--allowedTools", "C,D"]
+    assert _values_for_flag(subprocess_command, "--allowedTools") == ["A,B", "C,D"]
+    assert _values_for_flag(streaming_command, "--allowedTools") == ["A,B", "C,D"]
+
+
 def test_claude_projection_allows_empty_user_allowed_tools_tail_without_crashing(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -682,6 +977,29 @@ def test_claude_projection_field_mapping_table_covers_every_field() -> None:
 
     assert set(field_checks) == set(ClaudeLaunchSpec.model_fields)
     assert all(field_checks.values()), field_checks
+
+
+def test_claude_projection_projects_mcp_tools_for_subprocess_and_streaming() -> None:
+    spec = ClaudeLaunchSpec(
+        prompt="prompt text",
+        mcp_tools=("codex-mcp=/usr/local/bin/codex-mcp", "other=/opt/other"),
+        permission_resolver=_StaticPermissionResolver(),
+    )
+
+    subprocess_command = project_claude_spec_to_cli_args(spec, base_command=("claude",))
+    streaming_command = project_claude_spec_to_cli_args(
+        spec,
+        base_command=("claude", "--input-format", "stream-json"),
+    )
+
+    assert _values_for_flag(subprocess_command, "--mcp-config") == [
+        "codex-mcp=/usr/local/bin/codex-mcp",
+        "other=/opt/other",
+    ]
+    assert _values_for_flag(streaming_command, "--mcp-config") == [
+        "codex-mcp=/usr/local/bin/codex-mcp",
+        "other=/opt/other",
+    ]
 
 
 def test_claude_adapter_preflight_delegates_to_claude_preflight(
@@ -910,6 +1228,66 @@ def test_codex_build_command_keeps_colliding_approval_override_in_tail() -> None
     assert command[-3:] == ["-c", 'approval_policy="untrusted"', "-"]
 
 
+def test_codex_projection_forwards_extra_args_verbatim_to_subprocess() -> None:
+    command = project_codex_spec_to_cli_args(
+        CodexLaunchSpec(
+            prompt="prompt text",
+            extra_args=("-c", "sandbox_mode=yolo", "--dangerous-flag", "--allowedTools", "C,D"),
+            permission_resolver=_StaticPermissionResolver(
+                config=PermissionConfig(sandbox="read-only")
+            ),
+        ),
+        base_command=("codex", "exec", "--json"),
+    )
+
+    assert _values_for_flag(command, "--sandbox") == ["read-only"]
+    assert command[-6:] == [
+        "-c",
+        "sandbox_mode=yolo",
+        "--dangerous-flag",
+        "--allowedTools",
+        "C,D",
+        "-",
+    ]
+
+
+def test_codex_streaming_projection_logs_passthrough_args_once_and_skips_empty_tail(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    logger_name = "meridian.lib.harness.projections.project_codex_streaming"
+
+    spec_with_tail = CodexLaunchSpec(
+        prompt="prompt text",
+        extra_args=("--weird-flag", "value"),
+        permission_resolver=_StaticPermissionResolver(),
+    )
+    with caplog.at_level(logging.DEBUG, logger=logger_name):
+        command = project_codex_spec_to_appserver_command(
+            spec_with_tail,
+            host="127.0.0.1",
+            port=4096,
+        )
+
+    assert command[-2:] == ["--weird-flag", "value"]
+    assert caplog.messages == [
+        "Forwarding passthrough args to codex app-server: ['--weird-flag', 'value']"
+    ]
+
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG, logger=logger_name):
+        empty_command = project_codex_spec_to_appserver_command(
+            CodexLaunchSpec(
+                prompt="prompt text",
+                permission_resolver=_StaticPermissionResolver(),
+            ),
+            host="127.0.0.1",
+            port=4096,
+        )
+
+    assert "--weird-flag" not in empty_command
+    assert caplog.messages == []
+
+
 @pytest.mark.parametrize(
     ("sandbox", "approval", "expected_sandbox", "expected_approval_policy"),
     [
@@ -959,6 +1337,43 @@ def test_codex_build_command_fails_closed_when_approval_mode_unmappable(
     resolver = _StaticPermissionResolver(config=PermissionConfig(approval="confirm"))
     with pytest.raises(HarnessCapabilityMismatch, match="approval mode 'confirm'"):
         CodexAdapter().build_command(_spawn(), resolver)
+
+
+def test_codex_projection_projects_mcp_tools_for_subprocess_and_streaming() -> None:
+    spec = CodexLaunchSpec(
+        prompt="prompt text",
+        mcp_tools=("codex-mcp=/usr/local/bin/codex-mcp", "other=/opt/other"),
+        permission_resolver=_StaticPermissionResolver(),
+    )
+
+    subprocess_command = project_codex_spec_to_cli_args(
+        spec,
+        base_command=("codex", "exec", "--json"),
+    )
+    streaming_command = project_codex_spec_to_appserver_command(
+        spec,
+        host="127.0.0.1",
+        port=4096,
+    )
+
+    expected = ['"/usr/local/bin/codex-mcp"', '"/opt/other"']
+    assert _values_for_codex_config_setting(
+        subprocess_command,
+        "mcp.servers.codex-mcp.command",
+    ) == ['"/usr/local/bin/codex-mcp"']
+    assert _values_for_codex_config_setting(
+        subprocess_command,
+        "mcp.servers.other.command",
+    ) == ['"/opt/other"']
+    assert _values_for_codex_config_setting(
+        streaming_command,
+        "mcp.servers.codex-mcp.command",
+    ) == ['"/usr/local/bin/codex-mcp"']
+    assert _values_for_codex_config_setting(
+        streaming_command,
+        "mcp.servers.other.command",
+    ) == ['"/opt/other"']
+    assert expected == ['"/usr/local/bin/codex-mcp"', '"/opt/other"']
 
 
 def test_opencode_build_command_parity_cases() -> None:
@@ -1042,6 +1457,153 @@ def test_opencode_build_command_parity_cases() -> None:
         "session-2",
         "--fork",
     ]
+
+
+def test_opencode_subprocess_projection_forwards_extra_args_verbatim() -> None:
+    command = project_opencode_spec_to_cli_args(
+        OpenCodeLaunchSpec(
+            prompt="prompt text",
+            extra_args=("--weird-flag", "value"),
+            permission_resolver=_StaticPermissionResolver(),
+        ),
+        base_command=("opencode", "run"),
+    )
+
+    assert command[-3:] == ["--weird-flag", "value", "-"]
+
+
+def test_opencode_streaming_projection_logs_passthrough_args_once_and_skips_empty_tail(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    logger_name = "meridian.lib.harness.projections.project_opencode_streaming"
+
+    spec_with_tail = OpenCodeLaunchSpec(
+        prompt="prompt text",
+        extra_args=("--weird-flag", "value"),
+        permission_resolver=_StaticPermissionResolver(),
+    )
+    with caplog.at_level(logging.DEBUG, logger=logger_name):
+        command = project_opencode_spec_to_serve_command(
+            spec_with_tail,
+            host="127.0.0.1",
+            port=4096,
+        )
+
+    assert command[-2:] == ["--weird-flag", "value"]
+    assert caplog.messages == [
+        "Forwarding passthrough args to opencode serve: ['--weird-flag', 'value']"
+    ]
+
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG, logger=logger_name):
+        empty_command = project_opencode_spec_to_serve_command(
+            OpenCodeLaunchSpec(
+                prompt="prompt text",
+                permission_resolver=_StaticPermissionResolver(),
+            ),
+            host="127.0.0.1",
+            port=4096,
+        )
+
+    assert "--weird-flag" not in empty_command
+    assert caplog.messages == []
+
+
+def test_opencode_streaming_projection_projects_mcp_tools_in_session_payload() -> None:
+    payload = project_opencode_spec_to_session_payload(
+        OpenCodeLaunchSpec(
+            prompt="prompt text",
+            mcp_tools=("codex-mcp=/usr/local/bin/codex-mcp", "other=/opt/other"),
+            permission_resolver=_StaticPermissionResolver(),
+        )
+    )
+
+    assert payload["mcp"] == {
+        "servers": [
+            "codex-mcp=/usr/local/bin/codex-mcp",
+            "other=/opt/other",
+        ]
+    }
+
+
+def test_empty_mcp_tools_emit_no_wire_state_across_all_supported_projections() -> None:
+    claude_command = project_claude_spec_to_cli_args(
+        ClaudeLaunchSpec(
+            prompt="prompt text",
+            permission_resolver=_StaticPermissionResolver(),
+        ),
+        base_command=("claude",),
+    )
+    codex_subprocess_command = project_codex_spec_to_cli_args(
+        CodexLaunchSpec(
+            prompt="prompt text",
+            permission_resolver=_StaticPermissionResolver(),
+        ),
+        base_command=("codex", "exec", "--json"),
+    )
+    codex_streaming_command = project_codex_spec_to_appserver_command(
+        CodexLaunchSpec(
+            prompt="prompt text",
+            permission_resolver=_StaticPermissionResolver(),
+        ),
+        host="127.0.0.1",
+        port=4096,
+    )
+    opencode_subprocess_command = project_opencode_spec_to_cli_args(
+        OpenCodeLaunchSpec(
+            prompt="prompt text",
+            permission_resolver=_StaticPermissionResolver(),
+        ),
+        base_command=("opencode", "run"),
+    )
+    opencode_streaming_payload = project_opencode_spec_to_session_payload(
+        OpenCodeLaunchSpec(
+            prompt="prompt text",
+            permission_resolver=_StaticPermissionResolver(),
+        )
+    )
+
+    assert _values_for_flag(claude_command, "--mcp-config") == []
+    assert _values_for_codex_config_setting(
+        codex_subprocess_command,
+        "mcp.servers.codex-mcp.command",
+    ) == []
+    assert _values_for_codex_config_setting(
+        codex_streaming_command,
+        "mcp.servers.codex-mcp.command",
+    ) == []
+    assert "mcp" not in opencode_streaming_payload
+    assert "--mcp-config" not in opencode_subprocess_command
+
+
+def test_mcp_tools_is_accounted_for_by_all_projections_and_adapters() -> None:
+    for projected_fields in (
+        set(ClaudeLaunchSpec.model_fields),
+        _CODEX_SUBPROCESS_PROJECTED_FIELDS,
+        _CODEX_STREAMING_PROJECTED_FIELDS,
+        _OPENCODE_SUBPROCESS_PROJECTED_FIELDS,
+        _OPENCODE_STREAMING_PROJECTED_FIELDS,
+    ):
+        assert "mcp_tools" in projected_fields
+
+    for adapter in (ClaudeAdapter(), CodexAdapter(), OpenCodeAdapter()):
+        assert "mcp_tools" in adapter.handled_fields
+
+
+def test_projection_package_contains_no_reserved_passthrough_stripping_helpers() -> None:
+    projection_root = Path(__file__).resolve().parents[2] / "src/meridian/lib/harness/projections"
+    combined = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted(projection_root.glob("project_*.py"))
+    )
+
+    for forbidden in (
+        "strip_reserved_passthrough",
+        "_RESERVED_CODEX_ARGS",
+        "_RESERVED_CLAUDE_ARGS",
+        "_reserved_flags.py",
+    ):
+        assert forbidden not in combined
 
 
 @pytest.mark.parametrize(

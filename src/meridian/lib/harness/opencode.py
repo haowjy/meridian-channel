@@ -17,14 +17,18 @@ from meridian.lib.harness.adapter import (
     RunPromptPolicy,
     SpawnParams,
 )
+from meridian.lib.harness.bundle import HarnessBundle, register_harness_bundle
 from meridian.lib.harness.common import (
     extract_opencode_report,
     extract_session_id_from_artifacts_with_patterns,
     extract_usage_from_artifacts,
 )
-from meridian.lib.harness.ids import HarnessId
+from meridian.lib.harness.connections.opencode_http import OpenCodeConnection
+from meridian.lib.harness.extractors.opencode import OPENCODE_EXTRACTOR
+from meridian.lib.harness.ids import HarnessId, TransportId
 from meridian.lib.harness.launch_spec import OpenCodeLaunchSpec
 from meridian.lib.harness.launch_types import PromptPolicy, SessionSeed
+from meridian.lib.harness.opencode_storage import resolve_opencode_session_file
 from meridian.lib.harness.projections.project_opencode_subprocess import (
     project_opencode_spec_to_cli_args,
 )
@@ -285,6 +289,10 @@ class OpenCodeAdapter(BaseHarnessAdapter[OpenCodeLaunchSpec]):
         )
         return _detect_primary_session_id(repo_root, started_at_epoch, local_iso)
 
+    def resolve_session_file(self, *, repo_root: Path, session_id: str) -> Path | None:
+        _ = repo_root
+        return resolve_opencode_session_file(session_id=session_id)
+
     def extract_session_id(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> str | None:
         return extract_session_id_from_artifacts_with_patterns(
             artifacts,
@@ -298,3 +306,14 @@ class OpenCodeAdapter(BaseHarnessAdapter[OpenCodeLaunchSpec]):
 
     def extract_report(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> str | None:
         return extract_opencode_report(artifacts, spawn_id)
+
+
+register_harness_bundle(
+    HarnessBundle(
+        harness_id=HarnessId.OPENCODE,
+        adapter=OpenCodeAdapter(),
+        spec_cls=OpenCodeLaunchSpec,
+        extractor=OPENCODE_EXTRACTOR,
+        connections={TransportId.STREAMING: OpenCodeConnection},
+    )
+)

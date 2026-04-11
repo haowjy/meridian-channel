@@ -19,13 +19,16 @@ from meridian.lib.harness.adapter import (
     RunPromptPolicy,
     SpawnParams,
 )
+from meridian.lib.harness.bundle import HarnessBundle, register_harness_bundle
 from meridian.lib.harness.claude_preflight import build_claude_preflight_result
 from meridian.lib.harness.common import (
     extract_claude_report,
     extract_session_id_from_artifacts,
     extract_usage_from_artifacts,
 )
-from meridian.lib.harness.ids import HarnessId
+from meridian.lib.harness.connections.claude_ws import ClaudeConnection
+from meridian.lib.harness.extractors.claude import CLAUDE_EXTRACTOR
+from meridian.lib.harness.ids import HarnessId, TransportId
 from meridian.lib.harness.launch_spec import ClaudeLaunchSpec
 from meridian.lib.harness.launch_types import PromptPolicy, SessionSeed
 from meridian.lib.harness.projections.project_claude import project_claude_spec_to_cli_args
@@ -437,3 +440,14 @@ class ClaudeAdapter(BaseHarnessAdapter[ClaudeLaunchSpec]):
             if session_file.is_file():
                 return True
         return False
+
+
+register_harness_bundle(
+    HarnessBundle(
+        harness_id=HarnessId.CLAUDE,
+        adapter=ClaudeAdapter(),
+        spec_cls=ClaudeLaunchSpec,
+        extractor=CLAUDE_EXTRACTOR,
+        connections={TransportId.STREAMING: ClaudeConnection},
+    )
+)

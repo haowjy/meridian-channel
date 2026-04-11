@@ -4,7 +4,7 @@
 - **Added by:** @design-orchestrator (revision round 3)
 - **Replaces:** [S037](S037-reserved-flag-stripping.md)
 - **Tester:** @unit-tester + @smoke-tester
-- **Status:** pending
+- **Status:** verified
 
 ## Given
 A spawn configured with `extra_args = ("-c", "sandbox_mode=yolo", "--dangerous-flag", "--allowedTools", "C,D")`.
@@ -28,4 +28,35 @@ The spec is projected to each harness's wire format — Claude subprocess, Claud
 - Delta test: search the entire `projections/` package for `strip_reserved_passthrough`, `_RESERVED_CODEX_ARGS`, `_RESERVED_CLAUDE_ARGS`, `_reserved_flags.py` — assert zero matches.
 
 ## Result (filled by tester)
-_pending_
+verified 2026-04-11
+
+- Evidence:
+  - `tests/harness/test_launch_spec_parity.py:837` — `test_claude_projection_forwards_extra_args_verbatim_across_transports`
+  - `tests/harness/test_launch_spec_parity.py:1231` — `test_codex_projection_forwards_extra_args_verbatim_to_subprocess`
+  - `tests/harness/test_launch_spec_parity.py:1254` — `test_codex_streaming_projection_logs_passthrough_args_once_and_skips_empty_tail`
+  - `tests/harness/test_launch_spec_parity.py:1462` — `test_opencode_subprocess_projection_forwards_extra_args_verbatim`
+  - `tests/harness/test_launch_spec_parity.py:1475` — `test_opencode_streaming_projection_logs_passthrough_args_once_and_skips_empty_tail`
+  - `tests/harness/test_launch_spec_parity.py:1593` — `test_projection_package_contains_no_reserved_passthrough_stripping_helpers`
+- Notes:
+  - All transport projections keep user `extra_args` verbatim and in-order; streaming projections also emit the expected debug log once per call.
+
+### Smoke-tester re-verification (2026-04-11)
+
+- Subprocess dry-run projection preserved the passthrough tail verbatim for all three harnesses, including `/tmp/foo`, `--note=hello world`, and `--value=--dashy`:
+  - Claude: `['claude', '-p', '--output-format', 'stream-json', '--verbose', '-', '--model', 'claude-sonnet-4-6', '--weird-flag', 'value', '/tmp/foo', '--note=hello world', '--value=--dashy']`
+  - Codex: `['codex', 'exec', '--json', '--model', 'gpt-5.3-codex', '--weird-flag', 'value', '/tmp/foo', '--note=hello world', '--value=--dashy', '-']`
+  - OpenCode: `['opencode', 'run', '--model', 'gpt-5.3-codex', '--weird-flag', 'value', '/tmp/foo', '--note=hello world', '--value=--dashy', '-']`
+- Real subprocess binaries saw the forwarded flag directly:
+  - Claude: exit `1`, stderr `error: unknown option '--weird-flag'`
+  - Codex: exit `2`, stderr `error: unexpected argument '--weird-flag' found`
+  - OpenCode: exit `1`, CLI help/usage surfaced cleanly from the real binary
+- Streaming passthrough logging and command tails also matched expectations:
+  - Codex projection logged `Forwarding passthrough args to codex app-server: ['--weird-flag', 'value', '/tmp/foo', '--note=hello world', '--value=--dashy']`
+  - Codex projected command: `['codex', 'app-server', '--listen', 'ws://127.0.0.1:47991', '--weird-flag', 'value', '/tmp/foo', '--note=hello world', '--value=--dashy']`
+  - Real `codex app-server ...` exited `2` with `error: unexpected argument '--weird-flag' found`
+  - OpenCode projection logged `Forwarding passthrough args to opencode serve: ['--weird-flag', 'value', '/tmp/foo', '--note=hello world', '--value=--dashy']`
+  - OpenCode projected command: `['opencode', 'serve', '--hostname', '127.0.0.1', '--port', '47992', '--weird-flag', 'value', '/tmp/foo', '--note=hello world', '--value=--dashy']`
+  - Real `opencode serve ...` exited `1` and surfaced its own help/usage
+- Managed-flag collision checks still preserved both values in order:
+  - Claude projection with resolver `--allowedTools A,B` and user tail `--allowedTools C,D` produced `... '--allowedTools', 'A,B', '--foo', 'bar', '--allowedTools', 'C,D'`
+  - Codex projection with resolver sandbox `read-only` and user tail `-c sandbox_mode=yolo` produced `... '--sandbox', 'read-only', '-c', 'approval_policy=\"on-request\"', '-c', 'sandbox_mode=yolo', '--weird-flag', 'value', '-'`

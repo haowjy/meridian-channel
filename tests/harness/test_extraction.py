@@ -1,13 +1,31 @@
 """Harness extraction invariants for report, usage, and session metadata."""
 
-from meridian.lib.core.types import SpawnId
+import os
+import time
+from collections.abc import Mapping
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from meridian.lib.core.domain import TokenUsage
+from meridian.lib.core.types import HarnessId, SpawnId
 from meridian.lib.harness.adapter import ArtifactStore
+from meridian.lib.harness.bundle import HarnessBundle
 from meridian.lib.harness.claude import ClaudeAdapter
 from meridian.lib.harness.codex import CodexAdapter
 from meridian.lib.harness.common import unwrap_event_payload
+from meridian.lib.harness.connections.base import HarnessEvent
+from meridian.lib.harness.connections.codex_ws import CodexConnection
+from meridian.lib.harness.extractor import StreamingExtractor
+from meridian.lib.harness.extractors.base import HarnessExtractor
+from meridian.lib.harness.extractors.opencode import OpenCodeHarnessExtractor
+from meridian.lib.harness.ids import TransportId
+from meridian.lib.harness.launch_spec import CodexLaunchSpec, OpenCodeLaunchSpec, ResolvedLaunchSpec
 from meridian.lib.harness.opencode import OpenCodeAdapter
 from meridian.lib.launch.report import extract_or_fallback_report
 from meridian.lib.launch.written_files import extract_written_files
+from meridian.lib.safety.permissions import UnsafeNoOpPermissionResolver
 from meridian.lib.state.artifact_store import InMemoryStore, make_artifact_key
 
 
@@ -21,6 +39,59 @@ class _StubCodexAdapter(CodexAdapter):
         if self._raises is not None:
             raise self._raises
         return self._report
+
+
+class _StubHarnessExtractor(HarnessExtractor[ResolvedLaunchSpec]):
+    def __init__(
+        self,
+        *,
+        artifact_session_id: str | None = None,
+        fallback_session_id: str | None = None,
+    ) -> None:
+        self._artifact_session_id = artifact_session_id
+        self._fallback_session_id = fallback_session_id
+
+    def detect_session_id_from_event(self, event: HarnessEvent) -> str | None:
+        _ = event
+        return None
+
+    def detect_session_id_from_artifacts(
+        self,
+        *,
+        spec: ResolvedLaunchSpec,
+        launch_env: Mapping[str, str],
+        child_cwd: Path,
+        state_root: Path,
+    ) -> str | None:
+        _ = spec, launch_env, child_cwd, state_root
+        return self._fallback_session_id
+
+    def extract_usage(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> TokenUsage:
+        _ = artifacts, spawn_id
+        return TokenUsage()
+
+    def extract_session_id(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> str | None:
+        _ = artifacts, spawn_id
+        return self._artifact_session_id
+
+    def extract_report(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> str | None:
+        _ = artifacts, spawn_id
+        return None
+
+
+def _bundle_for_extractor(
+    extractor: HarnessExtractor[ResolvedLaunchSpec],
+) -> HarnessBundle[ResolvedLaunchSpec]:
+    return HarnessBundle(
+        harness_id=HarnessId.CODEX,
+        adapter=SimpleNamespace(
+            handled_fields=frozenset(),
+            owns_untracked_session=lambda **kwargs: False,
+        ),
+        spec_cls=CodexLaunchSpec,
+        extractor=extractor,
+        connections={TransportId.STREAMING: CodexConnection},
+    )
 
 
 def test_adapters_extract_usage_from_cross_harness_payloads() -> None:
@@ -254,3 +325,87 @@ def test_extractors_handle_envelope_wrapped_output_jsonl_lines() -> None:
     assert usage.total_cost_usd == 0.01
     assert OpenCodeAdapter().extract_session_id(artifacts, opencode_spawn) == "oc_wrapped_session"
     assert OpenCodeAdapter().extract_report(artifacts, opencode_spawn) == "wrapped opencode report"
+
+
+def test_streaming_extractor_prefers_live_connection_session_id() -> None:
+    class _LiveConnection:
+        session_id = "thread-live-123"
+
+    spec = CodexLaunchSpec(
+        prompt="hello",
+        permission_resolver=UnsafeNoOpPermissionResolver(_suppress_warning=True),
+    )
+    extractor = StreamingExtractor(
+        connection=_LiveConnection(),  # type: ignore[arg-type]
+        bundle=_bundle_for_extractor(_StubHarnessExtractor()),
+        spec=spec,
+        launch_env={},
+        child_cwd=Path.cwd(),
+        state_root=Path.cwd(),
+    )
+
+    assert extractor.extract_session_id(InMemoryStore(), SpawnId("p-live")) == "thread-live-123"
+
+
+def test_streaming_extractor_falls_back_to_harness_owned_artifact_detection() -> None:
+    spec = CodexLaunchSpec(
+        prompt="hello",
+        permission_resolver=UnsafeNoOpPermissionResolver(_suppress_warning=True),
+    )
+    extractor = StreamingExtractor(
+        connection=None,
+        bundle=_bundle_for_extractor(
+            _StubHarnessExtractor(
+                artifact_session_id=None,
+                fallback_session_id="thread-fallback-456",
+            )
+        ),
+        spec=spec,
+        launch_env={"CODEX_HOME": "/tmp/nonexistent"},
+        child_cwd=Path.cwd(),
+        state_root=Path.cwd(),
+    )
+
+    assert (
+        extractor.extract_session_id(InMemoryStore(), SpawnId("p-fallback"))
+        == "thread-fallback-456"
+    )
+
+
+def test_opencode_extractor_falls_back_to_xdg_session_storage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    xdg_data_home = tmp_path / "xdg-data"
+    session_diff_dir = xdg_data_home / "opencode" / "storage" / "session_diff"
+    session_diff_dir.mkdir(parents=True)
+
+    older_session_id = "ses_older_session_12345"
+    fake_session_id = "ses_fake_session_67890"
+    older_file = session_diff_dir / f"{older_session_id}.json"
+    target_file = session_diff_dir / f"{fake_session_id}.json"
+    older_file.write_text("[]", encoding="utf-8")
+    target_file.write_text("[]", encoding="utf-8")
+    now = time.time()
+    os.utime(older_file, (now - 20, now - 20))
+    os.utime(target_file, (now, now))
+
+    monkeypatch.setenv("XDG_DATA_HOME", xdg_data_home.as_posix())
+    extractor = OpenCodeHarnessExtractor()
+    spec = OpenCodeLaunchSpec(
+        prompt="hello",
+        permission_resolver=UnsafeNoOpPermissionResolver(_suppress_warning=True),
+    )
+    empty_child_cwd = tmp_path / "child"
+    empty_state_root = tmp_path / "state"
+    empty_child_cwd.mkdir()
+    empty_state_root.mkdir()
+
+    detected = extractor.detect_session_id_from_artifacts(
+        spec=spec,
+        launch_env={"XDG_DATA_HOME": xdg_data_home.as_posix()},
+        child_cwd=empty_child_cwd,
+        state_root=empty_state_root,
+    )
+
+    assert detected == fake_session_id

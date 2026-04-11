@@ -3,7 +3,7 @@
 - **Source:** design/edge-cases.md E31 + design/typed-harness.md §Import Topology (revision round 3 convergence pass)
 - **Added by:** @design-orchestrator (design phase, updated in revision round 3 convergence pass)
 - **Tester:** @verifier
-- **Status:** pending
+- **Status:** verified
 
 ## Given
 Current typed module DAG (authoritative list in `design/typed-harness.md §Import Topology`):
@@ -40,4 +40,10 @@ Modules are imported in fresh interpreters and pyright runs.
 - Negative test: introduce a deliberate `from meridian.lib.harness.projections.project_claude import ...` at the top of `launch/launch_types.py` (fixture patch), assert import raises `ImportError` due to the induced cycle, and assert the baseline graph does not trigger this.
 
 ## Result (filled by tester)
-_pending_
+- **Status:** verified
+- **Date:** 2026-04-11
+- **Evidence:** `uv run python -W error -c "import meridian.lib.harness; import meridian.lib.harness.bundle; import meridian.lib.harness.extractors; import meridian.lib.harness.projections"` exited 0 with no warnings or stderr; bootstrap order remains load-bearing in [src/meridian/lib/harness/__init__.py](/home/jimyao/gitrepos/meridian-channel/src/meridian/lib/harness/__init__.py:14).
+- **Evidence:** `rg -n "from meridian\\.lib\\.streaming import|import meridian\\.lib\\.streaming" src/meridian/lib/harness` returned no matches, so the harness package is not importing the streaming package back into the bootstrap path.
+- **Evidence:** `uv run pyright` passed with `0 errors, 0 warnings, 0 informations`.
+- **Evidence:** Dispatch in [src/meridian/lib/streaming/spawn_manager.py](/home/jimyao/gitrepos/meridian-channel/src/meridian/lib/streaming/spawn_manager.py:65) is bundle-routed and uses one runtime narrow at lines 75-80; `rg -n "if\\s+harness_id\\s*==|if\\s+harness\\s*==|isinstance\\([^\\n]*ClaudeLaunchSpec|isinstance\\([^\\n]*CodexLaunchSpec|isinstance\\([^\\n]*OpenCodeLaunchSpec" src/meridian/lib/streaming` returned no leftover harness-specific branches.
+- **Evidence:** All five projection modules import the shared helper from `projections/_guards.py` and call `_check_projection_drift(...)` at module level; `rg -n "check_projection_drift as _check_projection_drift|_check_projection_drift\\(" src/meridian/lib/harness/projections/project_*.py` matched exactly those imports and calls with no shadowing helper definitions.

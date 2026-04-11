@@ -4,19 +4,18 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable, Sequence
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from pydantic import BaseModel
 
 from meridian.lib.harness.adapter import resolve_permission_flags
 from meridian.lib.harness.ids import HarnessId
 from meridian.lib.harness.launch_spec import OpenCodeLaunchSpec
+from meridian.lib.harness.projections._guards import (
+    check_projection_drift as _check_projection_drift,
+)
 
 logger = logging.getLogger(__name__)
 
 
-class HarnessCapabilityMismatch(RuntimeError):
+class HarnessCapabilityMismatch(ValueError):
     """Raised when requested launch semantics cannot be represented on OpenCode."""
 
 
@@ -37,22 +36,6 @@ _PROJECTED_FIELDS: frozenset[str] = frozenset(
 )
 
 _DELEGATED_FIELDS: frozenset[str] = frozenset()
-
-
-def _check_projection_drift(
-    spec_cls: type[BaseModel],
-    projected_fields: frozenset[str],
-    delegated_fields: frozenset[str],
-) -> None:
-    expected = set(spec_cls.model_fields)
-    accounted = set(projected_fields | delegated_fields)
-    missing = expected - accounted
-    stale = accounted - expected
-    if missing or stale:
-        raise ImportError(
-            f"Projection drift for {spec_cls.__name__}: "
-            f"missing={sorted(missing)} stale={sorted(stale)}"
-        )
 
 
 def _normalized_nonempty(values: Iterable[str]) -> tuple[str, ...]:
@@ -179,8 +162,8 @@ def project_opencode_spec_to_cli_args(
 
 _check_projection_drift(
     OpenCodeLaunchSpec,
-    _PROJECTED_FIELDS,
-    _DELEGATED_FIELDS,
+    projected=_PROJECTED_FIELDS,
+    delegated=_DELEGATED_FIELDS,
 )
 
 

@@ -10,12 +10,14 @@ from typing import cast
 import pytest
 
 from meridian.lib.core.types import HarnessId, SpawnId
+from meridian.lib.harness.bundle import _REGISTRY, HarnessBundle, get_harness_bundle
 from meridian.lib.harness.connections.base import (
     ConnectionCapabilities,
     ConnectionConfig,
     HarnessEvent,
 )
-from meridian.lib.harness.launch_spec import ResolvedLaunchSpec
+from meridian.lib.harness.ids import TransportId
+from meridian.lib.harness.launch_spec import CodexLaunchSpec, ResolvedLaunchSpec
 from meridian.lib.safety.permissions import UnsafeNoOpPermissionResolver
 from meridian.lib.state.paths import resolve_state_paths
 from meridian.lib.state.spawn_store import get_spawn, start_spawn
@@ -152,7 +154,7 @@ async def test_spawn_manager_natural_completion_writes_envelope_and_completion_o
     manager = SpawnManager(state_root=state_root, repo_root=repo_root)
     await manager.start_spawn(
         _build_config(spawn_id, repo_root),
-        ResolvedLaunchSpec(
+        CodexLaunchSpec(
             prompt="hello",
             permission_resolver=UnsafeNoOpPermissionResolver(_suppress_warning=True),
         ),
@@ -516,3 +518,63 @@ async def test_spawn_manager_stop_spawn_race_uses_natural_completion_outcome_onc
     assert row is not None
     assert row.status == "running"
     assert row.exit_code is None
+
+
+@pytest.mark.asyncio
+async def test_spawn_manager_dispatch_rejects_base_spec_for_claude(tmp_path: Path) -> None:
+    repo_root = tmp_path
+    state_root = resolve_state_paths(repo_root).root_dir
+    manager = SpawnManager(state_root=state_root, repo_root=repo_root)
+
+    config = ConnectionConfig(
+        spawn_id=SpawnId("p-claude-mismatch"),
+        harness_id=HarnessId.CLAUDE,
+        prompt="hello",
+        repo_root=repo_root,
+        env_overrides={},
+    )
+    base_spec = ResolvedLaunchSpec(
+        prompt="hello",
+        permission_resolver=UnsafeNoOpPermissionResolver(_suppress_warning=True),
+    )
+
+    with pytest.raises(TypeError, match=r"expected ClaudeLaunchSpec"):
+        await manager.start_spawn(config, base_spec)
+
+
+@pytest.mark.asyncio
+async def test_spawn_manager_dispatch_raises_keyerror_when_streaming_transport_missing(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path
+    state_root = resolve_state_paths(repo_root).root_dir
+    manager = SpawnManager(state_root=state_root, repo_root=repo_root)
+
+    config = ConnectionConfig(
+        spawn_id=SpawnId("p-codex-missing-streaming"),
+        harness_id=HarnessId.CODEX,
+        prompt="hello",
+        repo_root=repo_root,
+        env_overrides={},
+    )
+    spec = CodexLaunchSpec(
+        prompt="hello",
+        permission_resolver=UnsafeNoOpPermissionResolver(_suppress_warning=True),
+    )
+
+    original_bundle = get_harness_bundle(HarnessId.CODEX)
+    _REGISTRY[HarnessId.CODEX] = HarnessBundle(
+        harness_id=original_bundle.harness_id,
+        adapter=original_bundle.adapter,
+        spec_cls=original_bundle.spec_cls,
+        extractor=original_bundle.extractor,
+        connections={TransportId.SUBPROCESS: next(iter(original_bundle.connections.values()))},
+    )
+    try:
+        with pytest.raises(
+            KeyError,
+            match=r"harness codex has no connection for transport streaming",
+        ):
+            await manager.start_spawn(config, spec)
+    finally:
+        _REGISTRY[HarnessId.CODEX] = original_bundle

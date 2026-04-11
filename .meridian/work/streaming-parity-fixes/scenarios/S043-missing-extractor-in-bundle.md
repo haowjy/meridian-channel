@@ -3,7 +3,7 @@
 - **Source:** design/edge-cases.md E49 + decisions.md K6 (revision round 3)
 - **Added by:** @design-orchestrator (revision round 3)
 - **Tester:** @unit-tester
-- **Status:** pending
+- **Status:** verified
 
 ## Given
 A developer constructs `HarnessBundle(harness_id=..., adapter=..., spec_cls=..., extractor=None, connections={...})` or omits the `extractor` field entirely.
@@ -21,4 +21,10 @@ A developer constructs `HarnessBundle(harness_id=..., adapter=..., spec_cls=...,
 - Positive test: every harness bundle registered in `harness/__init__.py` has a non-None extractor.
 
 ## Result (filled by tester)
-_pending_
+verified 2026-04-11
+
+- Evidence:
+  - `tests/harness/test_launch_spec_parity.py:528` — `test_bundle_registration_requires_extractor`
+  - `tests/harness/test_launch_spec_parity.py:606` — `test_registered_harness_bundles_have_extractors_and_connections`
+- Notes:
+  - `extractor=None` fails registration immediately, and all production bundles now verify non-`None` extractors at bootstrap.

@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from pydantic import BaseModel
 
 from meridian.lib.harness.launch_spec import OpenCodeLaunchSpec
+from meridian.lib.harness.projections._guards import (
+    check_projection_drift as _check_projection_drift,
+)
 from meridian.lib.harness.projections.project_opencode_subprocess import (
     HarnessCapabilityMismatch,
 )
@@ -38,23 +37,8 @@ _SESSION_PAYLOAD_FIELDS: frozenset[str] = frozenset(
 )
 
 _ACCOUNTED_FIELDS: frozenset[str] = _SERVE_COMMAND_FIELDS | _SESSION_PAYLOAD_FIELDS
+_PROJECTED_FIELDS: frozenset[str] = _ACCOUNTED_FIELDS
 _DELEGATED_FIELDS: frozenset[str] = frozenset()
-
-
-def _check_projection_drift(
-    spec_cls: type[BaseModel],
-    projected_fields: frozenset[str],
-    delegated_fields: frozenset[str],
-) -> None:
-    expected = set(spec_cls.model_fields)
-    accounted = set(projected_fields | delegated_fields)
-    missing = expected - accounted
-    stale = accounted - expected
-    if missing or stale:
-        raise ImportError(
-            f"Projection drift for {spec_cls.__name__}: "
-            f"missing={sorted(missing)} stale={sorted(stale)}"
-        )
 
 
 def _consume_streaming_lifecycle_fields(spec: OpenCodeLaunchSpec) -> None:
@@ -133,7 +117,7 @@ def project_opencode_spec_to_session_payload(spec: OpenCodeLaunchSpec) -> dict[s
 
     projected_mcp_tools = [entry.strip() for entry in spec.mcp_tools if entry.strip()]
     if projected_mcp_tools:
-        payload["mcp"] = projected_mcp_tools
+        payload["mcp"] = {"servers": projected_mcp_tools}
 
     if spec.continue_session_id is not None:
         payload["sessionID"] = spec.continue_session_id
@@ -143,14 +127,15 @@ def project_opencode_spec_to_session_payload(spec: OpenCodeLaunchSpec) -> dict[s
 
 _check_projection_drift(
     OpenCodeLaunchSpec,
-    _ACCOUNTED_FIELDS,
-    _DELEGATED_FIELDS,
+    projected=_ACCOUNTED_FIELDS,
+    delegated=_DELEGATED_FIELDS,
 )
 
 
 __all__ = [
     "_ACCOUNTED_FIELDS",
     "_DELEGATED_FIELDS",
+    "_PROJECTED_FIELDS",
     "_SERVE_COMMAND_FIELDS",
     "_SESSION_PAYLOAD_FIELDS",
     "HarnessCapabilityMismatch",

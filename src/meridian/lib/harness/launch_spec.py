@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from types import SimpleNamespace
-from typing import Protocol, cast
+from typing import Any
 
-from meridian.lib.harness.adapter import SpawnParams, SubprocessHarness
+from meridian.lib.harness.adapter import SpawnParams
+from meridian.lib.harness.bundle import HarnessBundle, get_bundle_registry
 from meridian.lib.harness.ids import HarnessId
 from meridian.lib.launch.launch_types import ResolvedLaunchSpec
 
@@ -32,54 +32,18 @@ class OpenCodeLaunchSpec(ResolvedLaunchSpec):
     skills: tuple[str, ...] = ()
 
 
-class HarnessBundle(Protocol):
-    """Minimal bundle contract needed by spawn-params accounting tests."""
-
-    adapter: SubprocessHarness
-
-
-_PHASE2_ADAPTER_HANDLED_FIELDS: frozenset[str] = frozenset(
-    {
-        "prompt",
-        "model",
-        "effort",
-        "skills",
-        "agent",
-        "adhoc_agent_payload",
-        "extra_args",
-        "repo_root",
-        "mcp_tools",
-        "interactive",
-        "continue_harness_session_id",
-        "continue_fork",
-        "appended_system_prompt",
-        "report_output_path",
-    }
-)
-
-_REGISTRY: dict[HarnessId, HarnessBundle] = cast(
-    "dict[HarnessId, HarnessBundle]",
-    {
-        HarnessId.CLAUDE: SimpleNamespace(
-            adapter=SimpleNamespace(handled_fields=_PHASE2_ADAPTER_HANDLED_FIELDS)
-        ),
-        HarnessId.CODEX: SimpleNamespace(
-            adapter=SimpleNamespace(handled_fields=_PHASE2_ADAPTER_HANDLED_FIELDS)
-        ),
-        HarnessId.OPENCODE: SimpleNamespace(
-            adapter=SimpleNamespace(handled_fields=_PHASE2_ADAPTER_HANDLED_FIELDS)
-        ),
-    },
-)
-
-# Derived from SpawnParams for error reporting; authoritative check is per-adapter union.
+# Derived from SpawnParams for error reporting; authoritative check is per-adapter
+# union over registered harness bundles.
 _SPEC_HANDLED_FIELDS: frozenset[str] = frozenset(SpawnParams.model_fields)
+_REGISTRY: Mapping[HarnessId, HarnessBundle[Any]] = get_bundle_registry()
 
 
 def _enforce_spawn_params_accounting(
-    registry: Mapping[HarnessId, HarnessBundle] | None = None,
+    registry: Mapping[HarnessId, HarnessBundle[Any]] | None = None,
 ) -> None:
-    reg = registry if registry is not None else _REGISTRY
+    """Fail fast when SpawnParams fields are not claimed by adapters."""
+
+    reg = registry if registry is not None else get_bundle_registry()
     expected = set(SpawnParams.model_fields)
     union: set[str] = set()
     per_adapter: dict[HarnessId, frozenset[str]] = {}
@@ -87,6 +51,7 @@ def _enforce_spawn_params_accounting(
         handled = frozenset(bundle.adapter.handled_fields)
         per_adapter[harness_id] = handled
         union |= handled
+
     missing = expected - union
     stale = union - expected
     if missing or stale:
@@ -95,11 +60,8 @@ def _enforce_spawn_params_accounting(
             f"Missing (no adapter claims these): {sorted(missing)}. "
             f"Stale (claimed but not on SpawnParams): {sorted(stale)}. "
             f"Per-adapter handled_fields: "
-            f"{ {h.value: sorted(f) for h, f in per_adapter.items()} }"
+            f"{{ {', '.join(f'{h.value}: {sorted(f)}' for h, f in per_adapter.items())} }}"
         )
-
-
-_enforce_spawn_params_accounting()
 
 
 __all__ = [

@@ -209,7 +209,7 @@ async def test_create_session_forwards_mcp_tools_in_payload() -> None:
     await connection._create_session(spec)
 
     payload = connection.requests[0][1]
-    assert payload["mcp"] == ["tool-a=echo a", "tool-b=echo b"]
+    assert payload["mcp"] == {"servers": ["tool-a=echo a", "tool-b=echo b"]}
 
 
 def test_opencode_streaming_serve_command_keeps_verbatim_extra_args_tail() -> None:

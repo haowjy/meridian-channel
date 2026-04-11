@@ -3,7 +3,7 @@
 - **Source:** design/edge-cases.md E2 + p1411 M1
 - **Added by:** @design-orchestrator (design phase)
 - **Tester:** @unit-tester
-- **Status:** pending
+- **Status:** verified
 
 ## Given
 A caller passes `ResolvedLaunchSpec(...)` where Claude dispatch expects `ClaudeLaunchSpec`.
@@ -23,4 +23,10 @@ Dispatch path is executed through `SpawnManager.start_spawn`/`dispatch_start`.
 - Grep audit confirms runtime guard lives at dispatch boundary.
 
 ## Result (filled by tester)
-_pending_
+verified 2026-04-11
+
+- Evidence:
+  - `tests/test_spawn_manager.py:524` — `test_spawn_manager_dispatch_rejects_base_spec_for_claude`
+  - `uv run pyright` — passed with `0 errors, 0 warnings, 0 informations`
+- Notes:
+  - Runtime guard raises `TypeError` at `SpawnManager.start_spawn(...)` before connection startup.

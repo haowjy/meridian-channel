@@ -5,12 +5,12 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, cast
-
-if TYPE_CHECKING:
-    from pydantic import BaseModel
+from typing import cast
 
 from meridian.lib.harness.launch_spec import CodexLaunchSpec
+from meridian.lib.harness.projections._guards import (
+    check_projection_drift as _check_projection_drift,
+)
 from meridian.lib.launch.launch_types import PermissionResolver
 
 logger = logging.getLogger(__name__)
@@ -50,24 +50,6 @@ _SANDBOX_MODE_BY_MODE: dict[str, str | None] = {
     "workspace-write": "workspace-write",
     "danger-full-access": "danger-full-access",
 }
-
-
-def _check_projection_drift(
-    spec_cls: type[BaseModel],
-    projected_fields: frozenset[str],
-    delegated_fields: frozenset[str],
-) -> None:
-    expected = set(spec_cls.model_fields)
-    accounted = set(projected_fields | delegated_fields)
-    missing = expected - accounted
-    stale = accounted - expected
-    if missing or stale:
-        raise ImportError(
-            f"Projection drift for {spec_cls.__name__}: "
-            f"missing={sorted(missing)} stale={sorted(stale)}"
-        )
-
-
 def map_codex_approval_policy(approval_mode: str) -> str | None:
     """Map Meridian approval mode to Codex approval policy."""
 
@@ -239,8 +221,8 @@ def project_codex_spec_to_cli_args(
 
 _check_projection_drift(
     CodexLaunchSpec,
-    _PROJECTED_FIELDS,
-    _DELEGATED_FIELDS,
+    projected=_PROJECTED_FIELDS,
+    delegated=_DELEGATED_FIELDS,
 )
 
 

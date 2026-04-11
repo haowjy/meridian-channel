@@ -595,3 +595,59 @@ Both are flagged for the final review loop, not for an intra-phase fix.
 ### E6.6 — Verifier observation (minor cleanup)
 
 - `src/meridian/lib/harness/connections/claude_ws.py:51` still names the blocked-env set `_BLOCKED_CHILD_ENV_VARS`, a private module constant. It does not duplicate `constants.py` values (verified), but the naming is close enough to the shared constants that a future refactor should consider consolidating or at least renaming for audit clarity. Deferred to final review loop / Phase 7.
+
+## E7 — Phase 7 execution decisions
+
+### E7.1 — `HarnessBundle` registry is authoritative; dispatch is single runtime narrow
+
+**What:** `src/meridian/lib/harness/bundle.py` now holds `HarnessBundle`, the bundle registry, and bootstrap-time validation (duplicate `HarnessId`, missing extractor, empty connection map, invalid transport key). `src/meridian/lib/streaming/spawn_manager.py` dispatches via `registry[harness_id]` plus one `isinstance(spec, bundle.spec_cls)` narrow. The flat connection registry in `src/meridian/lib/harness/connections/__init__.py` is retired; lookups delegate to the bundle registry.
+
+**Why:** D1 plus D2 required a single authoritative paired registry with exactly one runtime narrow. Phase 7 is where those decisions land in code. No `if harness_id == ...` branches remain in the shared dispatch path.
+
+### E7.2 — Eager bootstrap runs all drift guards at package import
+
+**What:** `src/meridian/lib/harness/__init__.py` now has a load-bearing eager-import sequence plus `ensure_bootstrap()`. All five projection modules (`project_claude`, `project_codex_subprocess`, `project_codex_streaming`, `project_opencode_subprocess`, `project_opencode_streaming`) import the shared drift guard from `src/meridian/lib/harness/projections/_guards.py` and run it at module level. `_enforce_spawn_params_accounting()` is called as the last step of bootstrap. Fresh-interpreter import now exits 0 with three bundles registered and `_bootstrapped=True`.
+
+**Why:** D5 + S030 + S039 require drift + accounting failures to surface at import time, not lazily at first spawn. An import-order cycle during early core module initialization forced the `ensure_bootstrap()` indirection — any caller that needs a ready registry can call it explicitly and the invariants are guaranteed before dispatch. S031 confirms no circular-import warnings from a fresh subprocess.
+
+### E7.3 — Harness-owned extractors replace the streaming extractor shortcut
+
+**What:** `src/meridian/lib/harness/extractors/{base,claude,codex,opencode}.py` now implement the `HarnessExtractor` protocol. `StreamingExtractor` routes through the bundle-owned extractor. `session_detection.py` uses bundle-first ownership inference. The legacy `extractor.py` is shrunk to a thin routing shim.
+
+**Why:** The previous streaming extractor was a Claude-only shortcut that silently broke for Codex and OpenCode when the streaming path didn't carry a session id in its live events. Harness-owned extractors unify the fallback path with subprocess extractors, and the bundle registry makes the dispatch explicit.
+
+### E7.4 — OpenCode XDG storage fallback (S049 fix)
+
+**What:** OpenCode persists session state at `$XDG_DATA_HOME/opencode/storage/session_diff/<session_id>.json` (falling back to `~/.local/share/opencode/storage/...` when `XDG_DATA_HOME` is unset), not inside `child_cwd` or `state_root`. The original Phase 7 implementation assumed local artifacts and silently returned `None` for OpenCode. Fix coder p1485 added:
+
+- `src/meridian/lib/harness/opencode_storage.py` — XDG-aware storage root resolution + session file iteration + direct session-id lookup.
+- `src/meridian/lib/harness/extractors/opencode.py` — fallback path probes `$XDG_DATA_HOME/opencode/storage/{session_diff,session}`; selects candidate by payload `directory` hints, spawn-start-time window from `spawns.jsonl`, then latest mtime.
+- `src/meridian/lib/harness/opencode.py` — implements `resolve_session_file(...)` so `meridian session log <spawn_id>` can open `ses_*.json` files.
+- `tests/harness/test_extraction.py` and `tests/ops/test_session_log.py` — regression tests with temp `XDG_DATA_HOME` fixtures.
+
+**Why:** S049 requires all three harnesses to recover session ids from on-disk artifacts and enable `meridian session log` end-to-end. OpenCode's global XDG storage is an integration reality that wasn't captured in the original design; treating it as an integration-boundary discovery rather than a design defect.
+
+**Addresses.** S049 (verified after fix by smoke tester p1486).
+
+### E7.5 — Unit tester tactical fixes for OpenCode MCP and exception hierarchy
+
+**What:** During unit-test coverage (p1482), two small fixes landed to match scenario contracts:
+- `project_opencode_streaming.py` now emits `mcp: {servers: [...]}` instead of a bare list, matching the real `opencode serve` POST /session schema observed during Phase 5 smoke probing.
+- `HarnessCapabilityMismatch` on the OpenCode path now subclasses `ValueError` so reject-path tests can catch it via the `ValueError` supertype. Claude/Codex equivalents remain consistent.
+- `_PROJECTED_FIELDS` is now exposed on all five projection modules so the import-time accounting checks are symmetric.
+
+**Why:** Scenario S047 (mcp_tools projected to every harness) required the wire format to match the real `opencode serve` schema, not the placeholder Phase 5 shape. The exception base class change is a minor simplification; no call site was depending on the raw `HarnessCapabilityMismatch` type.
+
+### E7.6 — S033 structural follow-up noted (non-blocking)
+
+**What:** The verifier p1483 observed that Codex streaming and OpenCode streaming projections log "passthrough forwarding" but do not emit the managed-flag collision + last-wins shape that Claude's streaming projection uses. The scenario S033 contract is narrower ("DEBUG log for passthrough args"), which all three satisfy — so S033 is verified. The consistency gap across the three streaming log shapes is a structural follow-up for the final review loop or Phase 8 integration.
+
+**Why:** Phase 7 is closed on the contract, not on the ideal. The refactor to unify debug-log shapes across streaming projections fits better alongside Phase 8's lifecycle convergence, where the same code paths will be touched.
+
+### E7.7 — E3.1 `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` consolidation: still deferred
+
+**What:** The long-running deferral from E3.1 (Phase 3) → E6.3 (Phase 6) was not consolidated in Phase 7. The env var remains on the plan-overrides channel with existing routing preserved.
+
+**Why:** Phase 7 scope was bounded to bundle/dispatch/extractor convergence; moving the autocompact env var routing safely would expand into primary launch env plumbing beyond this phase's scope. The continued deferral is a conscious choice, not an oversight. Candidate home: final review loop or Phase 8 (primary launch env integration).
+
+**Addresses.** E3.1 (deferred, still not resolved; flagged for final review).
