@@ -97,8 +97,8 @@ The four feasibility questions frame both the pre-planning step and the planner'
 
 **Decision.** Impl-orch bails out only when evidence contradicts a design assumption in a way that cannot be resolved by patching forward. The escape hatch has two arms:
 
-- **Execution-time falsification.** Runtime evidence (smoke tests, real-binary probes, cross-phase ripple) contradicts a structural design assumption mid-execution. Test failures, fixture collateral, scenario scope issues, and missing edge cases are handled by normal fix loops — they are not bail-out triggers.
-- **Planning-time falsification.** Three triggers: pre-planning notes contradict a design assumption *before* the planner is spawned (impl-orch bails before wasting a planner slot); the planner cannot converge after K=3 spawns (the `planning-blocked` signal, see D12); the planner returns a plan with `Cause: structural coupling preserved by design` (the `structural-blocking` signal from the pre-execution structural gate).
+- **Execution-time falsification.** Runtime evidence (smoke tests, real-binary probes, cross-phase ripple) contradicts a structural design assumption mid-execution. Test failures, fixture collateral, spec-leaf scope mismatches, and missing edge cases are handled by normal fix loops — they are not bail-out triggers.
+- **Planning-time falsification.** Three triggers: pre-planning notes contradict a design assumption *before* the planner is spawned (impl-orch bails before wasting a planner slot); the planner exhausts either planning counter — K_fail=3 failed plans or K_probe=2 probe-requests — (the `planning-blocked` signal, see D12); the planner returns a plan with `Cause: structural coupling preserved by design` or short-circuits with a `structural-blocking` signal from the pre-execution structural gate (which bypasses both counters).
 
 Both arms write `redesign-brief.md` (D9). The brief format includes a planning-time-specific section so dev-orch can distinguish the two arms and route the design revision accordingly.
 
@@ -340,6 +340,39 @@ The consequence is that planning impl-orch and execution impl-orch are separate 
 - *Two explicit profiles (design-orch-light and design-orch-heavy).* Multiplies the agent profile count and splits the decision logic across two bodies. One profile with a scaling rule keeps the design logic in one place.
 
 **Reasoning.** Problem-size scaling is how every real workflow stays honest: the same shape that works for a CLI flag addition and a cross-cutting refactor is too heavy for one and too light for the other. The threshold is deliberately concrete (three subsystems, cross-cutting refactors, external integrations) so a resuming agent can read the design package and tell which path was followed by checking which artifacts exist. Light-path runs still produce every artifact class (spec, architecture, refactors, feasibility) — they just collapse the hierarchy when the work is small enough that there is nothing to hierarchize. Dev-orch sets the path during the requirements-gathering pass based on the user's framing and the scope implied by `requirements.md`.
+
+## D24: `dev-principles` is a design-orch convergence gate only; downstream agents carry the principles as context, not as gates
+
+**Decision.** The `dev-principles` skill is a design-orch convergence gate at design time. Impl-orch, @planner, and @coder load `dev-principles` as context so the principles shape their judgment, but none of them run a pass/fail gate against it. The final implementation review loop re-applies the principles via a @reviewer spawn whose brief names the relevant principles as a review lens — it is not impl-orch's own gate. This narrows r1 D-D: earlier wording suggested every agent ran a gate, which would have multiplied gate passes across every phase and buried tactical judgment under the same checklist.
+
+**Alternatives rejected.**
+- *Run a `dev-principles` gate in every orchestrator.* Every agent would have to self-audit against the same list before claiming convergence. The principles are judgment prompts ("refactor early", "delete aggressively", "abstraction at three instances"), not mechanical checks — formalizing them as gates at every layer produces ceremony without signal.
+- *Drop the gate entirely and trust the skill load.* Without a gate somewhere, design-orch can converge on a design that violates a principle (for example, under-refactored foundations) and the failure mode only surfaces during implementation. The design-orch gate is the earliest cheap checkpoint.
+- *Make final review a gate instead of a reviewer lens.* Impl-orch already runs a reviewer fan-out at final review; adding a separate gate on top of that would duplicate the reviewer loop. Framing `dev-principles` as a reviewer lens keeps the existing review structure and just sharpens the reviewer's focus.
+
+**Reasoning.** The principles are heuristics that need context to apply correctly — whether to refactor before a phase depends on the terrain, whether to delete a module depends on Chesterton's fence. A single design-orch gate is the right place to enforce them because design-orch has the full picture; downstream agents should be shaped by the principles (via skill load) but not bureaucratized by them (via a gate at every boundary). Addresses r1 D-D.
+
+## D25: EARS parsing has a per-pattern rule, not a single WHEN/WHILE/SHALL mapping
+
+**Decision.** The EARS-to-test-shape contract in design-orch and reviewer bodies is a per-pattern table covering all five EARS patterns (Ubiquitous, State-driven, Event-driven, Optional-feature, Complex), not a single WHEN/WHILE/SHALL mapping. Each pattern carries its own mechanical parsing rule (subject/action for Ubiquitous; trigger/state/action for State-driven; event/action for Event-driven; optional-feature/action/gate for Optional-feature; combined clauses for Complex). A leaf that cannot be mechanically parsed into a test shape under its pattern is rejected back to the spec author with the note "cannot mechanically parse — requires design clarification" — this is the escape valve that keeps the EARS contract honest without fabricating interpretations.
+
+**Alternatives rejected.**
+- *One universal mapping across all patterns.* Collapses five distinct EARS patterns into one shape and loses the trigger/state/event distinction that makes EARS mechanically parseable. Reviewers would either reject leaves that should pass, or accept leaves that cannot be parsed, depending on how they applied the shared rule.
+- *No mechanical parsing rule — trust the reviewer's judgment.* The whole point of EARS is that it removes judgment from verification-contract parsing. A per-pattern rule is what makes the mechanical parse possible.
+- *Force every leaf into a single pattern (e.g. State-driven only).* Forcing Event-driven or Optional-feature requirements into State-driven shape distorts the semantics. The five patterns exist because real requirements come in five shapes.
+
+**Reasoning.** Reviewer r4 F2 flagged that the original single-mapping rule would have made about a third of realistic leaves unparseable. Per-pattern rules match the EARS literature (Mavin et al.) and match Kiro's own parsing. The escape valve prevents the rule from generating false rejections on genuinely ambiguous leaves — the rejection forces a design clarification rather than a silent guess. Addresses r4 F2.
+
+## D26: Preserved phases with revised spec leaves get tester-only re-verification, not a full coder respawn
+
+**Decision.** When a redesign cycle revises a spec leaf in place (keeping the leaf ID but rewriting the EARS statement), any preserved phase that claims the revised leaf is marked `preserved-requires-reverification` in `plan/status.md` instead of `preserved`. The next impl-orch cycle runs a tester-only re-verification pass against the existing commits for those specific revised leaves before executing replanned or new phases. The three outcomes: all revised leaves verify → phase stays `preserved`; one or more falsify → promote to `partially-invalidated`, respawn coder, land the delta on top of existing commits; re-verification cannot execute → promote to `replanned` and emit a redesign brief.
+
+**Alternatives rejected.**
+- *Skip re-verification — preserved commits are preserved.* Silent spec drift. A leaf revised in place changes what "correct" means; keeping the commits without re-verifying against the new EARS statement ships code that matches the old spec and contradicts the new one. This is the exact failure mode Fowler's level 3 spec-anchored discipline exists to prevent.
+- *Respawn the coder unconditionally on any revised leaf.* Wastes implementation effort when the code still satisfies the revised leaf (very common when the revision tightens language without changing behavior). The tester-only pass is the cheap test that decides whether coder work is needed at all.
+- *Treat revised leaves as fully invalidated (force `replanned`).* Discards preserved commits even when they are still valid. Same cost problem as unconditional respawn, one step further.
+
+**Reasoning.** The preservation contract exists so redesign cycles stay cheap, but preservation that ignores revised leaves produces silent drift between code and spec — the opposite of what spec-anchored SDD is for. Tester-only re-verification is the smallest possible check that closes the drift surface: if the existing code still satisfies the new EARS statement, nothing else needs to happen; if it does not, the phase promotes and the cycle does the minimum work to reconverge. The new `preserved-requires-reverification` status value makes the intermediate state visible in `plan/status.md` so a resuming agent can tell which preserved phases are safe to skip and which still need the tester pass. Addresses r4 F1.
 
 ---
 

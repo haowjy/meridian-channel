@@ -36,8 +36,10 @@ Phases whose committed work is still valid under the revised design. Preserved h
 
 The table below lists all preserved phases; the `Revised leaves?` column names which sub-category applies.
 
-| Phase | Commit SHA | Spec leaves satisfied | Revised leaves? | Reason preserved |
-|-------|-----------|-----------------------|-----------------|------------------|
+**Column semantics:** the `Spec leaves satisfied` column contains **EARS statement IDs** at `S<subsystem>.<section>.<letter><number>` granularity, matching `plan/leaf-ownership.md` — not leaf-file paths. A single spec leaf file may contribute multiple statement IDs to this column if the phase claims several statements from it. The planner copies these IDs verbatim into the new `plan/leaf-ownership.md` when consuming the hint.
+
+| Phase | Commit SHA | Spec leaves satisfied (EARS statement IDs) | Revised leaves? | Reason preserved |
+|-------|-----------|---------------------------------------------|-----------------|------------------|
 | Phase 1 (typed leaves) | abc123 | S01.1.e1, S01.1.e2, S01.2.e1 | none | unaffected by revision; type contracts unchanged |
 | Phase 2 (permission pipeline) | def456 | S02.3.e1, S02.3.e2 | none | revision is Codex-specific; shared pipeline unchanged |
 | Phase 3 (shared approval router) | ghi789 | S03.1.e1 (revised), S03.1.e2 | S03.1.e1 | routing shape unchanged; language of S03.1.e1 tightened, re-verification required to confirm |
