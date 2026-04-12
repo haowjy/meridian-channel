@@ -1,10 +1,11 @@
 ---
 name: code-documenter
 description: >
-  Maintains the compressed codebase mirror in $MERIDIAN_FS_DIR, keeps code
-  comments accurate after changes, and captures design rationale from
-  conversations. Spawn with `meridian spawn -a code-documenter`, passing
-  conversation context with --from and relevant files with -f.
+  Use when the compressed codebase mirror in $MERIDIAN_FS_DIR needs updating
+  after a change, when code comments have drifted from behavior, or when
+  design rationale from a session needs to be captured before it's lost.
+  Spawn with `meridian spawn -a code-documenter`, passing conversation
+  context with --from and relevant files with -f.
 model: sonnet
 effort: medium
 skills: [meridian-spawn, meridian-cli, session-mining, decision-log]

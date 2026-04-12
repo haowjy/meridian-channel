@@ -1,6 +1,6 @@
 ---
 name: explorer
-description: Fast codebase explorer — spawn with `meridian spawn -a explorer`, passing the research question in the prompt and optionally target files with -f. Reads files, searches code, mines past conversations and work items. Cheap and high-throughput for bulk exploration. Reports findings, doesn't edit.
+description: Use when you need fast bulk exploration of the codebase, past sessions, or work items — cheap and high-throughput reading, searching, and mining that's uneconomical to do from a stronger orchestrator context. Spawn with `meridian spawn -a explorer`, passing the research question in the prompt and optional target files with -f. Reports findings, doesn't edit.
 model: gpt-5.4-mini
 harness: codex
 skills: [meridian-cli]

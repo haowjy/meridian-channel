@@ -1,117 +1,84 @@
 ---
 name: dev-artifacts
-description: Shared artifact convention between orchestrators — what goes where, how artifacts flow between phases, and what each directory means. Use whenever work artifacts, design docs, plans, status tracking, or work structure are being created, referenced, or discussed.
+description: Trigger when creating, reading, or deciding where to put artifacts in `$MERIDIAN_WORK_DIR/` — design packages, plans, decision logs, status files, preservation hints.
 ---
 # Dev Artifacts
 
-All work artifacts live under `$MERIDIAN_WORK_DIR/`. This convention defines what each directory and file means, who writes it, and how artifacts flow between orchestrators. Every orchestrator shares this understanding — it's how design intent survives the handoff to implementation.
+Durable workflow state lives under `$MERIDIAN_WORK_DIR/`. This skill is the canonical artifact contract — agent bodies defer here for path conventions and ownership so that one place defines the layout and every agent reads from the same source.
 
-## The Directories
+The contract matters because spawns end. Anything not on disk does not survive a spawn termination, so artifacts are how design intent reaches planning, how planning intent reaches execution, and how partial progress survives interruption.
 
-**`design/`** — The target system state. Model how the system *should* look after implementation, including existing parts the work interacts with. Design docs follow the structure and writing conventions in `/tech-docs` — one concept per doc, linked, hierarchically organized. Describes what the system should become, not how it evolved to get there.
+## Layout
 
-**`plan/`** — The delta from current codebase to designed state. Each phase file is scoped, ordered, and verifiable against design/. Plan says *what changes*; design says *what it should look like*.
+```text
+$MERIDIAN_WORK_DIR/
+  requirements.md
+  decisions.md
+  design/
+    spec/                 # behavioral contract (EARS statements with stable IDs)
+    architecture/         # technical realization (observational, not prescriptive)
+    refactors.md          # rearrangement agenda the planner must account for
+    feasibility.md        # probe evidence and assumption verdicts
+  plan/
+    overview.md           # parallelism posture, rounds, refactor mapping, mermaid fanout, staffing
+    phase-N-<slug>.md     # one per phase: scope, EARS claims, exit criteria
+    leaf-ownership.md     # one row per spec EARS statement, exclusive phase ownership
+    status.md             # phase lifecycle ground truth
+    pre-planning-notes.md # planning impl-orch runtime observations before planner spawn
+    preservation-hint.md  # redesign cycles only — dev-orch carry-over guidance
+```
 
-**`scenarios/`** — The verification contract. A flat, cumulative list of every edge case, failure mode, and boundary condition that must be tested before the work is considered complete. See the "Scenarios Folder" section below for structure and lifecycle. Lives alongside `design/` and `plan/` as a first-class artifact because verification is a first-class concern — it is not a subsection of design (which describes intent) or plan (which describes delta).
+The spec and architecture trees are hierarchical — sub-trees and overview files inside each, organized by subsystem. The depth and shape match the work-item tier, so small work gets a light tree and large work gets deeper decomposition.
 
-**`decisions.md`** — Execution-time pivots, review triage, overruled @reviewers — with reasoning. Written as implementation discovers reality that the design didn't anticipate. (See the decision-log skill for the craft of writing decisions.)
+## What Each Artifact Carries
 
-**`plan/status.md`** — Ground truth for phase progress. The @impl-orchestrator maintains this as phases start, complete, or hit blockers.
-
-**`requirements.md`** (optional) — Captured user intent, constraints, and success criteria. Write this when the problem needs anchoring before design begins. @design-orchestrator optimizes toward it; @impl-orchestrator verifies against it.
+- **`requirements.md`** — captured user intent, constraints, and success criteria. Optional, but worth writing once the problem is non-trivial because it anchors design and gives execution something to verify against.
+- **`decisions.md`** — append-only reasoning log for significant judgment calls: design tradeoffs, plan adaptations, overruled reviewers, deferred refactors. Substance over ceremony; resumed runs rehydrate reasoning from these entries, not from the conversation transcript. See `/decision-log` for the writing craft.
+- **`design/spec/`** — the behavioral contract. EARS-notation statements with stable IDs are the leaves; spec leaves are what execution verifies against. Hierarchical, with cross-links to the architecture tree.
+- **`design/architecture/`** — the technical realization. Observational rather than prescriptive: it describes how the system meets the spec contract, but justified deviations during execution are allowed when logged in `decisions.md`.
+- **`design/refactors.md`** — structural rearrangement agenda. The planner must account for every entry, sequencing foundational prep early when present so feature phases can parallelize.
+- **`design/feasibility.md`** — probe evidence, validated assumptions, open questions, and fix-or-preserve verdicts. Grounds design decisions in runtime reality. Re-run probes when entries are stale.
+- **`plan/overview.md`** — parallelism posture and the cause that drove it, round definitions with per-round justifications, refactor handling for every refactor-agenda entry, a Mermaid fanout that matches the textual rounds, and a staffing section concrete enough that execution impl-orch can spawn workers from it directly.
+- **`plan/phase-N-<slug>.md`** — phase-level blueprint: scope and boundaries, touched files and modules, claimed EARS statement IDs, touched refactor IDs, dependencies, tester lane assignment, exit criteria.
+- **`plan/leaf-ownership.md`** — one row per spec EARS statement ID with complete and exclusive phase ownership. Tester lane and evidence pointer fields are seeded empty; execution fills them as phases close.
+- **`plan/status.md`** — phase lifecycle ground truth. Includes preservation-derived states on redesign cycles so a fresh execution spawn can resume from disk alone.
+- **`plan/pre-planning-notes.md`** — planning impl-orch runtime observations captured before the planner spawn: feasibility re-checks, fresh probe results, architecture re-interpretation, module-scoped constraints, leaf-distribution hypothesis, probe gaps.
+- **`plan/preservation-hint.md`** — produced by dev-orch between redesign cycles. Tells the next planning impl-orch what carries over and which spec leaves were revised, so preserved phases can be tester-only re-verified.
 
 ## Who Writes What
 
-| Artifact | Written by | Read by |
+| Artifact | Primary writer | Primary readers |
 |---|---|---|
-| requirements.md | @dev-orchestrator | @design-orchestrator, @impl-orchestrator |
-| design/ | @design-orchestrator (via @architects) | @impl-orchestrator, @dev-orchestrator |
-| plan/ | @design-orchestrator (via @planners) | @impl-orchestrator, @dev-orchestrator |
-| scenarios/ | every stage appends (design, plan, impl) | testers (verify), @dev-orchestrator (convergence) |
-| plan/status.md | @impl-orchestrator | @dev-orchestrator |
-| decisions.md | @impl-orchestrator | @dev-orchestrator |
-| $MERIDIAN_FS_DIR | @docs-orchestrator (via @code-documenters) | all agents |
+| `requirements.md` | dev-orch | design-orch, impl-orch |
+| `design/` (spec, architecture, refactors, feasibility) | design-orch (via architects) | impl-orch, dev-orch |
+| `plan/overview.md`, phase blueprints, `leaf-ownership.md`, `status.md` | planner (called by planning impl-orch) | execution impl-orch, dev-orch |
+| `plan/pre-planning-notes.md` | planning impl-orch | planner |
+| `plan/preservation-hint.md` | dev-orch | next planning impl-orch |
+| `decisions.md` | design-orch and impl-orch (append-only) | dev-orch and downstream agents |
+| `plan/status.md` updates during execution | execution impl-orch | dev-orch |
+| `$MERIDIAN_FS_DIR` | docs-orch (via code-documenters) | all agents |
 
-Artifacts flow forward: @design-orchestrator writes the specification (design/ + plan/), @impl-orchestrator reads it and writes the execution record (plan/status.md + decisions.md), @dev-orchestrator reads everything to review with the user. `scenarios/` is the exception — it is append-only and shared, written by every stage as edge cases surface and read by every tester as their acceptance contract.
+Artifacts flow forward: design-orch produces the design package; planning impl-orch produces the plan via the planner; execution impl-orch consumes the plan and writes the execution record (status, decisions, leaf-ownership evidence pointers); dev-orch reads everything to review with the user and to route redesign cycles.
 
-## Scenarios Folder
+## Redesign Brief Lives in the Terminal Report
 
-`scenarios/` is the verification contract — a shared, cumulative, append-only record of every edge case, failure mode, boundary condition, and audit-flagged gap that the work must prove is handled. It is the single source of truth for "what does it mean for this work to be correctly complete." Without it, edge cases documented in design docs evaporate before reaching testers, and testers default to happy-path coverage.
-
-### Layout
-
-```
-scenarios/
-  overview.md          -- index listing every scenario with ID, title, tester role, and status
-  S001-<slug>.md       -- one file per scenario
-  S002-<slug>.md
-  ...
-```
-
-Small work items may keep everything in a single `scenarios.md` instead of a folder. Use the folder once there are more than ~10 scenarios or once multiple stages are contributing.
-
-### Scenario file format
-
-```markdown
-# S007: Sandbox flag propagation through streaming path
-
-- **Source:** design/overview.md §4.2 (edge case E3) + audit p1386 (gap #2)
-- **Added by:** @design-orchestrator (design phase)
-- **Tester:** @smoke-tester
-- **Status:** pending
-
-## Given
-User launches spawn with `--sandbox read-only`.
-
-## When
-Streaming runner bootstraps the Codex harness.
-
-## Then
-Codex process receives the sandbox directive and enforces it for all subsequent tool calls.
-
-## Verification
-- Inspect debug.jsonl for the sandbox flag in the startup frame
-- Attempt a write operation and confirm it is rejected
-- Confirm no silent downgrade to default sandbox
-
-## Result (filled by tester)
-_pending_
-```
-
-### Who appends, when
-
-- **@design-orchestrator** seeds the folder during design by extracting scenarios from every edge case the design enumerates, every rejected alternative with a failure mode, and every audit or investigation report in context. Design phase cannot be declared complete if the design enumerates edge cases that have no scenario.
-- **@planner** appends during planning if decomposition surfaces new cross-phase interactions, sequencing hazards, or phase-boundary edge cases that the design did not anticipate. Each scenario gets tagged with the phase that owns it.
-- **@impl-orchestrator** appends during implementation whenever a @coder or tester discovers an edge case the design and plan missed. New scenarios block phase completion until tested.
-- **testers** never append scenarios — they execute them. Their report fills the "Result" section with verified / failed / skipped and evidence.
-- **@dev-orchestrator** uses `scenarios/overview.md` as the convergence check. Work is not done while any scenario is pending or failed.
-
-### Status values
-
-- **pending** — scenario exists, no tester has executed it yet
-- **verified** — tester executed it and confirmed expected behavior with evidence
-- **failed** — tester executed it and observed wrong behavior (phase cannot close)
-- **skipped** — tester could not execute it (explain why; orchestrator decides whether to accept or reassign)
-
-### Traceability
-
-Every scenario has an ID (S001, S002, ...). Design docs reference scenarios by ID when discussing edge cases. Plan blueprints list scenario IDs under "Scenarios to Verify" for each phase. Tester reports cite scenario IDs in their status entries. Decisions in decisions.md reference scenario IDs when explaining why a scenario was reclassified or dropped. The ID chain makes it impossible for a scenario to vanish between stages.
+When an impl-orch escape hatch fires, the redesign brief is a section in the impl-orch terminal report, not a separate file. Each redesign cycle has its own impl-orch spawn with its own report, and meridian persists those reports indefinitely — cross-cycle history is recoverable from spawn history without an extra artifact. The next cycle's preservation hint (which *is* a file) lives in `plan/preservation-hint.md` because it has a different producer (dev-orch) and a different consumer (the next planning impl-orch).
 
 ## Rejected Iterations
 
-Replace rejected designs atomically. Approved artifacts live at `design/` and `plan/` — not versioned alongside rejected drafts. Git history preserves prior iterations if anyone needs them. The current state of these directories is always the approved state.
+Replace rejected designs and plans atomically. Approved artifacts live at `design/` and `plan/`; rejected drafts do not get versioned alongside them. Git history preserves prior iterations if anyone needs them. The current state of these directories is always the approved state.
 
 ## Documentation Layers
 
 Three distinct documentation surfaces exist, each serving a different audience:
 
-**`$MERIDIAN_FS_DIR` (fs/)** — Agent-facing codebase mirror. Domain-structured compression of the architecture: what exists, how it works, why it's that way. Organized by conceptual domain (named for architectural concepts, not source paths). Agents read this to orient on unfamiliar subsystems without scanning every source file. The @code-documenter maintains it; the @dev-orchestrator triggers the @docs-orchestrator to coordinate updates after implementation completes.
+**`$MERIDIAN_FS_DIR` (fs/)** — Agent-facing codebase mirror. Domain-structured compression of the architecture: what exists, how it works, why it's that way. Organized by conceptual domain (named for architectural concepts, not source paths). Agents read this to orient on unfamiliar subsystems without scanning every source file. The `@code-documenter` maintains it; `@dev-orchestrator` triggers `@docs-orchestrator` to coordinate updates after implementation completes.
 
 **`docs/`** — User-facing documentation. CLI reference, getting started guides, configuration docs. Written for humans who use the project, not agents navigating the codebase.
 
-**`$MERIDIAN_WORK_DIR`** — Work-scoped artifacts including research, design, and plans. Research stays here — it's ephemeral context for the current work item. Lasting findings from research get synthesized into the relevant fs/ domain doc when the work completes, not copied verbatim.
+**`$MERIDIAN_WORK_DIR`** — Work-scoped artifacts including research, design, and plans. Research stays here — it is ephemeral context for the current work item. Lasting findings from research get synthesized into the relevant fs/ domain doc when the work completes, not copied verbatim.
 
-fs/ has no `research/` subdirectory. If you're writing research, it belongs in the work item. If the research produced durable knowledge about a subsystem, that knowledge belongs in the fs/ domain doc for that subsystem.
+fs/ has no `research/` subdirectory. If you are writing research, it belongs in the work item. If the research produced durable knowledge about a subsystem, that knowledge belongs in the fs/ domain doc for that subsystem.
 
 ## This Convention Is Swappable
 

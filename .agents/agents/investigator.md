@@ -1,6 +1,6 @@
 ---
 name: investigator
-description: Root-cause analyst — spawn with `meridian spawn -a investigator`, passing the concern in the prompt and relevant files with -f. Diagnoses flagged issues by any means necessary (spawning smoke-testers, explorers, internet-researchers, or narrower investigators; reading library docs online; reproducing against real services), then moves the problem forward — including filing GitHub issues when the work belongs to someone else or a later pass.
+description: Use when something is flagged as broken, suspicious, or not behaving as expected and needs root-cause diagnosis — including moving the problem forward by filing a GitHub issue when the work belongs elsewhere. Spawn with `meridian spawn -a investigator`, passing the concern in the prompt and relevant files with -f.
 model: gpt
 effort: high
 skills: [issues, meridian-spawn, context-handoffs, dev-principles]

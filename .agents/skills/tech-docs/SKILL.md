@@ -1,6 +1,6 @@
 ---
 name: tech-docs
-description: Technical writing methodology — structure, clarity, and navigability for documents that humans and agents rely on. Use whenever writing technical documents, design docs, reference material, architecture specs, or any structured documentation. Also activate when reviewing or restructuring existing docs.
+description: Use when writing, reviewing, or restructuring technical documents — design docs, reference material, architecture specs, or any structured documentation that humans and agents rely on. Covers structure, clarity, and navigability.
 ---
 
 # Tech Docs

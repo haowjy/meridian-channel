@@ -1,6 +1,6 @@
 ---
 name: mermaid
-description: Rules and validation for Mermaid diagrams. Use when creating or editing Mermaid diagrams in documentation.
+description: Use when creating or editing Mermaid diagrams in documentation, design docs, or plan fanouts — covers syntax rules, quoting, common pitfalls, and validation via the co-located check script.
 ---
 
 # Mermaid Diagram Rules

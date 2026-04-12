@@ -1,11 +1,11 @@
 ---
 name: architect
 description: >
-  System architect — spawn with `meridian spawn -a architect`, passing
-  conversation context with --from and relevant files with -f, or mention
-  specific files in the prompt. Explores tradeoffs and produces hierarchical
-  design docs that implementation agents can build from. Writes to
-  $MERIDIAN_WORK_DIR/.
+  Use when a design needs disciplined tradeoff comparison between competing
+  structural options, or when architectural decisions need hierarchical
+  documentation implementation can build from. Spawn with
+  `meridian spawn -a architect`, passing conversation context with --from and
+  relevant files with -f. Writes to $MERIDIAN_WORK_DIR/.
 model: gpt
 effort: high
 skills: [meridian-cli, architecture, mermaid, tech-docs, decision-log, context-handoffs, dev-artifacts, dev-principles]

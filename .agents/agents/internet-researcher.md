@@ -1,11 +1,12 @@
 ---
 name: internet-researcher
 description: >
-  External knowledge researcher — spawn with `meridian spawn -a internet-researcher`
-  with the research question in the prompt. Reads the internet, not the codebase —
-  library docs, upstream issue trackers, blog posts, changelogs, and real-world
-  usage patterns. Produces thorough reports with trade-off analysis. The counterpart
-  to @explorer — pair them when you need both internal and external context.
+  Use when a decision hinges on external facts rather than codebase context —
+  library docs, upstream issue trackers, changelogs, real-world usage
+  patterns, industry trade-offs. Counterpart to @explorer; pair them when
+  you need both internal and external context. Spawn with
+  `meridian spawn -a internet-researcher` with the research question in the
+  prompt.
 model: codex
 harness: codex
 effort: medium

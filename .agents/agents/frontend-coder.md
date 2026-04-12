@@ -1,6 +1,6 @@
 ---
 name: frontend-coder
-description: Production frontend code writer — spawn with `meridian spawn -a frontend-coder`, passing phase blueprints and context with -f. Implements scoped UI tasks with distinctive design quality via the frontend-design skill.
+description: Use when a scoped UI implementation task needs distinctive design quality rather than only production correctness — pick over @coder when the aesthetic matters. Spawn with `meridian spawn -a frontend-coder`, passing phase blueprints and context with -f.
 model: opus
 effort: medium
 skills: [frontend-design]

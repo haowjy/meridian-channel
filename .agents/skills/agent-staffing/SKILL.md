@@ -1,6 +1,6 @@
 ---
 name: agent-staffing
-description: Team composition for design and implementation phases — which agents to spawn, how many, what can run in parallel, and how to scale effort to complexity. Use when composing a team for a phase, choosing review focus areas, or calibrating effort.
+description: Use when composing a team for a design or implementation phase — choosing which agents to spawn, how many, what runs in parallel, which review focus areas to cover, and how to scale effort to complexity. Also use when deciding whether a task is small enough to skip orchestration ceremony or large enough to warrant fan-out.
 ---
 
 # Agent Staffing

@@ -1,6 +1,6 @@
 ---
 name: browser-test
-description: Browser-based QA — visual verification, user flows, form testing, accessibility, and console error detection. Use when a change touches frontend behavior and you need to verify it works in a real browser, not just that tests pass.
+description: Use when verifying a frontend change requires a real browser — visual rendering, user flows, form behavior, accessibility, or console error detection that only surfaces at runtime. Not the right fit when unit or integration tests already cover the behavior.
 ---
 # Browser Testing
 

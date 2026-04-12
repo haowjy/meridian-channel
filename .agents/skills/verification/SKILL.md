@@ -1,44 +1,56 @@
 ---
 name: verification
-description: Build verification — run tests, type checks, and linters, fix mechanical breakage, and report real issues. Use after implementation to get the build green, or when you need to assess whether the codebase is in a clean state. This is the "does it compile and pass" check, not creative testing.
+description: Use after implementation to get the build green — running tests, type checks, and linters, fixing mechanical breakage, and reporting substantive issues. The "does it compile and pass" baseline, not creative testing. Not the right fit for edge-case coverage (unit-test) or user-flow verification (smoke-test).
 ---
 # Verification
 
-Your job is to get the build green — or clearly report what's blocking it. Run the project's verification suite (tests, type checker, linter), fix what's mechanical, and report what's substantive.
+Your job is to get the build green, or clearly report what is blocking it.
 
 ## Finding What to Run
 
-Every project is different. Check these for verification commands:
+Every repo wires verification differently. Identify canonical commands from project docs and CI config:
 
-- README, CLAUDE.md — often list the exact commands
-- `pyproject.toml` — scripts, tool configs, test settings
-- `Makefile` / `package.json` scripts — common entry points
-- CI configs (`.github/workflows/`, `.gitlab-ci.yml`) — what CI actually runs is the source of truth
+- README / AGENTS / CLAUDE guidance
+- build scripts (`pyproject.toml`, `package.json`, `Makefile`, task runners)
+- CI workflows (source of truth for gated checks)
 
-Run everything the project considers part of its verification suite. Don't skip the linter because you think it's unimportant — if the project has it configured, it's part of the bar.
+Run the full verification bar used by the project. Do not silently skip configured lanes.
 
-## Fix What's Mechanical
+## Core Loop
 
-Mechanical breakage doesn't require judgment:
+- Run project verification suite (tests, type checks, lint, format checks used by CI).
+- Fix mechanical breakage directly.
+- Separate substantive failures from mechanical failures.
+- Report final state with actionable blockers.
 
-- Import errors, missing dependencies
-- Unused imports, unused variables
-- Missing type annotations that are straightforward to add
-- Formatting issues
-- Trivial test fixes (wrong assertion value after an intentional change)
+## If Used as a Phase Tester Lane
 
-Fix these without asking. The whole point is to clear the noise so @reviewers can focus on real issues.
+When the prompt includes claimed EARS statement IDs:
 
-## Report What's Substantive
+- verify those IDs explicitly
+- report per-ID outcomes with evidence
+- use `/ears-parsing` for parse discipline
 
-Substantive failures require judgment or context you don't have:
+Use the claimed EARS statement IDs as the acceptance contract for phase-lane verification.
 
-- Test failures that indicate actual logic bugs
-- Type errors that suggest a design problem, not a missing annotation
-- Lint violations that are really design issues (function too complex, too many parameters)
+## Mechanical vs Substantive
 
-For these, report clearly: what failed, what it likely means, and what information would be needed to fix it. Don't guess at fixes for problems you don't fully understand.
+Mechanical (fix directly):
 
-## Reporting
+- import/format/lint noise
+- trivial type annotation gaps
+- straightforward broken assertions after intentional behavior changes
 
-Structure your report as: what you ran, what passed, what you fixed (and how), and what's still failing (and why). The reader needs to know whether the build is green and, if not, what's blocking it.
+Substantive (report/escalate):
+
+- logic regressions
+- contract mismatches
+- design-level type/interface conflicts
+
+## Report Shape
+
+- what ran
+- what passed
+- what you fixed
+- what still fails and why
+- next unblock action when not green

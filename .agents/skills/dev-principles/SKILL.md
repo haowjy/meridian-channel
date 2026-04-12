@@ -1,6 +1,6 @@
 ---
 name: dev-principles
-description: Engineering principles LLM agents systematically violate — refactoring discipline, abstraction judgment, deletion courage, and structural hygiene. Loaded into orchestrators to trigger proactive refactoring and into reviewers to guide what to flag.
+description: Use when designing, implementing, reviewing, or refactoring code as shared operating guidance — covers patterns LLM agents systematically get wrong (refactoring discipline, abstraction judgment, deletion courage, edge-case thinking, integration-boundary probing, structural health signals). Loaded into orchestrators to trigger proactive refactoring and into reviewers to guide what to flag.
 ---
 
 # Refactor Early, Refactor Continuously
@@ -16,7 +16,7 @@ description: Engineering principles LLM agents systematically violate — refact
 - Treat edge cases, failure modes, and boundary conditions as first-class requirements, not test afterthoughts.
 - Require design artifacts to enumerate edge cases explicitly before implementation starts.
 - Before each implementation phase, identify additional edge cases not covered in the design and pass them to testers.
-- Testers must generate independent edge cases beyond the @coder's stated scenarios.
+- Testers must generate independent edge cases beyond the phase's claimed EARS statements.
 - Consider "works on happy path" an incomplete result, not a passing result.
 
 # Abstraction Judgment
@@ -85,7 +85,7 @@ Orchestrators coordinate — they never write code or edit source files, regardl
 - **Review catches what the author can't see.** Even a one-line change can have unintended consequences. The orchestrator that wrote the code can't objectively review it — the same blind spot that let the bug through will let it pass review.
 - **Workarounds compound.** When Edit/Write are blocked, writing files via `Bash(cat >)` or `python3 -c` bypasses the restriction without removing the reason it exists. Each workaround teaches the next session that the rules are negotiable.
 
-If a task is too trivial for a full @impl-orchestrator cycle, the @dev-orchestrator should spawn a @coder + @verifier directly, adding @smoke-tester or @unit-tester as warranted — not hand it to an @impl-orchestrator that shortcuts the process.
+If a task is too trivial for a full @impl-orchestrator cycle, the @dev-orchestrator should spawn the appropriate implementer (for example, @coder for code, @frontend-coder for UI work, @code-documenter or @tech-writer for docs-only changes) + @verifier directly, adding @smoke-tester or @unit-tester as warranted — not hand it to an @impl-orchestrator that shortcuts the process.
 
 ## Refactor Continuously
 

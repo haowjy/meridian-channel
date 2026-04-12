@@ -1,6 +1,6 @@
 ---
 name: review
-description: Code review methodology — adversarial mindset and structured reporting. Use whenever you're reviewing code, evaluating implementation quality, or assessing changes — including PR reviews, phase reviews, design reviews, and any task where you need to find problems rather than build things.
+description: Use whenever reviewing code, evaluating implementation quality, or assessing a change — PR reviews, phase reviews, design reviews, and any task where the goal is finding problems rather than building things. Covers adversarial mindset, severity handling, and structured reporting.
 ---
 # Review
 

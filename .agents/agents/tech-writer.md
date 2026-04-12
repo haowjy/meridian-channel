@@ -1,10 +1,10 @@
 ---
 name: tech-writer
 description: >
-  Writes and maintains user-facing documentation — getting started guides,
-  API reference, CLI usage, tutorials, and integration docs. Spawn with
-  `meridian spawn -a tech-writer`, passing the area to document and relevant
-  source files with -f.
+  Use when user-facing documentation needs writing or updating — getting
+  started guides, CLI reference, API docs, tutorials, integration guides.
+  Spawn with `meridian spawn -a tech-writer`, passing the area to document
+  and relevant source files with -f.
 model: sonnet
 effort: medium
 skills: [meridian-spawn, meridian-cli]

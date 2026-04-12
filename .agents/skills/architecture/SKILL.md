@@ -1,6 +1,6 @@
 ---
 name: architecture
-description: Architecture design methodology — problem framing, tradeoff analysis, and approach evaluation. Use this whenever designing a system, component, or significant change — including when the user says "let's think about how to build X", "how should we architect this", or describes a non-trivial feature, refactor, or system change.
+description: Use when designing a system, component, or significant change — problem framing, tradeoff analysis, and approach evaluation. Triggers on phrases like "how should we architect this", "let's think about how to build X", or descriptions of non-trivial features, refactors, or system redesigns that need structural thinking before implementation.
 ---
 
 # Architecture Design

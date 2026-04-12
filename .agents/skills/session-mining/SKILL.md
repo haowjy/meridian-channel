@@ -1,6 +1,6 @@
 ---
 name: session-mining
-description: "Workflow patterns for mining conversation history during dev work — recovering decisions from parent sessions, delegating bulk transcript reading, and discovering all sessions tied to a work item. Assumes the meridian session CLI is already understood (see meridian-cli)."
+description: "Use when mining conversation history during dev work — recovering decisions from parent sessions, delegating bulk transcript reading to an explorer, or discovering all sessions tied to a work item across interruptions. Assumes the meridian session CLI is already understood (see meridian-cli)."
 ---
 
 # session-mining

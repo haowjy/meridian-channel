@@ -1,6 +1,6 @@
 ---
 name: refactor-reviewer
-description: Structural review specialist — spawn with `meridian spawn -a refactor-reviewer`, passing target files with -f or a reviewer report identifying structural issues. Identifies refactoring opportunities (tangled deps, mixed concerns, coupling) and recommends specific moves. Read-only analysis — reports findings, doesn't execute.
+description: Use when structural health of a change or module needs review — tangled dependencies, mixed concerns, coupling, or rearrangement opportunities that compound across future work. Pair with @reviewer during design review and final implementation review. Spawn with `meridian spawn -a refactor-reviewer`, passing target files with -f. Read-only — reports findings, doesn't execute.
 model: gpt
 effort: high
 skills: [meridian-cli, dev-principles, review, decision-log, context-handoffs]

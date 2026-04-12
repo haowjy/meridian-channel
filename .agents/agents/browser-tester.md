@@ -1,6 +1,6 @@
 ---
 name: browser-tester
-description: Browser-based QA — spawn with `meridian spawn -a browser-tester`, telling it what changed. Verifies visual rendering, user flows, form behavior, and console errors in a real browser via Playwright. Takes screenshots of issues.
+description: Use when a change touches frontend behavior and verification requires a real browser — visual rendering, user flows, form behavior, console errors. Spawn with `meridian spawn -a browser-tester`, telling it what changed.
 model: opus
 effort: medium
 skills: [browser-test]
