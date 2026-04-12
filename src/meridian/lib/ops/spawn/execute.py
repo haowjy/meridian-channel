@@ -52,7 +52,6 @@ from .query import read_spawn_row
 
 logger = structlog.get_logger(__name__)
 _BACKGROUND_SUBMIT_MESSAGE = "Background spawn submitted."
-_BACKGROUND_PID_FILENAME = "background.pid"
 _BACKGROUND_STDOUT_FILENAME = "background-launcher.stdout.log"
 _BACKGROUND_STDERR_FILENAME = "background-launcher.stderr.log"
 _BG_WORKER_PARAMS_FILENAME = "bg-worker-params.json"
@@ -646,7 +645,6 @@ def execute_spawn_background(
             exit_code=1,
         )
 
-    atomic_write_text(log_dir / _BACKGROUND_PID_FILENAME, f"{process.pid}\n")
     mark_spawn_running(
         context.state_root,
         context.spawn.spawn_id,

@@ -29,7 +29,6 @@ from meridian.lib.harness.adapter import SpawnParams
 from meridian.lib.harness.registry import HarnessRegistry
 from meridian.lib.state import spawn_store
 from meridian.lib.state.artifact_store import LocalStore, make_artifact_key
-from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.paths import resolve_spawn_log_dir, resolve_state_paths
 from meridian.lib.state.session_store import (
     get_session_active_work_id,
@@ -42,7 +41,6 @@ from meridian.lib.state.spawn_store import FOREGROUND_LAUNCH_MODE
 
 from .claude_preflight import ensure_claude_session_accessible
 from .command import build_launch_env
-from .heartbeat import threaded_heartbeat_scope
 from .plan import ResolvedPrimaryLaunchPlan
 from .session_ids import extract_latest_session_id
 from .session_scope import session_scope
@@ -339,62 +337,64 @@ def run_harness_process(
                     execution_cwd=str(repo_root),
                     launch_mode=FOREGROUND_LAUNCH_MODE,
                     work_id=attached_work_id,
+                    runner_pid=os.getpid(),
                     status="queued",
                 )
                 log_dir = resolve_spawn_log_dir(repo_root, primary_spawn_id)
-                with threaded_heartbeat_scope(log_dir / "heartbeat"):
-                    primary_started = time.monotonic()
-                    primary_started_epoch = time.time()
-                    primary_started_local_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-                    child_env = build_launch_env(
-                        repo_root,
-                        plan.request,
-                        chat_id=chat_id,
-                        work_id=attached_work_id,
-                        default_autocompact_pct=plan.config.primary.autocompact_pct,
-                        spawn_id=primary_spawn_id,
-                        adapter=plan.adapter,
-                        run_params=run_params,
-                        permission_config=plan.permission_config,
+                primary_started = time.monotonic()
+                primary_started_epoch = time.time()
+                primary_started_local_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+                child_env = build_launch_env(
+                    repo_root,
+                    plan.request,
+                    chat_id=chat_id,
+                    work_id=attached_work_id,
+                    default_autocompact_pct=plan.config.primary.autocompact_pct,
+                    spawn_id=primary_spawn_id,
+                    adapter=plan.adapter,
+                    run_params=run_params,
+                    permission_config=plan.permission_config,
+                )
+                output_log_path = log_dir / _PRIMARY_OUTPUT_FILENAME
+
+                # Symlink source session for primary fork launches.
+                if (
+                    plan.adapter.id == HarnessId.CLAUDE
+                    and plan.source_execution_cwd
+                    and resolved_harness_session_id
+                ):
+                    ensure_claude_session_accessible(
+                        source_session_id=resolved_harness_session_id,
+                        source_cwd=Path(plan.source_execution_cwd),
+                        child_cwd=repo_root,
                     )
-                    output_log_path = log_dir / _PRIMARY_OUTPUT_FILENAME
 
-                    # Symlink source session for primary fork launches.
-                    if (
-                        plan.adapter.id == HarnessId.CLAUDE
-                        and plan.source_execution_cwd
-                        and resolved_harness_session_id
-                    ):
-                        ensure_claude_session_accessible(
-                            source_session_id=resolved_harness_session_id,
-                            source_cwd=Path(plan.source_execution_cwd),
-                            child_cwd=repo_root,
-                        )
-
-                    def _record_primary_started(child_pid: int) -> None:
-                        atomic_write_text(
-                            log_dir / "harness.pid",
-                            f"{child_pid}\n",
-                        )
-                        spawn_store.mark_spawn_running(
-                            plan.state_root,
-                            primary_spawn_id,
-                            launch_mode=FOREGROUND_LAUNCH_MODE,
-                            worker_pid=child_pid,
-                        )
-
-                    exit_code, _child_pid = _run_primary_process_with_capture(
-                        command=command,
-                        cwd=repo_root,
-                        env=child_env,
-                        output_log_path=output_log_path,
-                        on_child_started=_record_primary_started,
+                def _record_primary_started(child_pid: int) -> None:
+                    spawn_store.mark_spawn_running(
+                        plan.state_root,
+                        primary_spawn_id,
+                        launch_mode=FOREGROUND_LAUNCH_MODE,
+                        worker_pid=child_pid,
                     )
-                    if output_log_path.exists():
-                        artifacts.put(
-                            make_artifact_key(primary_spawn_id, _PRIMARY_OUTPUT_FILENAME),
-                            output_log_path.read_bytes(),
-                        )
+
+                exit_code, _child_pid = _run_primary_process_with_capture(
+                    command=command,
+                    cwd=repo_root,
+                    env=child_env,
+                    output_log_path=output_log_path,
+                    on_child_started=_record_primary_started,
+                )
+                with suppress(Exception):
+                    spawn_store.record_spawn_exited(
+                        plan.state_root,
+                        primary_spawn_id,
+                        exit_code=exit_code,
+                    )
+                if output_log_path.exists():
+                    artifacts.put(
+                        make_artifact_key(primary_spawn_id, _PRIMARY_OUTPUT_FILENAME),
+                        output_log_path.read_bytes(),
+                    )
             finally:
                 durable_report = False
                 terminated_after_completion = False
