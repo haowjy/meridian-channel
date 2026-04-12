@@ -33,3 +33,11 @@
 **What changed from D-2:** The algorithm, not the location. The function still lives in `sync/mod.rs` as `declaration_ordered_dep_models`, still keeps `topological_sort` in `resolve/mod.rs` unchanged. Only the internal algorithm changed from "topo order + stable sort" to "re-run Kahn's with declaration-order tiebreak."
 
 **Alternative rejected (again):** Modifying the existing `topological_sort` to accept a tiebreak parameter. Same rationale as D-1 — it's a general-purpose utility that shouldn't know about model merge policy. The local Kahn's variant in sync is ~25 lines and purpose-built.
+
+## D-5: Plan as two independent phases in one parallel round
+
+**Decision:** Execute the work as two phases in the same implementation round: Phase 1 owns declaration-ordered dependency model construction in `src/sync/mod.rs`; Phase 2 owns conflict-warning attribution and suppression behavior in `src/models/mod.rs`.
+
+**Reasoning:** The write sets are disjoint, the spec leaves split cleanly between ordering behavior and diagnostics behavior, and each phase can be verified independently with module-focused Rust tests plus a small CLI sync smoke check. Serializing the warning work behind the sync-ordering work would add elapsed time without reducing technical risk.
+
+**Alternative rejected:** A sequential two-phase plan with Phase 2 blocked on Phase 1. Rejected because Phase 2 does not depend on the new helper or on sync-module refactoring to compile or to prove its EARS leaves. Cross-phase interaction is limited to the final review loop, which is the correct place to validate whole-change convergence.
