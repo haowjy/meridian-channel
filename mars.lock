@@ -16,8 +16,8 @@ commit = "a564dbf0e5d7c753c7f82a224614f63ac07434f5"
 
 [dependencies.meridian-dev-workflow]
 url = "https://github.com/meridian-flow/meridian-dev-workflow"
-version = "v0.0.20"
-commit = "736041185fe1dc42a6188191dd596be3179c4f7a"
+version = "v0.0.21"
+commit = "ce5cdf103f333706c1fd485eb3db28fad21e56db"
 
 [items."agents/architect.md"]
 source = "meridian-dev-workflow"
@@ -102,9 +102,9 @@ dest_path = "agents/frontend-designer.md"
 [items."agents/impl-orchestrator.md"]
 source = "meridian-dev-workflow"
 kind = "agent"
-version = "v0.0.20"
-source_checksum = "sha256:504ed57a8abc1face8473c360b0817ba534c65e5e6d90949c1dd9b683a47b4d1"
-installed_checksum = "sha256:504ed57a8abc1face8473c360b0817ba534c65e5e6d90949c1dd9b683a47b4d1"
+version = "v0.0.21"
+source_checksum = "sha256:07145ad57bfea0a2b972d8c5310c1fad22478da3b9e799f223b6283594f8a103"
+installed_checksum = "sha256:07145ad57bfea0a2b972d8c5310c1fad22478da3b9e799f223b6283594f8a103"
 dest_path = "agents/impl-orchestrator.md"
 
 [items."agents/internet-researcher.md"]
@@ -233,30 +233,6 @@ version = "v1.5.1"
 source_checksum = "sha256:e3cf2c3ba35d34a39f1c54bf9fa3d2afa9569374de327aaa4356226c60ad3b83"
 installed_checksum = "sha256:e3cf2c3ba35d34a39f1c54bf9fa3d2afa9569374de327aaa4356226c60ad3b83"
 dest_path = "skills/caveman"
-
-[items."skills/caveman-commit"]
-source = "caveman"
-kind = "skill"
-version = "v1.3.5"
-source_checksum = "sha256:f01e62b151d2d285f4657b5aa7af17966f2d53e95e615d5a773d5005e6c6e57f"
-installed_checksum = "sha256:f01e62b151d2d285f4657b5aa7af17966f2d53e95e615d5a773d5005e6c6e57f"
-dest_path = "skills/caveman-commit"
-
-[items."skills/caveman-help"]
-source = "caveman"
-kind = "skill"
-version = "v1.5.1"
-source_checksum = "sha256:6e9f9fa3d137446ef073a9c5d416bd6efe90ad9a9cf1467d0bc959ed2d080107"
-installed_checksum = "sha256:6e9f9fa3d137446ef073a9c5d416bd6efe90ad9a9cf1467d0bc959ed2d080107"
-dest_path = "skills/caveman-help"
-
-[items."skills/caveman-review"]
-source = "caveman"
-kind = "skill"
-version = "v1.3.5"
-source_checksum = "sha256:59a7939632c57841b58fd64c010b013cc98ad861931fd3be65e3d8fe49452f58"
-installed_checksum = "sha256:59a7939632c57841b58fd64c010b013cc98ad861931fd3be65e3d8fe49452f58"
-dest_path = "skills/caveman-review"
 
 [items."skills/context-handoffs"]
 source = "meridian-dev-workflow"
