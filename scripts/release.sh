@@ -130,7 +130,7 @@ main() {
   uv run pyright >/dev/null 2>&1 || die "pyright failed — fix type errors first"
   printf 'pass\n'
   printf '  tests... '
-  uv run pytest-llm >/dev/null 2>&1 || die "tests failed — fix failing tests first"
+  uv run python -m pytest -x -q >/dev/null 2>&1 || die "tests failed — fix failing tests first"
   printf 'pass\n'
 
   local current_version
