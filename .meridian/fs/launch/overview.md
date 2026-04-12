@@ -16,9 +16,10 @@
 2a. run_harness_process()            [process.py] — PRIMARY PATH
    - Allocate session (session_store)
    - Register spawn as queued → started (spawn_store)
-   - Write PID file, attach to work item
+     runner_pid=os.getpid() recorded in start event
+   - Attach to work item
    - _run_primary_process_with_capture() via PTY or subprocess.Popen
-   - Heartbeat loop active throughout execution
+   - record_spawn_exited() written immediately after harness process exits
    - On exit: resolve_execution_terminal_state() from exit code +
      has_durable_report_completion() check (no enrich_finalize)
    - extract_latest_session_id() for harness session persistence
@@ -26,7 +27,8 @@
 
 2b. spawn_and_stream()               [runner.py] — SPAWN/SUBAGENT PATH
    - Async subprocess execution with stdout/stderr capture
-   - Heartbeat loop, report watchdog, stdin feeding
+   - Report watchdog, stdin feeding
+   - record_spawn_exited() written immediately after process exits, before enrich_finalize
    - On exit: enrich_finalize() extracts report, usage, session ID
    - Finalize spawn state (succeeded / failed / cancelled)
 
@@ -72,7 +74,6 @@ launch/
   extract.py         — enrich_finalize() pipeline: usage + session + report
   signals.py         — SignalForwarder, SignalCoordinator; SIGINT/SIGTERM forwarding
   timeout.py         — wait_for_process_exit(); terminate_process() SIGTERM→SIGKILL
-  heartbeat.py       — threaded/async heartbeat writer (30s interval, atomic writes)
   command.py         — build_launch_env(); normalize_system_prompt_passthrough_args()
   env.py             — build_harness_child_env() (env sanitization for child processes)
   default_agent_policy.py — fallback chain when no agent profile requested
@@ -86,11 +87,11 @@ launch/
 
 **Two-pass policy resolution**: `resolve_policies()` runs a pre-profile merge first to select the agent profile, then re-merges with the profile's overrides. Required because the profile may specify a model/harness that needs to win over config defaults, but profile selection itself may depend on the pre-profile resolved agent name.
 
-**Crash tolerance**: PID files + heartbeats mean a crashed meridian parent doesn't orphan state permanently. The reaper (`state/reaper.py`) detects stale spawns on read paths using PID liveness, heartbeat age, and durable report presence.
+**Crash tolerance**: Exited events + psutil-based liveness mean a crashed runner doesn't orphan state permanently. The reaper (`state/reaper.py`) detects orphaned spawns on read paths by checking `runner_pid` liveness via `liveness.py:is_process_alive()`, branching on `exited_at` event presence, and falling back to durable report completion.
 
 ## Related Docs
 
-- `launch/process.md` — subprocess management, signals, timeouts, heartbeat
+- `launch/process.md` — subprocess management, signals, timeouts, exited event recording
 - `launch/prompt.md` — prompt assembly, skill injection, template variables
 - `launch/reports.md` — report extraction, fallback chain, auto-extracted reports
 - `state/spawns.md` — spawn store, event model, terminal merging

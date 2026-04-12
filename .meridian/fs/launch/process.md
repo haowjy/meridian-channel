@@ -16,14 +16,17 @@
    - Acquires session lock + lease file
 
 3. spawn_store.start_spawn() → registers spawn as queued
-   - Writes PID placeholder
+   - runner_pid=os.getpid() recorded in start event
 
 4. update_session_work_id() if work_id set
 
 5. _run_primary_process_with_capture()
    - PTY mode (if stdin is a tty): pty.fork() + _copy_primary_pty_output()
    - Pipe mode (non-interactive): subprocess.Popen (no runner.py involved)
-   - threaded_heartbeat_scope() active throughout (30s interval)
+
+5.5. spawn_store.record_spawn_exited() — exited event written immediately after process exits
+   - Wrapped in suppress(Exception) so disk errors don't block finalization
+   - Carries raw exit code and timestamp; spawn status stays "running" until finalize
 
 6. Finalization (inline, no enrich_finalize)
    - has_durable_report_completion() checks if report.md exists with completion marker
@@ -51,11 +54,10 @@ Output is written to `.meridian/spawns/<id>/output.jsonl`.
 `spawn_and_stream()` in `runner.py` is the async subprocess runner for subagent spawns (non-primary). Key behaviors:
 
 - Captures stdout → `output.jsonl`, stderr → `stderr.log`
-- Writes `harness.pid` for reaper detection
 - Feeds stdin from `run_params.stdin_prompt` if set (for stdin-based prompt delivery)
 - Runs a report watchdog: if `report.md` appears during execution, can consider spawn done
 - Maps raw return codes to meridian exit codes via `map_process_exit_code()`
-- Runs `enrich_finalize()` on exit to extract and persist artifacts
+- After `spawn_and_stream` returns: writes `exited` event (via `record_spawn_exited`), then runs `enrich_finalize()` to extract and persist artifacts
 
 ## Signal Handling
 
@@ -87,26 +89,15 @@ wait_for_process_returncode(process, timeout_seconds)
 Default kill grace is `config.kill_grace_minutes * 60` (default: 2 seconds).  
 Guardrail timeout: `config.guardrail_timeout_minutes * 60` (default: 30 seconds) — used by the safety guardrails layer.
 
-## Heartbeat
-
-`heartbeat.py` provides two context managers:
-
-```python
-heartbeat_scope(path, interval_secs=30)        # async
-threaded_heartbeat_scope(path, interval_secs=30) # sync (for PTY/primary path)
-```
-
-Both write the current Unix timestamp to `path` every 30 seconds using `atomic_write_text`. The reaper reads this file to determine if a spawn is alive: a heartbeat older than the grace threshold + interval means the spawn is stale.
-
 ## Artifact Outputs
 
 Each spawn writes to `.meridian/spawns/<id>/`:
 - `output.jsonl` — harness stdout (JSONL stream events or raw text)
 - `stderr.log` — harness stderr
 - `tokens.json` — token usage (extracted from output stream)
-- `harness.pid` — child process PID (for reaper)
-- `heartbeat` — last heartbeat timestamp
 - `report.md` — extracted report (written by `enrich_finalize()`)
+
+Spawn directories contain only durable artifacts. Runtime coordination (PIDs, exit status, timestamps) lives exclusively in the `spawns.jsonl` event stream. No PID files, heartbeat files, or marker files are written to disk.
 
 ## Error Classification
 

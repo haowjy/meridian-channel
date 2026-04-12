@@ -30,8 +30,8 @@ src/meridian/
 **Launch flow:**
 1. `ops/spawn/prepare.py` — validates input, resolves model aliases (via catalog), loads agent profile and skills, renders reference files and prior context, computes permission policy
 2. `lib/launch/resolve.py` — two-pass policy resolution: agent profile selection influences the final model/harness/safety layers
-3. `lib/launch/process.py` — creates session, starts spawn as queued, writes PID files, attaches to work item, calls runner
-4. `lib/launch/runner.py` — `spawn_and_stream()`: subprocess execution, stdout/stderr capture, heartbeat writes, report watchdog, stdin feeding, exit code mapping
+3. `lib/launch/process.py` — creates session, starts spawn as queued (recording runner_pid), attaches to work item, calls runner
+4. `lib/launch/runner.py` — `spawn_and_stream()`: subprocess execution, stdout/stderr capture, report watchdog, stdin feeding, exit code mapping; writes exited event immediately after process exits
 5. `lib/launch/extract.py` + `report.py` — extract usage/session/report from harness output, persist report artifact
 
 **State flow:**
@@ -39,7 +39,7 @@ src/meridian/
 - Session state is JSONL events in `.meridian/sessions.jsonl`
 - Work items are mutable JSON under `.meridian/work-items/`
 - All writes are atomic (tmp+rename) with `fcntl.flock` for concurrency
-- Crash recovery: the reaper (`lib/state/reaper.py`) detects orphaned spawns on read paths — missing PID files, stale heartbeats, durable report presence — no explicit recovery step
+- Crash recovery: the reaper (`lib/state/reaper.py`) detects orphaned spawns on read paths — psutil liveness checks on `runner_pid` (`lib/state/liveness.py:is_process_alive()`), `exited_at` event presence, durable report completion — no explicit recovery step
 
 **Mars integration:**
 - `meridian mars ...` is a passthrough to the bundled `mars` binary
