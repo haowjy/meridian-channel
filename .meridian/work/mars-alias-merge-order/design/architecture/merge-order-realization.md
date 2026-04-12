@@ -9,66 +9,38 @@ The data flows through three stages:
 
 Declaration order is available in stage 1 but lost at stage 2. The fix must re-introduce declaration order as a tiebreaker for siblings at stage 2→3.
 
-## Approach: Declaration-Ordered Model Merge Iterator
+## Approach: Declaration-Ordered Kahn's Variant in sync/mod.rs
 
-**Do not modify `topological_sort` or `ResolvedGraph.order`.** The topo sort is correct for its purpose (ensuring deps are processed before dependents). Model merge needs a different ordering that respects both constraints:
-- Dependencies before dependents (from topo sort)
+**Do not modify `topological_sort` or `ResolvedGraph.order`.** The topo sort is correct for its purpose (ensuring deps are processed before dependents for item discovery, collision detection, etc.). Its alphabetical tiebreak is correct and desirable for those uses.
+
+Model merge needs a different ordering that respects both constraints:
+- Dependencies before dependents (topological property)
 - Siblings ordered by declaration order (from `mars.toml`)
 
-### Key insight
+### Rejected approach: stable sort
 
-We need a new ordering function that produces a model-merge-specific iteration order. This function:
-1. Takes the `ResolvedGraph` (for dependency relationships and topo order)
-2. Takes the `EffectiveConfig` (for declaration order)
-3. Returns `Vec<SourceName>` ordered for model merging
+The initial design considered `stable_sort_by_key` on the topo-ordered dep_models, keyed by root sponsor declaration position. **This is incorrect.** Stable sort preserves relative order of equal-key elements, but it can reorder elements across different key groups — moving a node with key=0 ahead of one with key=1 even when a dependency edge exists between them. This breaks the topological invariant in diamond dependency patterns.
 
-### Algorithm: Declaration-Aware Stable Sort
+### Chosen approach: Local Kahn's with declaration-order tiebreak
 
-The simplest correct approach is to take the topological order and re-sort siblings (nodes at the same "depth" or with no dependency relationship) by their declaration order. But "depth" is imprecise in a DAG — two nodes at the same depth can still have a dependency relationship.
+Build a Kahn's-algorithm variant inside `sync/mod.rs` that:
+1. Uses the same dependency edges as the graph
+2. Replaces the alphabetical tiebreak with declaration-order tiebreak
+3. Is scoped to the sync module — the existing `topological_sort` in `resolve/mod.rs` stays untouched
 
-**Better formulation**: Given the topological order, for any two nodes A and B where neither depends on the other (directly or transitively), sort by declaration order. For nodes where one depends on the other, preserve topo order (dep first).
+This is ~25 lines. It provably maintains topological order while giving declaration order control over sibling ordering. The Kahn's algorithm naturally handles all the edge cases (diamonds, shared transitive deps) because it only processes a node when all its dependencies are already processed.
 
-**Implementation**: 
+### Declaration position assignment
 
-1. Build a reachability set from `ResolvedGraph.nodes` — for each node, compute the set of all transitive dependencies.
-2. Build a declaration-order index from `EffectiveConfig.dependencies` — maps each direct dep name to its position in the `[dependencies]` section.
-3. For transitive deps (not directly in `mars.toml`), derive their declaration position from their "sponsor" — the direct dep that transitively requires them.
-4. Stable-sort the topological order using a comparator that:
-   - Preserves topo order when one node depends on the other
-   - Uses declaration position when nodes are siblings
+Each node needs a declaration position for the tiebreak comparator:
 
-**Simplification**: The stable sort doesn't need reachability checks if we use a different framing. The topological order already guarantees deps come before dependents. We only need to re-order *within each set of nodes that are simultaneously eligible* (same in-degree reduction round in Kahn's). This is exactly where the alphabetical tiebreak happens.
+1. **Direct deps**: Position = index in `EffectiveConfig.dependencies` iteration order (0, 1, 2, ...)
+2. **Transitive deps**: Position = lowest (earliest) declaration position among all direct deps that transitively reach this node. Walk from each direct dep downward through `ResolvedNode.deps` to find reachable transitive deps.
+3. **Secondary tiebreak**: When two nodes share the same declaration position (e.g., two transitive deps under the same sponsor), break ties alphabetically for determinism.
 
-### Refined Algorithm: Inject Declaration Order Into Kahn's Tiebreak
+### Why "earliest sponsor" is correct
 
-Instead of post-processing, inject the declaration order directly into the topological sort's tiebreak logic. Currently:
-
-```rust
-// In topological_sort():
-let mut sorted_queue: Vec<SourceName> = queue.drain(..).collect();
-sorted_queue.sort();  // ← alphabetical tiebreak
-queue.extend(sorted_queue);
-```
-
-Replace the alphabetical sort with a declaration-order-aware sort. But `topological_sort` doesn't have access to declaration order. Two options:
-
-**Option A: Add `declaration_order` to `ResolvedGraph`**
-- Store declaration positions in `ResolvedGraph` during `resolve()`
-- Pass to `topological_sort()` as a tiebreak comparator
-- Topo sort uses declaration order for same-in-degree nodes
-
-**Option B: Post-process in `resolve_graph` (sync phase 2)**
-- Keep `topological_sort` unchanged
-- After getting `graph.order`, build the model-merge ordering in `sync::resolve_graph`
-- Use a separate function that walks the topo order but re-sorts siblings by declaration order
-
-### Recommended: Option B (Post-process)
-
-**Rationale:**
-- `topological_sort` is a general-purpose graph utility — it shouldn't know about model merge concerns
-- The alphabetical tiebreak in topo sort is correct and desirable for other uses (deterministic graph ordering for item discovery, collision detection, etc.)
-- The model merge ordering is sync-pipeline-specific policy; keep it in `sync/mod.rs`
-- Minimal blast radius — only the model merge code path changes
+If transitive dep D is reachable from both direct dep A (position 0) and direct dep B (position 1), assigning D position 0 means D's model definitions are processed with A's subtree. This is consistent with first-wins semantics: the user listed A first, so A's entire dependency subtree gets priority.
 
 ## Detailed Design
 
@@ -76,25 +48,28 @@ Replace the alphabetical sort with a declaration-order-aware sort. But `topologi
 
 Location: `src/sync/mod.rs` (private helper)
 
-```
+```rust
 fn declaration_ordered_dep_models(
     graph: &ResolvedGraph,
     config: &EffectiveConfig,
-) -> Vec<ResolvedDepModels>
+) -> Vec<crate::models::ResolvedDepModels>
 ```
 
-**Behavior:**
-1. Build `decl_index: HashMap<SourceName, usize>` from `config.dependencies` iteration order (direct deps get their declaration position)
-2. For transitive deps not in `config.dependencies`, assign them the declaration position of their "root sponsor" — the direct dep that transitively requires them. Walk `graph.nodes[name].deps` upward to find the direct dep ancestor. If a transitive dep is reachable from multiple direct deps, use the earliest (lowest position) sponsor.
-3. Build the output `Vec<ResolvedDepModels>` by iterating `graph.order` but sorting siblings by their declaration position (primary) and name (secondary, for determinism within same sponsor).
-4. Filter to nodes that have non-empty model configs (same filter as current code).
+**Algorithm:**
 
-**Alternative simpler implementation**: Since `merge_model_config` is first-wins, we only need to ensure that among siblings, earlier-declared deps appear first in the slice. We can:
-1. Collect all dep models entries
-2. Stable-sort by declaration position of their root sponsor
-3. The stable sort preserves topo order within the same position group
+1. **Compute declaration positions:**
+   - Iterate `config.dependencies` to build `decl_pos: HashMap<SourceName, usize>` for direct deps
+   - For each direct dep, BFS/DFS through `graph.nodes[dep].deps` recursively to find all transitive deps. Assign each transitive dep the minimum declaration position among all sponsors that reach it.
 
-This is simpler because `stable_sort_by_key` does exactly what we need — it preserves the relative order of elements with equal keys (topo order) while sorting by the key (declaration position).
+2. **Kahn's with declaration-order tiebreak:**
+   - Build in-degree and adjacency from `graph.nodes` (same structure as `topological_sort`)
+   - Initialize: collect nodes with in_degree == 0 into a `BinaryHeap` (min-heap) ordered by `(decl_pos, name)` — declaration position primary, alphabetical secondary
+   - Process: pop min, emit, decrement dependents' in-degree, push newly-zero-in-degree nodes
+   - Result: `Vec<SourceName>` in topological order with declaration-order sibling tiebreak
+
+3. **Filter and collect:**
+   - From the ordered names, filter to nodes with non-empty `manifest.models`
+   - Build `Vec<ResolvedDepModels>` from filtered entries
 
 ### Changes to `resolve_graph` (sync phase 2)
 
@@ -114,13 +89,13 @@ let dep_models = declaration_ordered_dep_models(&graph, &loaded.effective);
 
 ### Changes to `finalize` (sync phase 7)
 
-Same replacement — `finalize` builds `dep_models` identically and must use the same ordering for S-FINALIZE-1.
+Same replacement — `finalize` builds `dep_models` identically and must use the same ordering for S-FINALIZE-1. Both call the same helper, eliminating code duplication (R-1).
 
 ### Improved conflict warning in `merge_model_config`
 
-Current warning says `"and earlier dependency"` without naming it. The function doesn't track which dep first provided the alias.
+Current warning says `"and earlier dependency"` without naming the winner. The function doesn't track which dep first provided each alias.
 
-Change: add a `first_provider: HashMap<String, String>` that records which dep first set each alias. On conflict, the warning becomes:
+Change: replace `dep_provided: HashSet<String>` with `dep_provided: HashMap<String, String>` that maps alias name → winning dep's source name. On conflict:
 
 ```
 model alias `fast` defined by both `workflow-a` (declared first) and `workflow-b` — using workflow-a
@@ -133,16 +108,30 @@ This change is internal to `merge_model_config` — its signature and first-wins
 
 | File | Change |
 |---|---|
-| `src/sync/mod.rs` | Add `declaration_ordered_dep_models()` helper; use it in `resolve_graph` and `finalize` |
-| `src/models/mod.rs` | Improve conflict warning message to name both deps and suggest override |
-| `src/models/mod.rs` (tests) | Add tests for sibling conflict with declaration-order tiebreak |
-| `src/sync/mod.rs` (tests) | Add tests for declaration-ordered model merge |
+| `src/sync/mod.rs` | Add `declaration_ordered_dep_models()` helper with local Kahn's variant; use it in `resolve_graph` and `finalize` |
+| `src/models/mod.rs` | Change `dep_provided` from `HashSet` to `HashMap`; improve conflict warning message to name both deps and suggest override |
+| `src/models/mod.rs` (tests) | Add tests: sibling conflict names both deps, consumer override suppresses warning |
+| `src/sync/mod.rs` (tests) | Add tests: declaration-ordered merge for siblings, diamonds, transitive sponsor inheritance |
 
 ## What Doesn't Change
 
 - `merge_model_config` signature and first-wins contract
-- `topological_sort` function
+- `topological_sort` function in `resolve/mod.rs`
 - `ResolvedGraph` struct
 - `resolve()` function in `src/resolve/mod.rs`
 - `models-merged.json` format
 - Any CLI commands or config surface
+
+## Edge Cases
+
+### Diamond dependency
+Direct deps A (pos 0) and B (pos 1) both depend on D. D gets position 0 (earliest sponsor). D is processed before both A and B in the merge (deps before dependents), which is correct — D's aliases can be overridden by A or B.
+
+### Three-way alias conflict
+Deps A (pos 0), B (pos 1), C (pos 2) all define alias `fast`. A wins. Two warnings emitted: one for B vs A, one for C vs A.
+
+### Dep is both direct and transitive
+If A is listed in `[dependencies]` and also appears in B's transitive deps, A's declaration position comes from its direct listing (position in `config.dependencies`), which is always present and correct.
+
+### Deep transitive chains
+BFS from each direct dep is O(V+E) total. For typical dependency trees (< 100 nodes), this is negligible. No performance concern.
