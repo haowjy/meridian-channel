@@ -2,7 +2,6 @@ import json
 from pathlib import Path
 
 from meridian.lib.state.spawn_store import (
-    cleanup_terminal_spawn_runtime_artifacts,
     finalize_spawn,
     get_spawn,
     list_spawns,
@@ -396,45 +395,3 @@ def test_terminal_status_first_wins_succeeded_then_cancelled_audit_visible(
         if event.get("event") == "finalize" and event.get("id") == str(spawn_id)
     ]
     assert finalize_statuses == ["succeeded", "cancelled"]
-
-
-def test_cleanup_terminal_spawn_runtime_artifacts_only_unlinks_terminal_rows(
-    tmp_path: Path,
-) -> None:
-    state_root = _state_root(tmp_path)
-
-    terminal_id = start_spawn(
-        state_root,
-        spawn_id="p10",
-        chat_id="c1",
-        model="gpt-5.4",
-        agent="coder",
-        harness="codex",
-        prompt="hello",
-    )
-    running_id = start_spawn(
-        state_root,
-        spawn_id="p11",
-        chat_id="c1",
-        model="gpt-5.4",
-        agent="coder",
-        harness="codex",
-        prompt="hello",
-    )
-    finalize_spawn(state_root, terminal_id, status="failed", exit_code=1, error="failed")
-
-    for spawn_id in (str(terminal_id), str(running_id)):
-        spawn_dir = state_root / "spawns" / spawn_id
-        spawn_dir.mkdir(parents=True, exist_ok=True)
-        for name in ("harness.pid", "heartbeat", "background.pid"):
-            (spawn_dir / name).write_text("123\n", encoding="utf-8")
-
-    removed = cleanup_terminal_spawn_runtime_artifacts(state_root, terminal_id)
-    assert set(removed) == {"harness.pid", "heartbeat", "background.pid"}
-
-    active_removed = cleanup_terminal_spawn_runtime_artifacts(state_root, running_id)
-    assert active_removed == ()
-    running_dir = state_root / "spawns" / str(running_id)
-    assert (running_dir / "harness.pid").exists()
-    assert (running_dir / "heartbeat").exists()
-    assert (running_dir / "background.pid").exists()

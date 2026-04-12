@@ -213,29 +213,35 @@ def detail_from_row(
     if is_active_spawn_status(row.status):
         log_path, last_message = _read_running_log_details(repo_root, row.id)
 
-    return SpawnDetailOutput(
-        spawn_id=row.id,
-        status=row.status,
-        model=row.model or "",
-        harness=row.harness or "",
-        parent_id=row.parent_id,
-        work_id=row.work_id,
-        desc=row.desc,
-        started_at=row.started_at or "",
-        finished_at=row.finished_at,
-        duration_secs=row.duration_secs,
-        exit_code=row.exit_code,
-        failure_reason=row.error,
-        input_tokens=row.input_tokens,
-        output_tokens=row.output_tokens,
-        cost_usd=row.total_cost_usd,
-        report_path=report_path,
-        report_summary=report_summary,
-        report_body=report_body,
-        harness_session_id=row.harness_session_id,
-        last_message=last_message,
-        log_path=log_path,
-    )
+    detail_data: dict[str, object] = {
+        "spawn_id": row.id,
+        "status": row.status,
+        "model": row.model or "",
+        "harness": row.harness or "",
+        "parent_id": row.parent_id,
+        "work_id": row.work_id,
+        "desc": row.desc,
+        "started_at": row.started_at or "",
+        "finished_at": row.finished_at,
+        "duration_secs": row.duration_secs,
+        "exit_code": row.exit_code,
+        "failure_reason": row.error,
+        "input_tokens": row.input_tokens,
+        "output_tokens": row.output_tokens,
+        "cost_usd": row.total_cost_usd,
+        "report_path": report_path,
+        "report_summary": report_summary,
+        "report_body": report_body,
+        "harness_session_id": row.harness_session_id,
+        "last_message": last_message,
+        "log_path": log_path,
+    }
+    if row.exited_at is not None:
+        detail_data["exited_at"] = row.exited_at
+    if row.process_exit_code is not None:
+        detail_data["process_exit_code"] = row.process_exit_code
+
+    return SpawnDetailOutput(**detail_data)
 
 
 __all__ = [

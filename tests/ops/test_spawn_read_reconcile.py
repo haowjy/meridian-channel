@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import meridian.lib.ops.spawn.api as spawn_api
@@ -12,7 +13,7 @@ def _state_root(repo_root: Path) -> Path:
     return state_root
 
 
-def _seed_terminal_spawn(state_root: Path, spawn_id: str) -> None:
+def _seed_running_spawn(state_root: Path, spawn_id: str) -> None:
     spawn_store.start_spawn(
         state_root,
         spawn_id=spawn_id,
@@ -21,29 +22,21 @@ def _seed_terminal_spawn(state_root: Path, spawn_id: str) -> None:
         agent="coder",
         harness="codex",
         prompt="hello",
-    )
-    spawn_store.finalize_spawn(
-        state_root,
-        spawn_id,
-        status="failed",
-        exit_code=143,
-        error="terminated",
+        runner_pid=os.getpid(),
     )
 
 
-def _write_runtime_files(state_root: Path, spawn_id: str) -> None:
-    spawn_dir = state_root / "spawns" / spawn_id
-    spawn_dir.mkdir(parents=True, exist_ok=True)
-    for name in ("harness.pid", "heartbeat", "background.pid"):
-        (spawn_dir / name).write_text("123\n", encoding="utf-8")
-
-
-def test_spawn_show_sync_cleans_terminal_runtime_files(tmp_path: Path) -> None:
+def test_spawn_show_sync_renders_running_post_exit_finalization_state(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     state_root = _state_root(repo_root)
-    _seed_terminal_spawn(state_root, "p1")
-    _write_runtime_files(state_root, "p1")
+    _seed_running_spawn(state_root, "p1")
+    spawn_store.record_spawn_exited(
+        state_root,
+        "p1",
+        exit_code=143,
+        exited_at="2026-04-12T14:00:00Z",
+    )
 
     output = spawn_api.spawn_show_sync(
         SpawnShowInput(
@@ -54,25 +47,27 @@ def test_spawn_show_sync_cleans_terminal_runtime_files(tmp_path: Path) -> None:
     )
 
     assert output.spawn_id == "p1"
-    spawn_dir = state_root / "spawns" / "p1"
-    assert not (spawn_dir / "harness.pid").exists()
-    assert not (spawn_dir / "heartbeat").exists()
-    assert not (spawn_dir / "background.pid").exists()
+    assert output.status == "running"
+    assert output.exited_at == "2026-04-12T14:00:00Z"
+    assert output.process_exit_code == 143
+    assert "running (exited 143, awaiting finalization)" in output.format_text()
 
 
-def test_spawn_list_sync_cleans_terminal_runtime_files_even_when_filtered_out(
-    tmp_path: Path,
-) -> None:
+def test_spawn_list_sync_marks_running_post_exit_with_asterisk(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     state_root = _state_root(repo_root)
-    _seed_terminal_spawn(state_root, "p2")
-    _write_runtime_files(state_root, "p2")
+    _seed_running_spawn(state_root, "p2")
+    spawn_store.record_spawn_exited(
+        state_root,
+        "p2",
+        exit_code=0,
+        exited_at="2026-04-12T14:00:00Z",
+    )
 
     output = spawn_api.spawn_list_sync(SpawnListInput(repo_root=repo_root.as_posix()))
 
-    assert output.spawns == ()
-    spawn_dir = state_root / "spawns" / "p2"
-    assert not (spawn_dir / "harness.pid").exists()
-    assert not (spawn_dir / "heartbeat").exists()
-    assert not (spawn_dir / "background.pid").exists()
+    assert len(output.spawns) == 1
+    assert output.spawns[0].status == "running"
+    assert output.spawns[0].status_display == "running*"
+    assert "running*" in output.format_text()

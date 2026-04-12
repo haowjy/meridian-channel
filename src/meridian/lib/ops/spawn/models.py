@@ -263,6 +263,7 @@ class SpawnListEntry(BaseModel):
 
     spawn_id: str
     status: str
+    status_display: str | None = None
     model: str
     duration_secs: float | None
     cost_usd: float | None
@@ -271,7 +272,7 @@ class SpawnListEntry(BaseModel):
         """Return columnar cells for tabular alignment."""
         return [
             self.spawn_id,
-            self.status,
+            self.status_display or self.status,
             _truncate_cell(self.model, max_chars=18),
             f"{self.duration_secs:.1f}s" if self.duration_secs is not None else "-",
         ]
@@ -287,7 +288,16 @@ class SpawnListOutput(BaseModel):
     @model_serializer(mode="plain")
     def _serialize(self) -> dict[str, object]:
         payload: dict[str, object] = {
-            "spawns": [entry.model_dump() for entry in self.spawns],
+            "spawns": [
+                {
+                    "spawn_id": entry.spawn_id,
+                    "status": entry.status,
+                    "model": entry.model,
+                    "duration_secs": entry.duration_secs,
+                    "cost_usd": entry.cost_usd,
+                }
+                for entry in self.spawns
+            ],
             "truncated": self.truncated,
         }
         if self.total_count is not None:
@@ -349,6 +359,8 @@ class SpawnDetailOutput(BaseModel):
     harness_session_id: str | None = None
     last_message: str | None = None
     log_path: str | None = None
+    exited_at: str | None = None
+    process_exit_code: int | None = None
 
     def _normalized_report_body(self) -> str | None:
         report_text = (self.report_body or "").strip()
@@ -376,7 +388,10 @@ class SpawnDetailOutput(BaseModel):
         from meridian.cli.format_helpers import kv_block
 
         status_str = self.status
-        if self.exit_code is not None:
+        if self.status == "running" and self.exited_at is not None:
+            exited_code = "?" if self.process_exit_code is None else str(self.process_exit_code)
+            status_str = f"running (exited {exited_code}, awaiting finalization)"
+        elif self.exit_code is not None:
             status_str += f" (exit {self.exit_code})"
 
         duration_value: str | None = (
@@ -397,6 +412,11 @@ class SpawnDetailOutput(BaseModel):
         pairs: list[tuple[str, str | None]] = [
             ("Spawn", self.spawn_id),
             ("Status", status_str),
+            ("Exited at", self.exited_at),
+            (
+                "Process exit code",
+                None if self.process_exit_code is None else str(self.process_exit_code),
+            ),
             ("Model", f"{self.model} ({self.harness})"),
             ("Duration", duration_value),
             ("Parent", parent_value),

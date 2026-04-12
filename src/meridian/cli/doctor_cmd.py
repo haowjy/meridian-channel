@@ -18,8 +18,8 @@ def register_doctor_command(app: App, emit: Emitter) -> tuple[set[str], dict[str
         command_help_epilogues={
             "doctor": (
                 "Health check and auto-repair for meridian state.\n\n"
-                "Reconciles orphaned spawns (dead PIDs, stale heartbeats, missing\n"
-                "spawn directories), cleans stale session locks, and warns about\n"
+                "Reconciles orphaned spawns (dead PIDs, missing spawn directories),\n"
+                "cleans stale session locks, and warns about\n"
                 "missing or malformed configuration.\n\n"
                 "Doctor is idempotent - re-running converges on the same result.\n"
                 "It is safe (and intended) to run after a crash, after a force-kill,\n"

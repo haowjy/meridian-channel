@@ -51,7 +51,6 @@ FOREGROUND_LAUNCH_MODE: LaunchMode = "foreground"
 
 ACTIVE_SPAWN_STATUSES = _ACTIVE_SPAWN_STATUSES
 is_active_spawn_status = _is_active_spawn_status
-_TERMINAL_RUNTIME_ARTIFACTS: tuple[str, ...] = ("harness.pid", "heartbeat", "background.pid")
 
 
 # ---------------------------------------------------------------------------
@@ -616,37 +615,6 @@ def list_spawns(state_root: Path, filters: Mapping[str, Any] | None = None) -> l
         spawns = filtered
 
     return sorted(spawns, key=_spawn_sort_key)
-
-
-def cleanup_terminal_spawn_runtime_artifacts(
-    state_root: Path,
-    spawn_id: SpawnId | str,
-    *,
-    status: SpawnStatus | Literal["unknown"] | None = None,
-) -> tuple[str, ...]:
-    """Best-effort cleanup for stale runtime files left behind after terminalization."""
-
-    resolved_status = status
-    if resolved_status is None:
-        record = get_spawn(state_root, spawn_id)
-        if record is None:
-            return ()
-        resolved_status = record.status
-    if resolved_status not in _TERMINAL_SPAWN_STATUSES:
-        return ()
-
-    spawn_dir = state_root / "spawns" / str(spawn_id)
-    removed: list[str] = []
-    for filename in _TERMINAL_RUNTIME_ARTIFACTS:
-        target = spawn_dir / filename
-        try:
-            target.unlink()
-        except FileNotFoundError:
-            continue
-        except OSError:
-            continue
-        removed.append(filename)
-    return tuple(removed)
 
 
 def get_spawn(state_root: Path, spawn_id: SpawnId | str) -> SpawnRecord | None:

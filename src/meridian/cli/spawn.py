@@ -629,7 +629,7 @@ def _spawn_wait(
     ] = False,
     quiet: Annotated[
         bool,
-        Parameter(name="--quiet", help="Suppress wait heartbeat output.", show=_HUMAN_ONLY),
+        Parameter(name="--quiet", help="Suppress wait progress output.", show=_HUMAN_ONLY),
     ] = False,
 ) -> None:
     result = spawn_wait_sync(

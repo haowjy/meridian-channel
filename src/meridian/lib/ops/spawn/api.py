@@ -55,7 +55,7 @@ from .query import (
     resolve_spawn_references,
 )
 
-_WAIT_HEARTBEAT_INTERVAL_SECS = 5.0
+_WAIT_PROGRESS_INTERVAL_SECS = 5.0
 
 
 def _forked_from_output(payload: SpawnCreateInput) -> str | None:
@@ -157,12 +157,6 @@ def spawn_list_sync(
 
     state_root = resolve_state_root(repo_root)
     spawns = list(reversed(reconcile_spawns(state_root, spawn_store.list_spawns(state_root))))
-    for row in spawns:
-        spawn_store.cleanup_terminal_spawn_runtime_artifacts(
-            state_root,
-            row.id,
-            status=row.status,
-        )
 
     # When statuses is empty tuple, show all statuses but cap intelligently:
     # always include all active spawns, pad with recent non-active up to limit.
@@ -202,6 +196,11 @@ def spawn_list_sync(
             SpawnListEntry(
                 spawn_id=row.id,
                 status=row.status,
+                status_display=(
+                    "running*"
+                    if row.status == "running" and row.exited_at is not None
+                    else None
+                ),
                 model=row.model or "",
                 duration_secs=row.duration_secs,
                 cost_usd=row.total_cost_usd,
@@ -369,11 +368,6 @@ def spawn_show_sync(
     row = read_spawn_row(repo_root, spawn_id)
     if row is None:
         raise ValueError(f"Spawn '{spawn_id}' not found")
-    spawn_store.cleanup_terminal_spawn_runtime_artifacts(
-        resolve_state_root(repo_root),
-        row.id,
-        status=row.status,
-    )
     return detail_from_row(
         repo_root=repo_root,
         row=row,
@@ -582,7 +576,7 @@ def _build_wait_multi_output(results: tuple[SpawnDetailOutput, ...]) -> SpawnWai
     )
 
 
-def _resolve_wait_heartbeat_mode(
+def _resolve_wait_progress_mode(
     *, verbose: bool, quiet: bool, config_verbosity: str | None
 ) -> str:
     if quiet:
@@ -595,7 +589,7 @@ def _resolve_wait_heartbeat_mode(
     return "quiet"
 
 
-def _render_wait_heartbeat(pending: set[str], *, elapsed_secs: float, mode: str) -> str | None:
+def _render_wait_progress(pending: set[str], *, elapsed_secs: float, mode: str) -> str | None:
     if not pending or mode == "quiet":
         return None
     pending_count = len(pending)
@@ -608,8 +602,8 @@ def _render_wait_heartbeat(pending: set[str], *, elapsed_secs: float, mode: str)
     return f"waiting for {pending_count} spawn(s) to finish..."
 
 
-def _emit_wait_heartbeat(message: str, *, sink: OutputSink) -> None:
-    sink.heartbeat(message)
+def _emit_wait_progress(message: str, *, sink: OutputSink) -> None:
+    sink.status(message)
 
 
 def spawn_wait_sync(
@@ -637,13 +631,13 @@ def spawn_wait_sync(
 
     completed_rows: dict[str, spawn_store.SpawnRecord] = {}
     pending: set[str] = set(spawn_ids)
-    heartbeat_mode = _resolve_wait_heartbeat_mode(
+    progress_mode = _resolve_wait_progress_mode(
         verbose=payload.verbose,
         quiet=payload.quiet,
         config_verbosity=getattr(getattr(config, "output", None), "verbosity", None),
     )
-    heartbeat_interval = max(_WAIT_HEARTBEAT_INTERVAL_SECS, poll)
-    next_heartbeat = started + heartbeat_interval
+    progress_interval = max(_WAIT_PROGRESS_INTERVAL_SECS, poll)
+    next_progress = started + progress_interval
 
     while True:
         for spawn_id in tuple(pending):
@@ -670,15 +664,15 @@ def spawn_wait_sync(
         if now >= deadline:
             timed_out = "', '".join(sorted(pending))
             raise TimeoutError(f"Timed out waiting for spawn(s) '{timed_out}'")
-        if now >= next_heartbeat:
-            heartbeat = _render_wait_heartbeat(
+        if now >= next_progress:
+            progress = _render_wait_progress(
                 pending,
                 elapsed_secs=max(now - started, 0.0),
-                mode=heartbeat_mode,
+                mode=progress_mode,
             )
-            if heartbeat is not None:
-                _emit_wait_heartbeat(heartbeat, sink=active_sink)
-            next_heartbeat = now + heartbeat_interval
+            if progress is not None:
+                _emit_wait_progress(progress, sink=active_sink)
+            next_progress = now + progress_interval
         time.sleep(poll)
 
 
