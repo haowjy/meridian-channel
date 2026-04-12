@@ -21,7 +21,7 @@ dependencies = [
   "aiohttp>=3.11",
   "coolname>=4.0.0",
   "cyclopts>=3.0",
-  "mars-agents==0.0.13",
+  "mars-agents==0.0.14",
   "mcp>=1.0",
   "pydantic>=2.12",
   "pydantic-settings>=2.13",
