@@ -6,6 +6,7 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 - `meridian-base` submodule bumped to pick up refined prompt-writing guidance in `agent-creator` and `skill-creator`.
+- Bundled `mars-agents` bumped from `0.0.14` to `0.1.1`.
 
 ## [0.0.28] - 2026-04-13
 
