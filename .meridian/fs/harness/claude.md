@@ -36,6 +36,8 @@ All capabilities enabled except `supports_programmatic_tools`. Is the only harne
 
 Claude doesn't expand profile skills via `--agent` (issue #29902 workaround). Skills are injected as `--append-system-prompt <content>` instead. `run_prompt_policy()` returns `skill_injection_mode="append-system-prompt"` with `include_agent_body=False, include_skills=False` — the launch layer handles composition, not Claude's native profile loading.
 
+Primary launch inventory injection uses this same channel. Fresh and forked primary sessions append the startup `# Meridian Agents` block to the `--append-system-prompt` payload, so Claude sees the installed agent catalog in its startup system context without flattening that catalog into the interactive user prompt body.
+
 ## Agent Loading
 
 For agent profiles, `build_adhoc_agent_payload()` builds a JSON blob: `{"<name>": {"description": "...", "prompt": "..."}}` passed as `--agents <json>`. This is the Claude-specific mechanism for installing a Meridian agent profile as a native Claude agent.

@@ -148,6 +148,17 @@ If the selected primary profile is an on-disk user profile, Meridian uses Claude
 
 Otherwise Meridian composes the prompt and passes it via `--system-prompt`.
 
+Fresh and forked primary launches now also inject an installed agent catalog:
+
+- Claude: agent inventory is included in the `--append-system-prompt` payload
+- Codex: agent inventory is flattened into the inline primary prompt
+- OpenCode: agent inventory is flattened into the inline primary prompt
+
+This startup inventory is additive. It does not replace the harness-specific
+loading/injection path for the selected agent profile body or its skills.
+
+Resume launches keep the existing behavior and do not receive a newly composed startup inventory block.
+
 ## Session Continuation Fields
 
 For spawn continuation (`meridian spawn --continue SPAWN_ID` with optional `--fork`), Meridian resolves and passes harness session context as:

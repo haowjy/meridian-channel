@@ -19,7 +19,7 @@ from meridian.lib.safety.permissions import (
 )
 from meridian.lib.state.paths import resolve_state_paths
 
-from .prompt import compose_skill_injections
+from .prompt import build_primary_inventory_prompt, compose_skill_injections
 from .resolve import (
     ResolvedPolicies,
     format_missing_skills_warning,
@@ -239,6 +239,10 @@ def resolve_primary_launch_plan(
     continue_fork = (
         session_intent.mode == SessionMode.FORK or resolved_request.session.continue_fork
     )
+    if session_intent.mode != SessionMode.RESUME:
+        inventory_prompt = build_primary_inventory_prompt(repo_root=resolved_root)
+        if inventory_prompt:
+            resolved_prompt = "\n\n".join((resolved_prompt, inventory_prompt))
     seed = adapter.seed_session(
         is_resume=session_intent.mode == SessionMode.RESUME,
         harness_session_id=explicit_harness_session_id,

@@ -6,7 +6,7 @@ Full command surface. Use `--help` on any command for flags and options.
 
 | Command | Description |
 | ------- | ----------- |
-| `meridian` | Launch the primary agent session |
+| `meridian` | Launch the primary agent session with startup context, including the installed agent catalog |
 | `meridian spawn -a AGENT -p "task"` | Delegate work to a routed agent/model |
 | `meridian spawn list` | See running and recent spawns |
 | `meridian spawn wait ID` | Block until a spawn completes |

@@ -6,6 +6,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Literal
 
+from meridian.lib.catalog.agent import scan_agent_profiles
 from meridian.lib.catalog.skill import SkillRegistry
 from meridian.lib.core.domain import SkillContent
 from meridian.lib.launch.reference import (
@@ -153,6 +154,31 @@ def compose_skill_injections(skills: Sequence[SkillContent]) -> str | None:
     if not blocks:
         return None
     return _join_sections(blocks)
+
+
+def build_primary_inventory_prompt(*, repo_root: Path) -> str | None:
+    """Render installed agent inventory for primary-launch startup context."""
+
+    agents = sorted(scan_agent_profiles(repo_root=repo_root), key=lambda profile: profile.name)
+
+    if not agents:
+        return None
+
+    lines = [
+        "# Meridian Agents",
+        "",
+        "Installed Meridian agents available at launch time.",
+    ]
+
+    lines.extend(["", "AGENTS"])
+    for agent in agents:
+        description = agent.description.strip()
+        if description:
+            lines.append(f"- {agent.name}: {description}")
+        else:
+            lines.append(f"- {agent.name}")
+
+    return "\n".join(lines).strip()
 
 
 def strip_stale_report_paths(input_text: str) -> str:

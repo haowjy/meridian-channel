@@ -32,6 +32,27 @@ Run `meridian report create --stdin` and provide a plain markdown report via std
 
 This is always included. On retries, `strip_stale_report_paths()` removes the old report instruction from the user prompt before re-assembly.
 
+## Primary Launch Startup Inventory
+
+Primary launches now inject a compact installed agent catalog built from the local `.agents/agents/` catalog:
+
+```text
+# Meridian Agents
+
+Installed Meridian agents available at launch time.
+
+AGENTS
+- <agent>: <description>
+```
+
+The inventory is produced by `build_primary_inventory_prompt(repo_root=...)` in `prompt.py`, using `scan_agent_profiles()`. It is appended to the primary launch startup context for fresh and forked sessions. Resume sessions keep the existing behavior and do not get a new startup inventory block.
+
+This startup inventory is additive. It does not replace normal launch-time loading of the selected agent profile body or its skill content.
+
+Channel delivery is harness-specific:
+- Claude: inventory goes through the `--append-system-prompt` path alongside other launch-layer injected context
+- Codex/OpenCode: inventory is flattened into the inline primary prompt body
+
 ## Skill Injection
 
 Two formats, used in different contexts:

@@ -4,6 +4,28 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.0.28] - 2026-04-13
+
+### Added
+- Primary `meridian` launch startup agent catalog. Fresh and forked sessions now show installed agents before user input. Claude gets it in appended system prompt; Codex and OpenCode inline.
+
+### Changed
+- Startup inventory now agent-only. Skills still load through normal harness launch path, but not duplicated in startup catalog.
+
+### Fixed
+- `session log` and `session search` now tell `chat not found` apart from `chat has no transcript yet`.
+- Chat ref resolution now falls back to primary spawn harness session id when the chat row has none.
+- `pytest-llm` launcher now uses current interpreter path more reliably.
+
+## [0.0.27] - 2026-04-12
+
+### Changed
+- Dev workflow package updated for unified `impl-orchestrator`.
+
+### Fixed
+- Spawn model validation now resolves models from the Meridian repo root instead of drifting with CWD.
+- Codex streamed report extraction now accepts current event names instead of dropping final agent output.
+
 ## [0.0.26] - 2026-04-12
 
 ### Added

@@ -26,6 +26,12 @@ Note: Codex uses `codex exec` for non-interactive runs and positional prompt mod
 
 `supports_stream_events`, `supports_session_resume`, `supports_session_fork`, `supports_primary_launch`, `supports_stdin_prompt`, `supports_native_skills` all enabled. No native agents, no programmatic tools.
 
+## Primary Launch Context
+
+Codex has no Meridian-managed side channel equivalent to Claude's `--append-system-prompt` for primary launch startup context. Launch-layer injected content such as the current agent profile body, skill content, and the startup `# Meridian Agents` inventory is flattened into the inline primary prompt body for fresh and forked sessions.
+
+Resume sessions keep the existing behavior and do not receive a newly composed startup inventory block.
+
 ## Session Handling
 
 **Critical constraint:** Codex always generates its own session UUID at launch — callers cannot inject a session ID. Meridian must discover the session ID post-launch by scanning `~/.codex/sessions/`.

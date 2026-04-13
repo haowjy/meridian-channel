@@ -65,7 +65,7 @@ The canonical input to every harness command build:
 - `extra_args` — passthrough CLI args
 - `repo_root`, `mcp_tools`, `interactive`
 - `continue_harness_session_id`, `continue_fork` — session continuity
-- `appended_system_prompt` — skill injection (Claude workaround for #29902)
+- `appended_system_prompt` — launch-layer injected startup context for Claude (skills plus primary-session `Meridian Agents` inventory)
 - `report_output_path` — for harnesses supporting `-o` style report output (Codex)
 
 ## Registry
@@ -81,3 +81,7 @@ Subprocess harnesses produce JSON stream output. `parse_json_stream_event()` in 
 ## Why This Design
 
 Adding a harness shouldn't touch any shared code — only the adapter and the registry registration. The `StrategyMap` invariant enforces that new `SpawnParams` fields are consciously handled (or explicitly dropped) in every adapter. The capability flags let the launch layer make harness-sensitive decisions without adapter-specific conditionals.
+
+Primary launch inventory is one example of that harness-sensitive split:
+- Claude receives the installed agent catalog through `appended_system_prompt`
+- Codex and OpenCode receive the same agent catalog inline in the primary prompt text

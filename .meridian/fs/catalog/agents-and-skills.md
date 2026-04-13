@@ -88,6 +88,16 @@ Skills at launch time go through `resolve_skills_from_profile()` in `launch/reso
 
 Skills are deduplicated by name before loading (`dedupe_skill_names()`, `dedupe_skill_contents()`).
 
+## Primary Launch Inventory
+
+Primary launch startup context now includes a compact installed agent catalog derived from the same catalog layer rather than shelling out to CLI text parsing.
+
+`build_primary_inventory_prompt(repo_root)` in `launch/prompt.py`:
+- scans installed agent profiles via `scan_agent_profiles(repo_root)`
+- renders a stable markdown block headed `# Meridian Agents`
+
+This intentionally exposes only the top-level agent catalog at startup. Skills remain a lower-level launch/runtime mechanism and are not listed in the primary startup inventory, even though their content may still be loaded through the harness's normal launch path for the selected agent.
+
 ## Default Agent Policy
 
 `resolve_agent_profile_with_builtin_fallback()` in `launch/default_agent_policy.py` handles the fallback chain when no agent is explicitly requested:

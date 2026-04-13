@@ -53,6 +53,10 @@ OpenCode routing in `model_policy.py` maps models with `opencode-` prefixes, `ge
 
 Skills are dropped (`FlagEffect.DROP`) in the strategy map — OpenCode doesn't have a native skill loading mechanism equivalent to Claude's `--append-system-prompt`. Skills are composed into the prompt body by the launch layer instead.
 
+Primary launch inventory follows the same rule. The startup `# Meridian Agents` block is composed into the inline primary prompt body for fresh and forked sessions rather than being sent through a separate system channel.
+
+On resume, `filter_launch_content()` still suppresses fresh startup prompt composition, so no new inventory block is injected.
+
 ## Effort Mapping
 
 Effort maps to `--variant <value>` (e.g., `--variant thinking` for high reasoning).
