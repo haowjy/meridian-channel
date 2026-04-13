@@ -78,8 +78,9 @@ def spawn_create_sync(
     sink: OutputSink | None = None,
 ) -> SpawnActionOutput:
     resolved_context = runtime_context(ctx)
-    payload, preflight_warning = validate_create_input(payload)
     resolved_root, config = resolve_runtime_root_and_config(payload.repo_root)
+    payload = payload.model_copy(update={"repo_root": resolved_root.as_posix()})
+    payload, preflight_warning = validate_create_input(payload)
 
     runtime = None
     if not payload.dry_run:
