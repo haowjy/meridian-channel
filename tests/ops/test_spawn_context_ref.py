@@ -27,6 +27,14 @@ def _write_agent(path: Path, *, sandbox: str) -> None:
     )
 
 
+def _write_minimal_mars_config(repo_root: Path) -> None:
+    (repo_root / "mars.toml").write_text(
+        "[settings]\n"
+        'targets = [".agents"]\n',
+        encoding="utf-8",
+    )
+
+
 def _seed_spawn(
     repo_root: Path,
     *,
@@ -129,6 +137,7 @@ def test_resolve_context_ref_session_falls_back_to_latest_when_no_success(tmp_pa
 def test_spawn_create_dry_run_injects_prior_context_from_session(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
+    _write_minimal_mars_config(repo_root)
     _write_agent(repo_root / ".agents" / "agents" / "coder.md", sandbox="workspace-write")
     seed_id = _seed_spawn(
         repo_root,
