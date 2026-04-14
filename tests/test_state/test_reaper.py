@@ -179,7 +179,7 @@ def test_reconcile_active_spawn_marks_exited_spawn_with_report_succeeded(
     assert latest.error is None
 
 
-def test_reconcile_active_spawn_marks_exited_spawn_without_report_failed(
+def test_reconcile_active_spawn_marks_running_spawn_without_report_failed(
     tmp_path: Path, monkeypatch
 ) -> None:
     state_root, spawn_id = _create_spawn(tmp_path)
@@ -199,10 +199,66 @@ def test_reconcile_active_spawn_marks_exited_spawn_without_report_failed(
 
     assert reconciled.status == "failed"
     assert reconciled.exit_code == 1
+    assert reconciled.error == "orphan_run"
+    latest = _get_spawn(state_root, spawn_id)
+    assert latest.status == "failed"
+    assert latest.error == "orphan_run"
+
+
+def test_reconcile_active_spawn_finalizing_stale_heartbeat_marks_orphan_finalization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_root, spawn_id = _create_spawn(
+        tmp_path,
+        status="finalizing",
+        started_at=_OLD_STARTED_AT,
+    )
+    heartbeat_path = state_root / "spawns" / spawn_id / "heartbeat"
+    heartbeat_path.parent.mkdir(parents=True, exist_ok=True)
+    heartbeat_path.touch()
+    _set_artifact_age_secs(heartbeat_path, age_secs=300)
+
+    def _unexpected_probe(*_args, **_kwargs) -> bool:
+        raise AssertionError("is_process_alive should not run for finalizing rows")
+
+    monkeypatch.setattr("meridian.lib.state.reaper.is_process_alive", _unexpected_probe)
+    record = _get_spawn(state_root, spawn_id)
+    reconciled = reconcile_active_spawn(state_root, record)
+
+    assert reconciled.status == "failed"
+    assert reconciled.exit_code == 1
     assert reconciled.error == "orphan_finalization"
     latest = _get_spawn(state_root, spawn_id)
     assert latest.status == "failed"
     assert latest.error == "orphan_finalization"
+
+
+def test_reconcile_active_spawn_finalizing_recent_heartbeat_skips(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_root, spawn_id = _create_spawn(
+        tmp_path,
+        status="finalizing",
+        started_at=_OLD_STARTED_AT,
+    )
+    heartbeat_path = state_root / "spawns" / spawn_id / "heartbeat"
+    heartbeat_path.parent.mkdir(parents=True, exist_ok=True)
+    heartbeat_path.touch()
+    _set_artifact_age_secs(heartbeat_path, age_secs=5)
+
+    def _unexpected_probe(*_args, **_kwargs) -> bool:
+        raise AssertionError("is_process_alive should not run for finalizing rows")
+
+    monkeypatch.setattr("meridian.lib.state.reaper.is_process_alive", _unexpected_probe)
+    record = _get_spawn(state_root, spawn_id)
+    reconciled = reconcile_active_spawn(state_root, record)
+
+    assert reconciled == record
+    latest = _get_spawn(state_root, spawn_id)
+    assert latest.status == "finalizing"
+    assert latest.error is None
 
 
 def test_reconcile_active_spawn_with_dead_runner_and_no_exit_stays_unchanged_in_grace(

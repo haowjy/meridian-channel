@@ -1,10 +1,12 @@
 import inspect
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, get_args
 
 import pytest
 
+from meridian.lib.core.domain import SpawnStatus
 from meridian.lib.state.spawn_store import (
     AUTHORITATIVE_ORIGINS,
     LEGACY_RECONCILER_ERRORS,
@@ -13,6 +15,7 @@ from meridian.lib.state.spawn_store import (
     finalize_spawn,
     get_spawn,
     list_spawns,
+    mark_finalizing,
     record_spawn_exited,
     resolve_finalize_origin,
     start_spawn,
@@ -192,6 +195,67 @@ def test_get_spawn_survives_mixed_malformed_rows(tmp_path: Path) -> None:
     assert row.status == "running"
 
 
+def test_mark_finalizing_returns_true_from_running(tmp_path: Path) -> None:
+    state_root = _state_root(tmp_path)
+    spawn_id = _start_test_spawn(state_root)
+
+    assert mark_finalizing(state_root, spawn_id) is True
+
+    row = get_spawn(state_root, spawn_id)
+    assert row is not None
+    assert row.status == "finalizing"
+
+
+@pytest.mark.parametrize(
+    "start_status",
+    ["queued", "finalizing", "succeeded", "failed", "cancelled"],
+)
+def test_mark_finalizing_returns_false_for_non_running_states(
+    tmp_path: Path,
+    start_status: SpawnStatus,
+) -> None:
+    state_root = _state_root(tmp_path)
+    spawn_id = str(
+        start_spawn(
+            state_root,
+            chat_id="c1",
+            model="gpt-5.4",
+            agent="coder",
+            harness="codex",
+            prompt="hello",
+            status=start_status,
+        )
+    )
+
+    assert mark_finalizing(state_root, spawn_id) is False
+    row = get_spawn(state_root, spawn_id)
+    assert row is not None
+    assert row.status == start_status
+
+
+def test_mark_finalizing_returns_false_for_missing_row(tmp_path: Path) -> None:
+    state_root = _state_root(tmp_path)
+    assert mark_finalizing(state_root, "p-missing") is False
+
+
+def test_mark_finalizing_concurrent_race_only_one_writer_wins(tmp_path: Path) -> None:
+    state_root = _state_root(tmp_path)
+    spawn_id = _start_test_spawn(state_root)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(
+            pool.map(
+                lambda _unused: mark_finalizing(state_root, spawn_id),
+                (0, 1),
+            )
+        )
+
+    assert sorted(results) == [False, True]
+    row = get_spawn(state_root, spawn_id)
+    assert row is not None
+    assert row.status == "finalizing"
+
+
 def test_projection_authority_reconciler_then_runner_replaces_terminal_tuple(
     tmp_path: Path,
 ) -> None:
@@ -244,13 +308,16 @@ def test_projection_authority_runner_then_reconciler_does_not_override(
         origin="runner",
         error="timeout",
     )
-    finalize_spawn(
-        state_root,
-        spawn_id,
-        status="succeeded",
-        exit_code=0,
-        origin="reconciler",
-        duration_secs=9.0,
+    assert (
+        finalize_spawn(
+            state_root,
+            spawn_id,
+            status="succeeded",
+            exit_code=0,
+            origin="reconciler",
+            duration_secs=9.0,
+        )
+        is False
     )
 
     row = get_spawn(state_root, spawn_id)
@@ -259,7 +326,7 @@ def test_projection_authority_runner_then_reconciler_does_not_override(
     assert row.exit_code == 1
     assert row.error == "timeout"
     assert row.terminal_origin == "runner"
-    assert row.duration_secs == 9.0
+    assert row.duration_secs is None
 
 
 def test_projection_authority_reconciler_then_reconciler_first_wins(tmp_path: Path) -> None:
@@ -274,13 +341,16 @@ def test_projection_authority_reconciler_then_reconciler_first_wins(tmp_path: Pa
         origin="reconciler",
         error="orphan_run",
     )
-    finalize_spawn(
-        state_root,
-        spawn_id,
-        status="succeeded",
-        exit_code=0,
-        origin="reconciler",
-        duration_secs=4.0,
+    assert (
+        finalize_spawn(
+            state_root,
+            spawn_id,
+            status="succeeded",
+            exit_code=0,
+            origin="reconciler",
+            duration_secs=4.0,
+        )
+        is False
     )
 
     row = get_spawn(state_root, spawn_id)
@@ -289,7 +359,7 @@ def test_projection_authority_reconciler_then_reconciler_first_wins(tmp_path: Pa
     assert row.exit_code == 1
     assert row.error == "orphan_run"
     assert row.terminal_origin == "reconciler"
-    assert row.duration_secs == 4.0
+    assert row.duration_secs is None
 
 
 def test_projection_authority_runner_then_runner_first_wins(tmp_path: Path) -> None:
@@ -320,6 +390,80 @@ def test_projection_authority_runner_then_runner_first_wins(tmp_path: Path) -> N
     assert row.error == "cancelled"
     assert row.terminal_origin == "runner"
     assert row.duration_secs == 3.2
+
+
+def test_late_update_status_never_downgrades_terminal_projection(tmp_path: Path) -> None:
+    state_root = _state_root(tmp_path)
+    spawn_id = _start_test_spawn(state_root)
+
+    finalize_spawn(
+        state_root,
+        spawn_id,
+        status="succeeded",
+        exit_code=0,
+        origin="runner",
+    )
+    update_spawn(
+        state_root,
+        spawn_id,
+        status="finalizing",
+        desc="post-finish metadata update",
+    )
+
+    row = get_spawn(state_root, spawn_id)
+    assert row is not None
+    assert row.status == "succeeded"
+    assert row.desc == "post-finish metadata update"
+
+
+def test_finalize_spawn_reconciler_writes_through_finalizing_row(tmp_path: Path) -> None:
+    state_root = _state_root(tmp_path)
+    spawn_id = _start_test_spawn(state_root)
+    assert mark_finalizing(state_root, spawn_id) is True
+
+    wrote = finalize_spawn(
+        state_root,
+        spawn_id,
+        status="failed",
+        exit_code=1,
+        origin="reconciler",
+        error="orphan_finalization",
+    )
+
+    assert wrote is True
+    row = get_spawn(state_root, spawn_id)
+    assert row is not None
+    assert row.status == "failed"
+    assert row.error == "orphan_finalization"
+
+
+def test_finalize_spawn_reconciler_drops_when_row_already_terminal(tmp_path: Path) -> None:
+    state_root = _state_root(tmp_path)
+    spawn_id = _start_test_spawn(state_root)
+
+    finalize_spawn(
+        state_root,
+        spawn_id,
+        status="failed",
+        exit_code=1,
+        origin="runner",
+        error="timeout",
+    )
+    wrote = finalize_spawn(
+        state_root,
+        spawn_id,
+        status="succeeded",
+        exit_code=0,
+        origin="reconciler",
+        duration_secs=999.0,
+    )
+
+    assert wrote is False
+    row = get_spawn(state_root, spawn_id)
+    assert row is not None
+    assert row.status == "failed"
+    assert row.error == "timeout"
+    assert row.duration_secs is None
 
 
 def test_resolve_finalize_origin_prefers_explicit_origin() -> None:

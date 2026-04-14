@@ -874,6 +874,15 @@ async def execute_with_finalization(
                 terminated_after_completion=terminated_after_completion,
             )
             with signal_coordinator().mask_sigterm():
+                marked_finalizing = spawn_store.mark_finalizing(state_root, run.spawn_id)
+                if marked_finalizing:
+                    _touch_heartbeat_file(state_root, run.spawn_id)
+                else:
+                    logger.info(
+                        "Runner finalizing CAS miss; continuing with terminal finalize.",
+                        spawn_id=str(run.spawn_id),
+                        harness_id=str(harness.id),
+                    )
                 spawn_store.finalize_spawn(
                     state_root,
                     run.spawn_id,

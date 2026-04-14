@@ -50,6 +50,9 @@ def test_spawn_show_sync_renders_finalizing_status_and_orphan_finalization_hint(
         status="finalizing",
         error="orphan_finalization",
     )
+    heartbeat = state_root / "spawns" / "p1" / "heartbeat"
+    heartbeat.parent.mkdir(parents=True, exist_ok=True)
+    heartbeat.touch(exist_ok=True)
 
     output = spawn_api.spawn_show_sync(
         SpawnShowInput(

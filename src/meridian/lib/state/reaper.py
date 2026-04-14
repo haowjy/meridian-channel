@@ -119,7 +119,11 @@ def _collect_artifact_snapshot(
     )
     report_text = _read_completion_report(state_root, record.id)
     runner_pid_alive = False
-    if record.runner_pid is not None and record.runner_pid > 0:
+    if (
+        record.status != "finalizing"
+        and record.runner_pid is not None
+        and record.runner_pid > 0
+    ):
         runner_pid_alive = is_process_alive(
             record.runner_pid,
             created_after_epoch=started_epoch,
@@ -148,6 +152,13 @@ def decide_reconciliation(
     snapshot: ArtifactSnapshot,
     now: float,
 ) -> ReconciliationDecision:
+    if record.status == "finalizing":
+        if _has_recent_activity(snapshot, require_heartbeat=True):
+            return Skip(reason="recent_activity")
+        if snapshot.durable_report_completion:
+            return FinalizeSucceededFromReport()
+        return FinalizeFailed(error="orphan_finalization")
+
     runner_pid = record.runner_pid
     if runner_pid is None or runner_pid <= 0:
         if _has_recent_activity(snapshot, require_heartbeat=True):
@@ -166,12 +177,11 @@ def decide_reconciliation(
     if _has_recent_activity(snapshot, require_heartbeat=True):
         return Skip(reason="recent_activity")
 
-    orphan_reason = "orphan_finalization" if record.exited_at is not None else "orphan_run"
-    if orphan_reason == "orphan_run" and _in_startup_grace(snapshot.started_epoch, now):
+    if _in_startup_grace(snapshot.started_epoch, now):
         return Skip(reason="startup_grace")
     if snapshot.durable_report_completion:
         return FinalizeSucceededFromReport()
-    return FinalizeFailed(error=orphan_reason)
+    return FinalizeFailed(error="orphan_run")
 
 
 def _finalize_and_log(

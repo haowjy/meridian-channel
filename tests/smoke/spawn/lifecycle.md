@@ -185,3 +185,34 @@ assert all(row.get("status") == "finalizing" for row in spawns), "non-finalizing
 print("PASS: --status finalizing returned only finalizing rows")
 PY
 ```
+
+### LIFE-8. Late status updates do not downgrade a terminal row [IMPORTANT]
+
+```bash
+uv run python - <<'PY'
+import os
+from pathlib import Path
+
+from meridian.lib.state.spawn_store import finalize_spawn, get_spawn, start_spawn, update_spawn
+
+state_root = Path(os.environ["MERIDIAN_STATE_ROOT"])
+spawn_id = str(
+    start_spawn(
+        state_root,
+        chat_id="c-lifecycle",
+        model="gpt-5.4",
+        agent="smoke",
+        harness="codex",
+        prompt="late update invariant smoke",
+    )
+)
+finalize_spawn(state_root, spawn_id, status="succeeded", exit_code=0, origin="runner")
+update_spawn(state_root, spawn_id, status="finalizing", desc="late update")
+
+row = get_spawn(state_root, spawn_id)
+assert row is not None
+assert row.status == "succeeded", f"terminal status downgraded: {row.status}"
+assert row.desc == "late update"
+print("PASS: late update merged metadata without downgrading terminal status")
+PY
+```

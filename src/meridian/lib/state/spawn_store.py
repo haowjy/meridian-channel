@@ -5,8 +5,9 @@ Also includes file-backed ID generation for spawns and sessions.
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
+import structlog
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from meridian.lib.core.domain import SpawnStatus
@@ -19,9 +20,14 @@ from meridian.lib.core.spawn_lifecycle import (
 from meridian.lib.core.spawn_lifecycle import (
     is_active_spawn_status as _is_active_spawn_status,
 )
+from meridian.lib.core.spawn_lifecycle import (
+    validate_transition as _validate_transition,
+)
 from meridian.lib.core.types import SpawnId
 from meridian.lib.state.event_store import append_event, lock_file, read_events, utc_now_iso
 from meridian.lib.state.paths import StateRootPaths
+
+logger = structlog.get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # ID generation (absorbed from state/id_gen.py)
@@ -360,6 +366,23 @@ def finalize_spawn(
     with lock_file(paths.spawns_flock):
         records = _record_from_events(read_events(paths.spawns_jsonl, _parse_event))
         record = records.get(str(spawn_id))
+        if origin == "reconciler" and (
+            record is None or record.status in _TERMINAL_SPAWN_STATUSES
+        ):
+            logger.info(
+                "Reconciler finalize rejected because row was missing or already terminal.",
+                spawn_id=str(spawn_id),
+                current_status=record.status if record is not None else None,
+                attempted_status=status,
+                attempted_error=error,
+            )
+            return False
+        if (
+            record is not None
+            and record.status != "unknown"
+            and record.status not in _TERMINAL_SPAWN_STATUSES
+        ):
+            _validate_transition(record.status, status)
         was_active = record is not None and is_active_spawn_status(record.status)
         event = SpawnFinalizeEvent(
             id=str(spawn_id),
@@ -383,6 +406,27 @@ def finalize_spawn(
         return was_active
 
 
+def mark_finalizing(state_root: Path, spawn_id: SpawnId | str) -> bool:
+    """CAS transition `running -> finalizing` under the spawn-store flock."""
+
+    paths = StateRootPaths.from_root_dir(state_root)
+    with lock_file(paths.spawns_flock):
+        records = _record_from_events(read_events(paths.spawns_jsonl, _parse_event))
+        record = records.get(str(spawn_id))
+        if record is None or record.status != "running":
+            return False
+        _validate_transition(record.status, "finalizing")
+        event = SpawnUpdateEvent(id=str(spawn_id), status="finalizing")
+        append_event(
+            paths.spawns_jsonl,
+            paths.spawns_flock,
+            event,
+            store_name="spawn",
+            exclude_none=True,
+        )
+        return True
+
+
 def mark_spawn_running(
     state_root: Path,
     spawn_id: SpawnId | str,
@@ -392,15 +436,27 @@ def mark_spawn_running(
     worker_pid: int | None = None,
     runner_pid: int | None = None,
 ) -> None:
-    update_spawn(
-        state_root,
-        spawn_id,
-        status="running",
-        launch_mode=launch_mode,
-        wrapper_pid=wrapper_pid,
-        worker_pid=worker_pid,
-        runner_pid=runner_pid,
-    )
+    paths = StateRootPaths.from_root_dir(state_root)
+    with lock_file(paths.spawns_flock):
+        records = _record_from_events(read_events(paths.spawns_jsonl, _parse_event))
+        record = records.get(str(spawn_id))
+        if record is not None and record.status not in {"unknown", "running"}:
+            _validate_transition(cast("SpawnStatus", record.status), "running")
+        event = SpawnUpdateEvent(
+            id=str(spawn_id),
+            status="running",
+            launch_mode=launch_mode,
+            wrapper_pid=wrapper_pid,
+            worker_pid=worker_pid,
+            runner_pid=runner_pid,
+        )
+        append_event(
+            paths.spawns_jsonl,
+            paths.spawns_flock,
+            event,
+            store_name="spawn",
+            exclude_none=True,
+        )
 
 
 def _empty_record(spawn_id: str) -> SpawnRecord:

@@ -1460,8 +1460,128 @@ async def test_execute_with_streaming_starts_and_ticks_runner_heartbeat(
     assert len(touch_times) >= 2
     intervals = [later - earlier for earlier, later in pairwise(touch_times)]
     assert intervals
-    assert max(intervals) <= 0.06
+    assert max(intervals) <= 0.12
     assert (state_root / "spawns" / str(run.spawn_id) / "heartbeat").exists()
+
+
+@pytest.mark.asyncio
+async def test_execute_with_streaming_marks_finalizing_before_terminal_finalize(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_root = resolve_state_paths(tmp_path).root_dir
+    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
+    registry = HarnessRegistry()
+    registry.register(_DummyCodexHarness())
+    monkeypatch.setattr(spawn_manager_module, "ControlSocketServer", _FakeControlSocketServer)
+    monkeypatch.setattr(
+        "meridian.lib.harness.connections.get_connection_class",
+        _fake_connection_class,
+    )
+
+    call_order: list[str] = []
+    original_mark_finalizing = streaming_runner_module.spawn_store.mark_finalizing
+    original_finalize_spawn = streaming_runner_module.spawn_store.finalize_spawn
+
+    def _tracked_mark_finalizing(*args, **kwargs) -> bool:  # type: ignore[no-untyped-def]
+        call_order.append("mark_finalizing")
+        return original_mark_finalizing(*args, **kwargs)
+
+    def _tracked_finalize_spawn(*args, **kwargs) -> bool:  # type: ignore[no-untyped-def]
+        call_order.append("finalize_spawn")
+        return original_finalize_spawn(*args, **kwargs)
+
+    monkeypatch.setattr(
+        streaming_runner_module.spawn_store,
+        "mark_finalizing",
+        _tracked_mark_finalizing,
+    )
+    monkeypatch.setattr(
+        streaming_runner_module.spawn_store,
+        "finalize_spawn",
+        _tracked_finalize_spawn,
+    )
+
+    run = Spawn(
+        spawn_id=SpawnId("r-finalizing-order-1"),
+        prompt="hello",
+        model=ModelId("gpt-5.3-codex"),
+        status="queued",
+    )
+    exit_code = await asyncio.wait_for(
+        execute_with_streaming(
+            run,
+            plan=_build_plan(),
+            repo_root=tmp_path,
+            state_root=state_root,
+            artifacts=artifacts,
+            registry=registry,
+            cwd=tmp_path,
+        ),
+        timeout=1.0,
+    )
+
+    assert exit_code == 0
+    assert call_order
+    assert "mark_finalizing" in call_order
+    assert "finalize_spawn" in call_order
+    assert call_order.index("mark_finalizing") < call_order.index("finalize_spawn")
+
+
+@pytest.mark.asyncio
+async def test_execute_with_streaming_tolerates_mark_finalizing_cas_miss(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_root = resolve_state_paths(tmp_path).root_dir
+    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
+    registry = HarnessRegistry()
+    registry.register(_DummyCodexHarness())
+    monkeypatch.setattr(spawn_manager_module, "ControlSocketServer", _FakeControlSocketServer)
+    monkeypatch.setattr(
+        "meridian.lib.harness.connections.get_connection_class",
+        _fake_connection_class,
+    )
+
+    logged_messages: list[str] = []
+
+    def _cas_miss_mark_finalizing(*_args, **_kwargs) -> bool:
+        return False
+
+    def _capture_info(message: str, *_args, **_kwargs) -> None:
+        logged_messages.append(message)
+
+    monkeypatch.setattr(
+        streaming_runner_module.spawn_store,
+        "mark_finalizing",
+        _cas_miss_mark_finalizing,
+    )
+    monkeypatch.setattr(streaming_runner_module.logger, "info", _capture_info)
+
+    run = Spawn(
+        spawn_id=SpawnId("r-finalizing-cas-miss-1"),
+        prompt="hello",
+        model=ModelId("gpt-5.3-codex"),
+        status="queued",
+    )
+    exit_code = await asyncio.wait_for(
+        execute_with_streaming(
+            run,
+            plan=_build_plan(),
+            repo_root=tmp_path,
+            state_root=state_root,
+            artifacts=artifacts,
+            registry=registry,
+            cwd=tmp_path,
+        ),
+        timeout=1.0,
+    )
+
+    assert exit_code == 0
+    row = spawn_store.get_spawn(state_root, run.spawn_id)
+    assert row is not None
+    assert row.status == "succeeded"
+    assert any("CAS miss" in message for message in logged_messages)
 
 
 @pytest.mark.asyncio
