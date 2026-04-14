@@ -42,18 +42,18 @@ NEVER REVERT CHANGES — always assume it's someone else's work.
 
 ### Editing Agents & Skills
 
-**NEVER edit `.agents/` directly** — it is generated output, overwritten by `meridian mars sync`. Edit the source submodules instead:
+**NEVER edit `.agents/` directly** — it is generated output, overwritten by `meridian mars sync`. Edit the source package repos directly (outside this checkout):
 
-- **`meridian-base/`** — core agents, skills, and spawn infrastructure (e.g. `meridian-spawn`, `meridian-subagent`)
-- **`meridian-dev-workflow/`** — dev orchestration agents and skills (e.g. `dev-orchestrator`, `reviewer`, `coder`, `agent-staffing`)
+- **`meridian-flow/meridian-base`** — core agents, skills, and spawn infrastructure (e.g. `meridian-spawn`, `meridian-subagent`)
+- **`meridian-flow/meridian-dev-workflow`** — dev orchestration agents and skills (e.g. `dev-orchestrator`, `reviewer`, `coder`, `agent-staffing`)
 
-When writing or editing agent profiles and skills, follow the prompt and skill design guidance in `meridian-base/skills/agent-creator/SKILL.md` and `meridian-base/skills/skill-creator/SKILL.md`, plus their `resources/anti-patterns.md` references.
+When writing or editing agent profiles and skills, follow the prompt and skill design guidance in the source repo at `skills/agent-creator/SKILL.md` and `skills/skill-creator/SKILL.md`, plus their `resources/anti-patterns.md` references.
 
 Canonical workflow:
 
-1. Edit in the source submodule (e.g. `meridian-base/skills/meridian-spawn/SKILL.md`)
+1. Edit in the standalone source repo (e.g. `meridian-flow/meridian-base`, `skills/meridian-spawn/SKILL.md`)
 2. Commit and push the source repo change
-3. Update package refs if needed with `meridian mars add ...`
+3. Update package refs in this repo if needed with `meridian mars add ...`
 4. Run `meridian mars sync` to regenerate `.agents/`
 
 ### Upgrading from Legacy Sources State

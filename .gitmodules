@@ -1,6 +1,0 @@
-[submodule "meridian-base"]
-	path = meridian-base
-	url = git@github.com:meridian-flow/meridian-base.git
-[submodule "meridian-dev-workflow"]
-	path = meridian-dev-workflow
-	url = git@github.com:meridian-flow/meridian-dev-workflow.git
