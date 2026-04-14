@@ -1,6 +1,6 @@
-# Interrupt Pipeline
+# Interrupt Pipeline (v2)
 
-Realizes `spec/interrupt.md` (INT-001 .. INT-007).
+Realizes `spec/interrupt.md` (INT-001..INT-007).
 
 ## Module touch-list
 
@@ -10,50 +10,49 @@ src/meridian/lib/launch/streaming_runner.py
   _consume_subscriber_events   # unchanged but inherits new classification
 
 src/meridian/lib/streaming/
-  spawn_manager.py             # SpawnManager.interrupt gains per-spawn lock + noop semantics
-  control_socket.py            # routes interrupt unchanged; mutex moves to SpawnManager
-  inject_lock.py               # NEW — per-spawn asyncio lock registry (shared with inject)
+  spawn_manager.py             # interrupt gains per-spawn lock + noop
+  control_socket.py            # routes interrupt; ack inside lock scope
+  inject_lock.py               # NEW — per-spawn asyncio lock registry
 
 src/meridian/lib/app/server.py # InjectRequest schema covers interrupt:true
 
-src/meridian/cli/spawn_inject.py # unchanged; --interrupt routes to control socket
+src/meridian/cli/spawn_inject.py # --interrupt routes to control socket
 ```
 
 ## Classifier change
 
 Today `_terminal_event_outcome` returns a non-None outcome whenever a
-`turn/completed` carries a non-`completed` status. That conflates "this turn
-ended badly" with "this spawn is terminal". The new rule:
+`turn/completed` carries a non-`completed` status. The new rule:
 
 - A `turn/completed` event is **never** spawn-terminal on its own. The
   spawn ends only on:
-  - a `session.error` / `session.terminated` event whose payload encodes
-    "the harness is done with this spawn"
-  - the harness exiting its event stream (drain ends naturally)
-  - SIGTERM / SIGINT (handled in CAN-001)
-  - the report-watchdog escalation
-- The `turn` payload is recorded in `output.jsonl` and surfaced to
-  observers, but the runner does not call `manager.stop_spawn(...)` because
-  of it.
+  - `session.error` / `session.terminated` — harness is done
+  - The harness exiting its event stream (drain ends naturally)
+  - SIGTERM / SIGINT (CAN-001)
+  - Report-watchdog escalation
+- `turn` payloads are recorded in `output.jsonl` and surfaced to
+  observers, but do not trigger `manager.stop_spawn(...)`.
 
-For codex specifically the rewrite is:
+For codex:
 
 ```python
 if event.harness_id == HarnessId.CODEX.value and event.event_type == "turn/completed":
-    # Per-turn outcome is logged via output.jsonl; spawn lifetime continues
-    # until SIGTERM, drain end, or session.error.
+    # Per-turn outcome; spawn lifetime continues until SIGTERM, drain
+    # end, or session.error. Fixes #28.
     return None
 ```
 
-For claude `result` and opencode `session.idle`/`session.error`, the existing
+For claude `result` and opencode `session.idle`/`session.error`, existing
 classification stays. Those payloads describe the **session**, not a turn.
-The architect spawn (open feasibility item P10) confirmed that codex is the
-only harness emitting per-turn terminal payloads on the session stream;
-claude and opencode terminal events already correspond to spawn-end.
+
+P10 confirmed: codex is the only harness emitting per-turn terminal
+payloads on the session stream. Claude and opencode terminal events
+correspond to spawn-end. All three harnesses keep connections alive after
+interrupt.
 
 ## Per-spawn FIFO
 
-A new `inject_lock.py` module owns a small registry:
+`inject_lock.py` — per-spawn asyncio lock registry:
 
 ```python
 _locks: dict[SpawnId, asyncio.Lock] = {}
@@ -65,24 +64,23 @@ def drop_lock(spawn_id: SpawnId) -> None:
     _locks.pop(spawn_id, None)
 ```
 
-Both `SpawnManager.inject` and `SpawnManager.interrupt` acquire the same
-per-spawn lock, wrapping the (`record_inbound` + `send_*`) pair. Drop happens
-in `_cleanup_completed_session` and `stop_spawn`.
+Both `SpawnManager.inject` and `SpawnManager.interrupt` acquire the lock.
 
-This is the smallest change that makes ordering linearizable. We considered
-moving serialization to the control socket layer; rejected because HTTP
-inject would still race the control-socket inject otherwise. Centralizing in
-`SpawnManager` covers all surfaces.
+**v2 change (D-05 extension).** Lock scope now covers ack emission:
+the control socket calls a new `SpawnManager.inject_with_reply` /
+`interrupt_with_reply` method that holds the lock across
+`record_inbound + send_* + return result`. The control socket handler
+writes the JSON reply from the returned result while still inside the
+caller's logical scope, ensuring control-socket ack order matches
+`inbound.jsonl` order. HTTP callers do not share that transport
+guarantee and rely on `inbound_seq`. See `inject_serialization.md` for
+full details.
 
 ## INT-004: noop when no turn
 
-`SpawnManager.interrupt` returns `InjectResult(success=True, noop=True)` when
-the harness reports `current_turn_id is None`. The control socket reflects
-the noop in the response (`{"ok": true, "noop": true}`); CLI text mode
-prints "Interrupt acknowledged (no turn in flight)".
-
-The control-socket reply schema gains an optional `noop: bool` field. CLI
-JSON mode exposes it; CLI text mode summarizes it.
+`SpawnManager.interrupt` returns `InjectResult(success=True, noop=True)`
+when `connection.current_turn_id is None`. Control socket reflects as
+`{"ok": true, "noop": true}`.
 
 ## INT-005 / INT-006: HTTP schema
 
@@ -103,18 +101,29 @@ class InjectRequest(BaseModel):
         return self
 ```
 
-`inject_message` HTTP handler dispatches to either `SpawnManager.inject`
-or `SpawnManager.interrupt` based on which was set. Schema rejection at
-parse time covers INT-006/INJ-005 violations.
+Handler dispatches to `SpawnManager.inject` or `.interrupt` based on
+which field was set. Schema rejection at parse time covers INT-006/INJ-005.
 
-## Test plan (gist)
+## Test plan
 
-- **Unit**: `_terminal_event_outcome` for codex `turn/completed`-`interrupted`
-  returns None; for `turn/completed`-`completed` still returns success;
-  for `session.error` still returns failed.
-- **Unit**: per-spawn lock serializes two simultaneous coroutines.
-- **Smoke**: scenario 2 (`spawn inject --interrupt`) — spawn stays running,
-  follow-up text inject is acked, fresh assistant turn.
-- **Smoke**: scenario 8 (double inject) — both messages ack with distinct
-  `inbound_seq`, both appear in `output.jsonl` in send order.
-- **Smoke**: scenarios 9b (HTTP interrupt parity).
+### Unit tests
+- `_terminal_event_outcome` for codex `turn/completed interrupted` →
+  `None`.
+- `_terminal_event_outcome` for codex `turn/completed completed` →
+  `None` (turn events are never spawn-terminal).
+- `_terminal_event_outcome` for `session.error` → `failed`.
+- Per-spawn lock serializes two coroutines; control-socket ack order
+  matches inbound order.
+
+### Smoke tests
+- Scenario 2: `spawn inject --interrupt` → spawn stays running,
+  follow-up text inject, fresh turn.
+- Scenario 8: double inject → distinct `inbound_seq`; control-socket ack
+  order matches inbound order.
+- Scenario 9b: HTTP interrupt parity.
+- Scenario 11: inject + interrupt simultaneously → `inbound.jsonl` order
+  matches harness delivery order.
+
+### Fault-injection tests
+- **Interrupt during no-turn**: noop ack, no state change.
+- **Rapid interrupt+inject**: ordering preserved, spawn alive.

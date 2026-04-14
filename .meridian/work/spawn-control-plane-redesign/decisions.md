@@ -1,201 +1,339 @@
-# Design Decisions — Spawn Control Plane
+# Design Decisions — Spawn Control Plane (v2)
 
 Append-only log of the non-obvious judgment calls made during this design
-cycle. Each entry states what was chosen, what alternatives were considered,
-and why this choice won.
+cycle. v1 decisions preserved where noted; v2 revisions flagged.
 
 ## D-01 — Cancel goes through OS signals, not control-socket transitions
 
-**Choice.** All cancel callers (CLI, HTTP, timeout killers) funnel through
-`SignalCanceller.cancel(spawn_id)` → SIGTERM to the runner pid. The runner's
+**v1 decision preserved.** All cancel callers funnel through
+`SignalCanceller.cancel(spawn_id)` → SIGTERM to the runner PID. Runner's
 existing SIGTERM handler drives `manager.stop_spawn(status="cancelled",
 origin="runner")`.
 
-**Alternatives considered.**
-
-1. *Fix `SpawnManager.cancel` to transition the session cleanly before
-   closing the harness.* Would require the manager to synthesize an internal
-   "cancel" drain outcome and bypass the harness's natural terminal event.
-   Adds a new failure mode in the drain state machine and leaves two cancel
-   code paths (signal-based for external kills, cooperative for
-   CLI-invoked). Duplication compounds #29-class bugs.
-2. *Leave `SpawnManager.cancel` and just fix its status mapping.* The
-   underlying issue — `connection.send_cancel()` for codex closes the
-   WebSocket cleanly, producing `DrainOutcome(status="succeeded")` — would
-   still require intercepting the drain outcome. Same surface-area cost
-   as (1) with no upside.
-
-**Why signals win.** The runner already has a SIGTERM handler, an
-exit-code mapping (143), and the `signal_coordinator().mask_sigterm()`
-critical section for finalize. Routing cancel through it reuses a proven,
-race-tested path. External killers (`timeout 60 meridian spawn ...`) already
-use SIGTERM today; this collapses three slightly-different "cancel"
-semantics into one.
-
-**Tradeoff.** Cancel becomes less "cooperative-looking" — the harness isn't
-asked nicely to stop; it's terminated by its parent. For meridian's model
-(every spawn is a child process we own), that's correct: the spawn is a
-resource, and cancel is resource termination. Interrupt retains the
-cooperative semantics for the "please stop this turn" case.
+**v2 change:** app-managed spawns now also go through SIGTERM because the
+app server moves to AF_UNIX per D-11, giving each app-managed spawn an
+addressable runner process (the FastAPI worker). See D-11 for the
+unification argument.
 
 ## D-02 — Heartbeat ownership moves to SpawnManager (LIV-003)
 
-**Choice.** Extract a module-level `heartbeat_loop` helper; SpawnManager
-starts and stops it per spawn. Runners that don't use SpawnManager still
-call the helper but via SpawnManager instantiation.
+**v1 decision preserved.** Extract `heartbeat_loop` helper; SpawnManager
+starts/stops it per spawn. Runners delegate to the helper.
 
-**Alternative considered.** Leave heartbeat in `runner.py` /
-`streaming_runner.py` and add a parallel heartbeat loop to the FastAPI
-`_run_managed_spawn` path. Rejected: three heartbeat writers is worse than
-one, and the FastAPI path would still drift from runner behavior on
-interval, cleanup, and error handling.
+## D-03 — Two-lane cancel: SIGTERM for CLI, in-process for app (v2 revised)
 
-**Why this wins.** The spawn is alive iff its SpawnManager is running. The
-manager is the natural owner of that signal. The runner scripts become
-thinner (one import + one `manager._start_heartbeat()` call).
+**v1 chose:** claimed one pipeline but had two hidden behind one name.
 
-## D-03 — FastAPI worker does NOT accept SIGTERM for per-spawn cancel
+**v2 initial attempt:** cancel-target coordination file + shared worker
+SIGTERM. Reviewers (p1794, p1795) blocked: external SIGTERM (timeout
+supervisors, OOM killers) to the shared worker PID cannot target a
+specific spawn because no cancel-target file exists in that path. The
+cancel-target file is a side-channel that only `SignalCanceller` writes.
 
-**Choice.** CLI `meridian spawn cancel <id>` dispatches by launch mode:
-foreground spawns SIGTERM the runner pid; app-launched spawns go through
-`POST /api/spawns/{id}/cancel`. The HTTP handler runs inside the FastAPI
-worker and calls `manager.stop_spawn(...)` in-process.
+**v2 final choice:** explicitly adopt two-lane cancel (BL-1 option b).
+Document why they cannot converge:
 
-**Alternative considered.** Have the FastAPI worker install a custom
-SIGTERM handler that reads a "current target spawn" from a file or socket
-and cancels just that spawn. Rejected: signal handlers inherently
-single-valued, the indirection is brittle, and it conflates "server
-shutdown" with "one of the server's spawns was cancelled".
+- **CLI-launched spawns** (one runner process per spawn): cancel via
+  SIGTERM to `runner_pid`. Runner's signal handler calls
+  `manager.stop_spawn(status="cancelled")`. This is the existing path.
+- **App-managed spawns** (shared FastAPI worker): cancel via
+  `SignalCanceller.cancel()` which detects `launch_mode == "app"` and
+  calls `manager.stop_spawn()` in-process (or routes through HTTP
+  `POST /cancel` when invoked from a different process). No SIGTERM to
+  the shared worker.
 
-**Why this wins.** Signals are process-level; per-spawn semantics need a
-per-spawn channel. HTTP already exists, runs inside the worker, and the
-in-process `SpawnManager` is directly addressable there. The CLI
-dispatcher is one extra `if record.launch_mode == "app":` branch.
+**Why unification is not feasible.** The fundamental constraint:
+SIGTERM is a process-level signal with no per-spawn addressing. A shared
+FastAPI worker hosts multiple spawns; SIGTERM-ing it kills all of them
+(or requires a coordination file side-channel that external supervisors
+don't write). Per-spawn worker processes would solve this but are a
+much larger architectural change (process pool, affinity routing, etc.)
+that is out of scope for this issue set.
 
-**Constraint discovered.** This design relies on app-server being a single
-worker. Multi-worker FastAPI deployments would need an affinity scheme
-("which worker owns spawn X?"); out of scope and not on the roadmap.
+**What IS unified.** The `SignalCanceller` class is the single entry
+point for all cancel callers. The dispatcher logic inside SignalCanceller
+branches on `launch_mode`:
+- `launch_mode in ("foreground", "background")`: SIGTERM to `runner_pid`.
+- `launch_mode == "app"`: in-process `manager.stop_spawn()` or HTTP
+  `POST /cancel` (if cross-process).
 
-## D-04 — `turn/completed` is never spawn-terminal (INT-002)
+Both branches converge on the same terminal state: `status="cancelled"`,
+`origin="runner"` (preferred) or `origin="cancel"` (fallback).
 
-**Choice.** Narrow `_terminal_event_outcome` so per-turn payloads don't
-finalize the spawn. Only `session.error` / `session.terminated`, natural
-stream end, SIGTERM, and the report watchdog finalize.
+**Tradeoff.** External timeout supervisors cannot cancel individual app-
+managed spawns via SIGTERM. They can only kill the worker (all spawns
+die). This is acceptable: app-managed spawns are managed by the app
+server, and the app server has its own cancel endpoint. External
+supervisors are CLI-launcher concerns.
 
-**Alternative considered.** Introduce a per-harness map
-`{harness: {turn_status: spawn_outcome}}`. Rejected: codifies the bug.
-`turn_status` is about a turn, not a session; any mapping reintroduces
-the #28 confusion when a harness adds new turn statuses.
+**What this means for the success criterion.** "Cancel semantics are
+consistent across CLI, HTTP, and timeout kill" is satisfied for CLI
+spawns. For app spawns, CLI cancel and HTTP cancel converge; timeout kill
+affects the whole worker (documented, not a bug).
 
-**Why this wins.** The classification concept is "what the harness meant
-by this event". `turn/completed` means "one turn ended"; that is never a
-spawn-terminal statement.
+## D-04 — `turn/completed` never spawn-terminal (INT-002)
 
-**Feasibility note.** P10 probe confirmed codex is the only harness
-emitting per-turn terminal-looking payloads. Claude `result` and opencode
-`session.idle`/`session.error` already correspond to spawn-end, so their
-classification is unchanged.
+**v1 decision preserved.** Per-turn payloads don't finalize the spawn.
+`_terminal_event_outcome` returns `None` for `turn/completed` regardless
+of `turn.status`.
 
-## D-05 — Per-spawn asyncio.Lock, not a command queue (INJ-002)
+## D-05 — Per-spawn asyncio.Lock for inject/interrupt serialization (INJ-002)
 
-**Choice.** `inject_lock` module with a `dict[SpawnId, asyncio.Lock]`.
-`SpawnManager.inject` and `.interrupt` acquire the lock for the duration
-of `(record_inbound + send_*)`.
+**v1 decision preserved.** `inject_lock` module with
+`dict[SpawnId, asyncio.Lock]`. SpawnManager.inject and .interrupt acquire
+the lock.
 
-**Alternatives considered.**
+**v2 extension (per BL-1 major).** Lock scope now includes the ack/reply
+emission, not just `record_inbound + send_*`. The control socket writes
+its JSON reply inside the lock, so ack arrival order matches `inbound.jsonl`
+order. See architecture `inject_serialization.md` for the extended scope.
 
-1. Per-spawn `asyncio.Queue[Command]` with a dedicated worker task.
-   Rejected: doubles task accounting during shutdown and splits error
-   paths across caller and worker.
-2. Lock inside `HarnessConnection`. Rejected: ties serialization to the
-   connection rather than the spawn; a future connection pool would
-   violate the invariant.
+## D-06 — Authorization by env-derived caller id, not tokens (revised transport)
 
-**Why this wins.** Smallest code change that guarantees FIFO; method
-signatures unchanged; error paths unchanged.
+**v1 decision revised.** The core `authorize()` function is unchanged (pure
+function over `state_root, target, caller`). The transport for HTTP caller
+identification changes:
 
-## D-06 — Authorization by env-derived caller id, not by cryptographic token
+**v1 proposed:** TCP loopback + `SO_PEERCRED` to read peer PID + read
+`/proc/<pid>/environ`. Reviewers flagged this as non-portable (BL-3).
 
-**Choice.** `MERIDIAN_SPAWN_ID` in the caller's environment identifies the
-caller. `authorize()` is a pure function over `(state_root, target, caller)`.
+**v2 choice:** AF_UNIX socket for the app server (D-11). `SO_PEERCRED`
+on AF_UNIX reliably provides peer PID on Linux. On macOS,
+`LOCAL_PEERCRED` / `getpeereid()` provides uid/gid but not PID.
 
-**Alternatives considered.**
+**v2r2 revision (post-review).** Reviewers (p1794, p1795) flagged the
+macOS operator fallback as fail-open. v2r2 fixes:
+- Identity extraction failure on HTTP/socket surfaces → **DENY**, not
+  operator. Reason: `"peercred_unavailable"`.
+- Operator mode is only available via CLI env path (`MERIDIAN_DEPTH == 0`,
+  `MERIDIAN_SPAWN_ID` unset, checked in the process's own environment).
+- This redesign does **not** define an HTTP/header fallback for
+  peercred-unavailable platforms. Supporting them would require a
+  different caller-identity transport, which is out of scope here.
 
-1. Per-spawn API token stamped into env and verified by the guard.
-   Rejected: adds token rotation, token storage, and token revocation to a
-   problem that today has a simple ancestry answer.
-2. Requiring an MCP-style auth header. Rejected: forgeable (local process
-   can set any header), and the threat model explicitly does not include
-   adversaries inside the process tree.
-
-**Why this wins.** The threat model (subagent accidentally cancels sibling)
-is an honest-actors problem, not a hostile-actors one. Env-derived
-identity matches the pattern meridian already uses for parent-tracking and
-costs nothing.
-
-**Escape valve.** If a future deployment wants hostile-actor resistance,
-replace `caller_from_env` / `_caller_from_http` / `_caller_from_socket_peer`
-without touching `authorize()`. The boundary is deliberate.
+**Alternative rejected (v2).** Per-spawn/per-session tokens. Would add
+token rotation, storage, and revocation surfaces. The threat model (honest
+actors) doesn't justify the complexity.
 
 ## D-07 — Inject stays un-gated
 
-**Choice.** `meridian spawn inject <id> '<text>'` and `POST /inject` (text)
-are explicitly outside the authorization guard.
-
-**Alternative considered.** Gate inject the same as interrupt/cancel.
-Rejected: inject is a data-plane "send text" operation; collaboration
-between sibling agents is an intentional feature. Gating it would break
-multi-agent choreography patterns that are legitimate use cases.
-
-**Why this wins.** The interrupt/cancel threats (force-terminate a sibling,
-crash an unrelated user's spawn) don't apply to "send a text message".
-Worst case: a sibling agent confuses another by injecting noise; the
-receiver can ignore.
+**v1 decision preserved.** Inject is cooperative data-plane; no
+authorization gate.
 
 ## D-08 — Delete `SpawnManager.cancel` outright; no shim (R-06)
 
-**Choice.** Remove `SpawnManager.cancel`, its control-socket handler, and
-the CLI `--cancel` flag in the same change set. Audit callers and update.
-
-**Alternative considered.** Keep a deprecation shim that forwards to
-`SignalCanceller` so external callers don't break. Rejected: the project
-explicitly has no backcompat guarantee (per CLAUDE.md "no real users, no
-real user data"). A shim costs maintenance and ambiguous semantics (if
-cancel now means SIGTERM, the shim's behavior is "SIGTERM inside a
-SpawnManager context" — which has never been a real contract).
-
-**Why this wins.** Simpler surface, one cancel path, no legacy branches
-in code review forever.
+**v1 decision preserved.** Remove the method, its control-socket handler,
+and the CLI `--cancel` flag in the same change set.
 
 ## D-09 — Rejected: cancel via "terminal message" over control socket
 
-**Alternative rejected before it could be written up.** An earlier option
-considered a new control-socket `type="cancel_graceful"` that would
-cause `SpawnManager` to drive a drain-then-finalize cycle without any
-signal. Rejected because:
+**v1 decision preserved.** No `type="cancel_graceful"` on the control
+socket.
 
-- The harness side (notably codex) has no "drain and stay dead" primitive
-  today — `send_cancel` closes the WS.
-- Adding one would require coordinating a new message type across every
-  harness adapter (claude, codex, opencode), a much larger surface than
-  signal-based cancel.
-- The coordination between "cooperative cancel finished" and the reaper's
-  authority window is identical to the SIGTERM path, so we'd pay all the
-  integration cost with no clarity win.
+## D-10 — App-launched spawns populate `runner_pid` with FastAPI worker PID
 
-## D-10 — App-launched spawns populate `runner_pid` with FastAPI worker pid
+**v1 decision preserved.** `runner_pid=os.getpid()` at spawn creation
+in the FastAPI worker.
 
-**Choice.** The FastAPI worker's pid goes into `runner_pid` at spawn
-creation time. This matches the contract "`runner_pid` is the process
-that owns finalize and heartbeat".
+## D-11 — App server moves to AF_UNIX socket (v2 new)
 
-**Alternative considered.** Leave `runner_pid` unset for app-launched
-spawns and add a reaper carve-out to skip the check. Rejected: carve-outs
-erode the clarity of the reaper's rule. The problem statement (#30) is
-literally "the contract wasn't met"; meeting the contract is the fix.
+**Choice.** The app server binds to an AF_UNIX socket
+(`.meridian/app.sock`) instead of TCP `127.0.0.1:8420`. Uvicorn supports
+`--uds` natively. The frontend connects via the Unix socket (browsers
+cannot; the frontend dev server proxies).
 
-**Tradeoff.** The FastAPI worker's pid is now visible in the spawn record;
-if the worker restarts, previously-running spawns have a stale
-`runner_pid`. That case is already handled by the reaper (pid-not-alive →
-reconciliation) and is actually the signal we want: a worker restart
-should let the reaper take over.
+**Why this resolves BL-3 + BL-6 together.**
+- BL-3 (HTTP caller identity): AF_UNIX provides `SO_PEERCRED` for peer
+  PID. No need for TCP loopback peercred hacks.
+- BL-6 (loopback not enforced): AF_UNIX sockets are filesystem objects
+  with standard Unix permissions. No `--host 0.0.0.0` exposure risk.
+  The `--host` flag is removed; replaced by `--uds <path>`.
+
+**Tradeoff.** Browser-based development needs a proxy. The app ships a
+tiny `--proxy` mode that binds TCP `127.0.0.1:<port>` and forwards to
+the Unix socket. Production GUI usage goes through the proxy; CLI and
+agent callers connect to the socket directly.
+
+**Alternatives rejected.**
+1. *Keep TCP, add token auth.* Adds a token lifecycle surface
+   (generation, rotation, distribution to spawns). Overcomplicated for
+   an honest-actors model.
+2. *Keep TCP, enforce `--host 127.0.0.1` in code.* Fixes BL-6 but not
+   BL-3 (TCP loopback still has no reliable peer-PID).
+
+## D-12 — `launch_mode` gains `"app"` value (v2 new, resolves BL-2)
+
+**Choice.** Extend `LaunchMode = Literal["background", "foreground", "app"]`.
+App server sets `launch_mode="app"` at spawn creation. This is the durable
+owner discriminator that the cancel dispatcher, reaper, and status
+display use to distinguish app-managed spawns.
+
+**Why `"app"` not a separate field.** The existing `launch_mode` field
+already answers "who launched this spawn". Adding a separate `owner`
+field is redundant — `launch_mode` IS the ownership signal. A new value
+in the existing enum is simpler than a new column.
+
+**Note on cancel dispatch.** With D-03 (two-lane cancel), the
+`launch_mode` field is the dispatch key: `SignalCanceller` branches on
+`launch_mode == "app"` to choose in-process vs SIGTERM cancel.
+
+## D-13 — No SIGKILL escalation at all; SIGTERM + wait + reaper (v2r2, resolves BL-4)
+
+**v2 initial attempt:** re-check `finalizing` before SIGKILL. Reviewer
+(p1795) flagged: the spawn can enter `mark_finalizing` in the window
+between the re-check and `os.kill(SIGKILL)`. This TOCTOU race is
+inherent to the design because the runner and canceller are in different
+processes with no shared lock.
+
+**v2r2 choice.** Remove SIGKILL escalation entirely from `SignalCanceller`.
+The cancel pipeline is: SIGTERM → wait for terminal row → if grace expires,
+return 503 and let the reaper handle it. No SIGKILL ever.
+
+**Why no SIGKILL.** The TOCTOU race between "is this process finalizing"
+and "kill it" cannot be closed without a cross-process lock, which is
+more mechanism than the problem warrants. The reaper already handles
+stuck processes (stale heartbeat → reconciliation). SIGKILL was a
+convenience optimization for "runner is hung"; removing it simplifies
+the pipeline and eliminates the race at no operational cost — the reaper
+converges on the same outcome within `heartbeat_window`.
+
+**What CAN-003 becomes.** Grace expiry returns 503 (HTTP) or prints
+"spawn did not terminate within grace; reaper will reconcile" (CLI).
+There is no separate `forced` flag in `CancelOutcome` because the cancel
+pipeline never force-kills. If the runner IS hung (not finalizing, just
+stuck), the reaper detects
+stale heartbeat + dead process and writes `origin="reconciler"`.
+
+**Tradeoff.** A hung runner takes up to `heartbeat_window` (120s) to be
+reaped instead of `cancel_grace_seconds` (5s). This is acceptable:
+hung runners are already rare, and the reaper is the designed safety net.
+
+## D-14 — `depth > 0 ∧ caller_id missing` is deny-by-default (v2 new)
+
+**Choice.** When `MERIDIAN_DEPTH > 0` (inside a spawn) and
+`MERIDIAN_SPAWN_ID` is unset or empty, `authorize()` returns DENY with
+reason `"missing_caller_in_spawn"`. An explicit `--operator-override` CLI
+flag bypasses this for debugging.
+
+**Why.** The v1 design treated missing env as "trusted operator" in all
+cases. Reviewers correctly flagged this as fail-open inside spawn trees —
+env-drop bugs would auto-promote subagents to operator status. The fix:
+operator status is only implicit at `depth == 0` (interactive shell).
+
+## D-15 — PID-reuse guard in SignalCanceller (v2 new)
+
+**Choice.** `SignalCanceller._resolve_runner_pid` passes
+`created_after_epoch=_epoch_from_started_at(record.started_at)` to
+`is_process_alive`, matching the reaper's guard in `reaper.py:127-129`.
+`SpawnRecord` already stores `started_at` as ISO 8601, so the guard
+converts that field at use time rather than adding a second persisted
+timestamp. If the PID has been reused, the resolver returns `None` and
+falls through to the finalize-only path (no SIGTERM sent to a stranger
+process).
+
+## D-16 — Terminal-cancel HTTP returns 409 (v2 new, resolves BL-7)
+
+**Choice.** Spec and architecture agree: cancel against an already-terminal
+spawn returns `409 Conflict` with FastAPI's standard
+`{"detail": "spawn already terminal: <status>"}` envelope. The v1
+architecture sketch that said `200 with already_terminal=true` is removed.
+
+**Why 409 over 200.** The client asked for a state transition that cannot
+happen. 409 is semantically correct for "conflict with current resource
+state". Returning 200 would force every client to check a boolean flag
+to know whether the cancel actually did anything.
+
+## D-17 — Semantic validation → 400, schema validation → 422 (v2r2 new)
+
+**Choice.** Split HTTP validation errors into two tiers:
+- **422**: FastAPI/pydantic structural validation (missing fields, wrong
+  types). Handled by FastAPI's default exception handler.
+- **400**: Semantic validation (text + interrupt both set, text empty and
+  interrupt false). Handled by a custom exception handler that catches
+  `ValueError` from `model_validator` and remaps to 400.
+
+This resolves the p1794 finding that INT-006 says 400 but pydantic
+`model_validator` produces 422 by default.
+
+## D-18 — INJ-002 contract narrowed to `inbound_seq` ordering (v2r2 new)
+
+**Choice.** The INJ-002 contract specifies that concurrent injects are
+linearized in `inbound.jsonl` order and harness delivery order. Ack
+arrival order at clients is **not** guaranteed to match for HTTP clients
+(separate TCP/Unix connections with independent response timing).
+
+For control socket clients, ack ordering IS guaranteed by the `on_result`
+callback (D-05 extension). For HTTP clients, `inbound_seq` in the
+response is sufficient for clients to reconstruct ordering.
+
+This resolves the p1795 major about HTTP ack ordering.
+
+## D-19 — Peercred failure → DENY for lifecycle ops (v2r2 new)
+
+**Choice.** When `SO_PEERCRED` fails or `/proc/<pid>/environ` is
+unreadable (peer exited, macOS, permission denied), the auth surface
+returns DENY for lifecycle operations, not operator fallback.
+
+CLI env path remains the only operator path. HTTP/socket callers whose
+identity cannot be determined are denied by default.
+
+This resolves both the p1794 blocker (macOS operator fallback) and the
+p1795 blocker (peer-exit race). The fallback from a failed peercred
+read is the same as "missing caller at depth > 0": deny.
+
+## D-20 — Timeout-kill consistency scoped to CLI spawns (v2r2 new)
+
+**Choice.** The requirements success criterion "cancel semantics are
+consistent across CLI, HTTP, and timeout kill" is satisfied for CLI
+spawns. For app spawns, CLI cancel and HTTP cancel converge on the same
+terminal state; timeout kill affects the entire FastAPI worker (all
+hosted spawns die), which is documented behavior, not a bug.
+
+This is a direct consequence of D-03 (two-lane cancel). External
+timeout supervisors issue SIGTERM to processes, which has no per-spawn
+addressing in a shared worker. The app server has its own cancel
+endpoint for targeted cancel.
+
+## Cleanup appendix (v2r2 narrow cleanup)
+
+### D-21 — Terminal cancel uses the shared FastAPI error envelope
+
+**Choice.** Already-terminal `POST /cancel` responses use the same
+`detail` envelope as other HTTP rejections:
+`{"detail": "spawn already terminal: <status>"}`.
+
+**Why.** `spec/http_surface.md` already standardizes rejected HTTP
+responses on FastAPI's `detail` form. Keeping cancel on that envelope
+avoids a one-off body contract that clients and smoke tests would have
+to special-case.
+
+### D-22 — Delete the peercred-unavailable header workaround
+
+**Choice.** No `X-Meridian-Caller` / `X-Meridian-Depth` fallback exists in
+this design. Peercred failure on HTTP/socket lifecycle surfaces is an
+unconditional deny.
+
+**Why.** The workaround was only partially specified and reintroduced the
+fail-open ambiguity D-19 was meant to remove. A forgeable header is still
+a different trust boundary, even in an honest-actors model; if Meridian
+wants a peercred-unavailable path later, it should be designed as a real
+transport, not as an exception bolted onto the deny path.
+
+### D-23 — PID-reuse guard converts `started_at` at read time
+
+**Choice.** D-15 is realized by converting `SpawnRecord.started_at`
+(ISO 8601 string) to epoch inside `SignalCanceller._resolve_runner_pid`.
+This cleanup round does not add a new `started_epoch` field to the spawn
+schema.
+
+**Why.** The existing schema already contains the needed timestamp. Adding
+another persisted field would widen R-11 for no behavioral gain.
+
+### D-24 — `inbound_seq` comes from `_record_inbound` return value
+
+**Choice.** R-02 explicitly changes `_record_inbound` to return the
+zero-based appended line index and threads that through `InjectResult`.
+
+**Why.** `inbound.jsonl` is the durable ordering authority. Returning the
+line index avoids inventing a second sequence source just to satisfy the
+HTTP/control-socket acknowledgement contract.

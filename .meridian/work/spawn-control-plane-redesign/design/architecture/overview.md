@@ -1,89 +1,112 @@
-# Architecture Overview — Spawn Control Plane
+# Architecture Overview — Spawn Control Plane (v2r2)
 
 The spawn control plane is split along two axes:
 
 1. **Operation kind** — *lifecycle* (cancel) vs. *intra-turn cooperative*
-   (inject, interrupt). Lifecycle goes through OS process signals; intra-turn
-   goes through the per-spawn control socket / `SpawnManager`.
-2. **Surface** — *CLI*, *HTTP app server*, *control socket*, *agent tool*.
-   Each surface composes the same underlying primitives; surfaces do not
-   re-implement semantics.
+   (inject, interrupt). Lifecycle goes through `SignalCanceller` (two-lane
+   dispatch by `launch_mode`); intra-turn goes through the per-spawn
+   control socket / `SpawnManager`.
+2. **Surface** — *CLI*, *AF_UNIX HTTP app server*, *control socket*,
+   *agent tool*. Each surface composes the same underlying primitives;
+   surfaces do not re-implement semantics.
 
 ```
                   ┌──────────────────────────────────────────────────────┐
                   │                       SURFACES                       │
-                  │ CLI    HTTP app    Control socket    Agent tool      │
-                  └─────┬────┬───────────────┬───────────────────────────┘
-                        │    │               │
-              lifecycle │    │ lifecycle     │ intra-turn (cooperative)
-                  ┌─────▼────▼─────┐   ┌─────▼────────────────┐
-                  │ AuthorizationG │   │ ControlSocketServer  │
-                  │ uard           │   │ (per-spawn AF_UNIX)  │
-                  └─────┬──────────┘   └─────┬────────────────┘
-                        │                    │
-                  ┌─────▼──────────┐   ┌─────▼────────────────┐
-                  │ SignalCanceller│   │ SpawnManager.inject  │
-                  │ (SIGTERM PID)  │   │ /interrupt + FIFO    │
-                  └─────┬──────────┘   └─────┬────────────────┘
-                        │                    │
-                        │       ┌────────────▼─────────────┐
-                        │       │ HarnessConnection.send_* │
-                        │       └──────────────────────────┘
-                        │
-                        ▼ (signal lands in runner process)
-                  ┌─────────────────────┐
-                  │ Runner signal       │
-                  │ handler →           │
-                  │ stop_spawn          │
-                  │ (status=cancelled,  │
-                  │ origin=runner)      │
-                  └─────────────────────┘
+                  │ CLI    AF_UNIX HTTP    Control socket    Agent tool  │
+                  └─────┬────┬──────────────────┬────────────────────────┘
+                        │    │                  │
+              lifecycle │    │ lifecycle        │ intra-turn (cooperative)
+                  ┌─────▼────▼─────┐      ┌─────▼────────────────┐
+                  │ AuthorizationG │      │ ControlSocketServer  │
+                  │ uard           │      │ (per-spawn AF_UNIX)  │
+                  └─────┬──────────┘      └─────┬────────────────┘
+                        │                       │
+                  ┌─────▼──────────────┐  ┌─────▼────────────────┐
+                  │ SignalCanceller    │  │ SpawnManager.inject  │
+                  │ (two-lane D-03)   │  │ /interrupt + FIFO    │
+                  └──┬────────────┬───┘  └─────┬────────────────┘
+                     │            │             │
+          CLI spawns │            │ app spawns  │
+          (SIGTERM)  │            │ (in-proc)   │
+                     ▼            ▼             ▼
+          ┌──────────────┐ ┌──────────────┐ ┌────────────────────┐
+          │Runner SIGTERM│ │manager.stop_ │ │HarnessConnection   │
+          │handler →     │ │spawn() or    │ │.send_*             │
+          │stop_spawn    │ │HTTP POST     │ └────────────────────┘
+          │(cancelled,   │ │/cancel       │
+          │origin=runner)│ │(origin=runner│
+          └──────────────┘ └──────────────┘
 ```
+
+## v2r2 key change: two-lane cancel (D-03)
+
+v1 had two cancel pipelines hidden behind one name. v2 initial attempt
+tried to unify them via a cancel-target coordination file, but reviewers
+(p1794, p1795) blocked: external SIGTERM (timeout supervisors, OOM killers)
+to the shared FastAPI worker PID cannot target a specific spawn because
+no cancel-target file exists in that code path.
+
+v2r2 explicitly adopts two-lane cancel:
+
+- **CLI-launched spawns** (`foreground`/`background`): SIGTERM to
+  `runner_pid`. Runner's signal handler calls
+  `manager.stop_spawn(status="cancelled")`.
+- **App-managed spawns** (`app`): `SignalCanceller` detects
+  `launch_mode == "app"` and calls `manager.stop_spawn()` in-process,
+  or routes through HTTP `POST /cancel` when cross-process.
+
+**What IS unified:** `SignalCanceller.cancel(spawn_id)` is the single
+entry point for all cancel callers. Both lanes converge on
+`status="cancelled"`, `origin="runner"`.
 
 ## Component Index
 
 | File | Role |
 |---|---|
 | `architecture/cancel_pipeline.md` | Signal-driven cancel from any surface |
-| `architecture/interrupt_pipeline.md` | Non-fatal interrupt routing and runner classification |
+| `architecture/interrupt_pipeline.md` | Non-fatal interrupt routing and classification |
 | `architecture/inject_serialization.md` | Per-spawn FIFO for control-socket and HTTP injects |
 | `architecture/liveness_contract.md` | `runner_pid` + heartbeat ownership move |
-| `architecture/http_endpoints.md` | HTTP shape, schema, error mapping |
-| `architecture/authorization_guard.md` | Capability-by-ancestry guard |
+| `architecture/http_endpoints.md` | HTTP shape, schema, error mapping, AF_UNIX transport |
+| `architecture/authorization_guard.md` | Capability-by-ancestry guard via AF_UNIX SO_PEERCRED |
 
 ## Cross-Cutting Decisions
 
-- **Single source of truth for cancel semantics.** All cancel callers funnel
-  through `SignalCanceller.cancel(spawn_id)` which encapsulates "resolve
-  `runner_pid` → SIGTERM with grace → SIGKILL fallback → finalize-if-needed".
-  The CLI command, HTTP endpoint, and timeout-based killers all share this
-  one call.
-- **Single source of truth for liveness.** `SpawnManager` owns the heartbeat
-  for every spawn it manages. The legacy heartbeat in
-  `runner.py` / `streaming_runner.py` becomes a thin wrapper that asks the
-  manager for its session and lets the manager touch the file. Two-process
-  runners that don't host a `SpawnManager` still touch the heartbeat via the
-  same module-level helper, but the helper is the only writer.
+- **Single cancel entry point, two lanes.** `SignalCanceller.cancel(spawn_id)`
+  is the only cancel entry point. It dispatches by `launch_mode`:
+  CLI spawns → SIGTERM with PID-reuse guard (D-15); app spawns →
+  in-process `stop_spawn` or HTTP `POST /cancel`. Both lanes check
+  the finalizing gate (CAN-008). No SIGKILL in any path (D-13).
+- **Single liveness contract.** `SpawnManager` owns heartbeat for every
+  spawn it manages. The heartbeat helper is the only writer.
 - **Authorization at the surface.** `AuthorizationGuard` is a stateless
-  function that surfaces import. `SpawnManager`, `SignalCanceller`, and
-  `spawn_cancel_sync` remain unaware of caller identity; they trust their
-  callers to have authorized the request.
-- **Control socket loses lifecycle.** After this change the control socket
-  vocabulary is `{user_message, interrupt}`. Any other `type` is rejected.
-  This matches what the channel actually carries: data and intra-turn
-  control.
+  function imported by surfaces. Inner components trust their callers.
+  Depth-aware deny (D-14) prevents env-drop auto-promotion. Peercred
+  failure → DENY for lifecycle ops (D-19); operator mode only via CLI.
+- **Control socket loses lifecycle.** Vocabulary: `{user_message,
+  interrupt}`. Any `cancel` type is rejected with a stable error.
+- **AF_UNIX transport.** App server binds AF_UNIX, not TCP. Resolves
+  BL-3 (caller identity via SO_PEERCRED) and BL-6 (no network exposure).
+- **HTTP validation split.** Schema errors → 422 (FastAPI default);
+  semantic errors → 400 (custom handler per D-17).
 
 ## Why the FastAPI worker is "the runner"
 
-The recurring confusion in #30 is that "runner" historically meant
-"`runner.py`/`streaming_runner.py` the CLI process". After this change,
-**runner** is whatever process owns the `HarnessConnection` and is
-responsible for finalize. For the CLI, that's the streaming-runner process.
-For the app server, that's the **FastAPI worker process**. The contract:
+**Runner** = whatever process owns the `HarnessConnection` and is
+responsible for finalize. For CLI: `streaming_runner.py` process. For
+app server: **FastAPI worker process**.
+
+The contract:
 
 > The runner is the process whose PID is in `runner_pid` for an active
-> spawn. It is responsible for heartbeat, terminal finalize (origin=runner
-> or origin=launcher when an outer wrapper owns finalize), and SIGTERM
-> handling.
+> spawn. It is responsible for heartbeat, terminal finalize
+> (`origin=runner`), and SIGTERM handling.
 
-This rephrasing closes the conceptual gap that produced #30.
+v2 structural change: app-managed spawns finalize with `origin="runner"`
+(not `origin="launcher"`) because the FastAPI worker IS the runner. No
+dual finalize ownership — the background-finalize task writes
+`origin="runner"` because that's what the worker is. The "wrapper writes
+launcher" path only exists in the `streaming_serve.py` outer wrapper for
+`meridian streaming serve`, which is a separate code path from the app
+server.

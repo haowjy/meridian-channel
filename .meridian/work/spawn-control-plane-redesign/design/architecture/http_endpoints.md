@@ -1,7 +1,30 @@
-# HTTP Endpoints
+# HTTP Endpoints (v2r2)
 
-Realizes `spec/http_surface.md` (HTTP-001 .. HTTP-005) and the HTTP halves
-of `spec/cancel.md` + `spec/inject.md` + `spec/interrupt.md`.
+Realizes `spec/http_surface.md` (HTTP-001..HTTP-006) and the HTTP halves
+of `spec/cancel.md`, `spec/inject.md`, `spec/interrupt.md`.
+
+## Transport: AF_UNIX (v2 change, D-11)
+
+The app server binds to `.meridian/app.sock` via uvicorn's `--uds`
+support:
+
+```python
+# app_cmd.py (revised)
+def run_app(
+    uds: str | None = None,      # replaces --host/--port
+    no_browser: bool = False,
+    debug: bool = False,
+    allow_unsafe_no_permissions: bool = False,
+) -> None:
+    socket_path = uds or str(state_root / "app.sock")
+    uvicorn_module.run(app, uds=socket_path, log_level="info")
+```
+
+Browser access uses a `--proxy` subcommand that starts a TCP-to-UDS
+reverse proxy (tiny asyncio bridge). CLI and agent callers connect
+directly to the Unix socket.
+
+`--host` is removed. No `--host 0.0.0.0` exposure (resolves BL-6).
 
 ## Endpoint table
 
@@ -14,9 +37,7 @@ of `spec/cancel.md` + `spec/inject.md` + `spec/interrupt.md`.
 | POST | `/api/spawns/{id}/cancel` | `cancel_spawn` (new) | CAN-004 |
 | ~~DELETE~~ | ~~`/api/spawns/{id}`~~ | REMOVED | CAN-005 |
 
-Any other method/path under `/api/spawns/{id}/...` returns 404 with
-`{"detail": "endpoint not found"}` (HTTP-005). FastAPI's default routing
-already does this once the offending routes are deleted.
+Any other path returns 404 (HTTP-005).
 
 ## `POST /api/spawns/{id}/inject`
 
@@ -36,99 +57,125 @@ class InjectRequest(BaseModel):
 
 @router.post("/api/spawns/{spawn_id}/inject")
 async def inject_message(spawn_id: str, request: InjectRequest):
-    record = _require_spawn(spawn_id)                      # 404 if missing
-    _require_not_terminal(record)                          # 409 / 410
+    record = _require_spawn(spawn_id)
+    _require_not_terminal(record)                          # 410 for inject/interrupt
     _require_not_finalizing(record)                        # 503
-    manager = _require_active_manager(spawn_id)            # 404 if no session
+    manager = _require_active_manager(spawn_id)            # 404
 
     if request.interrupt:
-        result = await manager.interrupt()
-        return {"ok": True, "inbound_seq": result.inbound_seq, "noop": result.noop}
+        _require_authorization(spawn_id, request_obj)      # AUTH gate
+        result = await manager.interrupt(typed_id, source="rest")
+        return {"ok": True, "inbound_seq": result.inbound_seq,
+                "noop": result.noop}
 
-    result = await manager.inject(request.text)  # text is str here per validator
+    # Inject is NOT gated (INJ-006)
+    result = await manager.inject(typed_id, request.text, source="rest")
     return {"ok": True, "inbound_seq": result.inbound_seq}
 ```
 
-- Inject is **not** authorization-gated (INJ-006). No `AuthorizationGuard`
-  call in this handler.
-- Interrupt **is** authorization-gated — handled by a dependency, see
-  `authorization_guard.md`.
-
-## `POST /api/spawns/{id}/cancel`
+## `POST /api/spawns/{id}/cancel` (v2r2 — two-lane aware)
 
 ```python
 @router.post("/api/spawns/{spawn_id}/cancel",
              dependencies=[Depends(require_authorization)])
 async def cancel_spawn(spawn_id: str):
-    record = _require_spawn(spawn_id)                      # 404
-    outcome = await signal_canceller.cancel(SpawnId(spawn_id))
-    return {
-        "ok": True,
-        "status": outcome.status,
-        "origin": outcome.origin,
-        "forced": outcome.forced,
-        "already_terminal": outcome.already_terminal,
-    }
+    record = _require_spawn(spawn_id)
+    if _spawn_is_terminal(record.status):
+        raise HTTPException(409, detail=f"spawn already terminal: {record.status}")
+
+    # v2r2: SignalCanceller accepts optional manager for in-process
+    # app-spawn cancel (D-03 two-lane). When the cancel endpoint runs
+    # inside the FastAPI worker, it can cancel app-managed spawns directly.
+    canceller = SignalCanceller(
+        state_root=app_state.state_root,
+        manager=app_state.manager,   # enables in-process cancel for app spawns
+    )
+    outcome = await canceller.cancel(SpawnId(spawn_id))
+
+    if outcome.finalizing:
+        raise HTTPException(503, detail="spawn is finalizing",
+                           headers={"Retry-After": "2"})
+    if outcome.already_terminal:
+        raise HTTPException(409, detail=f"spawn already terminal: {outcome.status}")
+
+    return {"ok": True, "status": outcome.status, "origin": outcome.origin}
 ```
 
-No request body. `SignalCanceller` handles idempotency — repeated calls to
-the same endpoint return `already_terminal=True` on the second call.
+**v2 resolution of BL-7.** Already-terminal cancel returns `409`, not
+`200`. Spec and architecture agree (D-16).
 
-## Error-mapping table (HTTP-004)
+## Error-mapping table (HTTP-004, v2r2 with D-17 split)
 
-| Condition | Status | `detail` |
-|---|---|---|
-| Body fails pydantic validation | 422 | FastAPI default |
-| `text` and `interrupt` both set (semantic) | 400 | `"text and interrupt are mutually exclusive"` |
-| `text` empty and `interrupt` false | 400 | `"provide text or interrupt: true"` |
-| Spawn id not in `spawns.jsonl` | 404 | `"spawn not found"` |
-| Inject against terminal spawn | 410 | `"spawn already terminal"` |
-| Cancel against terminal spawn | 200 | `{already_terminal: true, origin: <existing>}` |
-| Spawn in `finalizing` | 503 + `Retry-After: 2` | `"spawn finalizing; retry"` |
-| Legacy `DELETE /api/spawns/{id}` | 405 | `"method not allowed; use POST /api/spawns/{id}/cancel"` |
-| Unauthorized | 403 | `"caller is not authorized for this spawn"` |
+| Condition | Status | `detail` | Source |
+|---|---|---|---|
+| Body fails pydantic validation (missing fields, wrong types) | 422 | FastAPI default | pydantic |
+| text + interrupt both set (semantic) | 400 | `"text and interrupt are mutually exclusive"` | `model_validator` → custom handler |
+| text empty + interrupt false (semantic) | 400 | `"provide text or interrupt: true"` | `model_validator` → custom handler |
+| Spawn id not found | 404 | `"spawn not found"` | handler |
+| Inject against terminal | 410 | `"spawn already terminal"` | handler |
+| Cancel against terminal | 409 | `"spawn already terminal: <status>"` | handler |
+| Spawn in `finalizing` | 503 + `Retry-After: 2` | `"spawn is finalizing"` | handler |
+| Legacy DELETE | 405 | `"use POST /cancel"` | handler |
+| Unauthorized | 403 | `"caller is not authorized"` | auth dep |
+| Caller identity unavailable (D-19) | 403 | `"caller identity unavailable"` | auth dep |
 
-For legacy `DELETE` we explicitly register a 405 handler rather than relying
-on "no route" (which would yield 404) so the operator gets a clear "you're
-calling the removed endpoint" message.
+**v2r2 validation split (D-17).** Semantic validation errors from
+`model_validator` raise `ValueError`, which a custom exception handler
+remaps to 400. Structural validation (missing fields, wrong types) stays
+at 422 via FastAPI's default pydantic handler. This resolves the p1794
+finding that INT-006 says 400 but `model_validator` produces 422 by default.
+
+## Authorization extraction via SO_PEERCRED (v2r2 — D-19 deny-on-failure)
+
+```python
+async def require_authorization(spawn_id: str, request: Request):
+    try:
+        caller, depth = _caller_from_peercred(request)
+    except PeercredFailure as exc:
+        # D-19: peercred failure → DENY for lifecycle ops
+        logger.warning("spawn_auth_peercred_failure",
+                       extra={"error": str(exc), "spawn_id": spawn_id})
+        raise HTTPException(403, detail="caller identity unavailable")
+
+    decision = authorize(
+        state_root=app_state.state_root,
+        target=SpawnId(spawn_id),
+        caller=caller,
+        depth=depth,
+    )
+    if not decision.allowed:
+        raise HTTPException(403, detail="caller is not authorized")
+```
+
+`_caller_from_peercred` reads the connecting process's PID via
+`SO_PEERCRED` on the AF_UNIX socket, then reads
+`/proc/<pid>/environ` for `MERIDIAN_SPAWN_ID` and `MERIDIAN_DEPTH`.
+
+**v2r2 (D-19).** On failure — macOS without PID, peer exited before
+`/proc` read, permission denied — `_caller_from_peercred` raises
+`PeercredFailure` and the dependency returns 403. Operator mode is only
+available via CLI env path. This design does not define a fallback
+header for peercred-unavailable HTTP callers.
 
 ## Manager lookup
 
-Today `_require_active_manager` does a dict lookup in the app-server
-process. That's correct because inject/interrupt are cooperative: only the
-process owning the `SpawnManager` can route the command. If the spawn was
-launched by a different app-server worker (multi-worker FastAPI), the
-request must go to that worker. **Out of scope**: the app server runs
-single-worker by default; multi-worker scaling is a separate design.
-
-## Observability
-
-Every handler logs:
-
-```python
-logger.info("spawn_control", extra={
-    "spawn_id": spawn_id,
-    "operation": "inject" | "interrupt" | "cancel",
-    "auth_mode": "operator" | "ancestor" | "self",
-    "outcome": "ok" | "denied" | "error",
-})
-```
-
-Tests assert on these log lines to verify AUTH-001 "Observable" semantics.
-
-## OpenAPI
-
-Pydantic models feed FastAPI's OpenAPI schema. The generated schema is the
-source of truth for client SDKs; `docs/api.md` references the live schema
-rather than hand-written JSON.
+`_require_active_manager` does a dict lookup in the app-server process.
+Only the process owning the `SpawnManager` can route inject/interrupt.
+Multi-worker scaling is out of scope (single-worker default).
 
 ## Test plan
 
-- **Unit**: `InjectRequest` validates the four combinations (text / interrupt
-  / both / neither) correctly.
-- **Smoke**: scenario 9a — `POST /inject` with `{"text": "hi"}` works.
-- **Smoke**: scenario 9b — `POST /inject` with `{"interrupt": true}` works.
-- **Smoke**: scenario 9c — `POST /inject` with both rejected as 400.
-- **Smoke**: scenario 14 — `POST /cancel` end-to-end transitions spawn to
-  `cancelled` with origin `runner` (or `cancel` on fallback).
-- **Smoke**: scenario 15 — `DELETE /api/spawns/{id}` returns 405.
+### Unit tests
+- `InjectRequest` validates four combinations.
+
+### Smoke tests
+- Scenario 9a: `POST /inject` with text via AF_UNIX.
+- Scenario 9b: `POST /inject` with interrupt via AF_UNIX.
+- Scenario 9c: both text and interrupt → 400.
+- Scenario 14: `POST /cancel` end-to-end.
+- Scenario 15: `DELETE` → 405.
+- Scenario 19: app server starts on AF_UNIX socket.
+
+### Fault-injection tests
+- **Cancel-during-finalize via HTTP**: verify 503, not 200.
+- **Concurrent HTTP cancels**: verify idempotency (409 on second).

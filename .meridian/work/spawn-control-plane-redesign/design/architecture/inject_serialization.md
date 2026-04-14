@@ -1,18 +1,15 @@
-# Inject Serialization
+# Inject Serialization (v2r2)
 
-Realizes `spec/inject.md` (INJ-002, INJ-003) and the linearizability half of
-`spec/interrupt.md` (INT-006, INT-007).
+Realizes `spec/inject.md` (INJ-002, INJ-003) and the linearizability
+half of `spec/interrupt.md` (INT-006, INT-007).
 
 ## Problem recap
 
-Two concurrent calls to `SpawnManager.inject` (or one inject + one interrupt)
-can interleave between `record_inbound(...)` and `connection.send_user_message(...)`.
-The net effect today:
-
-- `inbound.jsonl` ordering does not match harness send ordering.
-- In rare cases both callers observe `success=True` but one of their bytes
-  never reaches the harness (second ack overwrites the queued sender
-  future). Issue #31 captures this.
+Two concurrent calls to `SpawnManager.inject` (or one inject + one
+interrupt) can interleave between `record_inbound(...)` and
+`connection.send_user_message(...)`. Additionally, the control socket
+writes the JSON ack AFTER `SpawnManager` returns, allowing ack order to
+diverge from inbound order (v1 review finding P13).
 
 ## Module
 
@@ -21,16 +18,13 @@ New file: `src/meridian/lib/streaming/inject_lock.py`.
 ```python
 """Per-spawn inject/interrupt ordering lock.
 
-SpawnManager is a per-spawn object, but its inject / interrupt methods are
-awaitable from arbitrary callers (control socket handler, HTTP endpoint,
-test harness). Serializing the (record_inbound + send_*) pair on a single
+SpawnManager is a multi-spawn registry. Its inject/interrupt methods are
+awaitable from arbitrary callers (control socket, HTTP, test harness).
+Serializing (record_inbound + send_* + return result) on a single
 asyncio.Lock keyed by spawn_id collapses every caller into one FIFO.
 """
 
-from __future__ import annotations
-
 import asyncio
-
 from meridian.lib.state.types import SpawnId
 
 _locks: dict[SpawnId, asyncio.Lock] = {}
@@ -46,71 +40,124 @@ def drop_lock(spawn_id: SpawnId) -> None:
     _locks.pop(spawn_id, None)
 ```
 
-## SpawnManager integration
+v2 correction: the docstring describes `SpawnManager` as a multi-spawn
+registry (matching the actual type at `spawn_manager.py:98`), not a
+per-spawn object as v1 incorrectly stated (minor finding from p1792).
+
+## `_record_inbound` return contract (v2r2 — new)
+
+The existing `_record_inbound` returns `None`. R-02 must change it to
+return the zero-based `inbound_seq` (line index in `inbound.jsonl`).
+This is the monotonic sequence number that INJ-003 promises clients.
 
 ```python
-async def inject(self, text: str) -> InjectResult:
-    async with inject_lock.get_lock(self._spawn_id):
-        seq = spawn_store.record_inbound(
-            self._state_root, self._spawn_id, kind="user_message", payload={"text": text},
+async def _record_inbound(self, spawn_id, kind, payload, source) -> int:
+    """Append to inbound.jsonl and return the zero-based line index."""
+    # ... existing write logic ...
+    return line_index
+```
+
+Additionally, add `InjectResult` as a new dataclass:
+
+```python
+@dataclass
+class InjectResult:
+    success: bool
+    inbound_seq: int | None = None
+    noop: bool = False
+    error: str | None = None
+```
+
+## SpawnManager integration (v2 — extended lock scope)
+
+```python
+async def inject(self, spawn_id: SpawnId, text: str, source: str) -> InjectResult:
+    async with inject_lock.get_lock(spawn_id):
+        seq = await self._record_inbound(
+            spawn_id, kind="user_message",
+            payload={"text": text}, source=source,
         )
-        await self._connection.send_user_message(text)
+        session = self._sessions.get(spawn_id)
+        if session is None:
+            return InjectResult(success=False, error="no active session")
+        await session.connection.send_user_message(text)
         return InjectResult(success=True, inbound_seq=seq)
 
-async def interrupt(self) -> InjectResult:
-    async with inject_lock.get_lock(self._spawn_id):
-        if self._connection.current_turn_id is None:
+async def interrupt(self, spawn_id: SpawnId, source: str) -> InjectResult:
+    async with inject_lock.get_lock(spawn_id):
+        session = self._sessions.get(spawn_id)
+        if session is None:
+            return InjectResult(success=False, error="no active session")
+        if session.connection.current_turn_id is None:
             return InjectResult(success=True, noop=True)
-        seq = spawn_store.record_inbound(
-            self._state_root, self._spawn_id, kind="interrupt", payload={},
+        seq = await self._record_inbound(
+            spawn_id, kind="interrupt", payload={}, source=source,
         )
-        await self._connection.send_interrupt()
+        await session.connection.send_interrupt()
         return InjectResult(success=True, inbound_seq=seq, noop=False)
 ```
 
-Both functions await holding the lock; the `send_*` coroutine runs to
-completion before the next caller's `record_inbound` runs. This makes
-`inbound.jsonl` order + harness wire order identical, which is the invariant
-the test suite will verify.
+**v2 key change.** The lock must cover ack emission, not just
+`record_inbound + send_*`. The chosen `on_result` callback lets callers
+emit replies inside the lock scope without exposing lock internals:
+
+```python
+async def inject(self, spawn_id, text, source, on_result=None) -> InjectResult:
+    async with inject_lock.get_lock(spawn_id):
+        seq = await self._record_inbound(...)
+        await session.connection.send_user_message(text)
+        result = InjectResult(success=True, inbound_seq=seq)
+        if on_result:
+            await on_result(result)
+        return result
+```
+
+The control socket passes `on_result=lambda r: self._write(writer, ...)`.
+The HTTP handler doesn't need the callback — HTTP responses travel on
+independent connections, so ack arrival order is NOT guaranteed to match
+`inbound.jsonl` order. Clients use `inbound_seq` in the response to
+reconstruct ordering (D-18).
+
+**v2r2 ack ordering contract (D-18):**
+- **Control socket clients:** ack arrival order matches `inbound.jsonl`
+  order (lock scope covers ack emission via `on_result` callback).
+- **HTTP clients:** ack arrival order is NOT guaranteed to match
+  `inbound.jsonl` order (independent connections). `inbound_seq` is
+  sufficient for clients to reconstruct ordering.
 
 ## Cleanup
 
-`drop_lock(spawn_id)` is called from:
+`drop_lock(spawn_id)` called from:
+- `SpawnManager.stop_spawn`
+- `_cleanup_completed_session`
 
-- `SpawnManager.stop_spawn` right before the spawn's session closes.
-- `_cleanup_completed_session` in the FastAPI background finalizer.
-
-A race where a late inject grabs a lock for an already-stopped spawn is
-benign: the lock exists, the `inject` call acquires it, and
-`connection.send_user_message` raises because the connection closed. The
-existing error-path returns `InjectResult(success=False, ...)` and the lock
-becomes garbage after the next `drop_lock` (or lives for process lifetime —
-the registry size is bounded by active-spawn count, which is small).
+Late inject on a stopped spawn: lock exists, `inject()` acquires it,
+`connection.send_user_message` raises, returns `InjectResult(success=False)`.
+Lock becomes garbage after `drop_lock`.
 
 ## Why asyncio.Lock, not a queue
 
-We considered a per-spawn `asyncio.Queue[Command]` with a dedicated worker
-task. Rejected: the queue adds a pump task per active spawn, doubling task
-accounting during shutdown, and it splits error-handling across the caller
-and the worker (the caller needs a future to await for the ack). The lock
-is fewer lines, the same ordering guarantee, and the current single-method
-signature stays intact.
-
-We also considered per-caller serialization (a lock on `HarnessConnection`).
-Rejected: a future connection pool could share a connection across spawns,
-and we'd rather the invariant be "one spawn, one FIFO" than "one connection,
-one FIFO".
+Queue adds a pump task per spawn, doubles task accounting at shutdown,
+splits error handling across caller and worker. Lock is fewer lines, same
+guarantee.
 
 ## Test plan
 
-- **Unit**: spin up two coroutines calling `inject("A")` and `inject("B")`
-  against a fake `HarnessConnection` whose `send_user_message` awaits an
-  event; verify `inbound.jsonl` sequences are monotonic and the order
-  observed at the fake matches.
-- **Unit**: same scenario with `inject("A")` and `interrupt()`; verify
-  linearization.
-- **Smoke**: scenario 8 — two simultaneous inject calls return distinct
-  `inbound_seq` values and both messages appear in harness output.
-- **Smoke**: scenario 11 — inject + interrupt simultaneously; interrupt
-  either lands before or after inject, but the `inbound.jsonl` order and
-  harness ordering agree.
+### Unit tests
+- Two coroutines calling `inject("A")` and `inject("B")` against a fake
+  connection: verify `inbound.jsonl` seqs are monotonic and harness wire
+  order matches.
+- Same with `inject("A")` and `interrupt()`: verify linearization.
+- Callback `on_result` fires inside lock scope (verified by attempting
+  a second inject from within the callback — it should deadlock/timeout).
+
+### Smoke tests
+- Scenario 8: two simultaneous injects → distinct `inbound_seq`;
+  control-socket ack order matches `inbound.jsonl`.
+- Scenario 11: inject + interrupt simultaneously → `inbound.jsonl` order
+  matches harness delivery order.
+
+### Fault-injection tests
+- **Three concurrent injects**: verify all three acked in inbound order,
+  no drops on the control socket; HTTP callers receive distinct
+  `inbound_seq` values they can reorder client-side.

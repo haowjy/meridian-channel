@@ -1,9 +1,9 @@
 # Inject — Cooperative Text Delivery (Intra-Turn)
 
-Inject is a **cooperative intra-turn operation** — it appends a user message
-to the active streaming spawn so the harness can respond. Inject is open to
-any caller that can reach the control socket or the HTTP endpoint; it carries
-no lifecycle authority and never finalizes the spawn.
+Inject is a **cooperative intra-turn operation** — it appends a user
+message to the active streaming spawn so the harness can respond. Inject
+is open to any caller that can reach the control socket or the AF_UNIX
+HTTP endpoint; it carries no lifecycle authority and never finalizes.
 
 ## EARS Statements
 
@@ -20,59 +20,77 @@ The harness emits a corresponding user-message item in `output.jsonl`.
 
 ### INJ-002 — Concurrent injects are linearizable per spawn
 
-**When** two or more clients open simultaneous control-socket connections to
-the same spawn and each sends an inject (text or interrupt),
-**the runner shall** serialize the writes through a per-spawn asyncio mutex
-that wraps the (`record_inbound` + `send_to_harness`) pair, so that
-`inbound.jsonl` order is the order acked back to clients **and** the order
-delivered to the harness.
+**When** two or more clients send simultaneous injects to the same spawn,
+**the runner shall** serialize through a per-spawn asyncio mutex that
+wraps (`record_inbound` + `send_to_harness`) so that:
+1. `inbound.jsonl` order matches harness delivery order.
+2. Each ack includes `inbound_seq` so clients can reconstruct ordering.
+3. No injected messages are silently dropped.
+
+**Ack ordering guarantee (v2r2 D-18):**
+- **Control socket clients:** ack arrival order matches `inbound.jsonl`
+  order (lock scope covers ack emission via `on_result` callback).
+- **HTTP clients:** ack arrival order is NOT guaranteed to match
+  `inbound.jsonl` order (independent connections). Clients use
+  `inbound_seq` to reconstruct ordering.
 
 **Observable.** Smoke scenario 8 passes — two parallel injects produce
-matched ordering across `inbound.jsonl`, `output.jsonl`, and the assistant
-acknowledgements. No injected messages are silently dropped.
+matched `inbound.jsonl` + harness delivery ordering and distinct
+`inbound_seq` values.
 
 ### INJ-003 — Inject acks a per-message handle
 
-**When** the runner has written `inbound.jsonl` and dispatched the message to
-the harness,
-**the runner shall** respond on the control socket with
+**When** the runner has written `inbound.jsonl` and dispatched to harness,
+**the runner shall** respond with
 `{"ok": true, "inbound_seq": <int>}` where `inbound_seq` is the
-zero-based line index of the message it appended.
+zero-based line index of the appended message.
 
-**Observable.** Concurrent clients see distinct `inbound_seq` values; CLI
-text-mode output is unchanged for human use, JSON output exposes the seq.
+**Observable.** Concurrent clients see distinct `inbound_seq` values.
 
 ### INJ-004 — Inject rejects when the spawn is terminal
 
-**When** the inject surface is invoked against a spawn that is terminal at
-request time,
+**When** the inject surface is invoked against a terminal spawn,
 **the surface shall** reject with `{"ok": false, "error": "spawn not
-running: <status>"}` and **shall not** open a connection or attempt to
-contact the runner.
+running: <status>"}` and **shall not** contact the runner.
 
-**Observable.** CLI exits 1 with the same error string. HTTP returns 410
-with `{"detail": "spawn not running: <status>"}`.
+**Observable.** CLI exits 1. HTTP returns 410.
 
 ### INJ-005 — HTTP inject schema mirrors CLI
 
-**When** the FastAPI app receives `POST /api/spawns/{id}/inject`,
+**When** the AF_UNIX app server receives `POST /api/spawns/{id}/inject`,
 **the app shall** accept exactly one of:
 1. `{"text": "<non-empty>"}` — equivalent to INJ-001
 2. `{"interrupt": true}` — equivalent to INT-005
 
-and **shall** reject any other shape with HTTP 422 and an error message that
-names the supported request shapes.
+and **shall** reject:
+- Schema violations (missing fields, wrong types) with HTTP 422.
+- Semantic violations (text + interrupt both set, neither set) with
+  HTTP 400 (D-17 split).
 
-**Observable.** Smoke scenarios 9a/9b pass. OpenAPI schema lists both
-variants.
+**Observable.** OpenAPI lists both variants.
 
 ### INJ-006 — Inject does not require lifecycle authorization
 
 **When** any caller reaches the inject surface with a valid request,
-**the surface shall** dispatch the inject without invoking the cancel/
-interrupt authorization gate from `spec/authorization.md`.
+**the surface shall** dispatch without invoking the authorization guard.
 
-**Observable.** Inject is the only cooperative surface; the
-`AuthorizationGuard` defined in the architecture doc is bypassed by
-construction for inject. Inject's safety story rests on the CLI/HTTP being
-local-only and on per-spawn isolation, not on caller identity.
+**Observable.** Inject bypasses `AuthorizationGuard` by construction.
+Safety rests on AF_UNIX filesystem permissions and per-spawn isolation.
+
+## Verification plan
+
+### Unit tests
+- `InjectRequest` validates text / interrupt / both / neither.
+- Per-spawn lock serializes two inject coroutines with correct seq ordering.
+
+### Smoke tests
+- Scenario 8: two parallel injects → distinct `inbound_seq`; control-socket
+  ack order matches `inbound.jsonl` order.
+- Scenario 9a: `POST /inject` with `{"text": "hi"}`.
+- Scenario 9c: `POST /inject` with both text and interrupt → 400.
+
+### Fault-injection tests
+- **Concurrent inject ordering**: three clients inject simultaneously;
+  verify `inbound.jsonl` order matches harness delivery, control-socket
+  ack order matches that sequence, and HTTP clients receive distinct
+  `inbound_seq` values with no drops.

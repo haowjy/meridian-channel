@@ -31,7 +31,7 @@ The design should evaluate this shape and either adopt it, refine it, or push ba
 
 - #28, #29, #30, #31 all have clear fix paths in the design package.
 - Reaper liveness contract is one contract, not two (CLI vs app).
-- Cancel semantics are consistent across CLI invocation, HTTP endpoint, and timeout-based external kill.
+- Cancel semantics are consistent across CLI invocation, HTTP endpoint, and timeout-based external kill for CLI-launched spawns; app-managed spawns document worker-wide timeout-kill behavior separately.
 - Interrupt is actually non-fatal end-to-end.
 - LLM-accessible surface for cancel/interrupt is explicitly scoped — either gated at meridian, restricted at profile level, or removed entirely.
 - Design names what tests (unit, smoke, fault-injection) will prove each behavior before the implementation phase starts.

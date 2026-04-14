@@ -1,13 +1,13 @@
-# Authorization Guard
+# Authorization Guard (v2r2)
 
-Realizes `spec/authorization.md` (AUTH-001 .. AUTH-006).
+Realizes `spec/authorization.md` (AUTH-001..AUTH-007).
 
 ## Module
 
 New file: `src/meridian/lib/ops/spawn/authorization.py`.
 
-Kept under `ops/spawn/` because it is policy, not state mechanism. The
-guard never writes and only reads the existing `spawns.jsonl` projection.
+Under `ops/spawn/` — this is policy, not mechanism. The guard reads the
+existing `spawns.jsonl` projection; never writes.
 
 ```python
 _AUTH_ANCESTRY_MAX_DEPTH = 32
@@ -15,7 +15,9 @@ _AUTH_ANCESTRY_MAX_DEPTH = 32
 @dataclass(frozen=True)
 class AuthorizationDecision:
     allowed: bool
-    reason: str          # "operator" | "self" | "ancestor" | "not_in_ancestry" | "missing_target"
+    reason: str          # "operator" | "self" | "ancestor" |
+                         # "not_in_ancestry" | "missing_target" |
+                         # "missing_caller_in_spawn"
     caller_id: SpawnId | None
     target_id: SpawnId
 
@@ -24,8 +26,15 @@ def authorize(
     state_root: Path,
     target: SpawnId,
     caller: SpawnId | None,
+    depth: int = 0,
 ) -> AuthorizationDecision:
     """Pure function. No side effects."""
+    # --- D-14: depth > 0 with missing caller is deny ---
+    if (caller is None or str(caller) == "") and depth > 0:
+        return AuthorizationDecision(
+            False, "missing_caller_in_spawn", None, target)
+
+    # --- AUTH-002: operator at depth 0 ---
     if caller is None or str(caller) == "":
         return AuthorizationDecision(True, "operator", None, target)
 
@@ -50,115 +59,203 @@ def authorize(
     return AuthorizationDecision(False, "not_in_ancestry", caller, target)
 
 
-def caller_from_env() -> SpawnId | None:
+def caller_from_env() -> tuple[SpawnId | None, int]:
+    """Return (caller_id, depth) from the process environment."""
     raw = os.environ.get("MERIDIAN_SPAWN_ID", "").strip()
-    return SpawnId(raw) if raw else None
+    depth = int(os.environ.get("MERIDIAN_DEPTH", "0").strip() or "0")
+    return (SpawnId(raw) if raw else None, depth)
 ```
+
+**v2 changes from v1:**
+- `authorize()` takes a `depth` parameter (D-14).
+- `depth > 0` with missing caller returns DENY with reason
+  `"missing_caller_in_spawn"` instead of allowing as operator.
+- `caller_from_env()` returns `(caller_id, depth)` tuple.
 
 ## Surface composition
 
-**CLI** (`src/meridian/cli/spawn_cancel.py`, `spawn_inject.py` for
-`--interrupt`):
+**CLI** (`spawn_cancel.py`, `spawn_inject.py` for `--interrupt`):
 
 ```python
+caller, depth = caller_from_env()
+
+# --operator-override bypasses depth check for debugging
+if args.operator_override:
+    depth = 0
+
 decision = authorize(state_root=paths.state_root(),
                      target=spawn_id,
-                     caller=caller_from_env())
+                     caller=caller,
+                     depth=depth)
 logger.info("spawn_auth", extra={"decision": asdict(decision)})
 if not decision.allowed:
-    typer.echo(f"Error: caller {decision.caller_id} is not authorized to "
-               f"{action} {spawn_id}", err=True)
+    typer.echo(f"Error: caller {decision.caller_id} is not authorized "
+               f"to {action} {spawn_id}", err=True)
     raise typer.Exit(code=2)
 ```
 
-**HTTP** — FastAPI dependency `require_authorization(spawn_id: str,
-request: Request)`:
+**HTTP** — FastAPI dependency via AF_UNIX SO_PEERCRED:
 
 ```python
 async def require_authorization(spawn_id: str, request: Request):
-    caller = _caller_from_http(request)  # env at app startup; see below
-    decision = authorize(state_root=app_state.state_root,
-                         target=SpawnId(spawn_id),
-                         caller=caller)
+    caller, depth = _caller_from_peercred(request)
+    decision = authorize(
+        state_root=app_state.state_root,
+        target=SpawnId(spawn_id),
+        caller=caller,
+        depth=depth,
+    )
     request.state.auth = decision
     if not decision.allowed:
-        raise HTTPException(
-            status_code=403,
-            detail="caller is not authorized for this spawn",
-        )
+        raise HTTPException(403, detail="caller is not authorized")
 ```
 
-Applied as a dependency on `/cancel` and on the interrupt branch of
-`/inject` (either by inlining the guard after parsing the body, or by
-splitting the interrupt branch into a separate inner handler that depends
-on `require_authorization`).
-
-**Control socket** — `ControlSocketServer` handles `interrupt` only (cancel
-is already removed). Before dispatching:
+**Control socket** — AF_UNIX `SO_PEERCRED`:
 
 ```python
-caller = _caller_from_socket_peer(peer_creds)  # SO_PEERCRED / SCM_CREDENTIALS
+caller, depth = _caller_from_socket_peer(peer_creds)
 decision = authorize(state_root=self._state_root,
-                     target=self._spawn_id, caller=caller)
+                     target=self._spawn_id,
+                     caller=caller,
+                     depth=depth)
 if not decision.allowed:
     await self._write(writer, {"ok": False,
                                "error": "interrupt requires caller authorization"})
     return
 ```
 
-Peer credentials come from the SO_PEERCRED option on AF_UNIX sockets. The
-peer PID lets us read `/proc/<pid>/environ` for `MERIDIAN_SPAWN_ID`. That
-same mechanism is used by `SpawnManager` today to reject unknown peers; we
-extend it to extract the caller id.
-
-**Agent tool** surfaces go through the CLI or HTTP entrypoints; they do not
-grow a separate code path (AUTH-006).
-
-## How caller id reaches each surface
+## How caller id reaches each surface (v2 — AF_UNIX transport)
 
 | Surface | Source |
 |---|---|
-| CLI (user, cron, systemd) | `MERIDIAN_SPAWN_ID` env of the CLI process |
-| CLI spawned by another spawn | `MERIDIAN_SPAWN_ID` env inherited from parent via `command.py` |
-| HTTP inside same process | `MERIDIAN_SPAWN_ID` of the FastAPI worker process |
-| HTTP called by a spawned subagent | that subagent's env propagates via headers? **No.** The FastAPI server is loopback-only; we read the *connecting process's* env by finding the caller PID through SO_PEERCRED on the TCP socket (Linux has this; macOS needs a fallback). |
-| Control socket | SO_PEERCRED on the AF_UNIX socket |
+| CLI (user, cron) | `MERIDIAN_SPAWN_ID` + `MERIDIAN_DEPTH` env |
+| CLI spawned by another spawn | Same, inherited via `command.py` |
+| HTTP (AF_UNIX) | `SO_PEERCRED` → PID → `/proc/<pid>/environ` for `MERIDIAN_SPAWN_ID` + `MERIDIAN_DEPTH` |
+| Control socket (AF_UNIX) | `SO_PEERCRED` → PID → `/proc/<pid>/environ` |
 
-**Fallback for macOS TCP peercred**: the app server refuses to apply
-authorization when the peer PID cannot be determined and logs
-`auth_mode="unknown"`. We tighten later if/when we grow a network deployment
-story. In practice all development targets Linux; macOS local-dev usage is
-a single-user machine so operator mode is safe.
+**v2 change from v1.** All HTTP/socket identification uses AF_UNIX
+`SO_PEERCRED`. No TCP loopback peercred attempt (BL-3 resolved).
 
-## Why not a header?
+**v2r2 change (D-19): peercred failure → DENY.** When `SO_PEERCRED` fails
+(macOS, peer exited before `/proc/<pid>/environ` read, permission denied),
+the auth surface returns DENY for lifecycle operations. Operator mode is
+only available via the CLI env path (`MERIDIAN_DEPTH == 0`,
+`MERIDIAN_SPAWN_ID` unset, checked in the process's own environment).
 
-A `MERIDIAN-Caller-Id` header would be trivially forgeable. Env-based
-identification is also forgeable by anyone with `fork + exec + setenv`, but
-the threat model (AUTH §threat model) is "a spawned subagent shells out to
-cancel" — that agent inherits its own env honestly; there is no adversary
-*within* meridian's process tree trying to pose as its parent.
+This resolves two review findings:
+- p1794 blocker: macOS operator fallback was fail-open.
+- p1795 blocker: peer-exit race between `SO_PEERCRED` and `/proc` read.
 
-If we ever grow remote auth, we replace the `caller_from_*` helpers without
-touching the core `authorize()` function. That boundary is why
-`authorize()` is a pure function taking a `SpawnId | None`, not an HTTP
-request.
+**No header fallback.** This design does not define a peercred-unavailable
+header override for HTTP. Supporting platforms without usable peer
+credentials would require a different caller-identity transport, not an
+exception path inside the deny branch.
+
+## `_caller_from_peercred` implementation sketch (v2r2)
+
+```python
+import socket
+import struct
+
+class PeercredFailure(Exception):
+    """Raised when caller identity cannot be extracted."""
+    pass
+
+def _caller_from_peercred(request: Request) -> tuple[SpawnId | None, int]:
+    """Extract caller identity from AF_UNIX SO_PEERCRED.
+
+    v2r2 (D-19): raises PeercredFailure on extraction failure.
+    Callers must catch this and DENY, not fall through to operator.
+    """
+    transport = request.scope.get("transport")
+    if transport is None:
+        raise PeercredFailure("no transport in request scope")
+
+    sock = transport.get_extra_info("socket")
+    if sock is None or sock.family != socket.AF_UNIX:
+        raise PeercredFailure("not an AF_UNIX socket")
+
+    try:
+        # Linux: SO_PEERCRED returns struct ucred (pid, uid, gid)
+        creds = sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED,
+                                struct.calcsize("iII"))
+        pid, uid, gid = struct.unpack("iII", creds)
+    except (OSError, AttributeError):
+        # macOS or unsupported — D-19: DENY, no fallback header
+        raise PeercredFailure("SO_PEERCRED unavailable")
+
+    # Read caller's env from /proc/<pid>/environ
+    try:
+        environ_path = Path(f"/proc/{pid}/environ")
+        environ_data = environ_path.read_bytes()
+        env = dict(
+            entry.split(b"=", 1) for entry in environ_data.split(b"\0")
+            if b"=" in entry
+        )
+        spawn_id_raw = env.get(b"MERIDIAN_SPAWN_ID", b"").decode().strip()
+        depth_raw = env.get(b"MERIDIAN_DEPTH", b"0").decode().strip()
+        return (
+            SpawnId(spawn_id_raw) if spawn_id_raw else None,
+            int(depth_raw or "0"),
+        )
+    except (OSError, ValueError) as exc:
+        # Peer exited before /proc read, or permission denied — D-19: DENY
+        raise PeercredFailure(f"environ read failed: {exc}")
+```
+
+**v2r2 calling pattern in surfaces:**
+
+```python
+# HTTP (require_authorization dependency)
+try:
+    caller, depth = _caller_from_peercred(request)
+except PeercredFailure as exc:
+    logger.warning("spawn_auth_peercred_failure", extra={"error": str(exc)})
+    raise HTTPException(403, detail="caller identity unavailable")
+
+# Control socket (_caller_from_socket_peer)
+try:
+    caller, depth = _caller_from_socket_peer(peer_creds)
+except PeercredFailure as exc:
+    await self._write(writer, {"ok": False,
+                               "error": "caller identity unavailable"})
+    return
+```
+
+## Why not tokens (D-06, v2 reaffirmed)
+
+Per-spawn API tokens would add rotation, storage, revocation — a full
+auth lifecycle for a problem the threat model says is honest-actors.
+`SO_PEERCRED` on AF_UNIX is unforgeable (kernel-provided), zero-config,
+and matches meridian's existing env-based identity model.
+
+If a future deployment needs hostile-actor resistance, replace the
+`caller_from_*` helpers without touching `authorize()`.
 
 ## Agent profiles and allowlists
 
-An agent profile wanting to deny a subagent lifecycle control over its
-siblings simply removes `spawn-cancel` / `spawn-interrupt` from the
-tool allowlist. The guard still runs for agents that do have the tool;
-removing the tool is the belt, the guard is the suspenders.
+Profile that wants to deny lifecycle control: remove `spawn-cancel` /
+`spawn-interrupt` from tool allowlist. Guard is the suspenders; allowlist
+is the belt.
 
 ## Test plan
 
-- **Unit**: `authorize()` for (caller=None, caller=self, caller=parent,
-  caller=grandparent, caller=sibling, caller=stranger, target=missing,
-  cycle in chain).
-- **Unit**: `caller_from_env()` handles unset, empty, padded strings.
-- **Smoke**: scenario 16 — child spawn cancels itself → allowed. Child
-  cancels sibling → 403 (HTTP) / exit 2 (CLI).
-- **Smoke**: scenario 17 — operator shell (no env) cancels any spawn →
-  allowed.
-- **Smoke**: scenario 18 — control-socket interrupt from non-ancestor →
-  rejected with stable error; no inbound event written; no send to harness.
+### Unit tests
+- `authorize()` for: caller=None depth=0 (operator), caller=None depth=1
+  (deny — D-14), caller=self, caller=parent, caller=grandparent,
+  caller=sibling (deny), caller=stranger (deny), target=missing (deny),
+  cycle in chain, max-depth walk.
+- `caller_from_env()` handles unset, empty, padded strings, missing depth.
+
+### Smoke tests
+- Scenario 16: child cancels itself → allowed. Child cancels sibling →
+  403 / exit 2.
+- Scenario 17: operator shell cancels any spawn → allowed.
+- Scenario 18: control-socket interrupt from non-ancestor → rejected.
+
+### Fault-injection tests
+- **Env-drop at depth > 0**: verify deny, not operator.
+- **Deep ancestry (30+ levels)**: walk reaches root, authorizes correctly.
+- **SO_PEERCRED unavailable (D-19)**: verify DENY, not operator fallback.
+- **Peer exit before /proc read (D-19)**: verify DENY with
+  `PeercredFailure`, HTTP returns 403.
