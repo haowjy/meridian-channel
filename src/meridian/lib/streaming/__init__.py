@@ -1,8 +1,12 @@
 """Streaming message and control types."""
 
-from meridian.lib.streaming.control_socket import ControlSocketServer
-from meridian.lib.streaming.spawn_manager import SpawnManager, SpawnSession
+from typing import TYPE_CHECKING
+
 from meridian.lib.streaming.types import ControlMessage, InjectResult
+
+if TYPE_CHECKING:
+    from meridian.lib.streaming.control_socket import ControlSocketServer
+    from meridian.lib.streaming.spawn_manager import SpawnManager, SpawnSession
 
 __all__ = [
     "ControlMessage",
@@ -11,3 +15,15 @@ __all__ = [
     "SpawnManager",
     "SpawnSession",
 ]
+
+
+def __getattr__(name: str) -> object:
+    if name == "ControlSocketServer":
+        from meridian.lib.streaming.control_socket import ControlSocketServer
+
+        return ControlSocketServer
+    if name in {"SpawnManager", "SpawnSession"}:
+        from meridian.lib.streaming.spawn_manager import SpawnManager, SpawnSession
+
+        return {"SpawnManager": SpawnManager, "SpawnSession": SpawnSession}[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

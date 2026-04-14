@@ -421,6 +421,117 @@ async def test_spawn_manager_interrupt_rejects_when_spawn_is_terminal_before_ses
 
 
 @pytest.mark.asyncio
+async def test_spawn_manager_interrupt_returns_noop_when_codex_has_no_turn(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path
+    state_root = resolve_state_paths(repo_root).root_dir
+    send_interrupt_calls = 0
+
+    class FakeControlSocketServer:
+        def __init__(self, spawn_id: str, socket_path: Path, manager: SpawnManager) -> None:
+            _ = spawn_id, manager
+            self.socket_path = socket_path
+
+        async def start(self) -> None:
+            self.socket_path.parent.mkdir(parents=True, exist_ok=True)
+
+        async def stop(self) -> None:
+            pass
+
+    class FakeConnection:
+        def __init__(self) -> None:
+            self._spawn_id = ""
+            self.state = "created"
+            self.capabilities = ConnectionCapabilities(
+                mid_turn_injection="queue",
+                supports_steer=True,
+                supports_interrupt=True,
+                supports_cancel=True,
+                runtime_model_switch=False,
+                structured_reasoning=False,
+            )
+            self.current_turn_id: str | None = None
+
+        @property
+        def harness_id(self) -> HarnessId:
+            return HarnessId.CODEX
+
+        @property
+        def spawn_id(self) -> str:
+            return self._spawn_id
+
+        async def start(self, config: ConnectionConfig, spec: ResolvedLaunchSpec) -> None:
+            _ = spec
+            self._spawn_id = config.spawn_id
+            self.state = "connected"
+
+        async def stop(self) -> None:
+            self.state = "stopped"
+
+        def health(self) -> bool:
+            return True
+
+        async def send_user_message(self, text: str) -> None:
+            _ = text
+
+        async def send_interrupt(self) -> None:
+            nonlocal send_interrupt_calls
+            send_interrupt_calls += 1
+
+        async def send_cancel(self) -> None:
+            return None
+
+        async def events(self):  # type: ignore[no-untyped-def]
+            while True:
+                await asyncio.sleep(3600)
+                if False:
+                    yield HarnessEvent(
+                        event_type="noop",
+                        harness_id="codex",
+                        payload={},
+                    )
+
+    monkeypatch.setattr(spawn_manager_module, "ControlSocketServer", FakeControlSocketServer)
+    monkeypatch.setattr(
+        "meridian.lib.harness.connections.get_connection_class",
+        lambda harness_id: FakeConnection,
+    )
+
+    spawn_id = str(
+        start_spawn(
+            state_root,
+            chat_id="c1",
+            model="gpt-5.3-codex",
+            agent="coder",
+            harness="codex",
+            kind="streaming",
+            prompt="hello",
+            launch_mode="foreground",
+            status="running",
+        )
+    )
+    manager = SpawnManager(state_root=state_root, repo_root=repo_root)
+    await manager.start_spawn(
+        _build_config(spawn_id, repo_root),
+        CodexLaunchSpec(
+            prompt="hello",
+            permission_resolver=UnsafeNoOpPermissionResolver(_suppress_warning=True),
+        ),
+    )
+    try:
+        result = await manager.interrupt(SpawnId(spawn_id), source="control_socket")
+        assert result == InjectResult(success=True, noop=True)
+        assert send_interrupt_calls == 0
+
+        inbound_path = state_root / "spawns" / spawn_id / "inbound.jsonl"
+        assert inbound_path.exists() is False
+    finally:
+        await manager.stop_spawn(SpawnId(spawn_id))
+
+
+@pytest.mark.asyncio
 async def test_spawn_manager_natural_completion_writes_envelope_and_completion_outcome(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

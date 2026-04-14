@@ -34,7 +34,6 @@ from meridian.lib.state.artifact_store import ArtifactStore, make_artifact_key
 from meridian.lib.state.atomic import atomic_write_bytes
 from meridian.lib.state.paths import resolve_spawn_log_dir
 from meridian.lib.state.spawn_store import FOREGROUND_LAUNCH_MODE
-from meridian.lib.streaming.heartbeat import heartbeat_loop
 
 from .constants import (
     DEFAULT_INFRA_EXIT_CODE,
@@ -544,9 +543,22 @@ async def execute_with_finalization(
     )
 
     child_env = dict(launch_context.env)
+    from meridian.lib.streaming import spawn_manager as spawn_manager_module
+
+    manager = spawn_manager_module.SpawnManager(
+        state_root=state_root,
+        repo_root=repo_root,
+        heartbeat_interval_secs=_HEARTBEAT_INTERVAL_SECS,
+        heartbeat_touch=_touch_heartbeat_file,
+    )
+    heartbeat_start_task: asyncio.Task[None] | None = None
 
     def _record_worker_started(worker_pid: int) -> None:
-        _ensure_heartbeat_task()
+        nonlocal heartbeat_start_task
+        if heartbeat_start_task is None or heartbeat_start_task.done():
+            heartbeat_start_task = asyncio.create_task(
+                manager._start_heartbeat(run.spawn_id)  # pyright: ignore[reportPrivateUsage]
+            )
         spawn_store.mark_spawn_running(
             state_root,
             run.spawn_id,
@@ -571,20 +583,6 @@ async def execute_with_finalization(
     last_raw_return_code = DEFAULT_INFRA_EXIT_CODE
     last_received_signal: signal.Signals | None = None
     last_timed_out = False
-    heartbeat_task: asyncio.Task[None] | None = None
-
-    def _ensure_heartbeat_task() -> None:
-        nonlocal heartbeat_task
-        _touch_heartbeat_file(state_root, run.spawn_id)
-        if heartbeat_task is None or heartbeat_task.done():
-            heartbeat_task = asyncio.create_task(
-                heartbeat_loop(
-                    state_root,
-                    run.spawn_id,
-                    interval=_HEARTBEAT_INTERVAL_SECS,
-                    touch=_touch_heartbeat_file,
-                )
-            )
 
     try:
         try:
@@ -910,9 +908,9 @@ async def execute_with_finalization(
                     error=failure_reason,
                 )
     finally:
-        if heartbeat_task is not None and not heartbeat_task.done():
-            heartbeat_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await heartbeat_task
+        if heartbeat_start_task is not None:
+            with suppress(Exception):
+                await heartbeat_start_task
+        await manager._stop_heartbeat(run.spawn_id)  # pyright: ignore[reportPrivateUsage]
 
     return exit_code

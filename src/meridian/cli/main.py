@@ -504,12 +504,20 @@ def serve() -> None:
 
 @app.command(name="app")
 def app_command(
-    port: Annotated[int, Parameter(name="--port", help="Server port")] = 8420,
-    no_browser: Annotated[
-        bool,
-        Parameter(name="--no-browser", help="Do not open a browser automatically."),
-    ] = False,
-    host: Annotated[str, Parameter(name="--host", help="Server host")] = "127.0.0.1",
+    uds: Annotated[
+        str | None,
+        Parameter(
+            name="--uds",
+            help="Unix domain socket path for the app server (default: .meridian/app.sock).",
+        ),
+    ] = None,
+    proxy: Annotated[
+        str | None,
+        Parameter(
+            name="--proxy",
+            help="Optional browser-facing proxy URL that forwards HTTP traffic to --uds.",
+        ),
+    ] = None,
     debug: Annotated[
         bool,
         Parameter(name="--debug", help="Enable wire-level debug tracing."),
@@ -530,9 +538,8 @@ def app_command(
     from meridian.cli.app_cmd import run_app
 
     run_app(
-        port=port,
-        no_browser=no_browser,
-        host=host,
+        uds=uds,
+        proxy=proxy,
         debug=debug,
         allow_unsafe_no_permissions=allow_unsafe_no_permissions,
     )

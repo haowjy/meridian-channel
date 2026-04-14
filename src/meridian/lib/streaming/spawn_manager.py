@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from meridian.lib.core.domain import SpawnStatus
 from meridian.lib.core.spawn_lifecycle import TERMINAL_SPAWN_STATUSES
-from meridian.lib.core.types import SpawnId
+from meridian.lib.core.types import HarnessId, SpawnId
 from meridian.lib.harness.adapter import SpawnParams
 from meridian.lib.harness.bundle import get_harness_bundle
 from meridian.lib.harness.connections.base import HarnessEvent
@@ -24,6 +24,7 @@ from meridian.lib.safety.permissions import UnsafeNoOpPermissionResolver
 from meridian.lib.state import spawn_store
 from meridian.lib.state.atomic import append_text_line
 from meridian.lib.streaming.control_socket import ControlSocketServer
+from meridian.lib.streaming.heartbeat import heartbeat_loop
 from meridian.lib.streaming.inject_lock import drop_lock, get_lock
 from meridian.lib.streaming.types import InjectResult
 
@@ -102,13 +103,24 @@ async def dispatch_start(
 class SpawnManager:
     """Own active connections, durable drain loops, and control routing."""
 
-    def __init__(self, state_root: Path, repo_root: Path, *, debug: bool = False):
+    def __init__(
+        self,
+        state_root: Path,
+        repo_root: Path,
+        *,
+        debug: bool = False,
+        heartbeat_interval_secs: float = 30.0,
+        heartbeat_touch: Callable[[Path, SpawnId], None] | None = None,
+    ):
         self._state_root = state_root
         self._repo_root = repo_root
         self._debug = debug
+        self._heartbeat_interval_secs = heartbeat_interval_secs
+        self._heartbeat_touch = heartbeat_touch
         self._sessions: dict[SpawnId, SpawnSession] = {}
         self._completion_futures: dict[SpawnId, asyncio.Future[DrainOutcome]] = {}
         self._cleanup_tasks: set[asyncio.Task[None]] = set()
+        self._heartbeat_tasks: dict[SpawnId, asyncio.Task[None]] = {}
 
     @property
     def state_root(self) -> Path:
@@ -121,6 +133,48 @@ class SpawnManager:
         """Return the repository root used for managed spawns."""
 
         return self._repo_root
+
+    async def _start_heartbeat(self, spawn_id: SpawnId) -> None:
+        """Start heartbeat ownership for one spawn; idempotent."""
+
+        current_task = self._heartbeat_tasks.get(spawn_id)
+        if current_task is not None and not current_task.done():
+            return
+
+        task = asyncio.create_task(
+            heartbeat_loop(
+                self._state_root,
+                spawn_id,
+                interval=self._heartbeat_interval_secs,
+                touch=self._heartbeat_touch,
+            )
+        )
+        self._heartbeat_tasks[spawn_id] = task
+
+        def _drop_heartbeat(done_task: asyncio.Task[None]) -> None:
+            tracked = self._heartbeat_tasks.get(spawn_id)
+            if tracked is done_task:
+                self._heartbeat_tasks.pop(spawn_id, None)
+            with suppress(asyncio.CancelledError):
+                if done_task.exception() is not None:
+                    logger.warning(
+                        "Heartbeat loop exited unexpectedly for spawn %s: %s",
+                        spawn_id,
+                        done_task.exception(),
+                    )
+
+        task.add_done_callback(_drop_heartbeat)
+
+    async def _stop_heartbeat(self, spawn_id: SpawnId) -> None:
+        """Stop heartbeat ownership for one spawn; idempotent."""
+
+        task = self._heartbeat_tasks.pop(spawn_id, None)
+        if task is None:
+            return
+        if not task.done():
+            task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
 
     async def start_spawn(
         self,
@@ -401,6 +455,13 @@ class SpawnManager:
                     on_result(result)
                 return result
 
+            current_turn_id = getattr(session.connection, "current_turn_id", object())
+            if session.connection.harness_id == HarnessId.CODEX and current_turn_id is None:
+                result = InjectResult(success=True, noop=True)
+                if on_result is not None:
+                    on_result(result)
+                return result
+
             try:
                 inbound_seq = await self._record_inbound(
                     spawn_id,
@@ -485,6 +546,7 @@ class SpawnManager:
 
         session = self._sessions.get(spawn_id)
         if session is None:
+            await self._stop_heartbeat(spawn_id)
             drop_lock(spawn_id)
             return None
 
@@ -524,6 +586,7 @@ class SpawnManager:
         with suppress(Exception):
             await session.control_server.stop()
 
+        await self._stop_heartbeat(spawn_id)
         self._fan_out_event(spawn_id, None)
         self._sessions.pop(spawn_id, None)
         self._completion_futures.pop(spawn_id, None)
@@ -574,6 +637,8 @@ class SpawnManager:
                 exit_code=exit_code,
                 error=error,
             )
+        for spawn_id in list(self._heartbeat_tasks):
+            await self._stop_heartbeat(spawn_id)
         self._completion_futures.clear()
 
     def list_spawns(self) -> list[SpawnId]:
@@ -633,6 +698,7 @@ class SpawnManager:
     async def _cleanup_completed_session(self, spawn_id: SpawnId) -> None:
         """Clean up resources after a receiver drain loop exits naturally."""
 
+        await self._stop_heartbeat(spawn_id)
         session = self._sessions.pop(spawn_id, None)
         if session is None:
             drop_lock(spawn_id)

@@ -191,6 +191,10 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
         return self._thread_id
 
     @property
+    def current_turn_id(self) -> str | None:
+        return self._current_turn_id
+
+    @property
     def subprocess_pid(self) -> int | None:
         process = self._process
         if process is None:

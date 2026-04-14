@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import types
 from collections.abc import Callable
@@ -113,11 +114,13 @@ class FakeManager:
         repo_root: Path,
         completion_ready: asyncio.Event,
         wait_calls: list[SpawnId],
+        heartbeat_calls: list[SpawnId],
     ) -> None:
         self.state_root = state_root
         self.repo_root = repo_root
         self._completion_ready = completion_ready
         self._wait_calls = wait_calls
+        self._heartbeat_calls = heartbeat_calls
 
     async def start_spawn(
         self,
@@ -126,6 +129,9 @@ class FakeManager:
     ) -> FakeConnection:
         _ = config, spec
         return FakeConnection()
+
+    async def _start_heartbeat(self, spawn_id: SpawnId) -> None:
+        self._heartbeat_calls.append(spawn_id)
 
     async def wait_for_completion(self, spawn_id: SpawnId) -> DrainOutcome | None:
         self._wait_calls.append(spawn_id)
@@ -184,6 +190,7 @@ def _create_spawn_handler(
     monkeypatch: pytest.MonkeyPatch,
     completion_ready: asyncio.Event,
     wait_calls: list[SpawnId],
+    heartbeat_calls: list[SpawnId],
     allow_unsafe_no_permissions: bool = False,
 ) -> Callable[[server_module.SpawnCreateRequest], Any]:
     fake_ws_module = types.SimpleNamespace(
@@ -197,6 +204,7 @@ def _create_spawn_handler(
         repo_root=tmp_path,
         completion_ready=completion_ready,
         wait_calls=wait_calls,
+        heartbeat_calls=heartbeat_calls,
     )
     app_obj = server_module.create_app(
         cast("Any", manager),
@@ -214,11 +222,13 @@ async def test_app_server_create_spawn_background_finalizer_writes_finalize(
     state_root = resolve_state_paths(tmp_path).root_dir
     completion_ready = asyncio.Event()
     wait_calls: list[SpawnId] = []
+    heartbeat_calls: list[SpawnId] = []
     create_spawn_handler = _create_spawn_handler(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
         completion_ready=completion_ready,
         wait_calls=wait_calls,
+        heartbeat_calls=heartbeat_calls,
     )
 
     payload = server_module.SpawnCreateRequest(
@@ -240,14 +250,17 @@ async def test_app_server_create_spawn_background_finalizer_writes_finalize(
     assert events[-1]["status"] == "succeeded"
     assert events[-1]["exit_code"] == 0
     assert events[-1]["duration_secs"] == 2.5
-    assert events[-1]["origin"] == "launcher"
+    assert events[-1]["origin"] == "runner"
     assert wait_calls == [SpawnId("p1")]
+    assert heartbeat_calls == [SpawnId("p1")]
 
     row = get_spawn(state_root, "p1")
     assert row is not None
     assert row.status == "succeeded"
     assert row.exit_code == 0
     assert row.duration_secs == 2.5
+    assert row.launch_mode == "app"
+    assert row.runner_pid == os.getpid()
 
 
 @pytest.mark.asyncio
@@ -257,11 +270,13 @@ async def test_app_server_rejects_missing_permissions_by_default(
 ) -> None:
     completion_ready = asyncio.Event()
     wait_calls: list[SpawnId] = []
+    heartbeat_calls: list[SpawnId] = []
     create_spawn_handler = _create_spawn_handler(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
         completion_ready=completion_ready,
         wait_calls=wait_calls,
+        heartbeat_calls=heartbeat_calls,
     )
 
     with pytest.raises(FakeHTTPException) as exc_info:
@@ -285,11 +300,13 @@ async def test_app_server_allows_unsafe_no_permissions_when_opted_in(
     state_root = resolve_state_paths(tmp_path).root_dir
     completion_ready = asyncio.Event()
     wait_calls: list[SpawnId] = []
+    heartbeat_calls: list[SpawnId] = []
     create_spawn_handler = _create_spawn_handler(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
         completion_ready=completion_ready,
         wait_calls=wait_calls,
+        heartbeat_calls=heartbeat_calls,
         allow_unsafe_no_permissions=True,
     )
 
@@ -317,6 +334,7 @@ async def test_app_server_threads_permission_resolver_into_streaming_spec(
 ) -> None:
     completion_ready = asyncio.Event()
     wait_calls: list[SpawnId] = []
+    heartbeat_calls: list[SpawnId] = []
 
     class _CaptureAdapter:
         def __init__(self) -> None:
@@ -342,6 +360,7 @@ async def test_app_server_threads_permission_resolver_into_streaming_spec(
         monkeypatch=monkeypatch,
         completion_ready=completion_ready,
         wait_calls=wait_calls,
+        heartbeat_calls=heartbeat_calls,
     )
 
     await create_spawn_handler(
@@ -369,6 +388,7 @@ async def test_app_server_start_spawn_failure_tags_launch_failure_origin(
     state_root = resolve_state_paths(tmp_path).root_dir
     completion_ready = asyncio.Event()
     wait_calls: list[SpawnId] = []
+    heartbeat_calls: list[SpawnId] = []
 
     async def _raising_start_spawn(
         self: FakeManager,
@@ -384,6 +404,7 @@ async def test_app_server_start_spawn_failure_tags_launch_failure_origin(
         monkeypatch=monkeypatch,
         completion_ready=completion_ready,
         wait_calls=wait_calls,
+        heartbeat_calls=heartbeat_calls,
     )
 
     with pytest.raises(FakeHTTPException) as exc_info:

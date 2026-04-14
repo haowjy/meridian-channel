@@ -81,7 +81,6 @@ from meridian.lib.state.spawn_store import (
     FOREGROUND_LAUNCH_MODE,
     mark_spawn_running,
 )
-from meridian.lib.streaming.heartbeat import heartbeat_loop
 from meridian.lib.streaming.spawn_manager import DrainOutcome, SpawnManager
 
 if TYPE_CHECKING:
@@ -245,23 +244,8 @@ def _stringify_terminal_error(error: object) -> str | None:
 
 def _terminal_event_outcome(event: HarnessEvent) -> _TerminalEventOutcome | None:
     if event.harness_id == HarnessId.CODEX.value and event.event_type == "turn/completed":
-        turn = event.payload.get("turn")
-        if not isinstance(turn, dict):
-            return _TerminalEventOutcome(status="succeeded", exit_code=0)
-
-        turn_payload = cast("dict[str, object]", turn)
-        turn_error = _stringify_terminal_error(turn_payload.get("error"))
-        if turn_error is not None:
-            return _TerminalEventOutcome(status="failed", exit_code=1, error=turn_error)
-
-        turn_status = str(turn_payload.get("status", "")).strip().lower()
-        if turn_status in {"", "completed"}:
-            return _TerminalEventOutcome(status="succeeded", exit_code=0)
-        return _TerminalEventOutcome(
-            status="failed",
-            exit_code=1,
-            error=f"turn_{turn_status or 'unknown'}",
-        )
+        # Codex turn completion is per-turn state, not spawn/session terminal state.
+        return None
 
     if event.harness_id == HarnessId.CLAUDE.value and event.event_type == "result":
         if bool(event.payload.get("is_error")):
@@ -408,7 +392,12 @@ async def run_streaming_spawn(
 ) -> DrainOutcome:
     """Run one streaming spawn to completion without spawn-store finalization."""
 
-    manager = SpawnManager(state_root=state_root, repo_root=repo_root)
+    manager = SpawnManager(
+        state_root=state_root,
+        repo_root=repo_root,
+        heartbeat_interval_secs=_HEARTBEAT_INTERVAL_SECS,
+        heartbeat_touch=_touch_heartbeat_file,
+    )
 
     loop = asyncio.get_running_loop()
     shutdown_event = asyncio.Event()
@@ -430,6 +419,7 @@ async def run_streaming_spawn(
     )
     try:
         await manager.start_spawn(config, run_spec)
+        await manager._start_heartbeat(spawn_id)  # pyright: ignore[reportPrivateUsage]
         subscriber = manager.subscribe(spawn_id)
         if subscriber is None:
             raise RuntimeError("failed to subscribe to spawn stream")
@@ -480,7 +470,20 @@ async def run_streaming_spawn(
                     exit_code=terminal_outcome.exit_code,
                     error=terminal_outcome.error,
                 )
-            elif signal_task in done and shutdown_event.is_set():
+        elif signal_task in done and shutdown_event.is_set():
+            if completion_task.done():
+                terminal_outcome = await _await_terminal_outcome_after_completion(
+                    completion_task=completion_task,
+                    terminal_event_future=terminal_event_future,
+                )
+                if terminal_outcome is not None:
+                    await manager.stop_spawn(
+                        spawn_id,
+                        status=terminal_outcome.status,
+                        exit_code=terminal_outcome.exit_code,
+                        error=terminal_outcome.error,
+                    )
+            else:
                 signal_exit = signal_to_exit_code(received_signal[0]) or 130
                 await manager.stop_spawn(
                     spawn_id,
@@ -488,14 +491,6 @@ async def run_streaming_spawn(
                     exit_code=signal_exit,
                     error="cancelled",
                 )
-        elif signal_task in done and shutdown_event.is_set():
-            signal_exit = signal_to_exit_code(received_signal[0]) or 130
-            await manager.stop_spawn(
-                spawn_id,
-                status="cancelled",
-                exit_code=signal_exit,
-                error="cancelled",
-            )
 
         outcome = await completion_task
         if outcome is None:
@@ -545,7 +540,6 @@ async def _run_streaming_attempt(
     timeout_seconds: float | None,
     event_observer: Callable[[StreamEvent], None] | None,
     stream_stdout_to_terminal: bool,
-    on_mark_running: Callable[[], None] | None = None,
 ) -> _AttemptRuntime:
     completion_task: asyncio.Task[DrainOutcome | None] | None = None
     timeout_task: asyncio.Task[None] | None = None
@@ -569,8 +563,7 @@ async def _run_streaming_attempt(
 
     try:
         connection = await manager.start_spawn(config, run_spec)
-        if on_mark_running is not None:
-            on_mark_running()
+        await manager._start_heartbeat(run.spawn_id)  # pyright: ignore[reportPrivateUsage]
         mark_spawn_running(
             state_root,
             run.spawn_id,
@@ -652,7 +645,7 @@ async def _run_streaming_attempt(
             terminated_by_report_watchdog = bool(watchdog_task.result())
         elif completion_task in done:
             # If completion and signal resolve together, always run the bounded
-            # terminal grace window before honoring cancellation.
+            # terminal grace window so late-arriving terminal frames can win.
             terminal_outcome = await _await_terminal_outcome_after_completion(
                 completion_task=completion_task,
                 terminal_event_future=terminal_event_future,
@@ -666,7 +659,22 @@ async def _run_streaming_attempt(
                 )
                 drain_exit_code = terminal_outcome.exit_code
                 drain_error = terminal_outcome.error
-            elif signal_task in done and signal_event.is_set():
+        elif signal_task in done and signal_event.is_set():
+            if completion_task.done():
+                terminal_outcome = await _await_terminal_outcome_after_completion(
+                    completion_task=completion_task,
+                    terminal_event_future=terminal_event_future,
+                )
+                if terminal_outcome is not None:
+                    await manager.stop_spawn(
+                        run.spawn_id,
+                        status=terminal_outcome.status,
+                        exit_code=terminal_outcome.exit_code,
+                        error=terminal_outcome.error,
+                    )
+                    drain_exit_code = terminal_outcome.exit_code
+                    drain_error = terminal_outcome.error
+            else:
                 signal_exit = signal_to_exit_code(received_signal[0]) or 130
                 await manager.stop_spawn(
                     run.spawn_id,
@@ -675,15 +683,6 @@ async def _run_streaming_attempt(
                     error="cancelled",
                 )
                 drain_exit_code = signal_exit
-        elif signal_task in done and signal_event.is_set():
-            signal_exit = signal_to_exit_code(received_signal[0]) or 130
-            await manager.stop_spawn(
-                run.spawn_id,
-                status="cancelled",
-                exit_code=signal_exit,
-                error="cancelled",
-            )
-            drain_exit_code = signal_exit
 
         drain_outcome = await completion_task
         if drain_outcome is not None and terminal_outcome is None:
@@ -878,7 +877,12 @@ async def execute_with_streaming(
         else None
     )
     preflight_breach = budget_tracker.check() if budget_tracker is not None else None
-    manager = SpawnManager(state_root=state_root, repo_root=repo_root)
+    manager = SpawnManager(
+        state_root=state_root,
+        repo_root=repo_root,
+        heartbeat_interval_secs=_HEARTBEAT_INTERVAL_SECS,
+        heartbeat_touch=_touch_heartbeat_file,
+    )
     retries_attempted = 0
     started_at = time.monotonic()
     started_at_epoch = time.time()
@@ -887,25 +891,11 @@ async def execute_with_streaming(
     failure_reason: str | None = None
     terminated_after_completion = False
     final_attempt_terminal_observed = False
-    heartbeat_task: asyncio.Task[None] | None = None
 
     loop = asyncio.get_running_loop()
     shutdown_event = asyncio.Event()
     received_signal: list[signal.Signals | None] = [None]
     installed_signals = _install_signal_handlers(loop, shutdown_event, received_signal)
-
-    def _ensure_heartbeat_task() -> None:
-        nonlocal heartbeat_task
-        _touch_heartbeat_file(state_root, run.spawn_id)
-        if heartbeat_task is None or heartbeat_task.done():
-            heartbeat_task = asyncio.create_task(
-                heartbeat_loop(
-                    state_root,
-                    run.spawn_id,
-                    interval=_HEARTBEAT_INTERVAL_SECS,
-                    touch=_touch_heartbeat_file,
-                )
-            )
 
     try:
         try:
@@ -937,7 +927,6 @@ async def execute_with_streaming(
                     timeout_seconds=timeout_seconds,
                     event_observer=event_observer,
                     stream_stdout_to_terminal=stream_stdout_to_terminal,
-                    on_mark_running=_ensure_heartbeat_task,
                 )
                 exit_code = attempt.drain_exit_code
                 terminated_after_completion = (
@@ -1246,10 +1235,7 @@ async def execute_with_streaming(
                     error=failure_reason,
                 )
     finally:
-        if heartbeat_task is not None and not heartbeat_task.done():
-            heartbeat_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await heartbeat_task
+        pass
 
     return exit_code
 

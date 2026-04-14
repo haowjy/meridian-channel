@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import importlib
-import threading
-import time
-import webbrowser
+from pathlib import Path
 
 
 def run_app(
-    port: int = 8420,
-    no_browser: bool = False,
-    host: str = "127.0.0.1",
+    uds: str | None = None,
+    proxy: str | None = None,
     debug: bool = False,
     allow_unsafe_no_permissions: bool = False,
 ) -> None:
@@ -37,17 +34,20 @@ def run_app(
         allow_unsafe_no_permissions=allow_unsafe_no_permissions,
     )
 
-    if not no_browser:
-        url = f"http://{host}:{port}"
+    socket_path = (uds or "").strip() or str(state_root / "app.sock")
+    resolved_socket_path = Path(socket_path)
+    resolved_socket_path.parent.mkdir(parents=True, exist_ok=True)
+    resolved_socket_path.unlink(missing_ok=True)
 
-        def _open_browser() -> None:
-            time.sleep(1.5)
-            webbrowser.open(url)
-
-        threading.Thread(target=_open_browser, daemon=True).start()
-
-    print(f"Starting meridian app at http://{host}:{port}")
-    uvicorn_module.run(app, host=host, port=port, log_level="info")
+    print(f"Starting meridian app on unix socket: {resolved_socket_path}")
+    if proxy and proxy.strip():
+        print(f"Browser proxy URL: {proxy.strip()}")
+    else:
+        print(
+            "Browser access requires an HTTP->UDS proxy (for example: "
+            f"socat TCP-LISTEN:8420,reuseaddr,fork UNIX-CONNECT:{resolved_socket_path})"
+        )
+    uvicorn_module.run(app, uds=str(resolved_socket_path), log_level="info")
 
 
 __all__ = ["run_app"]

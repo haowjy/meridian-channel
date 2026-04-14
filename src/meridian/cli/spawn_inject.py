@@ -8,7 +8,12 @@ import json
 import sys
 from typing import cast
 
-from meridian.lib.ops.runtime import resolve_runtime_root_and_config, resolve_state_root
+from meridian.lib.core.types import SpawnId
+from meridian.lib.ops.runtime import (
+    resolve_runtime_root_and_config,
+    resolve_state_root,
+)
+from meridian.lib.ops.spawn.authorization import authorize, caller_from_env
 
 
 def _fail(message: str) -> None:
@@ -22,6 +27,7 @@ async def inject_message(
     *,
     interrupt: bool = False,
     cancel: bool = False,
+    operator_override: bool = False,
 ) -> None:
     """Send a control message to a running bidirectional spawn via Unix socket."""
 
@@ -55,6 +61,23 @@ async def inject_message(
         _fail("provide a message, --interrupt, or --cancel")
     if action_count > 1:
         _fail("message text is mutually exclusive with --interrupt/--cancel")
+
+    if interrupt:
+        caller, depth = caller_from_env()
+        if operator_override:
+            depth = 0
+        decision = authorize(
+            state_root=state_root,
+            target=SpawnId(normalized_spawn_id),
+            caller=caller,
+            depth=depth,
+        )
+        if not decision.allowed:
+            caller_label = str(decision.caller_id) if decision.caller_id is not None else "<none>"
+            _fail(
+                f"caller {caller_label} is not authorized to interrupt "
+                f"{normalized_spawn_id} (reason: {decision.reason})"
+            )
 
     request: dict[str, str]
     if interrupt:

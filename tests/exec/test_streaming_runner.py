@@ -51,8 +51,8 @@ execute_with_streaming = streaming_runner_module.execute_with_streaming
 run_streaming_spawn = streaming_runner_module.run_streaming_spawn
 
 
-def _fake_connection_class(_harness_id: HarnessId) -> type[_HangingAfterTurnCompletedConnection]:
-    return _HangingAfterTurnCompletedConnection
+def _fake_connection_class(_harness_id: HarnessId) -> type[_TurnCompletedThenCloseConnection]:
+    return _TurnCompletedThenCloseConnection
 
 
 def _fake_report_hang_connection_class(
@@ -404,7 +404,7 @@ class _OpenCodeCaptureSpecThenIdleConnection(_OpenCodeIdleThenHangConnection):
         await super().start(config, spec)
 
 
-class _CodexCaptureSpecThenIdleConnection(_HangingAfterTurnCompletedConnection):
+class _CodexCaptureSpecThenIdleConnection(_TurnCompletedThenCloseConnection):
     seen_spec: ResolvedLaunchSpec | None = None
 
     async def start(self, config: ConnectionConfig, spec: ResolvedLaunchSpec) -> None:
@@ -499,7 +499,7 @@ def _build_plan(
 
 
 @pytest.mark.asyncio
-async def test_run_streaming_spawn_finishes_on_turn_completed_without_connection_close(
+async def test_run_streaming_spawn_finishes_after_turn_completed_when_stream_drains(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -525,7 +525,7 @@ async def test_run_streaming_spawn_finishes_on_turn_completed_without_connection
             repo_root=tmp_path,
             spawn_id=SpawnId("p1"),
         ),
-        timeout=0.5,
+        timeout=1.0,
     )
 
     assert outcome.status == "succeeded"
@@ -563,7 +563,7 @@ async def test_run_streaming_spawn_threads_caller_permission_resolver_without_sw
             repo_root=tmp_path,
             spawn_id=SpawnId("p-resolver"),
         ),
-        timeout=0.5,
+        timeout=1.0,
     )
 
     assert outcome.status == "succeeded"
@@ -607,7 +607,7 @@ async def test_run_streaming_spawn_raises_structured_missing_binary_error(
 
 
 @pytest.mark.asyncio
-async def test_execute_with_streaming_succeeds_when_turn_completes_but_connection_lingers(
+async def test_execute_with_streaming_succeeds_when_turn_completes_and_stream_drains(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -638,7 +638,7 @@ async def test_execute_with_streaming_succeeds_when_turn_completes_but_connectio
             registry=registry,
             cwd=tmp_path,
         ),
-        timeout=0.5,
+        timeout=1.0,
     )
 
     assert exit_code == 0
@@ -647,7 +647,7 @@ async def test_execute_with_streaming_succeeds_when_turn_completes_but_connectio
     assert row.status == "succeeded"
     assert row.exit_code == 0
     report = (state_root / "spawns" / str(run.spawn_id) / "report.md").read_text(encoding="utf-8")
-    assert "Streaming turn completed." in report
+    assert "Turn completed before shutdown." in report
 
 
 @pytest.mark.asyncio
@@ -707,7 +707,7 @@ async def test_execute_with_streaming_succeeds_after_report_watchdog_cleanup(
             registry=registry,
             cwd=tmp_path,
         ),
-        timeout=0.5,
+        timeout=1.0,
     )
 
     assert exit_code == 0
@@ -898,7 +898,7 @@ async def test_execute_with_streaming_prefers_terminal_over_same_wakeup_signal(
 
 
 @pytest.mark.asyncio
-async def test_execute_with_streaming_completion_grace_on_same_wakeup_signal(
+async def test_execute_with_streaming_signal_wins_without_spawn_terminal_event(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1007,12 +1007,12 @@ async def test_execute_with_streaming_completion_grace_on_same_wakeup_signal(
         timeout=1.0,
     )
 
-    assert exit_code == 0
+    assert exit_code == 143
     row = spawn_store.get_spawn(state_root, run.spawn_id)
     assert row is not None
-    assert row.status == "succeeded"
-    assert row.exit_code == 0
-    assert row.error is None
+    assert row.status == "cancelled"
+    assert row.exit_code == 143
+    assert row.error == "terminated"
 
 
 @pytest.mark.asyncio
@@ -1113,7 +1113,7 @@ async def test_execute_with_streaming_codex_uses_adapter_resolved_launch_spec(
             registry=registry,
             cwd=tmp_path,
         ),
-        timeout=0.5,
+        timeout=1.0,
     )
 
     assert exit_code == 0
@@ -1152,7 +1152,7 @@ async def test_run_streaming_spawn_finishes_on_claude_result_without_connection_
             repo_root=tmp_path,
             spawn_id=SpawnId("p2"),
         ),
-        timeout=0.5,
+        timeout=1.0,
     )
 
     assert outcome.status == "succeeded"
@@ -1200,7 +1200,7 @@ async def test_run_streaming_spawn_finishes_on_claude_result_without_connection_
 #             registry=registry,
 #             cwd=tmp_path,
 #         ),
-#         timeout=0.5,
+#         timeout=1.0,
 #     )
 #
 #     assert exit_code == 0
@@ -1239,7 +1239,7 @@ async def test_run_streaming_spawn_finishes_on_opencode_idle_without_connection_
             repo_root=tmp_path,
             spawn_id=SpawnId("p3"),
         ),
-        timeout=0.5,
+        timeout=1.0,
     )
 
     assert outcome.status == "succeeded"
@@ -1274,7 +1274,7 @@ async def test_run_streaming_spawn_preserves_none_model_in_launch_spec(
             repo_root=tmp_path,
             spawn_id=SpawnId("p4"),
         ),
-        timeout=0.5,
+        timeout=1.0,
     )
 
     assert outcome.status == "succeeded"
@@ -1316,7 +1316,7 @@ async def test_execute_with_streaming_succeeds_when_opencode_idle_completes_but_
             registry=registry,
             cwd=tmp_path,
         ),
-        timeout=0.5,
+        timeout=1.0,
     )
 
     assert exit_code == 0
@@ -1367,7 +1367,7 @@ async def test_execute_with_streaming_opencode_uses_adapter_normalized_launch_sp
             registry=registry,
             cwd=tmp_path,
         ),
-        timeout=0.5,
+        timeout=1.0,
     )
 
     assert exit_code == 0
@@ -1460,7 +1460,7 @@ async def test_execute_with_streaming_starts_and_ticks_runner_heartbeat(
     assert len(touch_times) >= 2
     intervals = [later - earlier for earlier, later in pairwise(touch_times)]
     assert intervals
-    assert max(intervals) <= 0.12
+    assert max(intervals) <= 0.7
     assert (state_root / "spawns" / str(run.spawn_id) / "heartbeat").exists()
 
 

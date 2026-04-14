@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -147,7 +148,7 @@ def create_app(
             spawn_id,
             status=outcome.status,
             exit_code=outcome.exit_code,
-            origin="launcher",
+            origin="runner",
             duration_secs=outcome.duration_secs,
             error=outcome.error,
         )
@@ -170,7 +171,8 @@ def create_app(
                 harness=harness,
                 kind="streaming",
                 prompt=prompt,
-                launch_mode="foreground",
+                launch_mode="app",
+                runner_pid=os.getpid(),
                 status="running",
             )
 
@@ -253,6 +255,7 @@ def create_app(
 
         try:
             connection = await spawn_manager.start_spawn(config, spec)
+            await spawn_manager._start_heartbeat(spawn_id)  # pyright: ignore[reportPrivateUsage]
         except Exception as exc:
             spawn_store.finalize_spawn(
                 state_root,

@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import socket
 from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from meridian.lib.core.types import SpawnId
+from meridian.lib.ops.spawn.authorization import (
+    PeercredFailure,
+    authorize,
+    caller_from_socket_peer,
+)
 from meridian.lib.streaming.types import InjectResult
 
 if TYPE_CHECKING:
@@ -44,7 +50,7 @@ class ControlSocketServer:
             if not raw:
                 response = {"ok": False, "error": "empty request"}
             else:
-                response = await self._handle_request(raw)
+                response = await self._handle_request(raw, writer)
         except Exception as exc:
             response = {"ok": False, "error": str(exc)}
 
@@ -59,7 +65,11 @@ class ControlSocketServer:
         with suppress(BrokenPipeError, ConnectionResetError):
             await writer.wait_closed()
 
-    async def _handle_request(self, raw: bytes) -> dict[str, object]:
+    async def _handle_request(
+        self,
+        raw: bytes,
+        writer: asyncio.StreamWriter,
+    ) -> dict[str, object]:
         """Decode and route one control request."""
 
         try:
@@ -94,6 +104,21 @@ class ControlSocketServer:
             )
             return response or self._result_to_response(result)
         elif message_type == "interrupt":
+            peer_socket = writer.get_extra_info("socket")
+            if not isinstance(peer_socket, socket.socket):
+                return {"ok": False, "error": "caller identity unavailable"}
+            try:
+                caller, depth = caller_from_socket_peer(peer_socket)
+            except PeercredFailure:
+                return {"ok": False, "error": "caller identity unavailable"}
+            decision = authorize(
+                state_root=self._manager.state_root,
+                target=self._spawn_id,
+                caller=caller,
+                depth=depth,
+            )
+            if not decision.allowed:
+                return {"ok": False, "error": "interrupt requires caller authorization"}
             response: dict[str, object] | None = None
 
             def _on_result(inject_result: InjectResult) -> None:
