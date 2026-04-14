@@ -173,6 +173,28 @@ def test_doctor_warning_shape_for_non_mars_warnings(
         assert warning.payload is None
 
 
+def test_doctor_skips_orphan_run_repair_when_depth_is_nonzero(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = _create_repo_root(tmp_path)
+    _setup_warning_shape_case(repo_root, monkeypatch)
+    monkeypatch.setenv("MERIDIAN_DEPTH", "1")
+    called = False
+
+    def _unexpected_repair(*_args, **_kwargs) -> int:
+        nonlocal called
+        called = True
+        raise AssertionError("_repair_orphan_runs should be skipped when MERIDIAN_DEPTH > 0")
+
+    monkeypatch.setattr(diag, "_repair_orphan_runs", _unexpected_repair)
+
+    result = doctor_sync(DoctorInput(repo_root=repo_root.as_posix()))
+
+    assert called is False
+    assert "orphan_runs" not in result.repaired
+
+
 def test_doctor_reports_no_warnings_when_conditions_are_clear(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

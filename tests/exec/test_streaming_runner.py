@@ -4,6 +4,7 @@ import asyncio
 import importlib
 import os
 import signal
+from itertools import pairwise
 from pathlib import Path
 from typing import ClassVar
 
@@ -1375,3 +1376,207 @@ async def test_execute_with_streaming_opencode_uses_adapter_normalized_launch_sp
     assert observed_spec.model == "gpt-5.3-codex"
     assert observed_spec.skills == ()
     assert observed_spec.mcp_tools == ("tool-a=echo a",)
+
+
+@pytest.mark.asyncio
+async def test_execute_with_streaming_starts_and_ticks_runner_heartbeat(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_root = resolve_state_paths(tmp_path).root_dir
+    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
+    registry = HarnessRegistry()
+    registry.register(_DummyCodexHarness())
+    monkeypatch.setattr(spawn_manager_module, "ControlSocketServer", _FakeControlSocketServer)
+    monkeypatch.setattr(
+        "meridian.lib.harness.connections.get_connection_class",
+        _fake_connection_class,
+    )
+
+    original_touch = streaming_runner_module._touch_heartbeat_file
+    touch_times: list[float] = []
+
+    def _tracked_touch(state_root_arg: Path, spawn_id_arg: SpawnId) -> None:
+        touch_times.append(asyncio.get_running_loop().time())
+        original_touch(state_root_arg, spawn_id_arg)
+
+    async def _delayed_terminal_consume(
+        *,
+        subscriber: asyncio.Queue[HarnessEvent | None],
+        budget_tracker: object,
+        budget_signal: asyncio.Event,
+        budget_breach_holder: list[object | None],
+        event_observer: object,
+        stream_stdout_to_terminal: bool,
+        terminal_event_future: asyncio.Future[object] | None = None,
+    ) -> None:
+        _ = (
+            budget_tracker,
+            budget_signal,
+            budget_breach_holder,
+            event_observer,
+            stream_stdout_to_terminal,
+        )
+        while True:
+            event = await subscriber.get()
+            if event is None:
+                return
+            if terminal_event_future is None or terminal_event_future.done():
+                continue
+            terminal_outcome = streaming_runner_module._terminal_event_outcome(event)
+            if terminal_outcome is None:
+                continue
+            await asyncio.sleep(0.07)
+            terminal_event_future.set_result(terminal_outcome)
+
+    monkeypatch.setattr(streaming_runner_module, "_HEARTBEAT_INTERVAL_SECS", 0.02)
+    monkeypatch.setattr(streaming_runner_module, "_touch_heartbeat_file", _tracked_touch)
+    monkeypatch.setattr(
+        streaming_runner_module,
+        "_consume_subscriber_events",
+        _delayed_terminal_consume,
+    )
+
+    run = Spawn(
+        spawn_id=SpawnId("r-heartbeat-1"),
+        prompt="hello",
+        model=ModelId("gpt-5.3-codex"),
+        status="queued",
+    )
+    exit_code = await asyncio.wait_for(
+        execute_with_streaming(
+            run,
+            plan=_build_plan(),
+            repo_root=tmp_path,
+            state_root=state_root,
+            artifacts=artifacts,
+            registry=registry,
+            cwd=tmp_path,
+        ),
+        timeout=1.0,
+    )
+
+    assert exit_code == 0
+    assert len(touch_times) >= 2
+    intervals = [later - earlier for earlier, later in pairwise(touch_times)]
+    assert intervals
+    assert max(intervals) <= 0.06
+    assert (state_root / "spawns" / str(run.spawn_id) / "heartbeat").exists()
+
+
+@pytest.mark.asyncio
+async def test_execute_with_streaming_cancels_heartbeat_when_finalize_raises(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_root = resolve_state_paths(tmp_path).root_dir
+    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
+    registry = HarnessRegistry()
+    registry.register(_DummyCodexHarness())
+    monkeypatch.setattr(spawn_manager_module, "ControlSocketServer", _FakeControlSocketServer)
+    monkeypatch.setattr(
+        "meridian.lib.harness.connections.get_connection_class",
+        _fake_connection_class,
+    )
+
+    original_touch = streaming_runner_module._touch_heartbeat_file
+    touch_times: list[float] = []
+
+    def _tracked_touch(state_root_arg: Path, spawn_id_arg: SpawnId) -> None:
+        touch_times.append(asyncio.get_running_loop().time())
+        original_touch(state_root_arg, spawn_id_arg)
+
+    def _raising_finalize_spawn(*_args, **_kwargs) -> bool:
+        raise RuntimeError("streaming finalize boom")
+
+    monkeypatch.setattr(streaming_runner_module, "_HEARTBEAT_INTERVAL_SECS", 0.01)
+    monkeypatch.setattr(streaming_runner_module, "_touch_heartbeat_file", _tracked_touch)
+    monkeypatch.setattr(
+        streaming_runner_module.spawn_store,
+        "finalize_spawn",
+        _raising_finalize_spawn,
+    )
+
+    run = Spawn(
+        spawn_id=SpawnId("r-heartbeat-2"),
+        prompt="hello",
+        model=ModelId("gpt-5.3-codex"),
+        status="queued",
+    )
+
+    with pytest.raises(RuntimeError, match="streaming finalize boom"):
+        await asyncio.wait_for(
+            execute_with_streaming(
+                run,
+                plan=_build_plan(),
+                repo_root=tmp_path,
+                state_root=state_root,
+                artifacts=artifacts,
+                registry=registry,
+                cwd=tmp_path,
+            ),
+            timeout=1.0,
+        )
+
+    touched_count = len(touch_times)
+    await asyncio.sleep(0.05)
+    assert len(touch_times) == touched_count
+
+
+@pytest.mark.asyncio
+async def test_execute_with_streaming_cancels_heartbeat_when_finalize_raises_value_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_root = resolve_state_paths(tmp_path).root_dir
+    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
+    registry = HarnessRegistry()
+    registry.register(_DummyCodexHarness())
+    monkeypatch.setattr(spawn_manager_module, "ControlSocketServer", _FakeControlSocketServer)
+    monkeypatch.setattr(
+        "meridian.lib.harness.connections.get_connection_class",
+        _fake_connection_class,
+    )
+
+    original_touch = streaming_runner_module._touch_heartbeat_file
+    touch_times: list[float] = []
+
+    def _tracked_touch(state_root_arg: Path, spawn_id_arg: SpawnId) -> None:
+        touch_times.append(asyncio.get_running_loop().time())
+        original_touch(state_root_arg, spawn_id_arg)
+
+    def _raising_finalize_spawn(*_args, **_kwargs) -> bool:
+        raise ValueError("streaming finalize value error")
+
+    monkeypatch.setattr(streaming_runner_module, "_HEARTBEAT_INTERVAL_SECS", 0.01)
+    monkeypatch.setattr(streaming_runner_module, "_touch_heartbeat_file", _tracked_touch)
+    monkeypatch.setattr(
+        streaming_runner_module.spawn_store,
+        "finalize_spawn",
+        _raising_finalize_spawn,
+    )
+
+    run = Spawn(
+        spawn_id=SpawnId("r-heartbeat-3"),
+        prompt="hello",
+        model=ModelId("gpt-5.3-codex"),
+        status="queued",
+    )
+
+    with pytest.raises(ValueError, match="streaming finalize value error"):
+        await asyncio.wait_for(
+            execute_with_streaming(
+                run,
+                plan=_build_plan(),
+                repo_root=tmp_path,
+                state_root=state_root,
+                artifacts=artifacts,
+                registry=registry,
+                cwd=tmp_path,
+            ),
+            timeout=1.0,
+        )
+
+    touched_count = len(touch_times)
+    await asyncio.sleep(0.05)
+    assert len(touch_times) == touched_count

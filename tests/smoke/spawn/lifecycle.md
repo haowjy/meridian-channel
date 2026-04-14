@@ -87,3 +87,59 @@ grep -q 'total_runs:' /tmp/meridian-lifecycle-stats.txt && \
 grep -q 'failed:' /tmp/meridian-lifecycle-stats.txt && \
 echo "PASS: spawn stats returned aggregate counts" || echo "FAIL: spawn stats output was incomplete"
 ```
+
+### LIFE-6. Nested read (`MERIDIAN_DEPTH>0`) does not stamp `orphan_run` [CRITICAL]
+
+```bash
+uv run python - <<'PY'
+import json, os, pathlib, subprocess
+
+root = pathlib.Path(os.environ["MERIDIAN_STATE_ROOT"])
+spawns_jsonl = root / "spawns.jsonl"
+spawn_id = "p-depth-gate-smoke"
+
+start_event = {
+    "v": 1,
+    "event": "start",
+    "id": spawn_id,
+    "chat_id": "c-depth",
+    "model": "gpt-5.4",
+    "agent": "smoke",
+    "harness": "codex",
+    "kind": "child",
+    "prompt": "depth gate smoke",
+    "status": "running",
+    "runner_pid": 999999,
+    "started_at": "2000-01-01T00:00:00Z",
+}
+spawns_jsonl.parent.mkdir(parents=True, exist_ok=True)
+with spawns_jsonl.open("a", encoding="utf-8") as fh:
+    fh.write(json.dumps(start_event) + "\n")
+
+env = dict(os.environ)
+env["MERIDIAN_DEPTH"] = "1"
+subprocess.run(
+    ["uv", "run", "meridian", "spawn", "show", spawn_id],
+    check=False,
+    env=env,
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+)
+
+events = []
+with spawns_jsonl.open(encoding="utf-8") as fh:
+    for line in fh:
+        line = line.strip()
+        if line:
+            events.append(json.loads(line))
+
+orphan_stamped = any(
+    event.get("event") == "finalize"
+    and event.get("id") == spawn_id
+    and event.get("error") == "orphan_run"
+    for event in events
+)
+assert not orphan_stamped, "depth>0 read unexpectedly stamped orphan_run"
+print("PASS: depth>0 read path skipped orphan reconciliation")
+PY
+```

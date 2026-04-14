@@ -4,6 +4,7 @@ import os
 import signal
 import sys
 import textwrap
+from itertools import pairwise
 from pathlib import Path
 from typing import ClassVar, get_args, get_origin
 
@@ -678,3 +679,192 @@ async def test_execute_resolves_sigterm_after_report_regardless_of_received_sign
     row = _fetch_run_row(state_root, run.spawn_id)
     assert row.status == expected_status
     assert row.exit_code == expected_exit_code
+
+
+@pytest.mark.asyncio
+async def test_execute_with_finalization_starts_and_ticks_runner_heartbeat(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    run, state_root = _create_run(tmp_path, prompt="heartbeat ticks")
+    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
+    adapter = ScriptHarnessAdapter(command=("unused-command",))
+    registry = HarnessRegistry()
+    registry.register(adapter)
+
+    original_touch = launch_runner._touch_heartbeat_file
+    touch_times: list[float] = []
+
+    def _tracked_touch(state_root_arg: Path, spawn_id_arg: SpawnId) -> None:
+        touch_times.append(asyncio.get_running_loop().time())
+        original_touch(state_root_arg, spawn_id_arg)
+
+    async def fake_spawn_and_stream(
+        *,
+        on_process_started,
+        output_log_path: Path,
+        stderr_log_path: Path,
+        **_: object,
+    ) -> launch_runner.SpawnResult:
+        assert on_process_started is not None
+        on_process_started(4242)
+        await asyncio.sleep(0.07)
+        return launch_runner.SpawnResult(
+            exit_code=1,
+            raw_return_code=1,
+            timed_out=False,
+            received_signal=None,
+            output_log_path=output_log_path,
+            stderr_log_path=stderr_log_path,
+            budget_breach=None,
+            terminated_by_report_watchdog=False,
+        )
+
+    monkeypatch.setattr(launch_runner, "_HEARTBEAT_INTERVAL_SECS", 0.02)
+    monkeypatch.setattr(launch_runner, "_touch_heartbeat_file", _tracked_touch)
+    monkeypatch.setattr(launch_runner, "spawn_and_stream", fake_spawn_and_stream)
+
+    await execute_with_finalization(
+        run,
+        plan=_build_plan(run, adapter.id, max_retries=0),
+        repo_root=tmp_path,
+        state_root=state_root,
+        artifacts=artifacts,
+        registry=registry,
+        harness_id=adapter.id,
+        cwd=tmp_path,
+    )
+
+    assert len(touch_times) >= 2
+    intervals = [later - earlier for earlier, later in pairwise(touch_times)]
+    assert intervals
+    assert max(intervals) <= 0.06
+    assert (state_root / "spawns" / str(run.spawn_id) / "heartbeat").exists()
+
+
+@pytest.mark.asyncio
+async def test_execute_with_finalization_cancels_heartbeat_when_finalize_raises(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    run, state_root = _create_run(tmp_path, prompt="heartbeat cancel")
+    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
+    adapter = ScriptHarnessAdapter(command=("unused-command",))
+    registry = HarnessRegistry()
+    registry.register(adapter)
+
+    touch_times: list[float] = []
+    original_touch = launch_runner._touch_heartbeat_file
+
+    def _tracked_touch(state_root_arg: Path, spawn_id_arg: SpawnId) -> None:
+        touch_times.append(asyncio.get_running_loop().time())
+        original_touch(state_root_arg, spawn_id_arg)
+
+    async def fake_spawn_and_stream(
+        *,
+        on_process_started,
+        output_log_path: Path,
+        stderr_log_path: Path,
+        **_: object,
+    ) -> launch_runner.SpawnResult:
+        assert on_process_started is not None
+        on_process_started(5151)
+        await asyncio.sleep(0.03)
+        return launch_runner.SpawnResult(
+            exit_code=1,
+            raw_return_code=1,
+            timed_out=False,
+            received_signal=None,
+            output_log_path=output_log_path,
+            stderr_log_path=stderr_log_path,
+            budget_breach=None,
+            terminated_by_report_watchdog=False,
+        )
+
+    def _raising_finalize_spawn(*_args, **_kwargs) -> bool:
+        raise RuntimeError("finalize boom")
+
+    monkeypatch.setattr(launch_runner, "_HEARTBEAT_INTERVAL_SECS", 0.01)
+    monkeypatch.setattr(launch_runner, "_touch_heartbeat_file", _tracked_touch)
+    monkeypatch.setattr(launch_runner, "spawn_and_stream", fake_spawn_and_stream)
+    monkeypatch.setattr(launch_runner.spawn_store, "finalize_spawn", _raising_finalize_spawn)
+
+    with pytest.raises(RuntimeError, match="finalize boom"):
+        await execute_with_finalization(
+            run,
+            plan=_build_plan(run, adapter.id, max_retries=0),
+            repo_root=tmp_path,
+            state_root=state_root,
+            artifacts=artifacts,
+            registry=registry,
+            harness_id=adapter.id,
+            cwd=tmp_path,
+        )
+
+    touched_count = len(touch_times)
+    await asyncio.sleep(0.05)
+    assert len(touch_times) == touched_count
+
+
+@pytest.mark.asyncio
+async def test_execute_with_finalization_cancels_heartbeat_when_finalize_raises_value_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    run, state_root = _create_run(tmp_path, prompt="heartbeat cancel value error")
+    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
+    adapter = ScriptHarnessAdapter(command=("unused-command",))
+    registry = HarnessRegistry()
+    registry.register(adapter)
+
+    touch_times: list[float] = []
+    original_touch = launch_runner._touch_heartbeat_file
+
+    def _tracked_touch(state_root_arg: Path, spawn_id_arg: SpawnId) -> None:
+        touch_times.append(asyncio.get_running_loop().time())
+        original_touch(state_root_arg, spawn_id_arg)
+
+    async def fake_spawn_and_stream(
+        *,
+        on_process_started,
+        output_log_path: Path,
+        stderr_log_path: Path,
+        **_: object,
+    ) -> launch_runner.SpawnResult:
+        assert on_process_started is not None
+        on_process_started(6161)
+        await asyncio.sleep(0.03)
+        return launch_runner.SpawnResult(
+            exit_code=1,
+            raw_return_code=1,
+            timed_out=False,
+            received_signal=None,
+            output_log_path=output_log_path,
+            stderr_log_path=stderr_log_path,
+            budget_breach=None,
+            terminated_by_report_watchdog=False,
+        )
+
+    def _raising_finalize_spawn(*_args, **_kwargs) -> bool:
+        raise ValueError("finalize value error")
+
+    monkeypatch.setattr(launch_runner, "_HEARTBEAT_INTERVAL_SECS", 0.01)
+    monkeypatch.setattr(launch_runner, "_touch_heartbeat_file", _tracked_touch)
+    monkeypatch.setattr(launch_runner, "spawn_and_stream", fake_spawn_and_stream)
+    monkeypatch.setattr(launch_runner.spawn_store, "finalize_spawn", _raising_finalize_spawn)
+
+    with pytest.raises(ValueError, match="finalize value error"):
+        await execute_with_finalization(
+            run,
+            plan=_build_plan(run, adapter.id, max_retries=0),
+            repo_root=tmp_path,
+            state_root=state_root,
+            artifacts=artifacts,
+            registry=registry,
+            harness_id=adapter.id,
+            cwd=tmp_path,
+        )
+
+    touched_count = len(touch_times)
+    await asyncio.sleep(0.05)
+    assert len(touch_times) == touched_count
