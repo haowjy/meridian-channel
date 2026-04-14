@@ -335,6 +335,7 @@ class SpawnCancelInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     spawn_id: str
+    operator_override: bool = False
     repo_root: str | None = None
 
 

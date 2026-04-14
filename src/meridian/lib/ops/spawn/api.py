@@ -1,15 +1,13 @@
 """Spawn operations used by CLI, MCP, and DirectAdapter surfaces."""
 
 import asyncio
-import os
-import signal
 import time
-from contextlib import suppress
 from pathlib import Path
 
 from meridian.lib.core.context import RuntimeContext
 from meridian.lib.core.sink import NullSink, OutputSink
 from meridian.lib.core.spawn_lifecycle import ACTIVE_SPAWN_STATUSES, is_active_spawn_status
+from meridian.lib.core.types import SpawnId
 from meridian.lib.ops.reference import ResolvedSessionReference, resolve_session_reference
 from meridian.lib.ops.runtime import (
     build_runtime_from_root_and_config,
@@ -18,8 +16,10 @@ from meridian.lib.ops.runtime import (
     runtime_context,
 )
 from meridian.lib.state import spawn_store
+from meridian.lib.streaming.signal_canceller import CancelOutcome, SignalCanceller
 from meridian.lib.utils.time import minutes_to_seconds
 
+from .authorization import authorize, caller_from_env
 from .execute import (
     depth_exceeded_output,
     depth_limits,
@@ -414,53 +414,100 @@ async def spawn_files(
     return await asyncio.to_thread(spawn_files_sync, payload, ctx=ctx, sink=sink)
 
 
-def _read_background_pid(state_root: Path, spawn_id: str) -> int | None:
-    pid_path = state_root / "spawns" / spawn_id / "background.pid"
-    if not pid_path.is_file():
-        return None
+def _enforce_cancel_authorization(
+    *,
+    state_root: Path,
+    spawn_id: str,
+    operator_override: bool = False,
+) -> None:
+    caller, depth = caller_from_env()
+    if operator_override:
+        depth = 0
+    decision = authorize(
+        state_root=state_root,
+        target=SpawnId(spawn_id),
+        caller=caller,
+        depth=depth,
+    )
+    if decision.allowed:
+        return
+    caller_label = str(decision.caller_id) if decision.caller_id is not None else "<none>"
+    raise PermissionError(
+        f"caller {caller_label} is not authorized to cancel {spawn_id} "
+        f"(reason: {decision.reason})"
+    )
+
+
+def _spawn_cancel_output_from_outcome(
+    *,
+    spawn_id: str,
+    outcome: CancelOutcome,
+    row: spawn_store.SpawnRecord,
+) -> SpawnActionOutput:
+    if outcome.already_terminal:
+        message = f"Spawn '{spawn_id}' is already {outcome.status}."
+    elif outcome.finalizing:
+        message = (
+            "Spawn did not terminate within grace; reaper will reconcile."
+            if outcome.status != "cancelled"
+            else "Spawn cancelled."
+        )
+    elif outcome.status == "cancelled":
+        message = "Spawn cancelled."
+    else:
+        message = f"Spawn '{spawn_id}' is {outcome.status}."
+
+    return SpawnActionOutput(
+        command="spawn.cancel",
+        status=outcome.status,
+        spawn_id=spawn_id,
+        message=message,
+        model=row.model,
+        harness_id=row.harness,
+        exit_code=outcome.exit_code,
+    )
+
+
+async def _spawn_cancel_impl(
+    payload: SpawnCancelInput,
+    *,
+    sink: OutputSink | None = None,
+) -> SpawnActionOutput:
+    _ = sink
+    repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
+    spawn_id = resolve_spawn_reference(repo_root, payload.spawn_id)
+    state_root = resolve_state_root(repo_root)
+    row = spawn_store.get_spawn(state_root, spawn_id)
+    if row is None:
+        raise ValueError(f"Spawn '{spawn_id}' not found")
+
+    _enforce_cancel_authorization(
+        state_root=state_root,
+        spawn_id=spawn_id,
+        operator_override=payload.operator_override,
+    )
+
+    canceller = SignalCanceller(state_root=state_root)
     try:
-        pid = int(pid_path.read_text(encoding="utf-8").strip())
-    except ValueError:
-        return None
-    if pid <= 0:
-        return None
-    return pid
+        outcome = await canceller.cancel(SpawnId(spawn_id))
+    except RuntimeError as exc:
+        return SpawnActionOutput(
+            command="spawn.cancel",
+            status="failed",
+            spawn_id=spawn_id,
+            message=f"Cancel failed: {exc}",
+            error=str(exc),
+            model=row.model,
+            harness_id=row.harness,
+            exit_code=1,
+        )
 
-
-def _read_harness_pid(state_root: Path, spawn_id: str) -> int | None:
-    pid_path = state_root / "spawns" / spawn_id / "harness.pid"
-    if not pid_path.is_file():
-        return None
-    try:
-        pid = int(pid_path.read_text(encoding="utf-8").strip())
-    except ValueError:
-        return None
-    if pid <= 0:
-        return None
-    return pid
-
-
-def _resolve_cancel_pid(state_root: Path, row: spawn_store.SpawnRecord) -> int | None:
-    launch_mode = (row.launch_mode or "").strip().lower()
-    if launch_mode == "background":
-        if row.worker_pid is not None and row.worker_pid > 0:
-            return row.worker_pid
-        if row.wrapper_pid is not None and row.wrapper_pid > 0:
-            return row.wrapper_pid
-        return _read_background_pid(state_root, row.id)
-    if launch_mode == "foreground":
-        if row.worker_pid is not None and row.worker_pid > 0:
-            return row.worker_pid
-        return _read_harness_pid(state_root, row.id)
-
-    if row.worker_pid is not None and row.worker_pid > 0:
-        return row.worker_pid
-    if row.wrapper_pid is not None and row.wrapper_pid > 0:
-        return row.wrapper_pid
-    background_pid = _read_background_pid(state_root, row.id)
-    if background_pid is not None:
-        return background_pid
-    return _read_harness_pid(state_root, row.id)
+    latest = spawn_store.get_spawn(state_root, spawn_id) or row
+    return _spawn_cancel_output_from_outcome(
+        spawn_id=spawn_id,
+        outcome=outcome,
+        row=latest,
+    )
 
 
 def spawn_cancel_sync(
@@ -469,57 +516,8 @@ def spawn_cancel_sync(
     *,
     sink: OutputSink | None = None,
 ) -> SpawnActionOutput:
-    _ = (ctx, sink)
-    repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
-    spawn_id = resolve_spawn_reference(repo_root, payload.spawn_id)
-    state_root = resolve_state_root(repo_root)
-    row = spawn_store.get_spawn(state_root, spawn_id)
-    if row is None:
-        raise ValueError(f"Spawn '{spawn_id}' not found")
-
-    if _spawn_is_terminal(row.status):
-        return SpawnActionOutput(
-            command="spawn.cancel",
-            status=row.status,
-            spawn_id=spawn_id,
-            message=f"Spawn '{spawn_id}' is already {row.status}.",
-            model=row.model,
-            harness_id=row.harness,
-        )
-    pid = _resolve_cancel_pid(state_root, row)
-    if pid is not None:
-        with suppress(ProcessLookupError):
-            os.kill(pid, signal.SIGTERM)
-
-    finalized = spawn_store.finalize_spawn(
-        state_root,
-        spawn_id,
-        status="cancelled",
-        exit_code=130,
-        origin="cancel",
-        error="cancelled",
-    )
-    if not finalized:
-        latest = spawn_store.get_spawn(state_root, spawn_id)
-        if latest is None:
-            raise ValueError(f"Spawn '{spawn_id}' not found")
-        return SpawnActionOutput(
-            command="spawn.cancel",
-            status=latest.status,
-            spawn_id=spawn_id,
-            message=f"Spawn '{spawn_id}' is already {latest.status}.",
-            model=latest.model,
-            harness_id=latest.harness,
-            exit_code=latest.exit_code,
-        )
-    return SpawnActionOutput(
-        command="spawn.cancel",
-        status="cancelled",
-        spawn_id=spawn_id,
-        message="Spawn cancelled.",
-        model=row.model,
-        harness_id=row.harness,
-    )
+    _ = ctx
+    return asyncio.run(_spawn_cancel_impl(payload, sink=sink))
 
 
 async def spawn_cancel(
@@ -528,7 +526,8 @@ async def spawn_cancel(
     *,
     sink: OutputSink | None = None,
 ) -> SpawnActionOutput:
-    return await asyncio.to_thread(spawn_cancel_sync, payload, ctx=ctx, sink=sink)
+    _ = ctx
+    return await _spawn_cancel_impl(payload, sink=sink)
 
 
 def _spawn_is_terminal(status: str) -> bool:

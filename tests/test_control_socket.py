@@ -23,9 +23,6 @@ class _FakeManager:
         self.interrupt_calls += 1
         return InjectResult(success=True, inbound_seq=7)
 
-    async def cancel(self, *_args: object, **_kwargs: object) -> InjectResult:
-        return InjectResult(success=True)
-
 
 class _FakeWriter:
     def __init__(self, sock: socket.socket) -> None:
@@ -131,3 +128,22 @@ async def test_interrupt_request_routes_when_authorized(
 
     assert result == {"ok": True, "inbound_seq": 7}
     assert manager.interrupt_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_cancel_request_is_rejected_on_control_socket(tmp_path: Path) -> None:
+    manager = _FakeManager(state_root=tmp_path / ".meridian")
+    server = ControlSocketServer(SpawnId("p1"), tmp_path / "control.sock", manager)
+    left, right = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    writer = _FakeWriter(right)
+
+    try:
+        result = await server._handle_request(b'{"type":"cancel"}\n', writer)
+    finally:
+        left.close()
+        right.close()
+
+    assert result == {
+        "ok": False,
+        "error": "cancel is not supported on the control socket; use meridian spawn cancel <id>",
+    }

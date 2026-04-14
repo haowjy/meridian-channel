@@ -658,6 +658,7 @@ def _spawn_cancel(
     result = spawn_cancel_sync(
         SpawnCancelInput(
             spawn_id=resolved_spawn_id,
+            operator_override=operator_override,
         ),
         sink=current_output_sink(),
     )
@@ -766,10 +767,6 @@ def _spawn_inject(
         bool,
         Parameter(name="--interrupt", help="Send interrupt signal."),
     ] = False,
-    cancel: Annotated[
-        bool,
-        Parameter(name="--cancel", help="Cancel the spawn."),
-    ] = False,
     operator_override: Annotated[
         bool,
         Parameter(
@@ -784,7 +781,6 @@ def _spawn_inject(
             spawn_id,
             message if message.strip() else None,
             interrupt=interrupt,
-            cancel=cancel,
             operator_override=operator_override,
         )
     )
@@ -813,10 +809,10 @@ def register_spawn_commands(app: App, emit: Emitter) -> tuple[set[str], dict[str
     app.command(
         _spawn_inject,
         name="inject",
-        help="Inject a message, interrupt, or cancel request into a running streaming spawn.",
+        help="Inject a message or interrupt request into a running streaming spawn.",
     )
     registered.add("spawn.inject")
     descriptions["spawn.inject"] = (
-        "Inject a message, interrupt, or cancel request into a running streaming spawn."
+        "Inject a message or interrupt request into a running streaming spawn."
     )
     return registered, descriptions

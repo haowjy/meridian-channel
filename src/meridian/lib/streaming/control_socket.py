@@ -132,7 +132,13 @@ class ControlSocketServer:
             )
             return response or self._result_to_response(result)
         elif message_type == "cancel":
-            result = await self._manager.cancel(self._spawn_id, source="control_socket")
+            return {
+                "ok": False,
+                "error": (
+                    "cancel is not supported on the control socket; "
+                    "use meridian spawn cancel <id>"
+                ),
+            }
         else:
             return {"ok": False, "error": f"unsupported request type: {message_type}"}
 

@@ -18,6 +18,7 @@ from meridian.lib.app.agui_mapping.base import AGUIMapper
 from meridian.lib.app.agui_mapping.extensions import make_capabilities_event
 from meridian.lib.core.types import SpawnId
 from meridian.lib.harness.connections.base import HarnessEvent
+from meridian.lib.streaming.signal_canceller import SignalCanceller
 from meridian.lib.streaming.spawn_manager import SpawnManager
 
 if TYPE_CHECKING:
@@ -211,7 +212,19 @@ async def _inbound_loop(
         elif message_type == "interrupt":
             result = await manager.interrupt(spawn_id, source="app_ws")
         elif message_type == "cancel":
-            result = await manager.cancel(spawn_id, source="app_ws")
+            try:
+                outcome = await SignalCanceller(
+                    state_root=manager.state_root,
+                    manager=manager,
+                ).cancel(spawn_id)
+            except ValueError as exc:
+                await _send_error(websocket, str(exc))
+                continue
+            if outcome.already_terminal:
+                await _send_error(websocket, f"spawn already terminal: {outcome.status}")
+            elif outcome.finalizing:
+                await _send_error(websocket, "spawn is finalizing")
+            continue
         else:
             await _send_error(websocket, f"unsupported control message type: {message_type}")
             continue

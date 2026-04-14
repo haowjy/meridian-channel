@@ -1,0 +1,237 @@
+"""Shared cancel pipeline for CLI and app-managed spawns."""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import signal
+import time
+from contextlib import suppress
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import TYPE_CHECKING, cast
+
+from meridian.lib.core.domain import SpawnStatus
+from meridian.lib.core.spawn_lifecycle import TERMINAL_SPAWN_STATUSES
+from meridian.lib.core.types import SpawnId
+from meridian.lib.state import spawn_store
+from meridian.lib.state.liveness import is_process_alive
+from meridian.lib.state.spawn_store import SpawnOrigin
+
+if TYPE_CHECKING:
+    from meridian.lib.state.spawn_store import SpawnRecord
+    from meridian.lib.streaming.spawn_manager import SpawnManager
+
+_WAIT_POLL_INTERVAL_SECS = 0.1
+
+
+@dataclass(frozen=True)
+class CancelOutcome:
+    status: SpawnStatus
+    origin: SpawnOrigin
+    exit_code: int
+    already_terminal: bool = False
+    finalizing: bool = False
+
+
+class SignalCanceller:
+    """Two-lane cancel dispatcher for spawn lifecycle cancellation."""
+
+    def __init__(
+        self,
+        *,
+        state_root: Path,
+        grace_seconds: float = 5.0,
+        manager: SpawnManager | None = None,
+    ) -> None:
+        self._state_root = state_root
+        self._grace_seconds = grace_seconds
+        self._manager = manager
+
+    async def cancel(self, spawn_id: SpawnId) -> CancelOutcome:
+        record = spawn_store.get_spawn(self._state_root, spawn_id)
+        if record is None:
+            raise ValueError(f"Spawn '{spawn_id}' not found")
+
+        if _is_terminal(record.status):
+            return _outcome_from_record(record, already_terminal=True)
+
+        if record.status == "finalizing":
+            terminal = await self._wait_for_terminal(spawn_id)
+            if terminal is not None:
+                return _outcome_from_record(terminal, already_terminal=True)
+            latest = spawn_store.get_spawn(self._state_root, spawn_id) or record
+            return CancelOutcome(
+                status="finalizing",
+                origin="cancel",
+                exit_code=_exit_code_or_default(latest),
+                finalizing=True,
+            )
+
+        launch_mode = (record.launch_mode or "").strip().lower()
+        if launch_mode == "app":
+            return await self._cancel_app_spawn(spawn_id, record)
+        return await self._cancel_cli_spawn(spawn_id, record)
+
+    async def _cancel_cli_spawn(
+        self,
+        spawn_id: SpawnId,
+        record: SpawnRecord,
+    ) -> CancelOutcome:
+        runner_pid = self._resolve_runner_pid(record)
+        if runner_pid is None:
+            finalized = spawn_store.finalize_spawn(
+                self._state_root,
+                spawn_id,
+                status="cancelled",
+                exit_code=130,
+                origin="cancel",
+                error="cancelled",
+            )
+            latest = spawn_store.get_spawn(self._state_root, spawn_id)
+            if latest is not None and _is_terminal(latest.status):
+                return _outcome_from_record(latest, already_terminal=not finalized)
+            return CancelOutcome(status="cancelled", origin="cancel", exit_code=130)
+
+        with suppress(ProcessLookupError):
+            os.kill(runner_pid, signal.SIGTERM)
+
+        terminal = await self._wait_for_terminal(spawn_id)
+        if terminal is not None:
+            return _outcome_from_record(terminal)
+
+        latest = spawn_store.get_spawn(self._state_root, spawn_id) or record
+        return CancelOutcome(
+            status="finalizing",
+            origin="cancel",
+            exit_code=_exit_code_or_default(latest),
+            finalizing=True,
+        )
+
+    async def _cancel_app_spawn(
+        self,
+        spawn_id: SpawnId,
+        record: SpawnRecord,
+    ) -> CancelOutcome:
+        if self._manager is None:
+            return await self._cancel_app_spawn_over_http(spawn_id)
+
+        await self._manager.stop_spawn(
+            spawn_id,
+            status="cancelled",
+            exit_code=143,
+            error="cancelled",
+        )
+        terminal = await self._wait_for_terminal(spawn_id)
+        if terminal is not None:
+            return _outcome_from_record(terminal)
+
+        latest = spawn_store.get_spawn(self._state_root, spawn_id) or record
+        return CancelOutcome(
+            status="finalizing",
+            origin="cancel",
+            exit_code=_exit_code_or_default(latest),
+            finalizing=True,
+        )
+
+    async def _cancel_app_spawn_over_http(self, spawn_id: SpawnId) -> CancelOutcome:
+        _ = spawn_id
+        raise RuntimeError("cross-process app cancel dispatch is not implemented yet")
+
+    def _resolve_runner_pid(self, record: SpawnRecord) -> int | None:
+        started_epoch = _started_at_epoch(record.started_at)
+
+        runner_pid = record.runner_pid
+        if runner_pid is not None and _pid_is_alive(runner_pid, started_epoch):
+            return runner_pid
+
+        worker_pid = record.worker_pid
+        if worker_pid is not None and _pid_is_alive(worker_pid, started_epoch):
+            return worker_pid
+
+        background_pid = _read_background_pid(self._state_root, record.id)
+        if background_pid is not None and _pid_is_alive(background_pid, started_epoch):
+            return background_pid
+        return None
+
+    async def _wait_for_terminal(self, spawn_id: SpawnId) -> SpawnRecord | None:
+        deadline = time.monotonic() + max(0.0, self._grace_seconds)
+        while True:
+            current = spawn_store.get_spawn(self._state_root, spawn_id)
+            if current is not None and _is_terminal(current.status):
+                return current
+            now = time.monotonic()
+            if now >= deadline:
+                return None
+            await asyncio.sleep(min(_WAIT_POLL_INTERVAL_SECS, deadline - now))
+
+
+def _is_terminal(status: str) -> bool:
+    return status in TERMINAL_SPAWN_STATUSES
+
+
+def _outcome_from_record(
+    record: SpawnRecord,
+    *,
+    already_terminal: bool = False,
+) -> CancelOutcome:
+    return CancelOutcome(
+        status=_status_or_default(record.status),
+        origin=_origin_or_default(record.terminal_origin),
+        exit_code=_exit_code_or_default(record),
+        already_terminal=already_terminal,
+    )
+
+
+def _status_or_default(status: str) -> SpawnStatus:
+    if status in {"queued", "running", "finalizing", "succeeded", "failed", "cancelled"}:
+        return cast("SpawnStatus", status)
+    return "failed"
+
+
+def _origin_or_default(origin: SpawnOrigin | None) -> SpawnOrigin:
+    if origin is None:
+        return "cancel"
+    return origin
+
+
+def _exit_code_or_default(record: SpawnRecord) -> int:
+    return record.exit_code if record.exit_code is not None else 1
+
+
+def _read_background_pid(state_root: Path, spawn_id: str) -> int | None:
+    pid_path = state_root / "spawns" / spawn_id / "background.pid"
+    if not pid_path.is_file():
+        return None
+    try:
+        pid = int(pid_path.read_text(encoding="utf-8").strip())
+    except ValueError:
+        return None
+    if pid <= 0:
+        return None
+    return pid
+
+
+def _pid_is_alive(pid: int | None, started_epoch: float | None) -> bool:
+    if pid is None or pid <= 0:
+        return False
+    return is_process_alive(pid, created_after_epoch=started_epoch)
+
+
+def _started_at_epoch(started_at: str | None) -> float | None:
+    normalized = (started_at or "").strip()
+    if not normalized:
+        return None
+    if normalized.endswith("Z"):
+        normalized = f"{normalized[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.timestamp()
+
+
+__all__ = ["CancelOutcome", "SignalCanceller"]

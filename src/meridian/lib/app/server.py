@@ -27,6 +27,7 @@ from meridian.lib.safety.permissions import (
     build_permission_config,
 )
 from meridian.lib.state import spawn_store
+from meridian.lib.streaming.signal_canceller import SignalCanceller
 from meridian.lib.streaming.spawn_manager import SpawnManager
 
 _SPAWN_ID_RE = re.compile(r"^p\d+$")
@@ -315,15 +316,24 @@ def create_app(
             )
         return {"ok": True}
 
-    async def cancel_spawn(spawn_id: str) -> dict[str, bool]:
+    async def cancel_spawn(spawn_id: str) -> dict[str, object]:
         typed_spawn_id = _validate_spawn_id(spawn_id)
-        result = await spawn_manager.cancel(typed_spawn_id, source="rest")
-        if not result.success:
+        canceller = SignalCanceller(state_root=state_root, manager=spawn_manager)
+        try:
+            outcome = await canceller.cancel(typed_spawn_id)
+        except ValueError as exc:
+            raise http_exception_cls(status_code=404, detail=str(exc)) from exc
+        if outcome.already_terminal:
             raise http_exception_cls(
-                status_code=400,
-                detail=result.error or "cancel failed",
+                status_code=409,
+                detail=f"spawn already terminal: {outcome.status}",
             )
-        return {"ok": True}
+        if outcome.finalizing:
+            raise http_exception_cls(
+                status_code=503,
+                detail="spawn is finalizing",
+            )
+        return {"ok": True, "status": outcome.status}
 
     app.post("/api/spawns")(create_spawn)
     app.get("/api/spawns")(list_spawns)

@@ -26,7 +26,6 @@ async def inject_message(
     message: str | None,
     *,
     interrupt: bool = False,
-    cancel: bool = False,
     operator_override: bool = False,
 ) -> None:
     """Send a control message to a running bidirectional spawn via Unix socket."""
@@ -56,11 +55,11 @@ async def inject_message(
         _fail(f"spawn not running: {normalized_spawn_id} has no control socket")
 
     normalized_message = message.strip() if message is not None else ""
-    action_count = int(interrupt) + int(cancel) + int(bool(normalized_message))
+    action_count = int(interrupt) + int(bool(normalized_message))
     if action_count == 0:
-        _fail("provide a message, --interrupt, or --cancel")
+        _fail("provide a message or --interrupt")
     if action_count > 1:
-        _fail("message text is mutually exclusive with --interrupt/--cancel")
+        _fail("message text is mutually exclusive with --interrupt")
 
     if interrupt:
         caller, depth = caller_from_env()
@@ -82,8 +81,6 @@ async def inject_message(
     request: dict[str, str]
     if interrupt:
         request = {"type": "interrupt"}
-    elif cancel:
-        request = {"type": "cancel"}
     else:
         request = {"type": "user_message", "text": normalized_message}
 
@@ -125,7 +122,7 @@ async def inject_message(
 
     ok = parsed.get("ok")
     if ok is True:
-        action = "Interrupt" if interrupt else ("Cancel" if cancel else "Message")
+        action = "Interrupt" if interrupt else "Message"
         print(f"{action} delivered to spawn {normalized_spawn_id}")
         return
 

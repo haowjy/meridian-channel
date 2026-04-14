@@ -481,25 +481,6 @@ class SpawnManager:
                 on_result(result)
             return result
 
-    async def cancel(self, spawn_id: SpawnId, source: str) -> InjectResult:
-        """Record and route one cancellation request to the target connection."""
-
-        session = self._sessions.get(spawn_id)
-        if session is None:
-            return InjectResult(success=False, error=f"Spawn {spawn_id} is not active")
-
-        try:
-            await self._record_inbound(
-                spawn_id,
-                action="cancel",
-                data={},
-                source=source,
-            )
-            await session.connection.send_cancel()
-        except Exception as exc:
-            return InjectResult(success=False, error=str(exc))
-        return InjectResult(success=True)
-
     async def _record_inbound(
         self,
         spawn_id: SpawnId,

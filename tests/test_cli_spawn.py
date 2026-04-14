@@ -570,6 +570,7 @@ def test_spawn_cancel_operator_override_allows_depth_drop(
     spawn_cli._spawn_cancel(lambda _payload: None, "p1", operator_override=True)
 
     assert captured["payload"].spawn_id == "p1"
+    assert captured["payload"].operator_override is True
 
 
 def test_spawn_inject_passes_operator_override(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -580,13 +581,11 @@ def test_spawn_inject_passes_operator_override(monkeypatch: pytest.MonkeyPatch) 
         message: str | None,
         *,
         interrupt: bool = False,
-        cancel: bool = False,
         operator_override: bool = False,
     ) -> None:
         captured["spawn_id"] = spawn_id
         captured["message"] = message
         captured["interrupt"] = interrupt
-        captured["cancel"] = cancel
         captured["operator_override"] = operator_override
 
     monkeypatch.setattr(spawn_cli, "inject_message", _fake_inject)
@@ -597,6 +596,5 @@ def test_spawn_inject_passes_operator_override(monkeypatch: pytest.MonkeyPatch) 
         "spawn_id": "p1",
         "message": None,
         "interrupt": True,
-        "cancel": False,
         "operator_override": True,
     }
