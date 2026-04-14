@@ -796,6 +796,48 @@ async def test_cancel_endpoint_returns_origin_and_uses_auth_dependency(
 
 
 @pytest.mark.asyncio
+async def test_cancel_auth_dependency_maps_missing_target_to_404(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    completion_ready = asyncio.Event()
+    wait_calls: list[SpawnId] = []
+    heartbeat_calls: list[SpawnId] = []
+    app, _manager = _create_test_app(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        completion_ready=completion_ready,
+        wait_calls=wait_calls,
+        heartbeat_calls=heartbeat_calls,
+    )
+
+    cancel_options = app.post_route_options["/api/spawns/{spawn_id}/cancel"]
+    dependencies = cast("list[object]", cancel_options["dependencies"])
+    dependency = cast("Callable[[str, FakeRequestsModule.Request], Any]", dependencies[0])
+
+    left, right = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    request = FakeRequestsModule.Request()
+    request.scope["transport"] = types.SimpleNamespace(
+        get_extra_info=lambda name, default=None: left if name == "socket" else default
+    )
+    monkeypatch.setattr(
+        server_module,
+        "caller_from_socket_peer",
+        lambda _sock: (SpawnId("p1"), 1),
+    )
+
+    try:
+        with pytest.raises(FakeHTTPException) as exc_info:
+            await dependency("p999", request)
+    finally:
+        left.close()
+        right.close()
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "spawn not found"
+
+
+@pytest.mark.asyncio
 async def test_cancel_endpoint_rejects_terminal_and_legacy_delete_is_405(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

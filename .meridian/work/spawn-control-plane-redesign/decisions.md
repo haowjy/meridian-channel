@@ -394,3 +394,23 @@ depend on transport/auth decisions and can advance safely in parallel.
 **Finding.** Verifier (p1804) found `SpawnManager.inject()` only rejects when session is absent, not when spawn status is already terminal but session cleanup hasn't run. A `turn/completed` event can make the spawn terminal while the session dict still has an entry.
 
 **Fix.** Add an explicit terminal status check in `inject()` and `interrupt()` before the session lookup. Read spawn record from store and reject if status is terminal.
+
+## Impl-04 — WS endpoint auth gap (reviewer p1815)
+
+**Finding.** ws_endpoint.py lets WS clients send interrupt/cancel without ancestry auth. Violates AUTH-001.
+
+**Fix.** Add auth check in WS endpoint's interrupt and cancel handling paths.
+
+## Impl-05 — 403 vs 404 ordering on cancel (reviewer p1815)
+
+**Finding.** Auth dependency resolves before spawn existence check. Missing spawn returns 403 (auth deny on missing target) instead of 404.
+
+**Fix.** Move spawn existence check before auth dependency, or handle missing_target reason as 404.
+
+## Impl-06 — --proxy is stub (reviewer p1815)
+
+**Choice.** Accept as-is. The design says "a tiny --proxy mode" and the stub documents the pattern. Full proxy implementation is follow-up work.
+
+## Impl-07 — Heartbeat start ownership (reviewer p1816 F-03)
+
+**Choice.** Accept as-is for this change set. Moving _start_heartbeat into start_spawn is a valid structural improvement but changes the SpawnManager interface contract. Worth doing as a follow-up when the callers settle.

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import socket
 import sys
 import types
 from pathlib import Path
@@ -13,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from meridian.lib.core.types import HarnessId, SpawnId
 from meridian.lib.harness.connections.base import ConnectionCapabilities, HarnessEvent
+from meridian.lib.ops.spawn.authorization import AuthorizationDecision
 from meridian.lib.streaming.spawn_manager import DrainOutcome, SpawnManager, SpawnSession
 
 
@@ -432,6 +434,160 @@ async def test_ws_route_rejects_non_local_origin_before_accept(
     assert spawn_calls == 0
     assert websocket.close_calls == [4403]
     assert websocket.accept_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_inbound_loop_rejects_unauthorized_interrupt(
+    phase3_modules: tuple[types.ModuleType, types.ModuleType],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _, ws_module = phase3_modules
+
+    class FakeManager:
+        def __init__(self) -> None:
+            self.state_root = tmp_path
+            self.interrupt_calls: list[tuple[SpawnId, str]] = []
+
+        async def inject(self, spawn_id: SpawnId, message: str, source: str = "app_ws") -> object:
+            _ = spawn_id, message, source
+            return types.SimpleNamespace(success=True, error=None, inbound_seq=1)
+
+        async def interrupt(self, spawn_id: SpawnId, source: str = "app_ws") -> object:
+            self.interrupt_calls.append((spawn_id, source))
+            return types.SimpleNamespace(success=True, error=None, inbound_seq=2, noop=False)
+
+    class FakeWebSocket:
+        def __init__(self, peer_socket: socket.socket) -> None:
+            self.scope = {
+                "transport": types.SimpleNamespace(
+                    get_extra_info=lambda name, default=None: (
+                        peer_socket if name == "socket" else default
+                    )
+                )
+            }
+            self.frames: list[dict[str, object]] = [
+                {"type": "websocket.receive", "text": '{"type":"interrupt"}'},
+                {"type": "websocket.disconnect"},
+            ]
+            self.payloads: list[dict[str, object]] = []
+
+        async def receive(self) -> dict[str, object]:
+            return self.frames.pop(0)
+
+        async def send_text(self, data: str) -> None:
+            self.payloads.append(cast("dict[str, object]", json.loads(data)))
+
+    left, right = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    manager = FakeManager()
+    websocket = FakeWebSocket(left)
+    monkeypatch.setattr(ws_module, "caller_from_socket_peer", lambda _sock: (SpawnId("p9"), 1))
+    monkeypatch.setattr(
+        ws_module,
+        "authorize",
+        lambda **kwargs: AuthorizationDecision(
+            allowed=False,
+            reason="not_in_ancestry",
+            caller_id=SpawnId("p9"),
+            target_id=kwargs["target"],
+        ),
+    )
+
+    try:
+        await ws_module._inbound_loop(websocket, SpawnId("p1"), cast("Any", manager))
+    finally:
+        left.close()
+        right.close()
+
+    assert manager.interrupt_calls == []
+    assert websocket.payloads == [
+        {
+            "type": "RUN_ERROR",
+            "message": "caller is not authorized",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_inbound_loop_rejects_unauthorized_cancel_before_dispatch(
+    phase3_modules: tuple[types.ModuleType, types.ModuleType],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _, ws_module = phase3_modules
+    canceller_inits = 0
+
+    class FakeManager:
+        def __init__(self) -> None:
+            self.state_root = tmp_path
+
+        async def inject(self, spawn_id: SpawnId, message: str, source: str = "app_ws") -> object:
+            _ = spawn_id, message, source
+            return types.SimpleNamespace(success=True, error=None, inbound_seq=1)
+
+        async def interrupt(self, spawn_id: SpawnId, source: str = "app_ws") -> object:
+            _ = spawn_id, source
+            return types.SimpleNamespace(success=True, error=None, inbound_seq=2, noop=False)
+
+    class _UnexpectedCanceller:
+        def __init__(self, *, state_root: Path, manager: FakeManager) -> None:
+            nonlocal canceller_inits
+            _ = state_root, manager
+            canceller_inits += 1
+
+        async def cancel(self, spawn_id: SpawnId) -> object:
+            raise AssertionError(f"cancel should not run when unauthorized: {spawn_id}")
+
+    class FakeWebSocket:
+        def __init__(self, peer_socket: socket.socket) -> None:
+            self.scope = {
+                "transport": types.SimpleNamespace(
+                    get_extra_info=lambda name, default=None: (
+                        peer_socket if name == "socket" else default
+                    )
+                )
+            }
+            self.frames: list[dict[str, object]] = [
+                {"type": "websocket.receive", "text": '{"type":"cancel"}'},
+                {"type": "websocket.disconnect"},
+            ]
+            self.payloads: list[dict[str, object]] = []
+
+        async def receive(self) -> dict[str, object]:
+            return self.frames.pop(0)
+
+        async def send_text(self, data: str) -> None:
+            self.payloads.append(cast("dict[str, object]", json.loads(data)))
+
+    left, right = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    manager = FakeManager()
+    websocket = FakeWebSocket(left)
+    monkeypatch.setattr(ws_module, "SignalCanceller", _UnexpectedCanceller)
+    monkeypatch.setattr(ws_module, "caller_from_socket_peer", lambda _sock: (SpawnId("p9"), 1))
+    monkeypatch.setattr(
+        ws_module,
+        "authorize",
+        lambda **kwargs: AuthorizationDecision(
+            allowed=False,
+            reason="not_in_ancestry",
+            caller_id=SpawnId("p9"),
+            target_id=kwargs["target"],
+        ),
+    )
+
+    try:
+        await ws_module._inbound_loop(websocket, SpawnId("p1"), cast("Any", manager))
+    finally:
+        left.close()
+        right.close()
+
+    assert canceller_inits == 0
+    assert websocket.payloads == [
+        {
+            "type": "RUN_ERROR",
+            "message": "caller is not authorized",
+        }
+    ]
 
 
 @pytest.mark.asyncio

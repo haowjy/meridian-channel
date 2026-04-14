@@ -309,6 +309,8 @@ def create_app(
             depth=depth,
         )
         if not decision.allowed:
+            if decision.reason == "missing_target":
+                raise http_exception_cls(status_code=404, detail="spawn not found")
             raise http_exception_cls(status_code=403, detail="caller is not authorized")
 
     async def create_spawn(body: SpawnCreateRequest) -> dict[str, object]:
