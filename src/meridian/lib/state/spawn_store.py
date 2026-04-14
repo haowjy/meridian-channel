@@ -279,7 +279,6 @@ def update_spawn(
     state_root: Path,
     spawn_id: SpawnId | str,
     *,
-    status: SpawnStatus | None = None,
     launch_mode: LaunchMode | None = None,
     wrapper_pid: int | None = None,
     worker_pid: int | None = None,
@@ -290,12 +289,11 @@ def update_spawn(
     desc: str | None = None,
     work_id: str | None = None,
 ) -> None:
-    """Append a non-terminal spawn update event under `spawns.jsonl.flock`."""
+    """Append a metadata update event under `spawns.jsonl.flock`."""
 
     paths = StateRootPaths.from_root_dir(state_root)
     event = SpawnUpdateEvent(
         id=str(spawn_id),
-        status=status,
         launch_mode=launch_mode,
         wrapper_pid=wrapper_pid,
         worker_pid=worker_pid,
@@ -638,13 +636,7 @@ def _record_from_events(events: list[SpawnEvent]) -> dict[str, SpawnRecord]:
             resolved_exit_code = (
                 event.exit_code if event.exit_code is not None else current.exit_code
             )
-            resolved_error = (
-                None
-                if event_status == "succeeded"
-                else event.error
-                if event.error is not None
-                else current.error
-            )
+            resolved_error = event.error
             resolved_terminal_origin = incoming_origin
         records[spawn_id] = current.model_copy(
             update={

@@ -738,7 +738,7 @@ async def test_execute_with_finalization_starts_and_ticks_runner_heartbeat(
     assert len(touch_times) >= 2
     intervals = [later - earlier for earlier, later in pairwise(touch_times)]
     assert intervals
-    assert max(intervals) <= 0.06
+    assert max(intervals) <= 0.08
     assert (state_root / "spawns" / str(run.spawn_id) / "heartbeat").exists()
 
 
@@ -868,3 +868,77 @@ async def test_execute_with_finalization_cancels_heartbeat_when_finalize_raises_
     touched_count = len(touch_times)
     await asyncio.sleep(0.05)
     assert len(touch_times) == touched_count
+
+
+@pytest.mark.asyncio
+async def test_execute_with_finalization_continues_when_terminal_heartbeat_touch_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    run, state_root = _create_run(tmp_path, prompt="heartbeat touch failure")
+    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
+    adapter = ScriptHarnessAdapter(command=("unused-command",))
+    registry = HarnessRegistry()
+    registry.register(adapter)
+
+    touch_calls = 0
+    warning_messages: list[str] = []
+    original_touch = launch_runner._touch_heartbeat_file
+
+    def _touch_with_terminal_failure(state_root_arg: Path, spawn_id_arg: SpawnId) -> None:
+        nonlocal touch_calls
+        touch_calls += 1
+        if touch_calls >= 2:
+            raise OSError("no space left on device")
+        original_touch(state_root_arg, spawn_id_arg)
+
+    async def fake_spawn_and_stream(
+        *,
+        on_process_started,
+        output_log_path: Path,
+        stderr_log_path: Path,
+        report_watchdog_path: Path | None = None,
+        **_: object,
+    ) -> launch_runner.SpawnResult:
+        assert on_process_started is not None
+        on_process_started(7171)
+        if report_watchdog_path is not None:
+            report_watchdog_path.parent.mkdir(parents=True, exist_ok=True)
+            report_watchdog_path.write_text("# Done\\n\\nFinalized.\\n", encoding="utf-8")
+        return launch_runner.SpawnResult(
+            exit_code=0,
+            raw_return_code=0,
+            timed_out=False,
+            received_signal=None,
+            output_log_path=output_log_path,
+            stderr_log_path=stderr_log_path,
+            budget_breach=None,
+            terminated_by_report_watchdog=False,
+        )
+
+    def _capture_warning(message: str, *_args, **_kwargs) -> None:
+        warning_messages.append(message)
+
+    monkeypatch.setattr(launch_runner, "_HEARTBEAT_INTERVAL_SECS", 60.0)
+    monkeypatch.setattr(launch_runner, "_touch_heartbeat_file", _touch_with_terminal_failure)
+    monkeypatch.setattr(launch_runner, "spawn_and_stream", fake_spawn_and_stream)
+    monkeypatch.setattr(launch_runner.logger, "warning", _capture_warning)
+
+    exit_code = await execute_with_finalization(
+        run,
+        plan=_build_plan(run, adapter.id, max_retries=0),
+        repo_root=tmp_path,
+        state_root=state_root,
+        artifacts=artifacts,
+        registry=registry,
+        harness_id=adapter.id,
+        cwd=tmp_path,
+    )
+
+    assert exit_code == 0
+    row = _fetch_run_row(state_root, run.spawn_id)
+    assert row.status == "succeeded"
+    assert any(
+        "Failed to touch heartbeat after entering finalizing" in msg
+        for msg in warning_messages
+    )

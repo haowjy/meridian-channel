@@ -137,14 +137,9 @@ def _collect_artifact_snapshot(
     )
 
 
-def _has_recent_activity(snapshot: ArtifactSnapshot, *, require_heartbeat: bool) -> bool:
-    """Return whether activity is recent enough for the caller's liveness context."""
-    artifact_name = snapshot.recent_activity_artifact
-    if artifact_name is None:
-        return False
-    if not require_heartbeat:
-        return True
-    return artifact_name == "heartbeat"
+def _has_recent_activity(snapshot: ArtifactSnapshot) -> bool:
+    """Return whether any tracked runner artifact is recent."""
+    return snapshot.recent_activity_artifact is not None
 
 
 def decide_reconciliation(
@@ -153,7 +148,7 @@ def decide_reconciliation(
     now: float,
 ) -> ReconciliationDecision:
     if record.status == "finalizing":
-        if _has_recent_activity(snapshot, require_heartbeat=True):
+        if _has_recent_activity(snapshot):
             return Skip(reason="recent_activity")
         if snapshot.durable_report_completion:
             return FinalizeSucceededFromReport()
@@ -161,7 +156,7 @@ def decide_reconciliation(
 
     runner_pid = record.runner_pid
     if runner_pid is None or runner_pid <= 0:
-        if _has_recent_activity(snapshot, require_heartbeat=True):
+        if _has_recent_activity(snapshot):
             return Skip(reason="recent_activity")
         if _in_startup_grace(snapshot.started_epoch, now):
             return Skip(reason="startup_grace")
@@ -170,11 +165,11 @@ def decide_reconciliation(
         return FinalizeFailed(error="missing_worker_pid")
 
     if snapshot.runner_pid_alive:
-        if _has_recent_activity(snapshot, require_heartbeat=False):
+        if _has_recent_activity(snapshot):
             return Skip(reason="recent_activity")
         return Skip(reason="runner_alive")
 
-    if _has_recent_activity(snapshot, require_heartbeat=True):
+    if _has_recent_activity(snapshot):
         return Skip(reason="recent_activity")
 
     if _in_startup_grace(snapshot.started_epoch, now):

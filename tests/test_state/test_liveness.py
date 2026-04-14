@@ -25,9 +25,16 @@ def test_is_process_alive_returns_false_when_pid_does_not_exist(monkeypatch) -> 
 
 def test_is_process_alive_returns_false_for_pid_reuse(monkeypatch) -> None:
     monkeypatch.setattr(liveness.psutil, "pid_exists", lambda pid: True)
-    monkeypatch.setattr(liveness.psutil, "Process", lambda pid: _FakeProcess(create_time=105.0))
+    monkeypatch.setattr(liveness.psutil, "Process", lambda pid: _FakeProcess(create_time=131.0))
 
     assert liveness.is_process_alive(123, created_after_epoch=100.0) is False
+
+
+def test_is_process_alive_allows_expected_process_startup_delay(monkeypatch) -> None:
+    monkeypatch.setattr(liveness.psutil, "pid_exists", lambda pid: True)
+    monkeypatch.setattr(liveness.psutil, "Process", lambda pid: _FakeProcess(create_time=120.0))
+
+    assert liveness.is_process_alive(123, created_after_epoch=100.0) is True
 
 
 def test_is_process_alive_returns_process_running_state(monkeypatch) -> None:

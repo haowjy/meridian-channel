@@ -96,7 +96,7 @@ def test_spawn_stats_includes_finalizing_bucket(tmp_path: Path, monkeypatch) -> 
         harness="codex",
         prompt="finalizing",
     )
-    spawn_store.update_spawn(state_root, finalizing_id, status="finalizing")
+    assert spawn_store.mark_finalizing(state_root, finalizing_id) is True
     succeeded_id = spawn_store.start_spawn(
         state_root,
         chat_id="c3",

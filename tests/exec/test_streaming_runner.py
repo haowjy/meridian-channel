@@ -1700,3 +1700,69 @@ async def test_execute_with_streaming_cancels_heartbeat_when_finalize_raises_val
     touched_count = len(touch_times)
     await asyncio.sleep(0.05)
     assert len(touch_times) == touched_count
+
+
+@pytest.mark.asyncio
+async def test_execute_with_streaming_continues_when_terminal_heartbeat_touch_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_root = resolve_state_paths(tmp_path).root_dir
+    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
+    registry = HarnessRegistry()
+    registry.register(_DummyCodexHarness())
+    monkeypatch.setattr(spawn_manager_module, "ControlSocketServer", _FakeControlSocketServer)
+    monkeypatch.setattr(
+        "meridian.lib.harness.connections.get_connection_class",
+        _fake_connection_class,
+    )
+
+    touch_calls = 0
+    warning_messages: list[str] = []
+    original_touch = streaming_runner_module._touch_heartbeat_file
+
+    def _touch_with_terminal_failure(state_root_arg: Path, spawn_id_arg: SpawnId) -> None:
+        nonlocal touch_calls
+        touch_calls += 1
+        if touch_calls >= 2:
+            raise OSError("permission denied")
+        original_touch(state_root_arg, spawn_id_arg)
+
+    def _capture_warning(message: str, *_args, **_kwargs) -> None:
+        warning_messages.append(message)
+
+    monkeypatch.setattr(streaming_runner_module, "_HEARTBEAT_INTERVAL_SECS", 60.0)
+    monkeypatch.setattr(
+        streaming_runner_module,
+        "_touch_heartbeat_file",
+        _touch_with_terminal_failure,
+    )
+    monkeypatch.setattr(streaming_runner_module.logger, "warning", _capture_warning)
+
+    run = Spawn(
+        spawn_id=SpawnId("r-heartbeat-touch-fail-1"),
+        prompt="hello",
+        model=ModelId("gpt-5.3-codex"),
+        status="queued",
+    )
+    exit_code = await asyncio.wait_for(
+        execute_with_streaming(
+            run,
+            plan=_build_plan(),
+            repo_root=tmp_path,
+            state_root=state_root,
+            artifacts=artifacts,
+            registry=registry,
+            cwd=tmp_path,
+        ),
+        timeout=1.0,
+    )
+
+    assert exit_code == 0
+    row = spawn_store.get_spawn(state_root, run.spawn_id)
+    assert row is not None
+    assert row.status == "succeeded"
+    assert any(
+        "Failed to touch heartbeat after entering finalizing" in msg
+        for msg in warning_messages
+    )

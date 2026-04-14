@@ -193,7 +193,13 @@ uv run python - <<'PY'
 import os
 from pathlib import Path
 
-from meridian.lib.state.spawn_store import finalize_spawn, get_spawn, start_spawn, update_spawn
+from meridian.lib.state.spawn_store import (
+    finalize_spawn,
+    get_spawn,
+    mark_finalizing,
+    start_spawn,
+    update_spawn,
+)
 
 state_root = Path(os.environ["MERIDIAN_STATE_ROOT"])
 spawn_id = str(
@@ -207,7 +213,8 @@ spawn_id = str(
     )
 )
 finalize_spawn(state_root, spawn_id, status="succeeded", exit_code=0, origin="runner")
-update_spawn(state_root, spawn_id, status="finalizing", desc="late update")
+mark_finalizing(state_root, spawn_id)
+update_spawn(state_root, spawn_id, desc="late update")
 
 row = get_spawn(state_root, spawn_id)
 assert row is not None

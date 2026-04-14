@@ -1212,7 +1212,16 @@ async def execute_with_streaming(
             with signal_coordinator().mask_sigterm():
                 marked_finalizing = spawn_store.mark_finalizing(state_root, run.spawn_id)
                 if marked_finalizing:
-                    _touch_heartbeat_file(state_root, run.spawn_id)
+                    try:
+                        _touch_heartbeat_file(state_root, run.spawn_id)
+                    except Exception:
+                        logger.warning(
+                            "Failed to touch heartbeat after entering finalizing; "
+                            "proceeding with terminal finalize.",
+                            spawn_id=str(run.spawn_id),
+                            harness_id=str(harness.id),
+                            exc_info=True,
+                        )
                 else:
                     logger.info(
                         "Runner finalizing CAS miss; continuing with terminal finalize.",

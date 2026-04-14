@@ -420,7 +420,7 @@ def test_decide_reconciliation_stale_dead_runner_fails_orphan_run() -> None:
     assert decision.error == "orphan_run"
 
 
-def test_decide_reconciliation_dead_runner_ignores_fallback_recent_activity() -> None:
+def test_decide_reconciliation_dead_runner_accepts_fallback_recent_activity() -> None:
     record = spawn_store.SpawnRecord(
         id="p1",
         chat_id=None,
@@ -465,8 +465,8 @@ def test_decide_reconciliation_dead_runner_ignores_fallback_recent_activity() ->
 
     decision = decide_reconciliation(record, snapshot, now)
 
-    assert isinstance(decision, FinalizeFailed)
-    assert decision.error == "orphan_run"
+    assert isinstance(decision, Skip)
+    assert decision.reason == "recent_activity"
 
 
 def test_decide_reconciliation_live_runner_accepts_fallback_recent_activity() -> None:
@@ -618,8 +618,8 @@ def test_reconcile_active_spawn_treats_exact_heartbeat_window_boundary_as_recent
     assert reconciled == record
 
 
-@pytest.mark.parametrize("artifact_name", ["output.jsonl", "stderr.log"])
-def test_reconcile_active_spawn_ignores_recent_fallback_artifact_when_runner_is_dead(
+@pytest.mark.parametrize("artifact_name", ["output.jsonl", "stderr.log", "report.md"])
+def test_reconcile_active_spawn_treats_recent_fallback_artifact_as_recent_when_runner_is_dead(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     artifact_name: str,
@@ -637,11 +637,16 @@ def test_reconcile_active_spawn_ignores_recent_fallback_artifact_when_runner_is_
         "meridian.lib.state.reaper.is_process_alive",
         lambda *_args, **_kwargs: False,
     )
+    monkeypatch.setattr(
+        "meridian.lib.state.reaper.finalize_spawn",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("finalize_spawn should not run inside the activity window")
+        ),
+    )
 
     reconciled = reconcile_active_spawn(state_root, record)
 
-    assert reconciled.status == "failed"
-    assert reconciled.error == "orphan_run"
+    assert reconciled == record
 
 
 @pytest.mark.parametrize("artifact_name", ["output.jsonl", "stderr.log"])
@@ -721,11 +726,51 @@ def test_reconcile_active_spawn_ignores_recent_fallback_artifact_without_runner_
     fixed_now = time.time()
     os.utime(stderr_path, (fixed_now - 5.0, fixed_now - 5.0))
     monkeypatch.setattr("meridian.lib.state.reaper.time.time", lambda: fixed_now)
+    monkeypatch.setattr(
+        "meridian.lib.state.reaper.finalize_spawn",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("finalize_spawn should not run inside the activity window")
+        ),
+    )
 
     reconciled = reconcile_active_spawn(state_root, record)
 
-    assert reconciled.status == "failed"
-    assert reconciled.error == "missing_worker_pid"
+    assert reconciled == record
+
+
+def test_reconcile_active_spawn_finalizing_recent_fallback_artifact_skips(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_root, spawn_id = _create_spawn(
+        tmp_path,
+        status="finalizing",
+        started_at=_OLD_STARTED_AT,
+    )
+    stderr_path = state_root / "spawns" / spawn_id / "stderr.log"
+    stderr_path.parent.mkdir(parents=True, exist_ok=True)
+    stderr_path.write_text("recent stderr\n", encoding="utf-8")
+
+    fixed_now = time.time()
+    os.utime(stderr_path, (fixed_now - 5.0, fixed_now - 5.0))
+    monkeypatch.setattr("meridian.lib.state.reaper.time.time", lambda: fixed_now)
+    monkeypatch.setattr(
+        "meridian.lib.state.reaper.finalize_spawn",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("finalize_spawn should not run inside the activity window")
+        ),
+    )
+    monkeypatch.setattr(
+        "meridian.lib.state.reaper.is_process_alive",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("is_process_alive should not run for finalizing rows")
+        ),
+    )
+
+    record = _get_spawn(state_root, spawn_id)
+    reconciled = reconcile_active_spawn(state_root, record)
+
+    assert reconciled == record
 
 
 def test_reconcile_active_spawn_depth_zero_still_collects_snapshot(

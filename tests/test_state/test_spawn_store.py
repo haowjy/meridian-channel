@@ -2,16 +2,19 @@ import inspect
 import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, get_args
+from typing import Any, cast, get_args
 
 import pytest
 
 from meridian.lib.core.domain import SpawnStatus
+from meridian.lib.state.event_store import append_event
+from meridian.lib.state.paths import StateRootPaths
 from meridian.lib.state.spawn_store import (
     AUTHORITATIVE_ORIGINS,
     LEGACY_RECONCILER_ERRORS,
     SpawnFinalizeEvent,
     SpawnOrigin,
+    SpawnUpdateEvent,
     finalize_spawn,
     get_spawn,
     list_spawns,
@@ -141,6 +144,16 @@ def test_finalize_spawn_requires_keyword_origin(tmp_path: Path) -> None:
     spawn_id = _start_test_spawn(state_root)
     with pytest.raises(TypeError):
         finalize_spawn(state_root, spawn_id, status="succeeded", exit_code=0)
+
+
+def test_update_spawn_is_metadata_only_and_rejects_status(tmp_path: Path) -> None:
+    signature = inspect.signature(update_spawn)
+    assert "status" not in signature.parameters
+
+    state_root = _state_root(tmp_path)
+    spawn_id = _start_test_spawn(state_root)
+    with pytest.raises(TypeError):
+        cast("Any", update_spawn)(state_root, spawn_id, status="running")
 
 
 def test_list_runs_skips_truncated_trailing_json(tmp_path: Path) -> None:
@@ -403,17 +416,53 @@ def test_late_update_status_never_downgrades_terminal_projection(tmp_path: Path)
         exit_code=0,
         origin="runner",
     )
-    update_spawn(
-        state_root,
-        spawn_id,
-        status="finalizing",
-        desc="post-finish metadata update",
+    paths = StateRootPaths.from_root_dir(state_root)
+    append_event(
+        paths.spawns_jsonl,
+        paths.spawns_flock,
+        SpawnUpdateEvent(
+            id=spawn_id,
+            status="finalizing",
+            desc="post-finish metadata update",
+        ),
+        store_name="spawn",
+        exclude_none=True,
     )
 
     row = get_spawn(state_root, spawn_id)
     assert row is not None
     assert row.status == "succeeded"
     assert row.desc == "post-finish metadata update"
+
+
+def test_projection_authority_override_clears_error_when_authoritative_error_missing(
+    tmp_path: Path,
+) -> None:
+    state_root = _state_root(tmp_path)
+    spawn_id = _start_test_spawn(state_root)
+
+    finalize_spawn(
+        state_root,
+        spawn_id,
+        status="failed",
+        exit_code=1,
+        origin="reconciler",
+        error="orphan_run",
+    )
+    finalize_spawn(
+        state_root,
+        spawn_id,
+        status="failed",
+        exit_code=9,
+        origin="runner",
+    )
+
+    row = get_spawn(state_root, spawn_id)
+    assert row is not None
+    assert row.status == "failed"
+    assert row.exit_code == 9
+    assert row.error is None
+    assert row.terminal_origin == "runner"
 
 
 def test_finalize_spawn_reconciler_writes_through_finalizing_row(tmp_path: Path) -> None:

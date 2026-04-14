@@ -44,12 +44,8 @@ def test_spawn_show_sync_renders_finalizing_status_and_orphan_finalization_hint(
         exit_code=143,
         exited_at="2026-04-12T14:00:00Z",
     )
-    spawn_store.update_spawn(
-        state_root,
-        "p1",
-        status="finalizing",
-        error="orphan_finalization",
-    )
+    assert spawn_store.mark_finalizing(state_root, "p1") is True
+    spawn_store.update_spawn(state_root, "p1", error="orphan_finalization")
     heartbeat = state_root / "spawns" / "p1" / "heartbeat"
     heartbeat.parent.mkdir(parents=True, exist_ok=True)
     heartbeat.touch(exist_ok=True)

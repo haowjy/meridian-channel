@@ -41,7 +41,7 @@ from meridian.lib.state.paths import resolve_state_paths
 repo = Path('$SMOKE_REPO')
 sp = resolve_state_paths(repo)
 sid = spawn_store.start_spawn(sp.root_dir, chat_id='c1', model='gpt', agent='coder', harness='codex', kind='child', prompt='seed', desc='Phase 1')
-spawn_store.finalize_spawn(sp.root_dir, str(sid), status='succeeded', exit_code=0)
+spawn_store.finalize_spawn(sp.root_dir, str(sid), status='succeeded', exit_code=0, origin='runner')
 rp = sp.root_dir / 'spawns' / str(sid) / 'report.md'
 rp.parent.mkdir(parents=True, exist_ok=True)
 rp.write_text('# Phase 1 Report\n\nImplemented data model.\n')
@@ -79,7 +79,14 @@ from meridian.lib.state.paths import resolve_state_paths
 repo = Path('$SMOKE_REPO')
 sp = resolve_state_paths(repo)
 sid = spawn_store.start_spawn(sp.root_dir, chat_id='c1', model='gpt', agent='coder', harness='codex', kind='child', prompt='fail', desc='Failed attempt')
-spawn_store.finalize_spawn(sp.root_dir, str(sid), status='failed', exit_code=1, error='oops')
+spawn_store.finalize_spawn(
+    sp.root_dir,
+    str(sid),
+    status='failed',
+    exit_code=1,
+    origin='runner',
+    error='oops',
+)
 "
 
 # Dry-run with session ref
@@ -110,7 +117,7 @@ from meridian.lib.state.paths import resolve_state_paths
 repo = Path('$SMOKE_REPO')
 sp = resolve_state_paths(repo)
 sid = spawn_store.start_spawn(sp.root_dir, chat_id='c2', model='gpt', agent='coder', harness='codex', kind='child', prompt='seed2', desc='Phase 2')
-spawn_store.finalize_spawn(sp.root_dir, str(sid), status='succeeded', exit_code=0)
+spawn_store.finalize_spawn(sp.root_dir, str(sid), status='succeeded', exit_code=0, origin='runner')
 rp = sp.root_dir / 'spawns' / str(sid) / 'report.md'
 rp.parent.mkdir(parents=True, exist_ok=True)
 rp.write_text('# Phase 2 Report\n\nBuilt API layer.\n')
@@ -143,7 +150,7 @@ from meridian.lib.state.paths import resolve_state_paths
 repo = Path('$SMOKE_REPO')
 sp = resolve_state_paths(repo)
 sid = spawn_store.start_spawn(sp.root_dir, chat_id='c3', model='gpt', agent='coder', harness='codex', kind='child', prompt='no-report', desc='No report spawn')
-spawn_store.finalize_spawn(sp.root_dir, str(sid), status='succeeded', exit_code=0)
+spawn_store.finalize_spawn(sp.root_dir, str(sid), status='succeeded', exit_code=0, origin='runner')
 print(sid)
 ")
 
