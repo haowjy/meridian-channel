@@ -1,114 +1,174 @@
 # Feasibility Record
 
-## Probe 1: Config File at Repo Root
+Probe evidence and assumption verdicts for the workspace-config design round. Every claim is cited to a live code line in the `meridian-cli` checkout or to a `codex-cli 0.120.0` help-output capture. This document is ground truth for the spec and architecture trees; `decisions.md` maps prior-round findings to design responses; `design/refactors.md` consumes the blast-radius list below to build the refactor agenda.
 
-**Question**: Can `meridian.toml` coexist with other root config files without conflicts?
+> Detailed source captures live in `$MERIDIAN_WORK_DIR/probe-evidence/probes.md`. This file records the verdicts distilled from those probes so the planner and reviewers don't need to re-run them.
 
-**Evidence**: Current repo root contains: `mars.toml`, `mars.lock`, `pyproject.toml`, `uv.lock`. No TOML file named `meridian.toml` exists. The name is unambiguous and follows the `<tool>.toml` convention used by Ruff, Mars, and others.
+## Verdicts
 
-**Verdict**: ✅ No conflict. Clean namespace.
+### FV-1 Codex supports `--add-dir`
 
----
+**Verdict**: feasible. v1 injects workspace roots into claude and codex.
 
-## Probe 2: Config Loading Backward Compatibility
+**Evidence**: `codex exec --help` on codex-cli 0.120.0 documents `--add-dir <DIR>` as "Additional directories that should be writable alongside the primary workspace" (see probes §1).
 
-**Question**: Can the two-location fallback work without breaking existing users?
+**Residual risk**: `--add-dir` is inert when the effective sandbox is `read-only`. Codex emits a runtime warning but `config show` / `doctor` must also surface this applicability so users don't reason from assumed behavior. Captured in `architecture/harness-integration.md` and spec `SURF-1.*` leaves on surfacing.
 
-**Evidence**: `_resolve_project_toml()` in `settings.py` returns a single `Path | None`. Callers don't care where the file came from — they just parse the TOML. Changing the resolution function to check root first, then `.meridian/`, is transparent to all consumers. The schema is identical in both locations.
+### FV-2 `dedupe_nonempty` is first-seen, and ordering of workspace projection is deterministic
 
-**Verdict**: ✅ Transparent migration. Same schema, different path.
+**Verdict**: confirmed. Design commits to the ordering
+`user passthrough → projection-managed → workspace-emitted` on the Claude path,
+and `user passthrough (spec.extra_args) → workspace-emitted` on the Codex path.
 
----
+**Evidence**: `lib/launch/text_utils.py:8-19`; `lib/harness/claude_preflight.py:131-147`; `lib/harness/projections/project_codex_subprocess.py:219`. See probes §2, §5, §6.
 
-## Probe 3: Claude --add-dir Injection (Previously Validated)
+**Residual risk**: none. The design fixes prior F4 by putting user passthrough first so any downstream first-seen dedupe preserves explicit CLI intent.
 
-**Question**: Can workspace context-roots inject via `--add-dir`?
+### FV-3 Meridian does not read `models.toml`; no Meridian-side models migration is justified
 
-**Evidence**: `expand_claude_passthrough_args` in `claude_preflight.py` already builds `--add-dir` lists. Adding workspace-derived directories is a list extension. `dedupe_nonempty` handles dedup.
+**Verdict**: out of scope. `rg "models\.toml|models_merged"` returns zero hits in `src/` and `tests/`. Mars owns alias resolution via `.mars/models-merged.json` (`lib/catalog/model_aliases.py:229`). The design does not propose a Meridian-owned `models.toml` and does not touch mars-agents.
 
-**Verdict**: ✅ Validated in prior design. No architectural changes needed.
+**Evidence**: probes §3.
 
----
+**Residual risk**: none. If a future change introduces Meridian-side model ownership, that is a separate decision with separate ownership analysis.
 
-## Probe 4: Codex/OpenCode Context-Root Mechanisms
+### FV-4 Moving committed config to the project root has a fully enumerated blast radius
 
-**Question**: Do Codex and OpenCode support directory-inclusion flags?
+**Verdict**: feasible, but the refactor agenda MUST cover all call sites. Any "one-function change" framing is rejected.
 
-**Evidence**: Inspected `project_codex_subprocess.py` and `project_opencode_subprocess.py`. Neither harness currently supports an `--add-dir` equivalent for injecting additional directory context.
+**Evidence**: probes §4 enumerates ≥ 9 source sites + help text + smoke + unit tests:
 
-Codex has `--read-dir` in some configurations but it is not used by Meridian's projection layer. OpenCode has no equivalent flag.
+- `lib/state/paths.py:21, 33, 127` — canonical path, gitignore policy.
+- `lib/config/settings.py:25, 206-210, 213-227` — loader resolver + user-config env.
+- `lib/ops/config.py:342-343, 602-606, 737-763, 758, 777, 827, 846, 872` — command family + bootstrap.
+- `lib/ops/manifest.py:242, 266` — CLI help.
+- `cli/main.py:806-815` — config_app description.
+- `tests/smoke/quick-sanity.md:45-47`, `tests/ops/test_runtime_bootstrap.py`, `tests/ops/test_config_warnings.py`, `tests/config/test_settings.py`, `tests/test_state/test_paths.py`, `tests/cli/test_sync_cmd.py`, `tests/test_cli_bootstrap.py` — tests.
 
-**Verdict**: ⚠️ Claude-only for first version. Context-roots silently skip for Codex/OpenCode. The architecture exposes `context_directories() → list[Path]` harness-agnostically so future adapter support requires only projection-layer changes.
+**Residual risk**: the command family (`config show/get/set/reset/init`) currently bypasses `_resolve_project_toml` and operates directly on `_config_path`. A partial refactor that rewires only the loader would leave reads resolving from the new location while writes still target `.meridian/config.toml`. `design/refactors.md` pins this as a single coordinated refactor (R02), not two.
 
----
+### FV-5 `StatePaths` is `.meridian`-scoped and is the wrong home for project-root file policy
 
-## Probe 5: Gitignore Management at Root
+**Verdict**: new module required. Root-file discovery, `MERIDIAN_WORKSPACE` env handling, and root `.gitignore` policy live outside `state/paths.py`.
 
-**Question**: Can we reliably add `workspace.toml` to `<repo_root>/.gitignore`?
+**Evidence**: `lib/state/paths.py:93-128`, `lib/config/settings.py:804-838` (only `resolve_repo_root` exists at project-root level today; no file enumeration (this will be renamed to `resolve_project_root` per R01)). See probes §7.
 
-**Evidence**: Mars already manages `mars.local.toml` in root `.gitignore`. The current root `.gitignore` already has entries like `.mars/` and `.agents/`. Appending `workspace.toml` follows the same append-if-absent pattern.
+**Residual risk**: naming bikeshed (`ProjectPaths` vs `RepoFiles` vs `RootConfigPaths`). The architecture tree commits to one name; no functional implication.
 
-The existing `.meridian/.gitignore` management in `state/paths.py` provides a reusable pattern (read file, check lines, append if missing, atomic write).
+### FV-6 First-run auto-bootstrap currently creates `.meridian/config.toml` unconditionally; root-file creation must be opt-in
 
-**Verdict**: ✅ Well-established pattern. One utility function.
+**Verdict**: the bootstrap path must be split. `.meridian/` state directories and `.meridian/.gitignore` continue to be created on every run (runtime state is always needed). Root `meridian.toml` is created ONLY by `config init`.
 
----
+**Evidence**: `lib/ops/config.py:737-763` — `ensure_state_bootstrap_sync` auto-writes `_scaffold_template()` if the config file is missing; called unconditionally from `lib/ops/runtime.py:66`. See probes §8.
 
-## Probe 6: `workspace.toml` Key Format
+**Residual risk**: when no `meridian.toml` exists at the project root, the loader runs on built-in defaults silently. `config init` is the user's entrypoint to opt into a committed project config. Stale `.meridian/config.toml` files in existing repos are ignored — the file is no longer read and is deleted by `R01` as part of the boundary cleanup.
 
-**Question**: Do TOML dotted keys work well for `org/repo` identifiers?
+### FV-7 Claude already has a projection-managed middle section; workspace projection extends it
 
-**Evidence**: TOML spec requires quoting keys containing `/`. So entries look like:
+**Verdict**: feasible. Claude's existing preflight-owned `execution_cwd` and
+parent-forwarded `additionalDirectories` become the projection-managed middle
+section, and workspace roots append after them.
 
-```toml
-[context-roots."meridian-flow/meridian-base"]
-path = "../prompts/meridian-base"
-```
+**Evidence**: `lib/harness/claude_preflight.py:131-147`. See probes §6.
 
-The quoting is slightly verbose but unambiguous. Alternative: use `.` separator (`meridian-flow.meridian-base`) which avoids quoting but diverges from the canonical `org/repo` format used everywhere else.
+**Residual risk**: interaction with parent-forwarding edge cases (no parent `.claude/settings.json`, symlink to parent session dir). Existing behavior unchanged.
 
-**Verdict**: ✅ Quoted TOML keys work correctly. The slight verbosity is acceptable for the clarity of using the canonical `org/repo` format. Non-repo entries use simple keys: `[context-roots.shared-data]`.
+### FV-8 — (obsolete) config migrate policy
 
----
+Removed per D8 (no migration).
 
-## Probe 7: models.toml Location
+### FV-9 OpenCode has day-1 workspace support through `permission.external_directory`
 
-**Question**: Where does models.toml loading happen and can it be redirected?
+**Verdict**: feasible. OpenCode does not expose native `--add-dir` parity, but
+it does expose `permission.external_directory` in its config schema plus inline
+config delivery via `OPENCODE_CONFIG_CONTENT`. Day-1 support is therefore a
+projection to `active:permission_allowlist`, not an unsupported state.
 
-**Evidence**: Need to trace the model catalog loader to find where `.meridian/models.toml` is resolved. The `models.toml` content is a curated overlay (aliases, metadata, harness patterns, visibility filters). Its schema has top-level tables (`[aliases]`, `[metadata.*]`, `[harness_patterns]`, `[model_visibility]`) that are distinct from `config.toml` sections.
+**Evidence**:
 
-**Verdict**: ✅ Same migration pattern as config.toml. Check root first, fallback to `.meridian/`. Separate file (not merged into `meridian.toml`) because the schema is distinct and self-contained.
+- `.meridian/work/workspace-config-design/opencode-probe-findings.md §1-§2` —
+  no first-class multi-root field or agent roots field was found.
+- `.meridian/work/workspace-config-design/opencode-probe-findings.md §4` —
+  `permission.external_directory` is the documented native permission mechanism
+  for paths outside the primary root.
+- `.meridian/work/workspace-config-design/opencode-probe-findings.md §8` —
+  recommendation is day-1 support via native file-tool access, not a wait-for-upstream posture.
 
----
+**Residual risk**: semantic gap, not capability gap. The extra roots are usable by
+OpenCode's file tools, but they are not surfaced as named workspace roots in the
+harness UX. The architecture captures this as
+`active:permission_allowlist` rather than pretending OpenCode gained `--add-dir`
+parity.
 
-## Probe 8: `.meridian/.gitignore` Exception Removal
+### FV-10 OpenCode config overlay can be delivered through `OPENCODE_CONFIG_CONTENT`
 
-**Question**: Can we safely remove the `!config.toml` exception from `.meridian/.gitignore`?
+**Verdict**: feasible. The OpenCode projection can keep a structured
+`config_overlay` and materialize it into `env_additions` without adding a
+launch-layer branch.
 
-**Evidence**: The `_REQUIRED_GITIGNORE_LINES` tuple in `paths.py` includes `"!config.toml"`. The `_merge_required_gitignore_lines` function adds missing required lines to existing gitignores. Removing `"!config.toml"` from `_REQUIRED_GITIGNORE_LINES` means it won't be added, but it also won't be removed from existing files.
+**Evidence**:
 
-For clean removal, add `"!config.toml"` to `_DEPRECATED_GITIGNORE_LINES` (which already exists for legacy entries). The existing merge logic already strips deprecated lines.
+- `.meridian/work/workspace-config-design/opencode-probe-findings.md §5` —
+  `OPENCODE_CONFIG_CONTENT` exists as an inline config env mechanism.
+- `.meridian/work/workspace-config-design/opencode-probe-findings.md §2` —
+  config schema includes the relevant permission surface.
+- `.meridian/work/workspace-config-design/opencode-probe-findings.md §4` —
+  config layering is already how OpenCode accepts non-CLI capability changes.
 
-**Verdict**: ✅ Clean migration path via existing deprecated-lines mechanism.
-
----
+**Residual risk**: explicit merge semantics remain to be pinned if a parent
+environment already supplies `OPENCODE_CONFIG_CONTENT`. The architecture records
+that as an open question instead of hiding it.
 
 ## Open Questions
 
-### OQ-1: Should `meridian config migrate` also migrate `models.toml`?
+1. **OpenCode overlay collision policy.** Resolved per D15. If a parent
+   environment already sets `OPENCODE_CONFIG_CONTENT`, meridian's OpenCode
+   adapter skips workspace projection and emits a diagnostic. The user's
+   explicit env value wins. Silent deep-merge rejected as hostile
+   invisible-modification behavior.
 
-A single `meridian config migrate` command that moves both `config.toml` and `models.toml` to repo root would be convenient. Alternative: separate `meridian models migrate`. The former is simpler UX.
+2. **`[context-roots]` vs `[extra-dirs]` table naming (prior F16).** Low
+   priority; architecture commits to `[context-roots]` for consistency with
+   Meridian's existing "context" language (`MERIDIAN_CHAT_ID`, "context
+   handoffs"). If a reviewer prefers `[extra-dirs]`, trivial rename.
 
-**Recommendation**: Single `meridian config migrate` moves both files.
+3. **`workspace.local.toml` rename rationale (prior F15).** Accepted. The
+   architecture uses `workspace.local.toml` explicitly; decisions.md records the
+   rationale (pnpm/npm/Yarn/Rush/Nx/Bazel/Go/Cargo/Bun/Deno all treat
+   `workspace.*` as committed team topology; a gitignored `workspace.toml` lies
+   to the reader).
 
-### OQ-2: Per-harness context-root subsets
+4. **`MERIDIAN_WORKSPACE` path resolution semantics.** Resolved per D12.
+   V1 supports absolute paths only. The relative-path case is deferred until
+   a concrete user need surfaces — shell cwd and meridian effective cwd both
+   have surprising behaviors, and the primary use case (workspace outside the
+   meridian tree) wants absolute paths anyway. Paths *inside*
+   `workspace.local.toml` are resolved relative to the file itself, matching
+   VS Code `.code-workspace` convention.
 
-Some developers might want certain roots only for Claude (e.g., a large codebase that OpenCode can't handle). The current design omits per-harness filtering as a non-goal.
+5. **Missing env-target file behavior.** Resolved per D13. `workspace.status
+   = absent` + per-invocation advisory when `MERIDIAN_WORKSPACE` points at a
+   nonexistent file. Distinguishes from silent `absent` (no env var set) and
+   `invalid` (parse/schema error on an existing file). Launch proceeds without
+   workspace roots; advisory surfaces the misconfiguration without blocking.
 
-**Recommendation**: Defer. When the need arises, add an optional `harnesses = ["claude", "codex"]` field to context-root entries. The architecture already separates path resolution from harness injection, so this extension is additive.
+6. **`workspace init --from mars.toml` path heuristic.** Resolved per D14.
+   No path heuristic is applied. Emission shape is disabled entries with an
+   empty `path` and the `org/repo` identity as a comment. User fills in local
+   paths explicitly. Rejected `<parent-of-.meridian/>/../<repo-name>` pattern
+   because it is wrong for this repo's own documented layout
+   (`~/gitrepos/meridian-cli` + `~/gitrepos/prompts/meridian-base`) and any
+   non-strict-sibling checkout topology.
 
-### OQ-3: Should `models.toml` merge into `meridian.toml`?
+7. **OpenCode subprocess/streaming parity.** Resolved per D16 via code
+   investigation. Both paths ultimately call `asyncio.create_subprocess_exec`
+   with an `env` param (see `src/meridian/lib/harness/connections/opencode_http.py:311-330`
+   and `src/meridian/lib/ops/spawn/execute.py:462`). `env_additions` — including
+   `OPENCODE_CONFIG_CONTENT` — flow identically to the child process in both
+   modes. No architecture change needed; the projection `env_additions` channel
+   works uniformly. A separate cleanup issue (meridian-flow/meridian-cli#32)
+   tracks removing the unreachable subprocess-runner code.
 
-Architecturally clean to keep separate (distinct schema). But having both `meridian.toml` and `models.toml` at root is two files where one could suffice. Users rarely edit models.toml directly — it's mostly for power users.
+## How this file was produced
 
-**Recommendation**: Keep separate. The schemas are orthogonal, and a `[models]` section in `meridian.toml` containing `[models.aliases]`, `[models.harness_patterns]` etc. creates awkward nesting. Two focused files > one cluttered file.
+Probes re-run on 2026-04-14 against `meridian-cli` HEAD and `codex-cli 0.120.0`. Full capture in `$MERIDIAN_WORK_DIR/probe-evidence/probes.md`. Verdicts above are distilled from that capture. When reviewers rerun probes, probes.md is the starting point; if any probe changes behavior, update this file's verdicts first, then propagate to spec/architecture/refactors.
