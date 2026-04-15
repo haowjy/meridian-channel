@@ -8,18 +8,6 @@ from meridian.lib.harness.connections.base import HarnessConnection
 from meridian.lib.harness.ids import HarnessId, TransportId
 
 
-def register_connection(
-    harness_id: HarnessId,
-    cls: type[HarnessConnection[Any]],
-) -> None:
-    """Deprecated compatibility shim for the removed flat connection registry."""
-
-    _ = harness_id, cls
-    raise RuntimeError(
-        "register_connection() is retired; register via register_harness_bundle()"
-    )
-
-
 def get_connection_class(
     harness_id: HarnessId,
     transport_id: TransportId = TransportId.STREAMING,
@@ -33,4 +21,4 @@ def get_connection_class(
     return get_connection_cls(harness_id, transport_id)
 
 
-__all__ = ["get_connection_class", "register_connection"]
+__all__ = ["get_connection_class"]

@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from meridian.lib.harness.claude import project_slug
-from meridian.lib.launch.claude_preflight import ensure_claude_session_accessible
+from meridian.lib.harness.claude_preflight import ensure_claude_session_accessible
 
 
 def _write_session_file(home: Path, project_root: Path, session_id: str) -> Path:
