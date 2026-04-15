@@ -6,15 +6,9 @@ Reports are the primary way spawn results are persisted and surfaced. Every spaw
 
 ## How Agents Write Reports
 
-The prompt always includes a report instruction telling agents to run:
+The prompt always includes a report instruction telling agents to emit the report as their **final assistant message** — not to call any CLI. The finalize pipeline extracts the final message from `output.jsonl` after the spawn exits and persists it to `spawns/<id>/report.md`.
 
-```
-meridian report create --stdin
-```
-
-This writes `spawns/<id>/report.md` via the `report.create` manifest operation. The report is written as stdin to the command.
-
-**Note**: The CLI surface is `meridian spawn report create --stdin` (nested under spawn), not `meridian report create --stdin`. The prompt instruction says `meridian report create --stdin` — this works because the system treats it as falling back to the auto-extraction path if the command fails.
+See `build_report_instruction()` in `prompt.py` for the exact wording.
 
 ## Extraction Fallback Chain
 
@@ -67,24 +61,19 @@ Called after subprocess exit in both `process.py` (primary) and `runner.py` (sub
 
 ## Report Operations (ops layer)
 
-`src/meridian/lib/ops/report.py` exposes the manifest-level report operations:
+`src/meridian/lib/ops/report.py` exposes read-only manifest-level report operations:
 
-- `report.create` — writes `spawns/<id>/report.md`; determines spawn_id from env `MERIDIAN_SPAWN_ID`
 - `report.show` — reads and returns report content
 - `report.search` — scans reports across all spawns or the current runtime context
 
-CLI surface: `meridian spawn report create/show/search` (nested under `spawn`).  
-MCP surface: `report_create`, `report_show`, `report_search` (flat, top-level tools).
+CLI surface: `meridian spawn report show/search` (nested under `spawn`).
+MCP surface: `report_show`, `report_search`.
 
-The manifest exposes report at the top level for MCP but nests it under `spawn` for CLI. This inconsistency is intentional: CLI users think of reports as spawn artifacts, while MCP consumers interact with reports as first-class objects.
+There is no `report.create` / `report_create` — reports are authored by the spawned agent as its final assistant message and persisted by the finalize pipeline on the orchestrator side (see `_persist_report()` above).
 
 ## Auto-extracted Report Marker
 
-Auto-extracted reports are wrapped with `# Auto-extracted Report` header. This lets downstream readers distinguish:
-- Agent-authored report (ran `meridian report create`) → no header
-- Fallback extraction (last assistant message) → `# Auto-extracted Report` header
-
-The `spawn show` command surfaces this distinction. Agents reading prior-spawn reports via `--from` can note whether the prior report was authoritative.
+All reports currently go through `_extract_last_assistant_message()` and are wrapped with `# Auto-extracted Report` header to signal the provenance. Agents reading prior-spawn reports via `--from` see the header and know the content came from the final assistant message rather than an out-of-band write.
 
 ## Reset on Retry
 

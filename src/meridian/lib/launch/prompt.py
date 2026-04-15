@@ -108,9 +108,7 @@ def build_report_instruction() -> str:
         "**IMPORTANT - Your final assistant message must be the run report.**\n\n"
         "Provide a plain markdown report in your final assistant message.\n\n"
         "Include: what was done, key decisions made, files created/modified, "
-        "verification results, and any issues or blockers.\n\n"
-        "Do not call `meridian spawn report create`; fallback extraction persists "
-        "your final message automatically."
+        "verification results, and any issues or blockers."
     )
 
 

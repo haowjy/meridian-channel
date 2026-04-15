@@ -24,13 +24,17 @@ All sections are joined with double newlines. Empty sections are dropped.
 ```
 # Report
 
-**IMPORTANT - As your final action, create the run report with Meridian.**
+**IMPORTANT - Your final assistant message must be the run report.**
 
-Run `meridian report create --stdin` and provide a plain markdown report via stdin.
-...
+Provide a plain markdown report in your final assistant message.
+
+Include: what was done, key decisions made, files created/modified,
+verification results, and any issues or blockers.
 ```
 
-This is always included. On retries, `strip_stale_report_paths()` removes the old report instruction from the user prompt before re-assembly.
+The agent emits the report as its final assistant message; the finalize pipeline extracts it via `extract_or_fallback_report()` (see `reports.md`). There is no CLI command the agent calls — report persistence happens on the orchestrator side after the spawn exits.
+
+This instruction is always included. On retries, `strip_stale_report_paths()` removes the old report instruction from the user prompt before re-assembly.
 
 ## Primary Launch Startup Inventory
 
