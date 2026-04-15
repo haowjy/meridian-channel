@@ -15,14 +15,15 @@ No real users, no real user data. No backwards compatibility needed — complete
 3. **Knowledge in Data, Not Code** *(Raymond, Rule of Representation)*: Agent capabilities live in YAML profiles, not procedural code. State lives in JSONL events, not in-memory objects. This keeps the system inspectable and harness-agnostic.
 4. **Crash-Only Design** *(Candea & Fox)*: Every write is atomic (tmp+rename). Every read tolerates truncation. There is no "graceful shutdown" — if meridian is killed mid-spawn, the next `meridian status` detects and reports the orphaned state. Recovery IS startup.
 5. **Progressive Disclosure** *(clig.dev, Lengstorf)*: `meridian spawn "do the thing"` works with smart defaults. Power users override with `--model`, `--harness`, `--skills`. Don't force all-or-nothing configuration.
-6. **Simplest Orchestration That Works** *(Google Cloud AI patterns)*: Stay a thin coordination layer. Centralized spawn-and-report is enough. Don't build complex agent choreography until the simple model breaks.
+6. **Simplest Orchestration That Works** *(Google Cloud AI patterns)*: Stay a thin coordination layer. Centralized spawn-and-report is enough. Don't build complex agent choreography until the simple model breaks. "Simplest" means least total complexity owned — lines maintained, platforms tested, failure modes debugged, contributors onboarded — not fewest imports. A trusted library that deletes a subsystem is a simplification; a hand-rolled reimplementation of the same subsystem is not.
 
 ### Core Principles
 
 1. **Harness-Agnostic**: One CLI, many runtimes. Meridian never assumes Claude, Codex, or any specific harness — adapters bridge the gap.
 2. **Files as Authority**: All state is files under `.meridian/`. No databases, no services, no hidden state. If it's not on disk, it doesn't exist. `cat spawns.jsonl | jq` should tell you everything.
 3. **Coordination, Not Control**: Meridian provides structure (spawns, sessions, skills, sync) but never dictates how agents do their work.
-4. **Idempotent Operations**: `meridian sync` twice = same result. Re-running after a crash converges to correct state, never doubles side effects.
+4. **Observable by Default, Intrusive Only Where Observation Requires It**: Meridian reads harness state rather than driving harness behavior. Where observation needs a mechanism the harness doesn't provide — like capturing output from a TUI that only emits to a TTY — meridian reaches into the boundary with the minimum machinery needed (PTY capture for primary-launch session-ID extraction is the canonical example). Observability requirement, not control lever. Code that looks intrusive should be justified against a specific unobservable-otherwise constraint, and that constraint named in the commit or comment.
+5. **Idempotent Operations**: `meridian sync` twice = same result. Re-running after a crash converges to correct state, never doubles side effects.
 
 ### Architecture
 
@@ -42,7 +43,13 @@ NEVER REVERT CHANGES — always assume it's someone else's work.
 
 ### Editing Agents & Skills
 
-**NEVER edit `.agents/` directly** — it is generated output, overwritten by `meridian mars sync`. Edit the source package repos directly (outside this checkout):
+**NEVER edit `.agents/` directly** — it is generated output, overwritten by `meridian mars sync`. Edit the source package repos directly in sibling checkouts outside this repo. Preferred local layout:
+
+- `~/gitrepos/meridian-cli`
+- `~/gitrepos/prompts/meridian-base`
+- `~/gitrepos/prompts/meridian-dev-workflow`
+
+Source repos:
 
 - **`meridian-flow/meridian-base`** — core agents, skills, and spawn infrastructure (e.g. `meridian-spawn`, `meridian-subagent`)
 - **`meridian-flow/meridian-dev-workflow`** — dev orchestration agents and skills (e.g. `dev-orchestrator`, `reviewer`, `coder`, `agent-staffing`)
@@ -51,7 +58,7 @@ When writing or editing agent profiles and skills, follow the prompt and skill d
 
 Canonical workflow:
 
-1. Edit in the standalone source repo (e.g. `meridian-flow/meridian-base`, `skills/meridian-spawn/SKILL.md`)
+1. Edit in the standalone source repo (for example `~/gitrepos/prompts/meridian-base/skills/meridian-spawn/SKILL.md`)
 2. Commit and push the source repo change
 3. Update package refs in this repo if needed with `meridian mars add ...`
 4. Run `meridian mars sync` to regenerate `.agents/`
