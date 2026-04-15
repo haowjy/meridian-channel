@@ -18,9 +18,11 @@ classifiers = [
   "Topic :: Utilities",
 ]
 dependencies = [
+  "ag-ui-protocol>=0.1",
   "aiohttp>=3.11",
   "coolname>=4.0.0",
   "cyclopts>=3.0",
+  "fastapi>=0.115",
   "mars-agents==0.1.1",
   "mcp>=1.0",
   "psutil>=7.2.2",
@@ -28,6 +30,8 @@ dependencies = [
   "pydantic-settings>=2.13",
   "python-frontmatter>=1.1",
   "structlog>=25.0",
+  "uvicorn[standard]>=0.34",
+  "websockets>=14.0",
 ]
 
 [project.urls]
@@ -41,12 +45,6 @@ pytests = "meridian.dev.pytests:main"
 pytest-llm = "meridian.dev.pytests:main"
 
 [project.optional-dependencies]
-app = [
-  "fastapi>=0.115",
-  "uvicorn[standard]>=0.34",
-  "websockets>=14.0",
-  "ag-ui-protocol>=0.1",
-]
 dev = [
   "pyright>=1.1.400",
   "pytest>=8.4.0",

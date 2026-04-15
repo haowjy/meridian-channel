@@ -14,12 +14,7 @@ def run_app(
 ) -> None:
     """Start the Meridian app server."""
 
-    try:
-        importlib.import_module("fastapi")
-        uvicorn_module = importlib.import_module("uvicorn")
-    except ModuleNotFoundError:
-        print("Missing app dependencies. Install with: uv sync --extra app")
-        raise SystemExit(1) from None
+    uvicorn_module = importlib.import_module("uvicorn")
 
     from meridian.lib.app.server import create_app
     from meridian.lib.ops.runtime import resolve_runtime_root_and_config, resolve_state_root

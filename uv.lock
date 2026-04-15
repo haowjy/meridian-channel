@@ -705,9 +705,11 @@ wheels = [
 name = "meridian-cli"
 source = { editable = "." }
 dependencies = [
+    { name = "ag-ui-protocol" },
     { name = "aiohttp" },
     { name = "coolname" },
     { name = "cyclopts" },
+    { name = "fastapi" },
     { name = "mars-agents" },
     { name = "mcp" },
     { name = "psutil" },
@@ -715,15 +717,11 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "python-frontmatter" },
     { name = "structlog" },
-]
-
-[package.optional-dependencies]
-app = [
-    { name = "ag-ui-protocol" },
-    { name = "fastapi" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "websockets" },
 ]
+
+[package.optional-dependencies]
 dev = [
     { name = "pyright" },
     { name = "pytest" },
@@ -736,11 +734,11 @@ templates = [
 
 [package.metadata]
 requires-dist = [
-    { name = "ag-ui-protocol", marker = "extra == 'app'", specifier = ">=0.1" },
+    { name = "ag-ui-protocol", specifier = ">=0.1" },
     { name = "aiohttp", specifier = ">=3.11" },
     { name = "coolname", specifier = ">=4.0.0" },
     { name = "cyclopts", specifier = ">=3.0" },
-    { name = "fastapi", marker = "extra == 'app'", specifier = ">=0.115" },
+    { name = "fastapi", specifier = ">=0.115" },
     { name = "jinja2", marker = "extra == 'templates'", specifier = ">=3.1" },
     { name = "mars-agents", specifier = "==0.1.1" },
     { name = "mcp", specifier = ">=1.0" },
@@ -753,10 +751,10 @@ requires-dist = [
     { name = "python-frontmatter", specifier = ">=1.1" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.12.0" },
     { name = "structlog", specifier = ">=25.0" },
-    { name = "uvicorn", extras = ["standard"], marker = "extra == 'app'", specifier = ">=0.34" },
-    { name = "websockets", marker = "extra == 'app'", specifier = ">=14.0" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.34" },
+    { name = "websockets", specifier = ">=14.0" },
 ]
-provides-extras = ["app", "dev", "templates"]
+provides-extras = ["dev", "templates"]
 
 [[package]]
 name = "multidict"
