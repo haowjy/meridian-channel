@@ -13,7 +13,6 @@ from meridian.lib.ops.runtime import (
 )
 from meridian.lib.ops.spawn.query import resolve_spawn_reference
 from meridian.lib.state import spawn_store
-from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.paths import resolve_state_paths
 
 
@@ -69,31 +68,6 @@ def _report_snippet(text: str, *, query: str) -> str:
     return normalized[start:end]
 
 
-class ReportCreateInput(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    content: str = ""
-    spawn_id: str | None = None
-    repo_root: str | None = None
-
-
-class ReportCreateOutput(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    command: str
-    status: str
-    spawn_id: str
-    report_path: str
-    bytes_written: int
-
-    def format_text(self, ctx: FormatContext | None = None) -> str:
-        _ = ctx
-        return (
-            f"{self.command}  {self.status}  spawn={self.spawn_id}  "
-            f"path={self.report_path}  bytes={self.bytes_written}"
-        )
-
-
 class ReportShowInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -142,27 +116,6 @@ class ReportSearchOutput(BaseModel):
         from meridian.cli.format_helpers import tabular
 
         return tabular([[item.spawn_id, item.report_path, item.snippet] for item in self.results])
-
-
-def report_create_sync(
-    payload: ReportCreateInput,
-    ctx: RuntimeContext | None = None,
-) -> ReportCreateOutput:
-    repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
-    spawn_id = _resolve_spawn(repo_root=repo_root, spawn_id=payload.spawn_id, ctx=ctx)
-    content = payload.content.strip()
-    if not content:
-        raise ValueError("Report content must not be empty.")
-    report_path = _report_path(repo_root, spawn_id=spawn_id)
-    text = f"{content}\n"
-    atomic_write_text(report_path, text)
-    return ReportCreateOutput(
-        command="report.create",
-        status="succeeded",
-        spawn_id=spawn_id,
-        report_path=report_path.as_posix(),
-        bytes_written=len(text.encode("utf-8")),
-    )
 
 
 def report_show_sync(
@@ -222,6 +175,5 @@ def report_search_sync(
     return ReportSearchOutput(results=tuple(matches))
 
 
-report_create = async_from_sync(report_create_sync)
 report_show = async_from_sync(report_show_sync)
 report_search = async_from_sync(report_search_sync)

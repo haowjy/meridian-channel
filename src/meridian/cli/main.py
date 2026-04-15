@@ -784,8 +784,7 @@ report_app = App(
     help_epilogue=(
         "Examples:\n\n"
         "  meridian spawn report show p107\n\n"
-        '  meridian spawn report search "auth bug"\n\n'
-        '  echo "Report body" | meridian spawn report create --stdin\n'
+        '  meridian spawn report search "auth bug"\n'
     ),
     help_formatter="plain",
 )

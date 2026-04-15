@@ -105,13 +105,12 @@ def build_report_instruction() -> str:
 
     return (
         "# Report\n\n"
-        "**IMPORTANT - As your final action, create the run report with Meridian.**\n\n"
-        "Run `meridian spawn report create --stdin` and provide a plain markdown report "
-        "via stdin.\n\n"
+        "**IMPORTANT - Your final assistant message must be the run report.**\n\n"
+        "Provide a plain markdown report in your final assistant message.\n\n"
         "Include: what was done, key decisions made, files created/modified, "
         "verification results, and any issues or blockers.\n\n"
-        "If `meridian spawn report create` is unavailable or fails, provide the same markdown "
-        "as your final assistant message so fallback extraction can persist the report."
+        "Do not call `meridian spawn report create`; fallback extraction persists "
+        "your final message automatically."
     )
 
 

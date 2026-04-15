@@ -26,7 +26,7 @@ Minimal MCP config:
 Current MCP tools:
 
 - `spawn_create`, `spawn_list`, `spawn_show`, `spawn_continue`, `spawn_cancel`, `spawn_wait`, `spawn_stats`
-- `report_create`, `report_show`, `report_search`
+- `report_show`, `report_search`
 - `models_list`, `models_show`
 - `skills_list`, `skills_show`
 - `doctor`
@@ -86,18 +86,6 @@ Spawn records returned by `spawn_show`, `spawn_list`, `spawn_wait`, and `spawn_s
 Compatibility alias accepted: `spawn_id` (single string).
 
 ## Report Tools
-
-### `report_create`
-
-```json
-{
-  "content": "# Report\n\nDone.",
-  "spawn_id": "p7"
-}
-```
-
-Defaults:
-- If `spawn_id` is omitted, Meridian resolves from `MERIDIAN_SPAWN_ID`.
 
 ### `report_show`
 

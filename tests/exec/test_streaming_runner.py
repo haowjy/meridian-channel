@@ -85,6 +85,12 @@ def _fake_turn_completed_then_close_connection_class(
     return _TurnCompletedThenCloseConnection
 
 
+def _fake_item_completed_then_close_connection_class(
+    _harness_id: HarnessId,
+) -> type[_ItemCompletedThenCloseConnection]:
+    return _ItemCompletedThenCloseConnection
+
+
 def _fake_opencode_capture_spec_connection_class(
     _harness_id: HarnessId,
 ) -> type[_OpenCodeCaptureSpecThenIdleConnection]:
@@ -392,6 +398,27 @@ class _TurnCompletedThenCloseConnection(_HangingAfterTurnCompletedConnection):
             payload={
                 "threadId": self._session_id,
                 "turn": {"id": "turn-1", "status": "completed", "error": None, "items": []},
+            },
+        )
+
+
+class _ItemCompletedThenCloseConnection(_HangingAfterTurnCompletedConnection):
+    async def events(self):  # type: ignore[no-untyped-def]
+        repo_root = self._repo_root
+        assert repo_root is not None
+        spawn_dir = resolve_spawn_log_dir(repo_root, self._spawn_id)
+        spawn_dir.mkdir(parents=True, exist_ok=True)
+        (spawn_dir / "report.md").write_text(
+            "# Done\n\nItem completed before shutdown.\n",
+            encoding="utf-8",
+        )
+        yield HarnessEvent(
+            event_type="item/completed",
+            harness_id="codex",
+            payload={
+                "item": {"id": "msg-1", "type": "agentMessage", "text": "done"},
+                "threadId": self._session_id,
+                "turnId": "turn-1",
             },
         )
 
@@ -909,7 +936,7 @@ async def test_execute_with_streaming_signal_wins_without_spawn_terminal_event(
     monkeypatch.setattr(spawn_manager_module, "ControlSocketServer", _FakeControlSocketServer)
     monkeypatch.setattr(
         "meridian.lib.harness.connections.get_connection_class",
-        _fake_turn_completed_then_close_connection_class,
+        _fake_item_completed_then_close_connection_class,
     )
 
     signal_state: dict[str, object] = {}

@@ -730,7 +730,7 @@ async def test_cancel_endpoint_rejects_terminal(
 
 
 @pytest.mark.asyncio
-async def test_validation_error_handler_maps_model_validator_value_errors_to_400(
+async def test_validation_error_handler_maps_only_mutually_exclusive_value_errors_to_400(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -761,6 +761,20 @@ async def test_validation_error_handler_maps_model_validator_value_errors_to_400
     assert semantic_response.content == {
         "detail": "text and interrupt are mutually exclusive"
     }
+
+    fallback_value_error_response = await handler(
+        object(),
+        FakeRequestValidationError(
+            [{"ctx": {"error": ValueError("provide text or interrupt: true")}}]
+        ),
+    )
+    assert fallback_value_error_response["status_code"] == 422
+    fallback_detail = cast("list[dict[str, object]]", fallback_value_error_response["detail"])
+    assert len(fallback_detail) == 1
+    fallback_ctx = cast("dict[str, object]", fallback_detail[0]["ctx"])
+    fallback_error = fallback_ctx["error"]
+    assert isinstance(fallback_error, ValueError)
+    assert str(fallback_error) == "provide text or interrupt: true"
 
     schema_response = await handler(object(), FakeRequestValidationError([{"type": "missing"}]))
     assert schema_response == {"status_code": 422, "detail": [{"type": "missing"}]}

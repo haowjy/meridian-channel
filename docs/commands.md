@@ -36,7 +36,6 @@ Common `spawn` flags:
 
 | Command | Description |
 | ------- | ----------- |
-| `meridian spawn report create` | Create a report for the current spawn |
 | `meridian report search "query"` | Search across all spawn reports |
 | `meridian session log REF` | Read a session transcript |
 | `meridian session search "query" REF` | Search session transcripts |

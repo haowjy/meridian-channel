@@ -39,14 +39,10 @@ from meridian.lib.ops.config import (
 )
 from meridian.lib.ops.diag import DoctorInput, DoctorOutput, doctor, doctor_sync
 from meridian.lib.ops.report import (
-    ReportCreateInput,
-    ReportCreateOutput,
     ReportSearchInput,
     ReportSearchOutput,
     ReportShowInput,
     ReportShowOutput,
-    report_create,
-    report_create_sync,
     report_search,
     report_search_sync,
     report_show,
@@ -317,17 +313,6 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="models",
         cli_name="refresh",
         mcp_name="models_refresh",
-    ),
-    _spec(
-        name="report.create",
-        description="Create or overwrite a spawn report.",
-        handler=report_create,
-        sync_handler=report_create_sync,
-        input_type=ReportCreateInput,
-        output_type=ReportCreateOutput,
-        cli_group="report",
-        cli_name="create",
-        mcp_name="report_create",
     ),
     _spec(
         name="report.search",

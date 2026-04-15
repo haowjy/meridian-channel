@@ -33,7 +33,7 @@ def test_compose_prompt_keeps_context_isolated_and_sanitized(tmp_path: Path) -> 
     )
 
     assert "INJECTION: should never leak" not in composed
-    assert composed.count("As your final action, create the run report with Meridian.") == 1
+    assert composed.count("Your final assistant message must be the run report.") == 1
     assert "/tmp/stale.md" not in composed
     assert str(safe_ref) in composed
     assert "Read these files from disk when gathering context:" in composed

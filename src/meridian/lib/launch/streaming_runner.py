@@ -244,8 +244,14 @@ def _stringify_terminal_error(error: object) -> str | None:
 
 def _terminal_event_outcome(event: HarnessEvent) -> _TerminalEventOutcome | None:
     if event.harness_id == HarnessId.CODEX.value and event.event_type == "turn/completed":
-        # Codex turn completion is per-turn state, not spawn/session terminal state.
-        return None
+        return _TerminalEventOutcome(status="succeeded", exit_code=0)
+
+    if event.event_type == "error/connectionClosed":
+        return _TerminalEventOutcome(
+            status="failed",
+            exit_code=1,
+            error="connection_closed",
+        )
 
     if event.harness_id == HarnessId.CLAUDE.value and event.event_type == "result":
         if bool(event.payload.get("is_error")):
@@ -683,6 +689,9 @@ async def _run_streaming_attempt(
                     error="cancelled",
                 )
                 drain_exit_code = signal_exit
+
+        if watchdog_task in done and not terminated_by_report_watchdog:
+            terminated_by_report_watchdog = bool(watchdog_task.result())
 
         drain_outcome = await completion_task
         if drain_outcome is not None and terminal_outcome is None:

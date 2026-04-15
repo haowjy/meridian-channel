@@ -340,6 +340,13 @@ class SpawnManager:
                         error=str(drain_error),
                         duration_secs=max(0.0, time.monotonic() - session.started_monotonic),
                     )
+                elif session.cancel_sent:
+                    outcome = DrainOutcome(
+                        status="cancelled",
+                        exit_code=143,
+                        error="cancelled",
+                        duration_secs=max(0.0, time.monotonic() - session.started_monotonic),
+                    )
                 else:
                     outcome = DrainOutcome(
                         status="succeeded",

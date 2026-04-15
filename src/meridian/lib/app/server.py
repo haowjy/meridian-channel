@@ -178,7 +178,9 @@ def create_app(
                     continue
                 context = cast("dict[str, object]", context_obj)
                 underlying_error = context.get("error")
-                if isinstance(underlying_error, ValueError):
+                if isinstance(underlying_error, ValueError) and "mutually exclusive" in str(
+                    underlying_error
+                ):
                     return json_response_cls(
                         status_code=400,
                         content={"detail": str(underlying_error)},
