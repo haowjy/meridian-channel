@@ -10,9 +10,9 @@ snapshot, and harness-owned projection.
 
 ## Realizes
 
-- `../spec/workspace-file.md` — `WS-1.u2`, `WS-1.u3`, `WS-1.e1`, `WS-1.e2`, `WS-1.e3`, `WS-1.e4`, `WS-1.c1`
+- `../spec/workspace-file.md` — `WS-1.u2`, `WS-1.u3`, `WS-1.s1`, `WS-1.e1`, `WS-1.e2`, `WS-1.e3`, `WS-1.e4`, `WS-1.e5`, `WS-1.c1`
 - `../spec/context-root-injection.md` — `CTX-1.u1`, `CTX-1.e2`
-- `../spec/surfacing.md` — `SURF-1.e1`, `SURF-1.e2`
+- `../spec/surfacing.md` — `SURF-1.e1`, `SURF-1.e2`, `SURF-1.e6`
 
 ## Current State
 
@@ -70,7 +70,7 @@ WorkspaceStatus = absent | valid | invalid
 WorkspaceSnapshot
   status: WorkspaceStatus
   path: Path | None
-  absent_reason: none | override_missing
+  absent_reason: none | override_missing | override_non_absolute
   roots: tuple[ResolvedContextRoot, ...]
   unknown_keys: tuple[str, ...]
   findings: tuple[str, ...]
@@ -92,8 +92,10 @@ Contract:
 - `status=invalid` keeps the file path and findings so inspection commands can
   continue.
 - `status=absent` remains the top-level quiet state, while `absent_reason`
-  distinguishes "no workspace file declared" from "MERIDIAN_WORKSPACE pointed at
-  a missing file" without forcing surfacing code to re-read the environment.
+  distinguishes "no workspace file declared" from broken explicit override cases
+  such as "MERIDIAN_WORKSPACE pointed at a missing file" or
+  "MERIDIAN_WORKSPACE used a non-absolute path" without forcing surfacing code
+  to re-read the environment.
 - `roots` includes disabled and missing entries so diagnostics can report counts
   without reparsing.
 - `harness_support` uses the richer applicability states defined in
@@ -146,7 +148,8 @@ Contract:
 | Condition | Status impact | Launch impact | Inspection impact |
 |---|---|---|---|
 | No env override and no file next to `.meridian/` | `absent` + `absent_reason=none` | no workspace behavior | no warnings |
-| `MERIDIAN_WORKSPACE` points at a missing file | `absent` + `absent_reason=override_missing` | no workspace behavior | advisory |
+| `MERIDIAN_WORKSPACE` points at a missing absolute-path file | `absent` + `absent_reason=override_missing` | no workspace behavior; no fallback to default discovery | advisory |
+| `MERIDIAN_WORKSPACE` uses a non-absolute path | `absent` + `absent_reason=override_non_absolute` | no workspace behavior; no fallback to default discovery | advisory |
 | Parse/schema error | `invalid` | fatal for workspace-dependent commands | surfaced, non-fatal |
 | Unknown key | `valid` | non-fatal | warning |
 | Enabled root missing on disk | `valid` | root omitted before projection | warning |
@@ -158,6 +161,9 @@ Contract:
   `HarnessWorkspaceProjection`, not in v1 TOML boilerplate.
 - `workspace init --from mars.toml` emits starter entries as comments in the
   file; provenance is file convention, not a parsed field.
+- Broken explicit overrides remain `workspace.status = absent` rather than
+  `invalid` because Meridian can still run without workspace roots; the design
+  makes the misconfiguration visible through findings instead of blocking launch.
 - This model keeps the door open for future per-root tags or access metadata
   without having to redesign the parser around a flat list later.
 

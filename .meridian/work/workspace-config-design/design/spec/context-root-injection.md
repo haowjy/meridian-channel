@@ -36,3 +36,4 @@ Workspace roots matter only if they reach harness launches predictably. The laun
 
 - **No new harness-specific topology syntax in v1.** The same declared root set applies wherever support exists.
 - **No hidden override of explicit CLI intent.** Workspace roots are defaults, not a stronger precedence layer than user passthrough.
+- **`MERIDIAN_HARNESS_COMMAND` bypass stays a surfaced unsupported path.** Primary launches that bypass normal adapter composition are covered by `CTX-1.w2`, realized in the architecture layer as `unsupported:harness_command_bypass`.

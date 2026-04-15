@@ -9,13 +9,13 @@ Terminology: **project root** names the parent directory of the active `.meridia
 ## Realizes
 
 - `../spec/config-location.md` — `CFG-1.u1`, `CFG-1.u3`
-- `../spec/workspace-file.md` — `WS-1.u1`, `WS-1.u2`
+- `../spec/workspace-file.md` — `WS-1.u1`, `WS-1.u2`, `WS-1.e5`
 - `../spec/bootstrap.md` — `BOOT-1.u1`, `BOOT-1.e2`
 
 ## Current State
 
 - `StatePaths` is `.meridian`-scoped today: it exposes `root_dir`, `spawns_dir`, `cache_dir`, and `config_path = root_dir / "config.toml"` (`probe-evidence/probes.md:64-71`, `probe-evidence/probes.md:139-145`).
-- There is no first-class project-root file abstraction. `resolve_repo_root()` at `lib/config/settings.py:804-838` locates the directory but project-root-level config/workspace files are not modeled as a cohesive layer (`probe-evidence/probes.md:139-145`). Target state renames this to `resolve_project_root` so the internal name matches the concept.
+- There is no first-class project-root file abstraction. `resolve_repo_root()` at `lib/config/settings.py:789-823` locates the directory but project-root-level config/workspace files are not modeled as a cohesive layer (`probe-evidence/probes.md:139-145`). Target state renames this to `resolve_project_root` so the internal name matches the concept.
 - `.meridian/.gitignore` currently has a committed exception for `config.toml`, which is a symptom of the wrong boundary rather than a durable contract (`probe-evidence/probes.md:70-71`).
 
 ## Target State
@@ -52,9 +52,9 @@ StatePaths
 ### Discovery rules
 
 - **Project config**: canonical path is `<project-root>/meridian.toml`. If absent, no project config is in effect.
-- **Workspace file**: if `MERIDIAN_WORKSPACE` is set to an absolute path, that path wins; otherwise use `<project-root>/workspace.local.toml`.
-- **`MERIDIAN_WORKSPACE` path semantics (v1)**: absolute paths only. Relative-path resolution is deferred per D12 until a concrete user need surfaces.
-- **Paths inside `workspace.local.toml`**: resolved relative to the file itself (VS Code `.code-workspace` convention), so the file remains portable across moves.
+- **Workspace file**: if `MERIDIAN_WORKSPACE` is unset, Meridian checks `<project-root>/workspace.local.toml`; if `MERIDIAN_WORKSPACE` is set to an absolute path, Meridian consults that path exclusively; if it is set to a non-absolute path, Meridian surfaces an advisory and treats workspace topology as absent for that invocation.
+- **`MERIDIAN_WORKSPACE` path semantics (v1)**: absolute paths only. Broken explicit overrides do not fall through to default discovery because doing so would make workspace topology depend on an unusable override plus an unrelated default file.
+- **Paths inside `workspace.local.toml`**: resolved relative to the file itself (VS Code `.code-workspace` convention), so the file remains portable across moves. This remains true even when `MERIDIAN_WORKSPACE` points at a file outside the project root.
 
 ### Ownership boundary
 

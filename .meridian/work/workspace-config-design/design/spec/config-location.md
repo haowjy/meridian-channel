@@ -4,7 +4,7 @@
 
 The primary problem is boundary clarity, not just file renaming. Committed project policy belongs alongside `mars.toml` in the same directory as the active `.meridian/`; `.meridian/` itself is local/runtime state. `meridian.toml` in that same directory is the canonical committed Meridian project configuration. `.meridian/config.toml` is not supported.
 
-**Realized by:** `../architecture/paths-layer.md`, `../architecture/config-loader.md`, `../architecture/surfacing-layer.md`.
+**Realized by:** `../architecture/paths-layer.md`, `../architecture/config-loader.md`.
 
 ## EARS Requirements
 

@@ -42,8 +42,8 @@ Half-migrations (loader-only) are explicitly forbidden.
 **Encoded in:** `design/architecture/config-loader.md` (A02 "Command-family
 consistency" section enumerates every consumer that must use the shared state);
 `design/refactors.md` R02 (exit criteria: "One observed project-config state object
-is shared by loader, config commands, bootstrap, and diagnostics. No command reads
-from root while another writes to legacy.").
+is shared by loader, config commands, bootstrap, and diagnostics. All project-config
+reads and writes target `meridian.toml` through that shared state.").
 **Evidence:** `probe-evidence/probes.md §4` — enumerated call sites
 `lib/ops/config.py:758, 777, 827, 846, 872` all call `_config_path` directly, never
 `_resolve_project_toml`.
@@ -253,7 +253,7 @@ The exception exists today because `.meridian/` is otherwise fully gitignored
 and `config.toml` was committed. With migration out of scope per D8, there is no
 Phase C: the exception is removed in the target-state refactor so `.meridian/`
 returns to the intended boundary of fully local/runtime state. R04
-(`design/refactors.md`) owns this removal.
+(`design/refactors.md`) is folded into R01, which owns this removal.
 
 ### D7 — Spec hierarchy size is deliberately small
 Five spec subsystems (`CFG-1`, `WS-1`, `CTX-1`, `SURF-1`, `BOOT-1`) is the
@@ -358,7 +358,10 @@ fragile and hostile to filesystem tooling.
 
 ### D13 — Missing env-target file behavior (OQ-5)
 
-**Directive (2026-04-14):** When `MERIDIAN_WORKSPACE` points at a nonexistent file, meridian treats this as `workspace.status = absent` and emits a per-invocation advisory. The launch proceeds without workspace roots.
+**Directive (2026-04-14):** When `MERIDIAN_WORKSPACE` points at a nonexistent
+file, meridian treats this as `workspace.status = absent`, does not fall
+through to default workspace-file discovery, and emits a per-invocation
+advisory. The launch proceeds without workspace roots.
 
 **Rationale:** a missing override target is a misconfiguration, not a parse error. Treating it as `invalid` would block legitimate launches when users fat-finger a path. The advisory surfaces the problem without blocking. Matches progressive disclosure.
 
@@ -412,15 +415,238 @@ Implementation is also simpler — no JSON deep-merge logic, no precedence rules
 
 **Status:** Resolved via code investigation; no architecture change needed.
 
-**Finding:** code inspection of `src/meridian/lib/ops/spawn/execute.py:462` and `src/meridian/lib/harness/connections/opencode_http.py:311-330` confirmed:
+**Finding:** code inspection confirmed:
 
-1. All three harnesses declare `supports_bidirectional=True`, so `meridian spawn` always routes to `execute_with_streaming` (streaming transport).
-2. `execute_with_streaming` still launches the harness binary via `asyncio.create_subprocess_exec(..., env=env)`. "Streaming" refers to the bidirectional IPC mechanism (HTTP/WebSocket), not an absence of subprocess spawning.
-3. `env_additions` (including `OPENCODE_CONFIG_CONTENT`) therefore reach the child process identically in both paths.
+1. All three harness bundles register only streaming connections in `src/meridian/lib/harness/claude.py:444`, `src/meridian/lib/harness/codex.py:500`, and `src/meridian/lib/harness/opencode.py:310`, so spawn execution is effectively streaming-only.
+2. Spawn execution unconditionally calls `execute_with_streaming` at `src/meridian/lib/ops/spawn/execute.py:459`; "streaming" refers to the IPC shape, not to the absence of a child process.
+3. OpenCode env propagation still flows through `inherit_child_env` in `src/meridian/lib/launch/env.py:123` into `create_subprocess_exec(..., env=env)` in `src/meridian/lib/harness/connections/opencode_http.py:324`.
 
 **Consequence:** `HarnessWorkspaceProjection.env_additions` works uniformly. The OpenCode workspace projection delivers `OPENCODE_CONFIG_CONTENT` through the standard env channel regardless of which runner code path is chosen.
 
-**Related follow-up (out of scope):** issue #32 (`meridian-flow/meridian-cli#32`) filed to remove dead subprocess-runner code (`execute_with_finalization` is unreachable) and clarify the misleading `_subprocess` filenames on shared projection utilities. That cleanup is independent of workspace-config-design.
+**Related follow-up (out of scope):** issue #32 (`meridian-flow/meridian-cli#32`) filed to remove dead legacy subprocess-runner code and clarify the misleading `_subprocess` filenames on shared projection utilities. That cleanup is independent of workspace-config-design.
+
+### D17 — Hexagonal launch core (3 driving adapters through one factory)
+
+**Directive (2026-04-15, refined 2026-04-15):** Meridian launch composition
+adopts a **hexagonal (ports and adapters)** architecture with a canonical
+Plan Object at the center. The architecture has 1 driving port (the
+`build_launch_context()` factory), 3 driving adapters with named
+architectural reasons, and 3 driven adapters (harness implementations).
+
+**Architecture — 3 driving adapters, each with a named reason:**
+
+1. **Primary launch** (`launch/plan.py` → `launch/process.py`) — foreground
+   process under meridian's control until exit. Two capture modes: **PTY
+   capture** (intended, `pty.fork()` + `os.execvpe()` when stdin/stdout are
+   TTYs and output log path is configured) and **direct Popen** (degraded
+   fallback, `subprocess.Popen().wait()` when TTYs unavailable). PTY enables
+   session-ID scraping; Popen loses session-ID observability today (GitHub
+   issue #34 tracks filesystem-polling fix). Both paths consume the same
+   `LaunchContext` and return the same `LaunchResult` contract.
+2. **Background worker** (`ops/spawn/prepare.py:build_create_payload` →
+   `ops/spawn/execute.py`) — detached one-shot subprocess per spawn.
+   `meridian spawn` forks a detached `python -m
+   meridian.lib.ops.spawn.execute` per spawn id; that process composes once,
+   executes, writes its report, and exits. The architectural reason is
+   **detached lifecycle** — the meridian parent can exit or crash without
+   orphaning the spawn.
+3. **App streaming HTTP** (`app/server.py:268-365`) — in-process
+   `SpawnManager` control channel. The REST/WS interface is structured around
+   a manager held by the HTTP handler; `/inject` and `/interrupt` route
+   through the same in-memory connection. The architectural reason is
+   **current API shape**: composition happens at request time to keep the
+   manager local. Meridian's separate `control.sock` + `spawn_inject`
+   mechanism demonstrates out-of-process control is possible; moving to
+   queued exec + remote control is a separate refactor.
+
+Each driving adapter constructs a `SpawnRequest` (user-facing args only),
+calls the factory `build_launch_context()`, and hands the resulting
+`LaunchContext` to the appropriate executor (PTY execvpe or async
+subprocess). Dry-run callers call the factory for preview output without
+executing.
+
+**Why not 1 driver:** Primary is a foreground process meridian owns until
+exit (PTY capture or direct Popen depending on environment). Worker must be
+a detached one-shot subprocess that outlives the parent. App streaming must
+keep the manager in-process for the current REST/WS API shape. These are
+incompatible driver semantics that cannot collapse into a single code path.
+
+**Why not 9 (the previous enumeration):** The earlier framings enumerated
+8–9 "driving ports" by mixing call locations inside the same driver
+(`plan.py` + `process.py` + `command.py` are all internal to primary launch)
+and counting two dead parallel implementations. R06 deletes the dead code:
+`run_streaming_spawn` at `streaming_runner.py:389` (a parallel
+implementation beside the shared `execute_with_streaming` at line 742) and
+the `SpawnManager.start_spawn` unsafe-resolver fallback at
+`spawn_manager.py:196-199` (post-R06 all callers hand in a resolved
+`LaunchContext`). Collapsing to 3 drivers is not simplification — it is
+the honest count after removing dead code and recognizing internal structure.
+
+**Three patterns provide drift protection (heuristic guardrails, not
+mechanically impossible constraints):**
+
+1. **Pipeline / functional composition.** Each composition concern has
+   exactly one builder with one implementation: `resolve_policies()`,
+   `resolve_permission_pipeline()`, `materialize_fork()`, `build_env_plan()`,
+   plus adapter-owned `resolve_launch_spec()` and `observe_session_id()`.
+   The factory `build_launch_context()` orchestrates the pipeline and
+   returns a complete `LaunchContext`. One file per stage, one callsite per
+   builder. CI-checkable via `rg` (heuristic — see R06 exit criteria for
+   known evasion modes). Several stages read bounded configuration from disk
+   (profiles, skills, session state, `.claude/settings*.json`);
+   `materialize_fork()` is the sole stage that performs state-mutating I/O
+   (Codex session API). The invariant is **centralization** — composition
+   happens only in this pipeline — not purity.
+
+2. **Plan Object (Evans) with algebraic sum.** `LaunchContext =
+   NormalLaunchContext | BypassLaunchContext`. Frozen dataclasses, required
+   fields at the type level. `NormalLaunchContext` carries
+   policy/permission/workspace/env/spec/runtime/cwd.
+   `BypassLaunchContext` carries `argv`, `env`, and `cwd` for
+   `MERIDIAN_HARNESS_COMMAND`. Post-launch session-id is NOT on
+   `LaunchContext` — it is on `LaunchResult`, returned post-execution via
+   adapter-owned `observe_session_id()`. Executors dispatch on the union
+   via `match` + `assert_never`; Pyright enforces exhaustiveness at build
+   time (with `pyright: ignore` and `cast(Any, ...)` banned in executor
+   modules — see R06 exit criteria). Compile-checkable with caveats.
+
+3. **Adapter pattern (GoF) for harness translation.** Domain core imports
+   from `harness/adapter.py` (abstract contract) only — no imports of
+   `harness/claude`, `harness/codex`, `harness/opencode`, or
+   `harness/projections`. Adapters implement `project_workspace()`,
+   `observe_session_id()`, and similar translation methods.
+   Import-graph-checkable.
+
+**Type split — `SpawnRequest` / `SpawnParams`:** `SpawnParams` today carries
+resolved execution state (skills, session ids, appended system prompts,
+report paths) — it is not a user-input DTO. R06 splits it into
+`SpawnRequest` (user-facing args, constructed by driving adapters) and
+`SpawnParams` (or successor, resolved execution inputs, constructed only
+inside/after the factory). This enforces the driving-adapter invariant at
+the type level: driving adapters see `SpawnRequest`, only the factory sees
+`SpawnParams`.
+
+**Fork continuation — absorbed into domain core (I/O-performing stage):**
+Fork materialization is pre-execution composition in both current sites
+(`launch/process.py:68-105` and `ops/spawn/prepare.py:296-311`). Both call
+`adapter.fork_session()`, mutate `SpawnParams`, and rebuild the command
+before any executor runs. R06 adds `materialize_fork()` as a pipeline stage
+in the domain core, running post-spec-resolution and pre-env-construction.
+`materialize_fork()` performs state-mutating I/O: `fork_session()` opens
+SQLite (`~/.codex/state_5.sqlite`), reads thread rows, copies rollout files
+(`src/meridian/lib/harness/codex.py:425`). The factory's invariant is
+**centralization** — composition happens only in this pipeline — not
+purity; several other stages read bounded configuration from disk, but only
+`materialize_fork()` writes. The previous claim that fork state is "a
+separate value produced by the executor" was incorrect — both sites do
+pre-execution composition, and R06 consolidates them honestly.
+
+**Session-ID adapter seam (`observe_session_id()`):** Session-ID is a
+post-launch observable, not a launch input. R06 moves session-ID off
+`LaunchContext` (which is frozen, all-required) onto `LaunchResult`,
+returned post-execution via adapter-owned `observe_session_id()`. This
+closes the "all required, frozen" `LaunchContext` contradiction.
+
+Executor contract: executors run the process and return `LaunchOutcome`
+(raw: exit code, pid, captured PTY output). The driving adapter calls
+`harness_adapter.observe_session_id(launch_context=...,
+launch_outcome=...)` and assembles a `LaunchResult`. `observe_session_id()`
+is a getter over adapter-held state — it returns the session-ID the adapter
+observed during launch via harness-native mechanisms, not a parser of
+`launch_outcome`. If observability fails (e.g., Popen fallback with
+scrape-only Claude impl today), `session_id = None`.
+
+Existing mechanisms are preserved, not changed: Claude's PTY path scrapes
+terminal output; Codex streaming reads `connection.session_id` set during
+WebSocket thread bootstrap
+(`src/meridian/lib/harness/connections/codex_ws.py:190,270`); OpenCode
+streaming reads `connection.session_id` set during session creation
+(`src/meridian/lib/harness/connections/opencode_http.py:137,166`). The
+refactor moves that logic behind the adapter method. GitHub issue #34
+tracks swapping implementations to filesystem polling — the seam exists;
+implementations change later without touching executors.
+
+**Scope evolution (chronological):**
+
+- *First narrowing (pre-p1882):* R06 scoped to `launch/` files only.
+  Rejected because exit criteria required `ops/spawn/prepare.py`, primary
+  fork, and `MERIDIAN_HARNESS_COMMAND` bypass.
+- *First growth (post-p1882):* Added `ops/spawn/prepare.py`, primary fork
+  paths, `RuntimeContext` unification. Still used function-centric invariants.
+- *Second growth (post-p1888/p1889):* Reviewers found additional composition
+  sites. Switched from function-centric to hexagonal/pattern-centric
+  invariants.
+- *Third reframe (post-p1893):* Feasibility explorer established the honest
+  driver count is 3, not 8–9. Several "ports" were call locations inside
+  one driver; two were dead parallel implementations. Absorbed fork
+  materialization into the pipeline (correcting the earlier overclaim).
+  Added `SpawnRequest`/`SpawnParams` split. Added concrete deletions.
+
+**Drift protection invariants (exit criteria in `refactors.md` R06):** After
+R06, the three patterns hold: one builder per concern (pipeline), one
+`LaunchContext` sum type and one `RuntimeContext` type (plan object), domain
+core isolated from concrete harness imports (adapter). Exactly 3 driving
+adapters (+1 preview) call `build_launch_context()`. These invariants are
+enforced by heuristic CI guardrails (`rg`-based checks in
+`scripts/check-launch-invariants.sh`, Pyright exhaustiveness with
+`pyright: ignore` and `cast(Any, ...)` banned in executor modules). They
+are structurally difficult to violate but not mechanically impossible —
+see R06 exit criteria for known evasion modes. These invariants are what
+R05 depends on and what every future launch-touching feature inherits.
+
+**Preserved divergences (branches, not flattening):**
+
+- Primary executor has two capture modes (PTY capture + direct Popen)
+  driven by runtime environment. Both consume `LaunchContext`, return
+  `LaunchResult`. PTY enables session-ID scraping; Popen loses session-ID
+  observability today. GitHub issue #34 tracks filesystem-polling fix.
+- Claude-in-Claude sub-worktree cwd logic stays as a `child_cwd` field on
+  `NormalLaunchContext`, populated by the pipeline.
+
+**Rejected alternative — shared projection merge point only (R05 targets
+both existing seams):** Both pipelines would keep their independent
+composition and each call `harness.project_workspace(...)` at their own
+merge point. Rejected because it leaves no domain core — the existing
+duplications keep growing (workspace becomes the fifth), every future
+launch-touching feature pays an N× implementation tax across all driving
+adapters, and there is no central type to check invariants against.
+
+**Rejected alternative — narrow spec to spawn-only:** `CTX-1.u1` would
+apply only to spawned subagents; primary launches would not see workspace
+roots. Rejected because the primary user flow is launching meridian from a
+parent directory and wanting sibling-repo context there.
+
+**Rejected alternative — demote R06 to optional follow-up:** Leave R06 as
+cleanup triggered by "post-R05 drift." Rejected because the drift surface
+is already five features wide, and the user's explicit directive is to
+refactor first and make drift structurally difficult.
+
+**Out of scope (separate follow-up work items):** Claude
+session-accessibility symlinking (`p1878` Q5). Fork materialization is
+absorbed into the domain core by R06; symlinking is a separate duplicated
+feature beyond composition.
+
+### D18 — Relative `MERIDIAN_WORKSPACE` values are explicit broken overrides
+
+**Directive (2026-04-15):** When `MERIDIAN_WORKSPACE` is set to a non-absolute
+path, Meridian treats workspace topology as absent for that invocation, emits a
+per-invocation advisory that v1 only supports absolute override paths, and does
+not fall through to default workspace-file discovery.
+
+**Rationale:** D12 already chose absolute-only semantics for v1, but the
+non-absolute case still needed an explicit contract. Silent fallthrough would
+make workspace topology depend on an unusable explicit override plus an
+unrelated default file, which is exactly the ambiguity this redesign is trying
+to remove. Hard failure would over-penalize a typo when Meridian can still run
+without workspace roots.
+
+**Rejected alternative:** hard error on relative override. Rejected because the
+workspace feature is additive; a bad override should be visible, not fatal to
+unrelated commands.
+
+**Rejected alternative:** ignore the relative override and fall through to
+default discovery. Rejected because it silently changes which workspace file is
+active for the invocation.
 
 ## How this file is used
 
@@ -428,7 +654,9 @@ Implementation is also simpler — no JSON deep-merge logic, no precedence rules
   spec/architecture leaves named under "Encoded in" for each row. If a response
   points at a spec/architecture leaf but the leaf does not make the claim, that
   is a convergence gap to flag.
-- Planner: use D1–D7 as constraints that survive into the plan. D2 and D3 in
-  particular govern phase sequencing.
+- Planner: use D1–D18 as constraints that survive into the plan. D2, D3, D17,
+  and D18 in particular govern phase sequencing, the R06 hexagonal-core
+  invariants (3 driving adapters through one factory), and workspace-loading
+  behavior.
 - Future rounds: when a new prior-round feedback file gets produced, append a
   new section here rather than rewriting these rows.

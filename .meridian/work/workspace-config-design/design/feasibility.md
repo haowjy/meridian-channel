@@ -10,7 +10,7 @@ Probe evidence and assumption verdicts for the workspace-config design round. Ev
 
 **Verdict**: feasible. v1 injects workspace roots into claude and codex.
 
-**Evidence**: `codex exec --help` on codex-cli 0.120.0 documents `--add-dir <DIR>` as "Additional directories that should be writable alongside the primary workspace" (see probes §1).
+**Evidence**: `codex exec --help` on codex-cli 0.120.0 documents `--add-dir <DIR>` as "Additional directories that should be writable alongside the primary workspace" (see `probes.md §1`).
 
 **Residual risk**: `--add-dir` is inert when the effective sandbox is `read-only`. Codex emits a runtime warning but `config show` / `doctor` must also surface this applicability so users don't reason from assumed behavior. Captured in `architecture/harness-integration.md` and spec `SURF-1.*` leaves on surfacing.
 
@@ -20,7 +20,7 @@ Probe evidence and assumption verdicts for the workspace-config design round. Ev
 `user passthrough → projection-managed → workspace-emitted` on the Claude path,
 and `user passthrough (spec.extra_args) → workspace-emitted` on the Codex path.
 
-**Evidence**: `lib/launch/text_utils.py:8-19`; `lib/harness/claude_preflight.py:131-147`; `lib/harness/projections/project_codex_subprocess.py:219`. See probes §2, §5, §6.
+**Evidence**: `lib/launch/text_utils.py:8-19`; `lib/harness/claude_preflight.py:131-147`; `lib/harness/projections/project_codex_subprocess.py:219`. See `probes.md §2`, `§5`, `§6`.
 
 **Residual risk**: none. The design fixes prior F4 by putting user passthrough first so any downstream first-seen dedupe preserves explicit CLI intent.
 
@@ -28,7 +28,7 @@ and `user passthrough (spec.extra_args) → workspace-emitted` on the Codex path
 
 **Verdict**: out of scope. `rg "models\.toml|models_merged"` returns zero hits in `src/` and `tests/`. Mars owns alias resolution via `.mars/models-merged.json` (`lib/catalog/model_aliases.py:229`). The design does not propose a Meridian-owned `models.toml` and does not touch mars-agents.
 
-**Evidence**: probes §3.
+**Evidence**: `probes.md §3`.
 
 **Residual risk**: none. If a future change introduces Meridian-side model ownership, that is a separate decision with separate ownership analysis.
 
@@ -36,7 +36,7 @@ and `user passthrough (spec.extra_args) → workspace-emitted` on the Codex path
 
 **Verdict**: feasible, but the refactor agenda MUST cover all call sites. Any "one-function change" framing is rejected.
 
-**Evidence**: probes §4 enumerates ≥ 9 source sites + help text + smoke + unit tests:
+**Evidence**: `probes.md §4` enumerates ≥ 9 source sites + help text + smoke + unit tests:
 
 - `lib/state/paths.py:21, 33, 127` — canonical path, gitignore policy.
 - `lib/config/settings.py:25, 206-210, 213-227` — loader resolver + user-config env.
@@ -51,7 +51,7 @@ and `user passthrough (spec.extra_args) → workspace-emitted` on the Codex path
 
 **Verdict**: new module required. Root-file discovery, `MERIDIAN_WORKSPACE` env handling, and root `.gitignore` policy live outside `state/paths.py`.
 
-**Evidence**: `lib/state/paths.py:93-128`, `lib/config/settings.py:804-838` (only `resolve_repo_root` exists at project-root level today; no file enumeration (this will be renamed to `resolve_project_root` per R01)). See probes §7.
+**Evidence**: `lib/state/paths.py:93-128`, `lib/config/settings.py:789-823` (only `resolve_repo_root` exists at project-root level today; no file enumeration (this will be renamed to `resolve_project_root` per R01)). See `probes.md §7`.
 
 **Residual risk**: naming bikeshed (`ProjectPaths` vs `RepoFiles` vs `RootConfigPaths`). The architecture tree commits to one name; no functional implication.
 
@@ -59,7 +59,7 @@ and `user passthrough (spec.extra_args) → workspace-emitted` on the Codex path
 
 **Verdict**: the bootstrap path must be split. `.meridian/` state directories and `.meridian/.gitignore` continue to be created on every run (runtime state is always needed). Root `meridian.toml` is created ONLY by `config init`.
 
-**Evidence**: `lib/ops/config.py:737-763` — `ensure_state_bootstrap_sync` auto-writes `_scaffold_template()` if the config file is missing; called unconditionally from `lib/ops/runtime.py:66`. See probes §8.
+**Evidence**: `lib/ops/config.py:737-763` — `ensure_state_bootstrap_sync` auto-writes `_scaffold_template()` if the config file is missing; called unconditionally from `lib/ops/runtime.py:66`. See `probes.md §8`.
 
 **Residual risk**: when no `meridian.toml` exists at the project root, the loader runs on built-in defaults silently. `config init` is the user's entrypoint to opt into a committed project config. Stale `.meridian/config.toml` files in existing repos are ignored — the file is no longer read and is deleted by `R01` as part of the boundary cleanup.
 
@@ -69,7 +69,7 @@ and `user passthrough (spec.extra_args) → workspace-emitted` on the Codex path
 parent-forwarded `additionalDirectories` become the projection-managed middle
 section, and workspace roots append after them.
 
-**Evidence**: `lib/harness/claude_preflight.py:131-147`. See probes §6.
+**Evidence**: `lib/harness/claude_preflight.py:131-147`. See `probes.md §6`.
 
 **Residual risk**: interaction with parent-forwarding edge cases (no parent `.claude/settings.json`, symlink to parent session dir). Existing behavior unchanged.
 
@@ -127,10 +127,11 @@ that as an open question instead of hiding it.
    explicit env value wins. Silent deep-merge rejected as hostile
    invisible-modification behavior.
 
-2. **`[context-roots]` vs `[extra-dirs]` table naming (prior F16).** Low
-   priority; architecture commits to `[context-roots]` for consistency with
-   Meridian's existing "context" language (`MERIDIAN_CHAT_ID`, "context
-   handoffs"). If a reviewer prefers `[extra-dirs]`, trivial rename.
+2. **`[context-roots]` vs `[extra-dirs]` table naming (prior F16).**
+   **Status:** deferred. Low priority; architecture commits to `[context-roots]`
+   for consistency with Meridian's existing "context" language
+   (`MERIDIAN_CHAT_ID`, "context handoffs"). If a reviewer prefers
+   `[extra-dirs]`, trivial rename.
 
 3. **`workspace.local.toml` rename rationale (prior F15).** Accepted. The
    architecture uses `workspace.local.toml` explicitly; decisions.md records the
@@ -139,18 +140,18 @@ that as an open question instead of hiding it.
    to the reader).
 
 4. **`MERIDIAN_WORKSPACE` path resolution semantics.** Resolved per D12.
-   V1 supports absolute paths only. The relative-path case is deferred until
-   a concrete user need surfaces — shell cwd and meridian effective cwd both
-   have surprising behaviors, and the primary use case (workspace outside the
-   meridian tree) wants absolute paths anyway. Paths *inside*
-   `workspace.local.toml` are resolved relative to the file itself, matching
-   VS Code `.code-workspace` convention.
+   V1 supports absolute paths only. Per D18, non-absolute override values are
+   treated as broken explicit overrides: workspace topology becomes absent for
+   that invocation, an advisory is surfaced, and Meridian does not fall through
+   to default discovery. Paths *inside* `workspace.local.toml` are resolved
+   relative to the file itself, matching VS Code `.code-workspace` convention.
 
 5. **Missing env-target file behavior.** Resolved per D13. `workspace.status
    = absent` + per-invocation advisory when `MERIDIAN_WORKSPACE` points at a
-   nonexistent file. Distinguishes from silent `absent` (no env var set) and
-   `invalid` (parse/schema error on an existing file). Launch proceeds without
-   workspace roots; advisory surfaces the misconfiguration without blocking.
+   nonexistent file. Distinguishes from silent `absent` (no env var set),
+   `override_non_absolute` (broken non-absolute override), and `invalid`
+   (parse/schema error on an existing file). Launch proceeds without workspace
+   roots; advisory surfaces the misconfiguration without blocking.
 
 6. **`workspace init --from mars.toml` path heuristic.** Resolved per D14.
    No path heuristic is applied. Emission shape is disabled entries with an

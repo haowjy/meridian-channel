@@ -47,11 +47,16 @@ The design must not create dependencies that block future migration of work/fs a
 ## Constraints
 
 - Must not break existing config precedence (CLI > ENV > profile > project > user > harness default).
-- Must support incremental migration — old `.meridian/config.toml` continues to work during transition.
+- Incremental migration is superseded by D8 (2026-04-14). Old `.meridian/config.toml` does not continue to work during transition because no transition exists in this redesign; see `.meridian/work/workspace-config-design/decisions.md` D8.
 - Must be local-only (gitignored) for workspace topology — no developer's filesystem layout leaks into committed files.
 - Must not require mars-agents changes in the first version.
 - Normal users who don't work across repos experience no new complexity.
 - Must treat committed `.meridian/fs/`, `.meridian/work/`, and `.meridian/work-archive/` as transitional exceptions to the long-term `.meridian/` contract, not as precedent for adding more committed config there.
+
+## Scope Boundaries
+
+- **Deferred — Mars local state directory.** Problem Statement item 3 ("Mars has no local state directory") is not addressed in this work item. `workspace.local.toml` and `meridian.toml` clarify Meridian-side boundaries only; any `.mars/` or Mars-runtime-state design belongs to a separate Mars-scoped work item.
+- **Deferred — AGENTS.md copy cleanup.** Problem Statement item 4 ("AGENTS.md hardcodes personal filesystem paths") is not addressed in this work item. The workspace file solves the topology declaration problem, but the documentation copy edit to remove personal paths from `AGENTS.md` is separate follow-up work.
 
 ## Non-Goals (First Version)
 

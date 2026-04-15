@@ -14,7 +14,7 @@ Workspace configuration is a local topology declaration, not shared project poli
 
 ### WS-1.u2 — Discovery order is explicit
 
-`Workspace file discovery shall use MERIDIAN_WORKSPACE when that environment variable is set to an absolute path, and otherwise shall use workspace.local.toml located next to the active .meridian/ directory when that file exists, and otherwise shall treat workspace topology as absent.`
+`Workspace file discovery shall use MERIDIAN_WORKSPACE when that environment variable is set to an absolute path, and when that environment variable is unset shall use workspace.local.toml located next to the active .meridian/ directory when that file exists, and otherwise shall treat workspace topology as absent.`
 
 ### WS-1.u3 — The v1 schema stays minimal and topology-only
 
@@ -30,7 +30,7 @@ Workspace configuration is a local topology declaration, not shared project poli
 
 ### WS-1.e2 — `workspace init --from mars.toml` is disabled by default
 
-`When workspace init --from mars.toml emits starter entries, each emitted context-root entry shall use an empty path value, shall default to enabled = false until the user edits it, shall include the source-package canonical org/repo identifier in comments, and shall not emit a filesystem-path suggestion derived from any heuristic.`
+`When workspace init --from mars.toml emits starter entries, Meridian shall emit commented context-root examples whose path value is empty, whose enabled value is false in the commented example, whose source-package canonical org/repo identifier appears in nearby comments, and which do not include a filesystem-path suggestion derived from any heuristic.`
 
 ### WS-1.e3 — Unknown keys are preserved and surfaced
 
@@ -38,7 +38,11 @@ Workspace configuration is a local topology declaration, not shared project poli
 
 ### WS-1.e4 — Broken workspace overrides stay absent but advisory
 
-`When MERIDIAN_WORKSPACE is set to an absolute path that does not exist, Meridian shall treat workspace topology as absent and shall emit a per-invocation advisory that the override target is missing.`
+`When MERIDIAN_WORKSPACE is set to an absolute path that does not exist, Meridian shall treat workspace topology as absent for that invocation, shall not fall through to default workspace-file discovery, and shall emit a per-invocation advisory that the override target is missing.`
+
+### WS-1.e5 — Relative workspace overrides are rejected explicitly
+
+`When MERIDIAN_WORKSPACE is set to a non-absolute path, Meridian shall treat workspace topology as absent for that invocation, shall not fall through to default workspace-file discovery, and shall emit a per-invocation advisory that only absolute override paths are supported in v1.`
 
 ### WS-1.c1 — Invalid workspace files are fatal only on workspace-dependent commands
 

@@ -4,7 +4,7 @@
 
 The previous design failed by hiding important behavior changes behind silent no-ops or chatty warnings. Surfacing must answer two questions cleanly: "what state am I in?" and "will my roots actually apply to this harness?"
 
-**Realized by:** `../architecture/surfacing-layer.md`, `../architecture/config-loader.md`, `../architecture/harness-integration.md`.
+**Realized by:** `../architecture/workspace-model.md`, `../architecture/surfacing-layer.md`, `../architecture/harness-integration.md`.
 
 ## EARS Requirements
 
@@ -20,6 +20,10 @@ The previous design failed by hiding important behavior changes behind silent no
 
 `When workspace.local.toml contains missing roots or unknown keys, doctor and config show shall surface those findings on every invocation that inspects workspace state, without requiring persistent suppression state.`
 
+### SURF-1.e3 — (deleted)
+
+Reserved tombstone to keep downstream references stable after prior-round surfacing reshapes removed the old `e3` slot.
+
 ### SURF-1.e4 — Spawn-time missing-root noise stays out of the default lane
 
 `When a launch encounters configured workspace roots that are missing on disk, Meridian shall keep those findings out of the default spawn warning lane and shall expose them through config show, doctor, and debug-level launch diagnostics instead.`
@@ -28,9 +32,11 @@ The previous design failed by hiding important behavior changes behind silent no
 
 `When the selected harness or sandbox will ignore or reject workspace-root injection for the current launch, Meridian shall emit an explicit applicability diagnostic for that invocation rather than silently behaving as though workspace roots were active.`
 
-### SURF-1.e6 — Broken workspace overrides are surfaced across inspection and launch
+### SURF-1.e6 — Broken workspace overrides are surfaced across inspection commands
 
-`When MERIDIAN_WORKSPACE is set to an absolute path that does not exist, config show, doctor, and the launch warning lane shall surface an actionable advisory for that invocation stating that MERIDIAN_WORKSPACE is set to the missing path and workspace topology is therefore absent.`
+`When MERIDIAN_WORKSPACE is set to a broken override value, such as a missing absolute path or a non-absolute path, config show and doctor shall surface an actionable advisory for that invocation stating that workspace topology is absent because the explicit override could not be used.`
+
+Note: the launch warning lane is not included because broken overrides produce `workspace.status = absent`, and absent workspace means zero workspace-dependent launch behavior (per WS-1.s1). The advisory surfaces pre-launch through the inspection tools where users check workspace health.
 
 ## Non-Requirement Edge Cases
 
