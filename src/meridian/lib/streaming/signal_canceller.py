@@ -216,10 +216,6 @@ class SignalCanceller:
         worker_pid = record.worker_pid
         if worker_pid is not None and _pid_is_alive(worker_pid, started_epoch):
             return worker_pid
-
-        background_pid = _read_background_pid(self._state_root, record.id)
-        if background_pid is not None and _pid_is_alive(background_pid, started_epoch):
-            return background_pid
         return None
 
     async def _wait_for_terminal(self, spawn_id: SpawnId) -> SpawnRecord | None:
@@ -265,19 +261,6 @@ def _origin_or_default(origin: SpawnOrigin | None) -> SpawnOrigin:
 
 def _exit_code_or_default(record: SpawnRecord) -> int:
     return record.exit_code if record.exit_code is not None else 1
-
-
-def _read_background_pid(state_root: Path, spawn_id: str) -> int | None:
-    pid_path = state_root / "spawns" / spawn_id / "background.pid"
-    if not pid_path.is_file():
-        return None
-    try:
-        pid = int(pid_path.read_text(encoding="utf-8").strip())
-    except ValueError:
-        return None
-    if pid <= 0:
-        return None
-    return pid
 
 
 def _pid_is_alive(pid: int | None, started_epoch: float | None) -> bool:

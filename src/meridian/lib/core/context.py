@@ -14,7 +14,6 @@ class RuntimeContext(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     spawn_id: SpawnId | None = None
-    parent_spawn_id: SpawnId | None = None
     depth: int = 0
     repo_root: Path | None = None
     state_root: Path | None = None
@@ -28,7 +27,6 @@ class RuntimeContext(BaseModel):
         import os
 
         spawn_id_raw = os.getenv("MERIDIAN_SPAWN_ID", "").strip()
-        parent_spawn_id_raw = os.getenv("MERIDIAN_PARENT_SPAWN_ID", "").strip()
         depth_raw = os.getenv("MERIDIAN_DEPTH", "0").strip()
         repo_root_raw = os.getenv("MERIDIAN_REPO_ROOT", "").strip()
         state_root_raw = os.getenv("MERIDIAN_STATE_ROOT", "").strip()
@@ -41,25 +39,11 @@ class RuntimeContext(BaseModel):
 
         return cls(
             spawn_id=SpawnId(spawn_id_raw) if spawn_id_raw else None,
-            parent_spawn_id=SpawnId(parent_spawn_id_raw) if parent_spawn_id_raw else None,
             depth=depth,
             repo_root=Path(repo_root_raw) if repo_root_raw else None,
             state_root=Path(state_root_raw) if state_root_raw else None,
             chat_id=chat_id_raw,
             work_id=work_id_raw or None,
-        )
-
-    def child_context(self, *, spawn_id: SpawnId) -> "RuntimeContext":
-        """Create child context for a nested spawn."""
-
-        return RuntimeContext(
-            spawn_id=spawn_id,
-            parent_spawn_id=self.spawn_id,
-            depth=self.depth + 1,
-            repo_root=self.repo_root,
-            state_root=self.state_root,
-            chat_id=self.chat_id,
-            work_id=self.work_id,
         )
 
     def to_env_overrides(self) -> dict[str, str]:
@@ -68,8 +52,6 @@ class RuntimeContext(BaseModel):
         overrides: dict[str, str] = {"MERIDIAN_DEPTH": str(self.depth)}
         if self.spawn_id is not None:
             overrides["MERIDIAN_SPAWN_ID"] = str(self.spawn_id)
-        if self.parent_spawn_id is not None:
-            overrides["MERIDIAN_PARENT_SPAWN_ID"] = str(self.parent_spawn_id)
         if self.repo_root is not None:
             overrides["MERIDIAN_REPO_ROOT"] = self.repo_root.as_posix()
         if self.state_root is not None:

@@ -350,7 +350,7 @@ def start_session(
             forked_from_chat_id=forked_from_chat_id,
         )
         with lock_file(paths.sessions_flock):
-            append_event(paths.sessions_jsonl, paths.sessions_flock, event, store_name="session")
+            append_event(paths.sessions_jsonl, paths.sessions_flock, event)
             _write_session_lease(paths, resolved_chat_id, session_instance_id)
     except Exception:
         fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
@@ -379,7 +379,6 @@ def stop_session(state_root: Path, chat_id: str) -> None:
             paths.sessions_jsonl,
             paths.sessions_flock,
             event,
-            store_name="session",
             exclude_none=True,
         )
         _session_lease_path(paths, chat_id).unlink(missing_ok=True)
@@ -399,7 +398,6 @@ def update_session_harness_id(state_root: Path, chat_id: str, harness_session_id
         paths.sessions_jsonl,
         paths.sessions_flock,
         event,
-        store_name="session",
         exclude_none=True,
     )
 
@@ -419,7 +417,6 @@ def update_session_work_id(state_root: Path, chat_id: str, work_id: str | None) 
         paths.sessions_jsonl,
         paths.sessions_flock,
         event,
-        store_name="session",
         exclude_none=True,
     )
 
@@ -640,7 +637,6 @@ def cleanup_stale_sessions(state_root: Path) -> StaleSessionCleanup:
                         session_instance_id=stop_session_instance_id,
                         stopped_at=stopped_at,
                     ),
-                    store_name="session",
                     exclude_none=True,
                 )
                 records[chat_id] = existing.model_copy(update={"stopped_at": stopped_at})

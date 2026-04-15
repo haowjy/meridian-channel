@@ -162,7 +162,7 @@ def decide_reconciliation(
             return Skip(reason="startup_grace")
         if snapshot.durable_report_completion:
             return FinalizeSucceededFromReport()
-        return FinalizeFailed(error="missing_worker_pid")
+        return FinalizeFailed(error="missing_runner_pid")
 
     if snapshot.runner_pid_alive:
         if _has_recent_activity(snapshot):

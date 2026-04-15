@@ -32,12 +32,6 @@ class OpenCodeLaunchSpec(ResolvedLaunchSpec):
     skills: tuple[str, ...] = ()
 
 
-# Derived from SpawnParams for error reporting; authoritative check is per-adapter
-# union over registered harness bundles.
-_SPEC_HANDLED_FIELDS: frozenset[str] = frozenset(SpawnParams.model_fields)
-_REGISTRY: Mapping[HarnessId, HarnessBundle[Any]] = get_bundle_registry()
-
-
 def _enforce_spawn_params_accounting(
     registry: Mapping[HarnessId, HarnessBundle[Any]] | None = None,
 ) -> None:
@@ -65,8 +59,6 @@ def _enforce_spawn_params_accounting(
 
 
 __all__ = [
-    "_REGISTRY",
-    "_SPEC_HANDLED_FIELDS",
     "ClaudeLaunchSpec",
     "CodexLaunchSpec",
     "HarnessBundle",

@@ -152,22 +152,10 @@ def resolve_work_archive_dir(repo_root: Path) -> Path:
     return resolve_state_paths(repo_root).root_dir / "work-archive"
 
 
-def resolve_work_items_dir(repo_root: Path) -> Path:
-    """Return `.meridian/work-items/` for a repository root."""
-
-    return resolve_state_paths(repo_root).root_dir / "work-items"
-
-
 def resolve_work_scratch_dir(state_root: Path, work_id: str) -> Path:
     """Return the work-scoped scratch directory for a work item."""
 
     return StateRootPaths.from_root_dir(state_root).work_dir / work_id
-
-
-def resolve_work_archive_scratch_dir(state_root: Path, work_id: str) -> Path:
-    """Return the archived work-scoped scratch directory for a work item."""
-
-    return StateRootPaths.from_root_dir(state_root).work_archive_dir / work_id
 
 
 def spawn_log_subpath(spawn_id: SpawnId | str) -> Path:

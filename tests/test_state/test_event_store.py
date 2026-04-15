@@ -89,8 +89,8 @@ def test_append_event_serialization_sorts_keys_and_toggles_none_fields(tmp_path:
     omit_lock = tmp_path / "omit.lock"
     event = _AppendEvent(z_key="z", a_key="a", optional=None)
 
-    append_event(include_path, include_lock, event, store_name="test", exclude_none=False)
-    append_event(omit_path, omit_lock, event, store_name="test", exclude_none=True)
+    append_event(include_path, include_lock, event, exclude_none=False)
+    append_event(omit_path, omit_lock, event, exclude_none=True)
 
     assert include_path.read_text(encoding="utf-8") == '{"a_key":"a","optional":null,"z_key":"z"}\n'
     assert omit_path.read_text(encoding="utf-8") == '{"a_key":"a","z_key":"z"}\n'
@@ -104,14 +104,12 @@ def test_append_event_multiple_appends_create_multiple_lines(tmp_path: Path) -> 
         data_path,
         lock_path,
         _AppendEvent(z_key="z1", a_key="a1", optional=None),
-        store_name="test",
         exclude_none=True,
     )
     append_event(
         data_path,
         lock_path,
         _AppendEvent(z_key="z2", a_key="a2", optional=None),
-        store_name="test",
         exclude_none=True,
     )
 

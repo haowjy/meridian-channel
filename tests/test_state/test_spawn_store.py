@@ -11,9 +11,7 @@ from meridian.lib.state.event_store import append_event
 from meridian.lib.state.paths import StateRootPaths
 from meridian.lib.state.spawn_store import (
     AUTHORITATIVE_ORIGINS,
-    LEGACY_RECONCILER_ERRORS,
     LaunchMode,
-    SpawnFinalizeEvent,
     SpawnOrigin,
     SpawnUpdateEvent,
     finalize_spawn,
@@ -21,7 +19,6 @@ from meridian.lib.state.spawn_store import (
     list_spawns,
     mark_finalizing,
     record_spawn_exited,
-    resolve_finalize_origin,
     start_spawn,
     update_spawn,
 )
@@ -127,12 +124,6 @@ def test_spawn_origin_enum_is_complete() -> None:
         "launch_failure",
         "cancel",
     } == AUTHORITATIVE_ORIGINS
-    assert {
-        "orphan_run",
-        "orphan_finalization",
-        "missing_worker_pid",
-        "harness_completed",
-    } == LEGACY_RECONCILER_ERRORS
 
 
 def test_launch_mode_enum_includes_app() -> None:
@@ -454,7 +445,6 @@ def test_late_update_status_never_downgrades_terminal_projection(tmp_path: Path)
             status="finalizing",
             desc="post-finish metadata update",
         ),
-        store_name="spawn",
         exclude_none=True,
     )
 
@@ -544,37 +534,6 @@ def test_finalize_spawn_reconciler_drops_when_row_already_terminal(tmp_path: Pat
     assert row.duration_secs is None
 
 
-def test_resolve_finalize_origin_prefers_explicit_origin() -> None:
-    event = SpawnFinalizeEvent(
-        id="p1",
-        status="failed",
-        exit_code=1,
-        error="orphan_run",
-        origin="cancel",
-    )
-    assert resolve_finalize_origin(event) == "cancel"
-
-
-def test_resolve_finalize_origin_maps_legacy_reconciler_errors() -> None:
-    event = SpawnFinalizeEvent(
-        id="p1",
-        status="failed",
-        exit_code=1,
-        error="orphan_run",
-    )
-    assert resolve_finalize_origin(event) == "reconciler"
-
-
-def test_resolve_finalize_origin_defaults_legacy_rows_to_runner() -> None:
-    event = SpawnFinalizeEvent(
-        id="p1",
-        status="failed",
-        exit_code=1,
-        error="timeout",
-    )
-    assert resolve_finalize_origin(event) == "runner"
-
-
 def test_exited_event_is_non_terminal_and_projects_process_exit(tmp_path: Path) -> None:
     state_root = _state_root(tmp_path)
     spawn_id = _start_test_spawn(state_root)
@@ -616,60 +575,3 @@ def test_runner_pid_projects_from_start_and_update(tmp_path: Path) -> None:
     row = get_spawn(state_root, spawn_id)
     assert row is not None
     assert row.runner_pid == 2222
-
-
-def _paired_orphan_run_then_succeeded_finalize_ids(events: list[dict[str, Any]]) -> list[str]:
-    per_spawn: dict[str, list[dict[str, Any]]] = {}
-    for event in events:
-        if event.get("event") != "finalize":
-            continue
-        spawn_id = str(event.get("id", "")).strip()
-        if not spawn_id:
-            continue
-        per_spawn.setdefault(spawn_id, []).append(event)
-
-    paired: list[str] = []
-    for spawn_id, finalize_events in per_spawn.items():
-        saw_orphan_run = False
-        for event in finalize_events:
-            if event.get("error") == "orphan_run":
-                saw_orphan_run = True
-            if saw_orphan_run and event.get("status") == "succeeded":
-                paired.append(spawn_id)
-                break
-    return sorted(paired)
-
-
-def test_backfill_regression_live_state_rows_project_to_succeeded(tmp_path: Path) -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    source_jsonl = repo_root / ".meridian" / "spawns.jsonl"
-    if not source_jsonl.is_file():
-        pytest.skip("Live .meridian/spawns.jsonl not present in this workspace.")
-
-    state_root = _state_root(tmp_path)
-    target_jsonl = state_root / "spawns.jsonl"
-    target_jsonl.write_text(source_jsonl.read_text(encoding="utf-8"), encoding="utf-8")
-
-    projected = {row.id: row for row in list_spawns(state_root)}
-    required_ids = ("p1711", "p1712", "p1731", "p1732")
-    for spawn_id in required_ids:
-        assert spawn_id in projected, f"expected {spawn_id} to exist in live spawns.jsonl"
-        assert projected[spawn_id].status == "succeeded"
-
-    parsed_events: list[dict[str, Any]] = []
-    for line in source_jsonl.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            event = json.loads(stripped)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(event, dict):
-            parsed_events.append(event)
-
-    paired_ids = _paired_orphan_run_then_succeeded_finalize_ids(parsed_events)
-    for spawn_id in paired_ids:
-        row = projected.get(spawn_id)
-        assert row is not None, f"missing projected row for paired finalize spawn {spawn_id}"
-        assert row.status == "succeeded"

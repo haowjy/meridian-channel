@@ -64,14 +64,6 @@ _AUTHORITATIVE_ORIGIN_VALUES: tuple[SpawnOrigin, ...] = (
 )
 AUTHORITATIVE_ORIGINS: frozenset[SpawnOrigin] = frozenset(_AUTHORITATIVE_ORIGIN_VALUES)
 
-_LEGACY_RECONCILER_ERROR_VALUES: tuple[str, ...] = (
-    "orphan_run",
-    "orphan_finalization",
-    "missing_worker_pid",
-    "harness_completed",
-)
-LEGACY_RECONCILER_ERRORS: frozenset[str] = frozenset(_LEGACY_RECONCILER_ERROR_VALUES)
-
 ACTIVE_SPAWN_STATUSES = _ACTIVE_SPAWN_STATUSES
 is_active_spawn_status = _is_active_spawn_status
 
@@ -101,7 +93,6 @@ class SpawnRecord(BaseModel):
     harness_session_id: str | None
     execution_cwd: str | None = None
     launch_mode: str | None
-    wrapper_pid: int | None
     worker_pid: int | None
     runner_pid: int | None
     status: SpawnStatus | Literal["unknown"]
@@ -154,7 +145,6 @@ class SpawnUpdateEvent(BaseModel):
     id: str = ""
     status: SpawnStatus | None = None
     launch_mode: LaunchMode | None = None
-    wrapper_pid: int | None = None
     worker_pid: int | None = None
     runner_pid: int | None = None
     harness_session_id: str | None = None
@@ -269,7 +259,6 @@ def start_spawn(
             paths.spawns_jsonl,
             paths.spawns_flock,
             event,
-            store_name="spawn",
             exclude_none=True,
         )
         return resolved_spawn_id
@@ -280,7 +269,6 @@ def update_spawn(
     spawn_id: SpawnId | str,
     *,
     launch_mode: LaunchMode | None = None,
-    wrapper_pid: int | None = None,
     worker_pid: int | None = None,
     runner_pid: int | None = None,
     harness_session_id: str | None = None,
@@ -295,7 +283,6 @@ def update_spawn(
     event = SpawnUpdateEvent(
         id=str(spawn_id),
         launch_mode=launch_mode,
-        wrapper_pid=wrapper_pid,
         worker_pid=worker_pid,
         runner_pid=runner_pid,
         harness_session_id=harness_session_id,
@@ -308,7 +295,6 @@ def update_spawn(
         paths.spawns_jsonl,
         paths.spawns_flock,
         event,
-        store_name="spawn",
         exclude_none=True,
     )
 
@@ -332,7 +318,6 @@ def record_spawn_exited(
         paths.spawns_jsonl,
         paths.spawns_flock,
         event,
-        store_name="spawn",
         exclude_none=True,
     )
 
@@ -398,7 +383,6 @@ def finalize_spawn(
             paths.spawns_jsonl,
             paths.spawns_flock,
             event,
-            store_name="spawn",
             exclude_none=True,
         )
         return was_active
@@ -419,7 +403,6 @@ def mark_finalizing(state_root: Path, spawn_id: SpawnId | str) -> bool:
             paths.spawns_jsonl,
             paths.spawns_flock,
             event,
-            store_name="spawn",
             exclude_none=True,
         )
         return True
@@ -430,7 +413,6 @@ def mark_spawn_running(
     spawn_id: SpawnId | str,
     *,
     launch_mode: LaunchMode | None = None,
-    wrapper_pid: int | None = None,
     worker_pid: int | None = None,
     runner_pid: int | None = None,
 ) -> None:
@@ -444,7 +426,6 @@ def mark_spawn_running(
             id=str(spawn_id),
             status="running",
             launch_mode=launch_mode,
-            wrapper_pid=wrapper_pid,
             worker_pid=worker_pid,
             runner_pid=runner_pid,
         )
@@ -452,7 +433,6 @@ def mark_spawn_running(
             paths.spawns_jsonl,
             paths.spawns_flock,
             event,
-            store_name="spawn",
             exclude_none=True,
         )
 
@@ -474,7 +454,6 @@ def _empty_record(spawn_id: str) -> SpawnRecord:
         harness_session_id=None,
         execution_cwd=None,
         launch_mode=None,
-        wrapper_pid=None,
         worker_pid=None,
         runner_pid=None,
         status="unknown",
@@ -498,14 +477,6 @@ def _normalized_work_id(work_id: str | None) -> str | None:
         return None
     normalized = work_id.strip()
     return normalized or None
-
-
-def resolve_finalize_origin(event: SpawnFinalizeEvent) -> SpawnOrigin:
-    if event.origin is not None:
-        return event.origin
-    if event.error in LEGACY_RECONCILER_ERRORS:
-        return "reconciler"
-    return "runner"
 
 
 def _record_from_events(events: list[SpawnEvent]) -> dict[str, SpawnRecord]:
@@ -577,9 +548,6 @@ def _record_from_events(events: list[SpawnEvent]) -> dict[str, SpawnRecord]:
                     "launch_mode": (
                         event.launch_mode if event.launch_mode is not None else current.launch_mode
                     ),
-                    "wrapper_pid": (
-                        event.wrapper_pid if event.wrapper_pid is not None else current.wrapper_pid
-                    ),
                     "worker_pid": (
                         event.worker_pid if event.worker_pid is not None else current.worker_pid
                     ),
@@ -618,7 +586,7 @@ def _record_from_events(events: list[SpawnEvent]) -> dict[str, SpawnRecord]:
             )
             continue
 
-        incoming_origin = resolve_finalize_origin(event)
+        incoming_origin = event.origin if event.origin is not None else "runner"
         incoming_authoritative = incoming_origin in AUTHORITATIVE_ORIGINS
         already_terminal = current.status in _TERMINAL_SPAWN_STATUSES
         replace_terminal = (

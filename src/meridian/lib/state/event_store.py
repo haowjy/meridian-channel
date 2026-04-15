@@ -65,11 +65,8 @@ def append_event(
     lock_path: Path,
     event: BaseModel,
     *,
-    store_name: str,
     exclude_none: bool = False,
 ) -> None:
-    # Preserved for caller compatibility; observers were removed.
-    _ = store_name
     payload = event.model_dump(exclude_none=exclude_none)
     line = json.dumps(payload, separators=(",", ":"), sort_keys=True) + "\n"
     with lock_file(lock_path):

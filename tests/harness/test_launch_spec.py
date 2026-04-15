@@ -10,7 +10,6 @@ from meridian.lib.harness.adapter import RunPromptPolicy, SpawnParams, Subproces
 from meridian.lib.harness.claude import ClaudeAdapter
 from meridian.lib.harness.codex import CodexAdapter
 from meridian.lib.harness.launch_spec import (
-    _SPEC_HANDLED_FIELDS,
     ClaudeLaunchSpec,
     CodexLaunchSpec,
     OpenCodeLaunchSpec,
@@ -245,10 +244,6 @@ def test_resolve_launch_spec_keeps_none_effort(adapter: SubprocessHarness) -> No
     spec = adapter.resolve_launch_spec(run, resolver)
 
     assert spec.effort is None
-
-
-def test_launch_spec_completeness_guard_matches_spawn_params() -> None:
-    assert set(SpawnParams.model_fields) == _SPEC_HANDLED_FIELDS
 
 
 @pytest.mark.parametrize(

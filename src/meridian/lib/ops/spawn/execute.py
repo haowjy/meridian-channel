@@ -130,8 +130,8 @@ def _emit_subrun_event(
         return
     event_payload = dict(payload)
     event_payload["v"] = 1
-    parent_spawn_id = str(resolved_context.spawn_id or "")
-    event_payload["parent"] = parent_spawn_id or None
+    parent_id = str(resolved_context.spawn_id or "")
+    event_payload["parent"] = parent_id or None
     event_payload["ts"] = time.time()
     sink.event(event_payload)
 
@@ -669,7 +669,6 @@ def execute_spawn_background(
         context.state_root,
         context.spawn.spawn_id,
         launch_mode=BACKGROUND_LAUNCH_MODE,
-        wrapper_pid=process.pid,
         runner_pid=process.pid,
     )
     # The Popen object goes out of scope without wait(). This is intentional:

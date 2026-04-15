@@ -26,6 +26,7 @@ from meridian.lib.core.spawn_lifecycle import (
 )
 from meridian.lib.core.types import HarnessId, SpawnId
 from meridian.lib.harness.adapter import SpawnParams
+from meridian.lib.harness.claude_preflight import ensure_claude_session_accessible
 from meridian.lib.harness.registry import HarnessRegistry
 from meridian.lib.state import spawn_store
 from meridian.lib.state.artifact_store import LocalStore, make_artifact_key
@@ -39,7 +40,6 @@ from meridian.lib.state.session_store import (
 )
 from meridian.lib.state.spawn_store import FOREGROUND_LAUNCH_MODE
 
-from .claude_preflight import ensure_claude_session_accessible
 from .command import build_launch_env
 from .plan import ResolvedPrimaryLaunchPlan
 from .session_ids import extract_latest_session_id

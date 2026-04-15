@@ -122,10 +122,10 @@ def test_reconcile_active_spawn_without_runner_pid_fails_after_startup_grace(
 
     assert reconciled.status == "failed"
     assert reconciled.exit_code == 1
-    assert reconciled.error == "missing_worker_pid"
+    assert reconciled.error == "missing_runner_pid"
     latest = _get_spawn(state_root, spawn_id)
     assert latest.status == "failed"
-    assert latest.error == "missing_worker_pid"
+    assert latest.error == "missing_runner_pid"
 
 
 def test_reconcile_active_spawn_returns_unchanged_when_runner_is_alive(
@@ -339,7 +339,6 @@ def test_decide_reconciliation_recent_heartbeat_skips() -> None:
         harness_session_id=None,
         execution_cwd=None,
         launch_mode=None,
-        wrapper_pid=None,
         worker_pid=None,
         runner_pid=123,
         status="running",
@@ -388,7 +387,6 @@ def test_decide_reconciliation_stale_dead_runner_fails_orphan_run() -> None:
         harness_session_id=None,
         execution_cwd=None,
         launch_mode=None,
-        wrapper_pid=None,
         worker_pid=None,
         runner_pid=123,
         status="running",
@@ -437,7 +435,6 @@ def test_decide_reconciliation_dead_runner_accepts_fallback_recent_activity() ->
         harness_session_id=None,
         execution_cwd=None,
         launch_mode=None,
-        wrapper_pid=None,
         worker_pid=None,
         runner_pid=123,
         status="running",
@@ -486,7 +483,6 @@ def test_decide_reconciliation_live_runner_accepts_fallback_recent_activity() ->
         harness_session_id=None,
         execution_cwd=None,
         launch_mode=None,
-        wrapper_pid=None,
         worker_pid=None,
         runner_pid=123,
         status="running",
@@ -535,7 +531,6 @@ def test_decide_reconciliation_durable_report_succeeds() -> None:
         harness_session_id=None,
         execution_cwd=None,
         launch_mode=None,
-        wrapper_pid=None,
         worker_pid=None,
         runner_pid=123,
         status="running",
@@ -821,7 +816,6 @@ def test_decide_reconciliation_is_pure_after_snapshot_construction(
         harness_session_id=None,
         execution_cwd=None,
         launch_mode=None,
-        wrapper_pid=None,
         worker_pid=None,
         runner_pid=123,
         status="running",
