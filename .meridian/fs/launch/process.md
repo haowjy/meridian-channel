@@ -2,27 +2,34 @@
 
 ## run_harness_process()
 
-`run_harness_process(plan, harness_registry)` in `process.py` is the synchronous entry point for primary (CLI) launches. It owns the full lifecycle: session allocation → subprocess execution → state finalization.
+`run_harness_process(launch_context, harness_registry)` in `process.py` is the synchronous entry point for primary (CLI) launches. It receives a pre-built `LaunchContext` (the preview context from `launch_primary()`) and owns the full lifecycle: session allocation → spawn row creation → fork materialization → context rebuild → subprocess execution → state finalization.
 
 ### Execution Path
 
 ```
-1. _resolve_command_and_session(plan)
-   - For FORK mode + Codex: materializes the fork by calling adapter.fork_session()
-   - Returns (command, resolved_harness_session_id, run_params)
+Precondition: caller has already built a preview LaunchContext via build_launch_context()
 
-2. start_session() [session_store]
+1. session_scope() [session_scope.py]
    - Allocates chat_id (c1, c2, ...)
    - Acquires session lock + lease file
+   - Resolves work-item attachment (explicit work_id or preserved from resumed session)
 
-3. spawn_store.start_spawn() → registers spawn as queued
+2. spawn_store.start_spawn() → registers spawn as queued
    - runner_pid=os.getpid() recorded in start event
+   - I-10: do NOT pre-populate harness_session_id on fork starts
 
-4. update_session_work_id() if work_id set
+3. materialize_fork() [fork.py] — if session_mode == FORK and harness supports it
+   - Called only after spawn row exists (I-10)
+   - Sole callsite for adapter.fork_session()
+
+4. build_launch_context() [context.py] — RUNTIME rebuild
+   - Updates runtime with actual spawn log dir, report path, state_root, work_id
+   - This is the context used for real execution (not the preview context passed in)
+   - Produces final argv, env, child_cwd, run_params
 
 5. _run_primary_process_with_capture()
-   - PTY mode (if stdin is a tty): pty.fork() + _copy_primary_pty_output()
-   - Pipe mode (non-interactive): subprocess.Popen (no runner.py involved)
+   - PTY mode (if stdin+stdout are ttys): pty.fork() + _copy_primary_pty_output()
+   - Pipe mode (non-interactive): subprocess.Popen (no streaming_runner.py involved)
 
 5.5. spawn_store.record_spawn_exited() — exited event written immediately after process exits
    - Wrapped in suppress(Exception) so disk errors don't block finalization
@@ -31,15 +38,29 @@
 6. Finalization (inline, no enrich_finalize)
    - has_durable_report_completion() checks if report.md exists with completion marker
    - resolve_execution_terminal_state() maps exit code + report presence → status
-   - spawn_store.finalize_spawn() → terminal state (written before session ID extraction)
-   - extract_latest_session_id() discovers harness session post-launch (best-effort, after finalize)
+   - Special case: exit codes 143/-15 (SIGTERM) with durable report →
+     terminated_after_completion=True → resolved as succeeded
+   - spawn_store.finalize_spawn() → terminal state (origin="launcher")
+   
+7. observe_session_id() [I-4] — called once post-execution (after finalize_spawn)
+   - harness_adapter.observe_session_id() — best-effort, wrapped in suppress(Exception)
+   - Updates resolved_harness_session_id and spawn/session records if changed
 
-7. stop_session() [session_store]
+8. stop_session() [session_store] — via session_scope context manager exit
 ```
+
+### Two-Phase Context Building
+
+The primary path calls `build_launch_context()` twice:
+
+- **Preview phase** (in `launch_primary()`, `dry_run=True`): resolves policies, builds preview argv for display, detects warnings. Uses a placeholder `report_output_path` (`"<spawn-report-path>"`). No filesystem side-effects.
+- **Runtime phase** (inside `run_harness_process()`, after spawn row exists): rebuilds context with real paths — actual `report_output_path`, concrete `state_root`, resolved `work_id`. This is the context that drives real subprocess execution.
+
+The split exists because the spawn row (and thus the real log dir) doesn't exist at preview time.
 
 ## Primary PTY Mode
 
-When running with a real terminal (`os.isatty(stdin)`), `process.py` spawns the harness in a PTY. `_copy_primary_pty_output()` runs a select loop forwarding:
+When running with a real terminal (`os.isatty(stdin)` and `os.isatty(stdout)`), `process.py` spawns the harness in a PTY. `_copy_primary_pty_output()` runs a select loop forwarding:
 - PTY master → stdout + `output.jsonl` log
 - stdin → PTY master
 
@@ -47,25 +68,24 @@ Window resize signals (`SIGWINCH`) are forwarded via `_install_winsize_forwardin
 The parent stdin is set to raw mode for the duration.  
 Output is written to `.meridian/spawns/<id>/output.jsonl`.
 
-**Note:** The primary path does NOT call `enrich_finalize()`. That pipeline (usage extraction, session ID extraction, report fallback) is exclusive to the spawn/subagent path in `runner.py`. The primary path finalizes from exit code + durable report checks directly in `process.py`.
+**The primary path does NOT call `enrich_finalize()`.** That pipeline (usage extraction, session ID extraction, report fallback) is exclusive to the spawn/subagent path in `streaming_runner.py`. The primary path finalizes from exit code + durable report checks directly in `process.py`.
 
-## Async Subprocess Execution (runner.py)
+## Async Subprocess Execution (streaming_runner.py)
 
-`spawn_and_stream()` in `runner.py` is the async subprocess runner for subagent spawns (non-primary). Key behaviors:
+`execute_with_streaming()` in `streaming_runner.py` is the async executor for subagent spawns (non-primary). It is called by `ops/spawn/execute.py` after the spawn row and session exist. Key behaviors:
 
 - Captures stdout → `output.jsonl`, stderr → `stderr.log`
-- Feeds stdin from `run_params.stdin_prompt` if set (for stdin-based prompt delivery)
+- Feeds stdin from `run_params.stdin_prompt` if set (stdin-based prompt delivery)
 - Runs a report watchdog: if `report.md` appears during execution, can consider spawn done
-- Maps raw return codes to meridian exit codes via `map_process_exit_code()`
-- After `spawn_and_stream` returns, `execute_with_finalization()` writes the `exited` event inline (via `record_spawn_exited`), then calls `enrich_finalize()` to extract and persist artifacts
+- Maps raw return codes to meridian exit codes
+- After process exit, writes the `exited` event inline (via `record_spawn_exited`)
+- Calls `enrich_finalize()` (`extract.py`) to extract and persist usage/session/report artifacts
 
-`execute_with_finalization()` owns the full subagent lifecycle including the new finalization handshake:
+**Heartbeat task:** `_run_heartbeat_task()` touches `.meridian/spawns/<id>/heartbeat` every 30 seconds. Started when the worker process starts. Cancelled in the **outer `finally`** block — the heartbeat covers the entire active window (`running` + `finalizing`). This is the primary liveness signal the reaper uses; see `state/spawns.md`.
 
-**Heartbeat task:** `_run_heartbeat_task()` touches `.meridian/spawns/<id>/heartbeat` every 30 seconds (`_HEARTBEAT_INTERVAL_SECS = 30.0`). Started in `_ensure_heartbeat_task()` when the worker process starts. Cancelled in the **outer `finally`** block — the heartbeat keeps running across `mark_finalizing` and `finalize_spawn` calls so it covers the entire active window (`running` + `finalizing`). This is the primary liveness signal the reaper uses; see `state/spawns.md`.
+**`mark_finalizing` CAS:** in the finalization `finally` block, after the harness has exited and drain/report extraction and retry handling are complete, `spawn_store.mark_finalizing(...)` is called immediately before `finalize_spawn()`. This is a CAS: acquires spawns flock, checks current status is exactly `running`, appends `status="finalizing"` only if so. Returns `True` on success, `False` on miss (already terminal, reaper won the race, etc.). On miss, the runner logs INFO and proceeds — `finalize_spawn(origin="runner")` still runs. The `finalizing` window is narrow: it signals "terminal state is being committed" rather than "draining output."
 
-**`mark_finalizing` CAS:** in the finalization `finally` block, after the harness has exited and drain/report extraction and retry handling are complete, `spawn_store.mark_finalizing(state_root, run.spawn_id)` is called immediately before `finalize_spawn()`. This is a CAS: it acquires the spawns flock, checks that current status is exactly `running`, and appends `status="finalizing"` only if so. Returns `True` on success, `False` on miss (already terminal, reaper won the race, etc.). On miss, the runner logs INFO and proceeds — `finalize_spawn(origin="runner")` still runs, and the projection authority rule ensures the runner's terminal state wins over any earlier reconciler stamp. The `finalizing` window is narrow: it signals "terminal state is being committed" rather than "draining output" — all drain/report work has already completed before this CAS runs.
-
-**Outer `finally` — heartbeat shutdown:** cancels and awaits the heartbeat task unconditionally, even if `finalize_spawn` raises. This ensures the heartbeat always terminates and doesn't outlive the runner's work.
+**Outer `finally` — heartbeat shutdown:** cancels and awaits the heartbeat task unconditionally, even if `finalize_spawn` raises.
 
 ## Signal Handling
 
@@ -95,7 +115,7 @@ wait_for_process_returncode(process, timeout_seconds)
 ```
 
 Default kill grace is `config.kill_grace_minutes * 60` (default: 2 seconds).  
-Guardrail timeout: `config.guardrail_timeout_minutes * 60` (default: 30 seconds) — used by the safety guardrails layer.
+Guardrail timeout: `config.guardrail_timeout_minutes * 60` (default: 30 seconds).
 
 ## Artifact Outputs
 
@@ -103,9 +123,9 @@ Each spawn writes to `.meridian/spawns/<id>/`:
 - `output.jsonl` — harness stdout (JSONL stream events or raw text)
 - `stderr.log` — harness stderr
 - `tokens.json` — token usage (extracted from output stream)
-- `report.md` — extracted report (written by `enrich_finalize()`)
+- `report.md` — extracted report (written by `enrich_finalize()` on spawn path; checked by primary path for durable completion)
 
-Spawn directories contain durable artifacts plus the runner heartbeat file. Runtime coordination (PIDs, exit status, timestamps) lives in the `spawns.jsonl` event stream. The `heartbeat` file is the exception: it is a live coordination artifact touched every 30s by the runner and read by the reaper for liveness. No PID files or other marker files are written to disk.
+Spawn directories contain durable artifacts plus the runner heartbeat file. Runtime coordination (PIDs, exit status, timestamps) lives in the `spawns.jsonl` event stream. The `heartbeat` file is touched every 30s by the runner and read by the reaper for liveness.
 
 ## Error Classification
 

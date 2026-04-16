@@ -28,13 +28,17 @@ src/meridian/
 - See `fs/ops/overview.md` for the manifest architecture
 
 **Launch flow:**
-1. `ops/spawn/prepare.py` — validates input, resolves model aliases (via catalog), loads agent profile and skills, renders reference files and prior context, computes permission policy
-2. `lib/launch/resolve.py` — two-pass policy resolution: agent profile selection influences the final model/harness/safety layers
-3. Dispatch splits by launch type:
-   - **Primary (CLI) path:** `lib/launch/process.py` (`run_harness_process()`) — creates session, starts spawn as queued (recording runner_pid), attaches to work item, runs PTY/pipe subprocess, finalizes inline (no `enrich_finalize`)
-   - **Subagent/spawn path:** `ops/spawn/execute.py` dispatches directly to `execute_with_finalization()` or `execute_with_streaming()` in `runner.py` — `process.py` is not involved
-4. `lib/launch/runner.py` — `spawn_and_stream()`: async subprocess execution, stdout/stderr capture, report watchdog, stdin feeding, exit code mapping; writes exited event immediately after process exits
-5. `lib/launch/extract.py` + `report.py` — extract usage/session/report from harness output, persist report artifact (subagent path only)
+
+Composition is centralized in `lib/launch/context.py:build_launch_context()`. Every launch path builds a `SpawnRequest` (caller intent DTO) and `LaunchRuntime` (surface/env/paths), calls the factory, then executes or observes. Driving adapters do not compose directly — see `fs/launch/overview.md` for invariant details.
+
+1. `ops/spawn/prepare.py` — validates input, resolves model aliases (via catalog), builds `SpawnRequest` with `SPAWN_PREPARE` surface, calls `build_launch_context(dry_run=True)` for prompt composition and preview argv
+2. `lib/launch/context.py:build_launch_context()` — sole composition seam: resolves policies (via `resolve.py` two-pass override merge), permission pipeline, prompt, argv, child env — returns `LaunchContext`
+3. Dispatch splits by launch surface:
+   - **Primary (CLI) path:** `lib/launch/__init__.py:launch_primary()` builds `SpawnRequest`+`LaunchRuntime`, calls factory for preview, then delegates to `lib/launch/process.py:run_harness_process()`. Inside `run_harness_process()`: creates session, registers spawn as queued (recording runner_pid), materializes fork if needed (after row exists), rebuilds `LaunchContext` with real paths, runs PTY/pipe subprocess, finalizes inline (no `enrich_finalize`), calls `observe_session_id()` once post-execution
+   - **Spawn/subagent path:** `ops/spawn/execute.py` builds `SpawnRequest`+`LaunchRuntime(SPEC_ONLY)`, calls factory after spawn row and session exist, then calls `lib/launch/streaming_runner.py:execute_with_streaming()` — `process.py` is not involved
+   - **App/streaming HTTP path:** `lib/app/server.py` and `cli/streaming_serve.py` build `SpawnRequest`+`LaunchRuntime(SPEC_ONLY)`, call factory, use `launch_ctx.spec` to start streaming connections via `SpawnManager`
+4. `lib/launch/streaming_runner.py:execute_with_streaming()` — async subprocess executor for spawn/subagent path: stdout/stderr capture, report watchdog, stdin feeding, exit code mapping, heartbeat task, `mark_finalizing` CAS, writes exited event after process exits
+5. `lib/launch/extract.py` + `report.py` — `enrich_finalize()`: extract usage/session/report from harness output, persist report artifact (subagent path only; called by `streaming_runner.py`)
 
 **State flow:**
 - Every spawn is append-only JSONL events in `.meridian/spawns.jsonl`
