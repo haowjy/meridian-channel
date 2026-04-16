@@ -29,6 +29,7 @@ from meridian.lib.harness.connections.base import (
     ConnectionState,
     HarnessConnection,
     HarnessEvent,
+    validate_prompt_size,
 )
 from meridian.lib.harness.errors import HarnessBinaryNotFound
 from meridian.lib.harness.ids import HarnessId
@@ -45,7 +46,6 @@ from meridian.lib.observability.trace_helpers import (
 )
 from meridian.lib.state.paths import resolve_spawn_log_dir
 
-_MAX_INITIAL_PROMPT_BYTES = 50 * 1024
 _DEFAULT_CONNECT_TIMEOUT_SECONDS = 10.0
 _DEFAULT_REQUEST_TIMEOUT_SECONDS = 30.0
 _STOP_WAIT_TIMEOUT_SECONDS = 5.0
@@ -205,6 +205,8 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
         if self._state not in {"created", "stopped", "failed"}:
             raise RuntimeError(f"Cannot start CodexConnection from state '{self._state}'")
 
+        validate_prompt_size(config)
+
         self._transition("starting")
         self._spawn_id = config.spawn_id
         self._tracer = config.debug_tracer
@@ -270,26 +272,11 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
             thread_result = await self._bootstrap_thread(spec)
             self._thread_id = _extract_thread_id(thread_result)
 
-            initial_prompt = _truncate_utf8(config.prompt, _MAX_INITIAL_PROMPT_BYTES)
-            if initial_prompt != config.prompt:
-                await self._event_queue.put(
-                    HarnessEvent(
-                        event_type="warning/promptTruncated",
-                        payload={
-                            "maxBytes": _MAX_INITIAL_PROMPT_BYTES,
-                            "originalBytes": len(config.prompt.encode("utf-8")),
-                            "truncatedBytes": len(initial_prompt.encode("utf-8")),
-                        },
-                        harness_id=self.harness_id.value,
-                        raw_text=None,
-                    )
-                )
-
             await self._request(
                 "turn/start",
                 {
                     "threadId": self._require_thread_id("turn/start"),
-                    "input": _build_text_user_input(initial_prompt),
+                    "input": _build_text_user_input(config.prompt),
                 },
             )
 
@@ -770,13 +757,6 @@ def _reserve_port(host: str) -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind((host, 0))
         return int(sock.getsockname()[1])
-
-
-def _truncate_utf8(text: str, max_bytes: int) -> str:
-    encoded = text.encode("utf-8")
-    if len(encoded) <= max_bytes:
-        return text
-    return encoded[:max_bytes].decode("utf-8", errors="ignore")
 
 
 def _coerce_text(raw_message: object) -> str:

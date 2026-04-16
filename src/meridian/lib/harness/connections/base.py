@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Generic, Literal
+from typing import TYPE_CHECKING, Final, Generic, Literal
 
 from meridian.lib.core.types import SpawnId
 from meridian.lib.harness.ids import HarnessId
@@ -14,6 +14,21 @@ from meridian.lib.launch.launch_types import SpecT
 
 if TYPE_CHECKING:
     from meridian.lib.observability.debug_tracer import DebugTracer
+
+# Uniform initial-prompt cap across adapters; fail loudly if the prompt is too large.
+MAX_INITIAL_PROMPT_BYTES: Final[int] = 10 * 1024 * 1024
+
+
+class PromptTooLargeError(RuntimeError):
+    """Raised when the initial prompt exceeds the harness adapter byte limit."""
+
+    def __init__(self, actual_bytes: int, max_bytes: int, harness: str) -> None:
+        super().__init__(
+            f"{harness}: initial prompt is {actual_bytes} bytes, exceeds limit of {max_bytes} bytes"
+        )
+        self.actual_bytes = actual_bytes
+        self.max_bytes = max_bytes
+        self.harness = harness
 
 
 @dataclass(frozen=True)
@@ -58,6 +73,18 @@ class ConnectionConfig:
     ws_bind_host: str = "127.0.0.1"
     ws_port: int = 0
     debug_tracer: DebugTracer | None = None
+
+
+def validate_prompt_size(config: ConnectionConfig) -> None:
+    """Validate initial prompt size before contacting harness transport endpoints."""
+
+    prompt_bytes = len(config.prompt.encode("utf-8"))
+    if prompt_bytes > MAX_INITIAL_PROMPT_BYTES:
+        raise PromptTooLargeError(
+            actual_bytes=prompt_bytes,
+            max_bytes=MAX_INITIAL_PROMPT_BYTES,
+            harness=config.harness_id.value,
+        )
 
 
 class HarnessConnection(Generic[SpecT], ABC):
@@ -110,10 +137,13 @@ class HarnessConnection(Generic[SpecT], ABC):
 
 
 __all__ = [
+    "MAX_INITIAL_PROMPT_BYTES",
     "ConnectionCapabilities",
     "ConnectionConfig",
     "ConnectionNotReady",
     "ConnectionState",
     "HarnessConnection",
     "HarnessEvent",
+    "PromptTooLargeError",
+    "validate_prompt_size",
 ]

@@ -24,6 +24,7 @@ from meridian.lib.harness.connections.base import (
     ConnectionState,
     HarnessConnection,
     HarnessEvent,
+    validate_prompt_size,
 )
 from meridian.lib.harness.errors import HarnessBinaryNotFound
 from meridian.lib.harness.ids import HarnessId
@@ -147,6 +148,8 @@ class OpenCodeConnection(HarnessConnection[OpenCodeLaunchSpec]):
     async def start(self, config: ConnectionConfig, spec: OpenCodeLaunchSpec) -> None:
         if self._state != "created":
             raise RuntimeError(f"Cannot start OpenCode connection from state '{self._state}'")
+
+        validate_prompt_size(config)
 
         self._config = config
         self._spawn_id = config.spawn_id
