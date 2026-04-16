@@ -151,9 +151,7 @@ def build_launch_context(
     )
 
     normalized_override = (
-        harness_command_override.strip()
-        if harness_command_override is not None
-        else os.getenv("MERIDIAN_HARNESS_COMMAND", "").strip()
+        harness_command_override.strip() if harness_command_override is not None else ""
     )
     if normalized_override:
         if plan.session.continue_fork:

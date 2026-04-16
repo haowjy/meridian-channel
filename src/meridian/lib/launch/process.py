@@ -338,6 +338,7 @@ def run_harness_process(
                     runtime_work_id=attached_work_id,
                     runtime_chat_id=chat_id,
                     runtime_spawn_id=str(primary_spawn_id),
+                    harness_command_override=os.getenv("MERIDIAN_HARNESS_COMMAND", ""),
                 )
                 child_cwd = repo_root
                 match launch_context:
