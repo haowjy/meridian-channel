@@ -27,7 +27,7 @@ from meridian.lib.catalog.model_policy import (
     is_default_visible_model,
     pattern_fallback_harness,
 )
-from meridian.lib.config.settings import resolve_repo_root
+from meridian.lib.config.settings import resolve_project_root
 from meridian.lib.core.types import HarnessId, ModelId
 from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.paths import resolve_cache_dir
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 def load_merged_aliases(repo_root: Path | None = None) -> list[AliasEntry]:
     """Load model aliases from mars packages."""
-    resolved_root = resolve_repo_root(repo_root) if repo_root is not None else None
+    resolved_root = resolve_project_root(repo_root) if repo_root is not None else None
     return load_mars_aliases(resolved_root)
 
 
@@ -296,7 +296,7 @@ class _CachedModelsPayload(BaseModel):
 
 
 def _default_cache_dir() -> Path:
-    return resolve_cache_dir(resolve_repo_root())
+    return resolve_cache_dir(resolve_project_root())
 
 
 def _resolve_cache_dir(cache_dir: Path | str | None) -> Path:

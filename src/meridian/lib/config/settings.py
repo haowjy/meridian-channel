@@ -10,6 +10,7 @@ from typing import Any, Literal, cast
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
+from meridian.lib.config.project_config_state import resolve_project_config_state
 from meridian.lib.core.overrides import (
     KNOWN_APPROVAL_VALUES,
     KNOWN_EFFORT_VALUES,
@@ -204,10 +205,7 @@ def _read_toml(path: Path) -> dict[str, object]:
 
 
 def _resolve_project_toml(repo_root: Path) -> Path | None:
-    config_path = resolve_state_paths(repo_root).config_path
-    if config_path.is_file():
-        return config_path
-    return None
+    return resolve_project_config_state(repo_root).path
 
 
 def _resolve_user_config_path(user_config: Path | None) -> Path | None:
@@ -786,8 +784,8 @@ def load_config(repo_root: Path, *, user_config: Path | None = None) -> Meridian
         _SETTINGS_CONTEXT.reset(token)
 
 
-def resolve_repo_root(explicit: Path | None = None) -> Path:
-    """Resolve repository root that owns `.agents/skills/`.
+def resolve_project_root(explicit: Path | None = None) -> Path:
+    """Resolve project root that owns `.agents/skills/`.
 
     Precedence:
     1. Explicit function argument.

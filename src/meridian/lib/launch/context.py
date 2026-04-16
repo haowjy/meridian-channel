@@ -10,6 +10,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+from meridian.lib.config.project_paths import ProjectPaths
 from meridian.lib.config.settings import MeridianConfig, load_config
 from meridian.lib.core.overrides import RuntimeOverrides
 from meridian.lib.core.types import HarnessId, ModelId
@@ -21,11 +22,7 @@ from meridian.lib.launch.launch_types import (
     ResolvedLaunchSpec,
     summarize_composition_warnings,
 )
-from meridian.lib.state.paths import (
-    ProjectPaths,
-    resolve_spawn_log_dir,
-    resolve_work_scratch_dir,
-)
+from meridian.lib.state.paths import resolve_spawn_log_dir, resolve_work_scratch_dir
 
 from .command import (
     apply_workspace_projection,

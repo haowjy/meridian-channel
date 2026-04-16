@@ -813,7 +813,7 @@ streaming_app = App(name="streaming", help="Streaming layer commands", help_form
 config_app = App(
     name="config",
     help=(
-        "Repository-level config (.meridian/config.toml) for default\n"
+        "Repository-level config (meridian.toml) for default\n"
         "agent, model, harness, timeouts, and output verbosity.\n\n"
         "Resolved values are evaluated independently per field -- a CLI\n"
         "override on one field does not pull other fields from the same\n"
@@ -1315,11 +1315,11 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     if not agent_mode_enabled():
         try:
-            from meridian.lib.config.settings import resolve_repo_root
-            from meridian.lib.ops.config import ensure_state_bootstrap_sync
+            from meridian.lib.config.settings import resolve_project_root
+            from meridian.lib.ops.config import ensure_runtime_state_bootstrap_sync
 
-            repo_root = resolve_repo_root()
-            ensure_state_bootstrap_sync(repo_root)
+            repo_root = resolve_project_root()
+            ensure_runtime_state_bootstrap_sync(repo_root)
             cleanup_stale_sessions(resolve_state_paths(repo_root).root_dir)
         except Exception:
             logger.debug("startup bootstrap failed", exc_info=True)

@@ -18,7 +18,7 @@ from meridian.lib.catalog.models import (
     refresh_models_cache,
     resolve_model,
 )
-from meridian.lib.config.settings import resolve_repo_root
+from meridian.lib.config.settings import resolve_project_root
 from meridian.lib.core.types import HarnessId, ModelId
 from meridian.lib.core.util import FormatContext
 from meridian.lib.ops.runtime import async_from_sync
@@ -186,7 +186,7 @@ class ModelsRefreshOutput(BaseModel):
 
 def _repo_root(repo_root: str | None) -> Path | None:
     explicit = Path(repo_root).expanduser().resolve() if repo_root is not None else None
-    return resolve_repo_root(explicit)
+    return resolve_project_root(explicit)
 
 
 def _format_float(value: float | None) -> str | None:

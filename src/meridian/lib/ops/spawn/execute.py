@@ -15,6 +15,7 @@ from typing import Any, cast
 import structlog
 from pydantic import BaseModel, ConfigDict
 
+from meridian.lib.config.project_paths import ProjectPaths, resolve_project_paths
 from meridian.lib.core.context import RuntimeContext
 from meridian.lib.core.domain import Spawn, SpawnStatus
 from meridian.lib.core.sink import OutputSink
@@ -34,8 +35,6 @@ from meridian.lib.ops.work_attachment import ensure_explicit_work_item
 from meridian.lib.state import spawn_store
 from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.paths import (
-    ProjectPaths,
-    resolve_project_paths,
     resolve_spawn_log_dir,
     resolve_state_paths,
     resolve_work_scratch_dir,

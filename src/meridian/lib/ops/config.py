@@ -8,12 +8,16 @@ from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict
 
+from meridian.lib.config.project_config_state import (
+    ProjectConfigState,
+    resolve_project_config_state,
+)
 from meridian.lib.config.settings import (
     USER_CONFIG_ENV_VAR,
     MeridianConfig,
     PrimaryConfig,
     load_config,
-    resolve_repo_root,
+    resolve_project_root,
 )
 from meridian.lib.core.util import FormatContext, to_jsonable
 from meridian.lib.ops.runtime import async_from_sync
@@ -22,6 +26,7 @@ from meridian.lib.state.paths import ensure_gitignore, resolve_state_paths
 
 _SECTION_ORDER: tuple[str, ...] = ("defaults", "timeouts", "harness", "primary", "output")
 _OUTPUT_VERBOSITY_PRESETS = frozenset({"quiet", "normal", "verbose", "debug"})
+_MISSING_PROJECT_CONFIG_MESSAGE = "no project config; run `meridian config init`"
 
 
 class _ConfigKeySpec(BaseModel):
@@ -314,12 +319,22 @@ class ConfigResetOutput(BaseModel):
 
 
 def _config_path(repo_root: Path) -> Path:
-    return resolve_state_paths(repo_root).config_path
+    return _resolve_project_config_state(repo_root).write_path
 
 
-def _resolve_repo_root(repo_root: str | None) -> Path:
+def _resolve_project_config_state(repo_root: Path) -> ProjectConfigState:
+    return resolve_project_config_state(repo_root)
+
+
+def _require_project_config_path(state: ProjectConfigState) -> Path:
+    if state.path is None:
+        raise ValueError(_MISSING_PROJECT_CONFIG_MESSAGE)
+    return state.path
+
+
+def _resolve_project_root(repo_root: str | None) -> Path:
     explicit = Path(repo_root).expanduser().resolve() if repo_root else None
-    return resolve_repo_root(explicit)
+    return resolve_project_root(explicit)
 
 
 def _resolve_key_spec(key: str) -> _ConfigKeySpec:
@@ -566,10 +581,10 @@ def _source_for_key(
     env_var = spec.env_var
     if env_var is not None and os.getenv(env_var) is not None:
         return "env var", env_var
-    if spec.canonical_key in user_overrides:
-        return "user-config", None
     if spec.canonical_key in project_overrides:
         return "file", None
+    if spec.canonical_key in user_overrides:
+        return "user-config", None
     return "builtin", None
 
 
@@ -704,10 +719,8 @@ def _ensure_mars_init(repo_root: Path, *, link: tuple[str, ...] = ()) -> None:
                 )
 
 
-def ensure_state_bootstrap_sync(
-    repo_root: Path, *, link: tuple[str, ...] = ()
-) -> ConfigInitOutput:
-    """Ensure first-run state exists and scaffold project config when missing."""
+def ensure_runtime_state_bootstrap_sync(repo_root: Path) -> None:
+    """Ensure first-run runtime state exists without creating project-root files."""
 
     state = resolve_state_paths(repo_root)
     bootstrap_dirs = (
@@ -723,28 +736,37 @@ def ensure_state_bootstrap_sync(
     for dir_path in bootstrap_dirs:
         dir_path.mkdir(parents=True, exist_ok=True)
     ensure_gitignore(repo_root)
+
+
+def ensure_state_bootstrap_sync(
+    repo_root: Path, *, link: tuple[str, ...] = ()
+) -> ConfigInitOutput:
+    """Ensure runtime state exists and scaffold project config when missing."""
+
+    ensure_runtime_state_bootstrap_sync(repo_root)
     _ensure_mars_init(repo_root, link=link)
+    state = _resolve_project_config_state(repo_root)
+    if state.path is not None:
+        return ConfigInitOutput(path=state.path.as_posix(), created=False)
 
-    path = _config_path(repo_root)
-    if path.exists():
-        return ConfigInitOutput(path=path.as_posix(), created=False)
-
-    atomic_write_text(path, _scaffold_template())
-    return ConfigInitOutput(path=path.as_posix(), created=True)
+    atomic_write_text(state.write_path, _scaffold_template())
+    return ConfigInitOutput(path=state.write_path.as_posix(), created=True)
 
 
 def config_init_sync(payload: ConfigInitInput) -> ConfigInitOutput:
-    # init always targets CWD or explicit path — don't walk up to a parent repo.
+    # init targets explicit path, then MERIDIAN_REPO_ROOT, then CWD.
     if payload.repo_root:
         repo_root = Path(payload.repo_root).expanduser().resolve()
     else:
-        repo_root = Path.cwd().resolve()
+        env_root = os.getenv("MERIDIAN_REPO_ROOT", "").strip()
+        repo_root = Path(env_root).expanduser().resolve() if env_root else Path.cwd().resolve()
     return ensure_state_bootstrap_sync(repo_root, link=payload.link)
 
 
 def config_show_sync(payload: ConfigShowInput) -> ConfigShowOutput:
-    repo_root = _resolve_repo_root(payload.repo_root)
-    path = _config_path(repo_root)
+    repo_root = _resolve_project_root(payload.repo_root)
+    state = _resolve_project_config_state(repo_root)
+    path = state.write_path
     project_overrides = _extract_file_overrides(_read_file_payload(path))
     user_path = _user_config_path_from_env()
     user_overrides = (
@@ -772,14 +794,14 @@ def config_show_sync(payload: ConfigShowInput) -> ConfigShowOutput:
 
     warning: str | None = None
     if not repo_root.exists():
-        warning = f"Resolved repo root '{repo_root.as_posix()}' does not exist on disk."
+        warning = f"Resolved project root '{repo_root.as_posix()}' does not exist on disk."
 
     return ConfigShowOutput(path=path.as_posix(), values=tuple(values), warning=warning)
 
 
 def config_set_sync(payload: ConfigSetInput) -> ConfigSetOutput:
-    repo_root = _resolve_repo_root(payload.repo_root)
-    path = _config_path(repo_root)
+    repo_root = _resolve_project_root(payload.repo_root)
+    path = _require_project_config_path(_resolve_project_config_state(repo_root))
 
     spec = _resolve_key_spec(payload.key)
     value = _parse_cli_value(spec, payload.value)
@@ -797,7 +819,7 @@ def config_set_sync(payload: ConfigSetInput) -> ConfigSetOutput:
 
 
 def config_get_sync(payload: ConfigGetInput) -> ConfigGetOutput:
-    repo_root = _resolve_repo_root(payload.repo_root)
+    repo_root = _resolve_project_root(payload.repo_root)
     path = _config_path(repo_root)
     spec = _resolve_key_spec(payload.key)
 
@@ -823,8 +845,8 @@ def config_get_sync(payload: ConfigGetInput) -> ConfigGetOutput:
 
 
 def config_reset_sync(payload: ConfigResetInput) -> ConfigResetOutput:
-    repo_root = _resolve_repo_root(payload.repo_root)
-    path = _config_path(repo_root)
+    repo_root = _resolve_project_root(payload.repo_root)
+    path = _require_project_config_path(_resolve_project_config_state(repo_root))
     spec = _resolve_key_spec(payload.key)
 
     file_overrides = _extract_file_overrides(_read_file_payload(path))

@@ -3,7 +3,11 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from meridian.lib.state.paths import ProjectPaths, resolve_project_paths
+from meridian.lib.config.project_paths import (
+    PROJECT_ROOT_IGNORE_TARGETS,
+    ProjectPaths,
+    resolve_project_paths,
+)
 
 
 def test_project_paths_is_frozen(tmp_path: Path) -> None:
@@ -35,3 +39,14 @@ def test_resolve_project_paths_defaults_execution_cwd_to_repo_root(tmp_path: Pat
 
     assert paths.repo_root == repo_root.resolve()
     assert paths.execution_cwd == repo_root.resolve()
+
+
+def test_project_paths_exposes_root_file_policy(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    paths = resolve_project_paths(repo_root=repo_root)
+
+    assert paths.meridian_toml == repo_root.resolve() / "meridian.toml"
+    assert paths.workspace_local_toml == repo_root.resolve() / "workspace.local.toml"
+    assert paths.workspace_ignore_targets == PROJECT_ROOT_IGNORE_TARGETS

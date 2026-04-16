@@ -17,9 +17,6 @@ _GITIGNORE_CONTENT = (
     "# Track .gitignore itself\n"
     "!.gitignore\n"
     "\n"
-    "# Track project config\n"
-    "!config.toml\n"
-    "\n"
     "# Track shared repo state\n"
     "!fs/\n"
     "!fs/**\n"
@@ -30,7 +27,6 @@ _GITIGNORE_CONTENT = (
 )
 _REQUIRED_GITIGNORE_LINES = (
     "!.gitignore",
-    "!config.toml",
     "!fs/",
     "!fs/**",
     "!work/",
@@ -43,6 +39,7 @@ _DEPRECATED_GITIGNORE_LINES = (
     "!work-items/**",
     "!agents.toml",
     "!agents.lock",
+    "!config.toml",
 )
 
 
@@ -90,15 +87,6 @@ class StateRootPaths(BaseModel):
         )
 
 
-class ProjectPaths(BaseModel):
-    """Resolved project-level paths used by launch/runtime code."""
-
-    model_config = ConfigDict(frozen=True)
-
-    repo_root: Path
-    execution_cwd: Path
-
-
 class StatePaths(BaseModel):
     """Resolved on-disk Meridian state paths."""
 
@@ -108,7 +96,6 @@ class StatePaths(BaseModel):
     artifacts_dir: Path
     spawns_dir: Path
     cache_dir: Path
-    config_path: Path
 
 
 def _resolve_state_root(repo_root: Path) -> Path:
@@ -124,17 +111,6 @@ def _resolve_state_root(repo_root: Path) -> Path:
     return repo_root / candidate
 
 
-def resolve_project_paths(repo_root: Path, execution_cwd: Path | None = None) -> ProjectPaths:
-    """Build project paths from repository root and optional execution cwd."""
-
-    resolved_repo_root = repo_root.resolve()
-    resolved_execution_cwd = (execution_cwd or repo_root).resolve()
-    return ProjectPaths(
-        repo_root=resolved_repo_root,
-        execution_cwd=resolved_execution_cwd,
-    )
-
-
 def resolve_state_paths(repo_root: Path) -> StatePaths:
     """Resolve all state paths rooted under `.meridian/`."""
 
@@ -144,7 +120,6 @@ def resolve_state_paths(repo_root: Path) -> StatePaths:
         artifacts_dir=root_dir / "artifacts",
         spawns_dir=root_dir / "spawns",
         cache_dir=root_dir / "cache",
-        config_path=root_dir / "config.toml",
     )
 
 

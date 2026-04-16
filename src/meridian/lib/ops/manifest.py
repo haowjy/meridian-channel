@@ -235,7 +235,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
     ),
     _spec(
         name="config.init",
-        description="Scaffold .meridian/config.toml with commented defaults.",
+        description="Scaffold meridian.toml with commented defaults.",
         handler=config_init,
         sync_handler=config_init_sync,
         input_type=ConfigInitInput,
@@ -259,7 +259,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
     ),
     _spec(
         name="config.set",
-        description="Set one config key in .meridian/config.toml.",
+        description="Set one config key in meridian.toml.",
         handler=config_set,
         sync_handler=config_set_sync,
         input_type=ConfigSetInput,

@@ -15,13 +15,13 @@ cd "$REPO_ROOT"
 test -d "$SMOKE_REPO/.git" && echo "PASS: config smoke repo ready" || echo "FAIL: config smoke repo setup failed"
 ```
 
-### CFG-1. Config init creates `.meridian/config.toml` [CRITICAL]
+### CFG-1. Config init creates `meridian.toml` [CRITICAL]
 
 ```bash
 uv run meridian config init >/tmp/meridian-config-init.txt && \
-test -f "$MERIDIAN_STATE_ROOT/config.toml" && \
-grep -q 'config.toml' /tmp/meridian-config-init.txt && \
-echo "PASS: config init created config.toml" || echo "FAIL: config init did not create config.toml"
+test -f "$SMOKE_REPO/meridian.toml" && \
+grep -q 'meridian.toml' /tmp/meridian-config-init.txt && \
+echo "PASS: config init created meridian.toml" || echo "FAIL: config init did not create meridian.toml"
 ```
 
 ### CFG-2. Config show exposes resolved values [CRITICAL]

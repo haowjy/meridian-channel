@@ -16,6 +16,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, model_validator
 
+from meridian.lib.config.project_paths import resolve_project_paths
 from meridian.lib.core.spawn_lifecycle import TERMINAL_SPAWN_STATUSES
 from meridian.lib.core.types import HarnessId, SpawnId
 from meridian.lib.harness.connections.base import ConnectionConfig
@@ -23,7 +24,6 @@ from meridian.lib.harness.registry import get_default_harness_registry
 from meridian.lib.launch.context import build_launch_context
 from meridian.lib.launch.request import LaunchArgvIntent, LaunchRuntime, SpawnRequest
 from meridian.lib.state import spawn_store
-from meridian.lib.state.paths import resolve_project_paths
 from meridian.lib.streaming.signal_canceller import SignalCanceller
 from meridian.lib.streaming.spawn_manager import SpawnManager
 

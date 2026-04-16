@@ -9,7 +9,7 @@ from typing import Any, ParamSpec, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from meridian.lib.config.settings import MeridianConfig, load_config, resolve_repo_root
+from meridian.lib.config.settings import MeridianConfig, load_config, resolve_project_root
 from meridian.lib.core.context import RuntimeContext
 from meridian.lib.core.sink import NullSink, OutputSink
 from meridian.lib.state.artifact_store import LocalStore
@@ -60,10 +60,10 @@ def resolve_runtime_root_and_config(
 
     _ = sink
     explicit_root = Path(repo_root).expanduser().resolve() if repo_root else None
-    resolved_root = resolve_repo_root(explicit_root)
-    from meridian.lib.ops.config import ensure_state_bootstrap_sync
+    resolved_root = resolve_project_root(explicit_root)
+    from meridian.lib.ops.config import ensure_runtime_state_bootstrap_sync
 
-    ensure_state_bootstrap_sync(resolved_root)
+    ensure_runtime_state_bootstrap_sync(resolved_root)
     return resolved_root, load_config(resolved_root)
 
 

@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 
-from meridian.lib.config.settings import MeridianConfig, load_config, resolve_repo_root
+from meridian.lib.config.settings import MeridianConfig, load_config, resolve_project_root
 from meridian.lib.state.paths import resolve_state_paths
 
 from .request import (
@@ -68,7 +68,7 @@ def build_primary_launch_runtime(
 ) -> LaunchRuntime:
     """Build primary-launch runtime inputs for the shared launch factory."""
 
-    resolved_root = resolve_repo_root(repo_root)
+    resolved_root = resolve_project_root(repo_root)
     resolved_config = config if config is not None else load_config(resolved_root)
     state_root = resolve_state_paths(resolved_root).root_dir
 
