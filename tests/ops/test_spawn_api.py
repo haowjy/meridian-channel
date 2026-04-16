@@ -38,15 +38,14 @@ def test_spawn_create_validates_model_against_resolved_runtime_root(
         _ = (payload, runtime, ctx)
         return SimpleNamespace(
             model="gpt-5.3-codex",
-            harness_id="codex",
-            warning=preflight_warning,
-            agent_name=None,
-            agent_path=None,
+            harness="codex",
+            agent=None,
+            agent_metadata={"warning": preflight_warning} if preflight_warning else {},
             skills=(),
             skill_paths=(),
             reference_files=(),
             template_vars={},
-            context_from_resolved=(),
+            context_from=None,
             prompt="prompt",
             cli_command=(),
         )

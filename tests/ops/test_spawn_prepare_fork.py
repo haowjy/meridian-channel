@@ -3,9 +3,9 @@ from pathlib import Path
 from meridian.lib.config.settings import load_config
 from meridian.lib.core.types import HarnessId
 from meridian.lib.harness.registry import get_default_harness_registry
+from meridian.lib.launch.request import SessionRequest
 from meridian.lib.ops.runtime import build_runtime_from_root_and_config
 from meridian.lib.ops.spawn.models import SpawnCreateInput
-from meridian.lib.ops.spawn.plan import SessionContinuation
 from meridian.lib.ops.spawn.prepare import build_create_payload
 
 
@@ -58,8 +58,8 @@ def test_fork_prepare_preserves_continue_fork_and_defers_materialization(
         SpawnCreateInput(
             prompt="fork prompt",
             repo_root=tmp_path.as_posix(),
-            session=SessionContinuation(
-                harness_session_id="source-session",
+            session=SessionRequest(
+                requested_harness_session_id="source-session",
                 continue_harness="codex",
                 continue_fork=True,
             ),
@@ -71,8 +71,8 @@ def test_fork_prepare_preserves_continue_fork_and_defers_materialization(
         SpawnCreateInput(
             prompt="fork prompt",
             repo_root=tmp_path.as_posix(),
-            session=SessionContinuation(
-                harness_session_id="source-session",
+            session=SessionRequest(
+                requested_harness_session_id="source-session",
                 continue_harness="codex",
                 continue_fork=True,
             ),
@@ -84,8 +84,8 @@ def test_fork_prepare_preserves_continue_fork_and_defers_materialization(
     # I-10: fork_session must NOT be called in prepare — fork happens after the row exists.
     assert calls == []
     # The source session ID and continue_fork=True are preserved for the executor.
-    assert prepared.session.harness_session_id == "source-session"
+    assert prepared.session.requested_harness_session_id == "source-session"
     assert prepared.session.continue_fork is True
     # dry_run also preserves the deferred state.
-    assert dry_run_prepared.session.harness_session_id == "source-session"
+    assert dry_run_prepared.session.requested_harness_session_id == "source-session"
     assert dry_run_prepared.session.continue_fork is True

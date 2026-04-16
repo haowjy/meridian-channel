@@ -8,6 +8,7 @@ from meridian.lib.core.context import RuntimeContext
 from meridian.lib.core.sink import NullSink, OutputSink
 from meridian.lib.core.spawn_lifecycle import ACTIVE_SPAWN_STATUSES, is_active_spawn_status
 from meridian.lib.core.types import SpawnId
+from meridian.lib.launch.request import SessionRequest
 from meridian.lib.ops.reference import ResolvedSessionReference, resolve_session_reference
 from meridian.lib.ops.runtime import (
     build_runtime_from_root_and_config,
@@ -44,7 +45,6 @@ from .models import (
     SpawnWrittenFilesInput,
     SpawnWrittenFilesOutput,
 )
-from .plan import SessionContinuation
 from .prepare import build_create_payload, validate_create_input
 from .query import (
     detail_from_row,
@@ -99,16 +99,16 @@ def spawn_create_sync(
         return SpawnActionOutput(
             command="spawn.create",
             status="dry-run",
-            model=prepared.model,
-            harness_id=prepared.harness_id,
-            warning=prepared.warning,
-            agent=prepared.agent_name,
-            agent_path=prepared.agent_path or None,
+            model=prepared.model or "",
+            harness_id=prepared.harness or "",
+            warning=prepared.agent_metadata.get("warning") or None,
+            agent=prepared.agent,
+            agent_path=prepared.agent_metadata.get("session_agent_path") or None,
             skills=prepared.skills,
             skill_paths=prepared.skill_paths,
             reference_files=prepared.reference_files,
             template_vars=prepared.template_vars,
-            context_from_resolved=prepared.context_from_resolved,
+            context_from_resolved=(prepared.context_from,) if prepared.context_from else (),
             composed_prompt=prepared.prompt,
             cli_command=prepared.cli_command,
             message="Dry run complete.",
@@ -120,14 +120,14 @@ def spawn_create_sync(
     if payload.background:
         result = execute_spawn_background(
             payload=payload,
-            prepared=prepared,
+            request=prepared,
             runtime=runtime,
             ctx=resolved_context,
         )
     else:
         result = execute_spawn_blocking(
             payload=payload,
-            prepared=prepared,
+            request=prepared,
             runtime=runtime,
             ctx=resolved_context,
         )
@@ -728,8 +728,8 @@ def spawn_continue_sync(
         dry_run=payload.dry_run,
         timeout=payload.timeout,
         background=payload.background,
-        session=SessionContinuation(
-            harness_session_id=resolved_reference.harness_session_id,
+        session=SessionRequest(
+            requested_harness_session_id=resolved_reference.harness_session_id,
             continue_harness=resolved_reference.harness,
             continue_source_tracked=resolved_reference.tracked,
             continue_source_ref=resolved_spawn_id,

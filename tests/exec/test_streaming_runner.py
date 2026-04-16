@@ -39,7 +39,7 @@ from meridian.lib.harness.launch_spec import (
 )
 from meridian.lib.harness.opencode import OpenCodeAdapter
 from meridian.lib.harness.registry import HarnessRegistry
-from meridian.lib.ops.spawn.plan import ExecutionPolicy, PreparedSpawnPlan, SessionContinuation
+from meridian.lib.launch.request import SpawnRequest
 from meridian.lib.safety.permissions import PermissionConfig, TieredPermissionResolver
 from meridian.lib.state import spawn_store
 from meridian.lib.state.artifact_store import LocalStore
@@ -498,30 +498,11 @@ class _MissingBinaryConnection:
 def _build_plan(
     harness_id: HarnessId = HarnessId.CODEX,
     model: str = "gpt-5.3-codex",
-) -> PreparedSpawnPlan:
-    return PreparedSpawnPlan(
+) -> SpawnRequest:
+    return SpawnRequest(
         model=model,
-        harness_id=harness_id.value,
+        harness=harness_id.value,
         prompt="hello",
-        agent_name=None,
-        skills=(),
-        skill_paths=(),
-        reference_files=(),
-        template_vars={},
-        mcp_tools=(),
-        session_agent="",
-        session_agent_path="",
-        session=SessionContinuation(),
-        execution=ExecutionPolicy(
-            timeout_secs=None,
-            kill_grace_secs=30.0,
-            max_retries=0,
-            retry_backoff_secs=0.0,
-            permission_config=PermissionConfig(),
-            permission_resolver=TieredPermissionResolver(config=PermissionConfig()),
-            allowed_tools=(),
-        ),
-        cli_command=(),
     )
 
 
@@ -677,7 +658,7 @@ async def test_execute_with_streaming_succeeds_when_turn_completes_and_stream_dr
     exit_code = await asyncio.wait_for(
         execute_with_streaming(
             run,
-            plan=_build_plan(),
+            request=_build_plan(),
             repo_root=tmp_path,
             state_root=state_root,
             artifacts=artifacts,
@@ -758,7 +739,7 @@ async def test_execute_with_streaming_succeeds_after_report_watchdog_cleanup(
     exit_code = await asyncio.wait_for(
         execute_with_streaming(
             run,
-            plan=_build_plan(),
+            request=_build_plan(),
             repo_root=tmp_path,
             state_root=state_root,
             artifacts=artifacts,
@@ -849,7 +830,7 @@ async def test_execute_with_streaming_waits_for_delayed_terminal_failure_after_d
     exit_code = await asyncio.wait_for(
         execute_with_streaming(
             run,
-            plan=_build_plan(HarnessId.CLAUDE, "claude-opus-4-1"),
+            request=_build_plan(HarnessId.CLAUDE, "claude-opus-4-1"),
             repo_root=tmp_path,
             state_root=state_root,
             artifacts=artifacts,
@@ -961,7 +942,7 @@ async def test_execute_with_streaming_prefers_terminal_over_same_wakeup_signal(
     exit_code = await asyncio.wait_for(
         execute_with_streaming(
             run,
-            plan=_build_plan(),
+            request=_build_plan(),
             repo_root=tmp_path,
             state_root=state_root,
             artifacts=artifacts,
@@ -1091,7 +1072,7 @@ async def test_execute_with_streaming_signal_wins_without_spawn_terminal_event(
     exit_code = await asyncio.wait_for(
         execute_with_streaming(
             run,
-            plan=_build_plan(),
+            request=_build_plan(),
             repo_root=tmp_path,
             state_root=state_root,
             artifacts=artifacts,
@@ -1155,7 +1136,7 @@ async def test_execute_with_streaming_persists_missing_binary_diagnostics(
     exit_code = await asyncio.wait_for(
         execute_with_streaming(
             run,
-            plan=_build_plan(HarnessId.CLAUDE, "claude-opus-4-1"),
+            request=_build_plan(HarnessId.CLAUDE, "claude-opus-4-1"),
             repo_root=tmp_path,
             state_root=state_root,
             artifacts=artifacts,
@@ -1210,21 +1191,17 @@ async def test_execute_with_streaming_codex_uses_adapter_resolved_launch_spec(
     )
 
     permission_config = PermissionConfig(sandbox="read-only", approval="auto")
-    plan = _build_plan().model_copy(
+    request = _build_plan().model_copy(
         update={
-            "execution": _build_plan().execution.model_copy(
-                update={
-                    "permission_config": permission_config,
-                    "permission_resolver": TieredPermissionResolver(config=permission_config),
-                }
-            )
+            "sandbox": "read-only",
+            "approval": "auto",
         }
     )
 
     exit_code = await asyncio.wait_for(
         execute_with_streaming(
             run,
-            plan=plan,
+            request=request,
             repo_root=tmp_path,
             state_root=state_root,
             artifacts=artifacts,
@@ -1313,7 +1290,7 @@ async def test_run_streaming_spawn_finishes_on_claude_result_without_connection_
 #     exit_code = await asyncio.wait_for(
 #         execute_with_streaming(
 #             run,
-#             plan=_build_plan(HarnessId.CLAUDE, "claude-opus-4-1"),
+#             request=_build_plan(HarnessId.CLAUDE, "claude-opus-4-1"),
 #             repo_root=tmp_path,
 #             state_root=state_root,
 #             artifacts=artifacts,
@@ -1446,7 +1423,7 @@ async def test_execute_with_streaming_succeeds_when_opencode_idle_completes_but_
     exit_code = await asyncio.wait_for(
         execute_with_streaming(
             run,
-            plan=_build_plan(HarnessId.OPENCODE, "openrouter/qwen/qwen3-coder:free"),
+            request=_build_plan(HarnessId.OPENCODE, "openrouter/qwen/qwen3-coder:free"),
             repo_root=tmp_path,
             state_root=state_root,
             artifacts=artifacts,
@@ -1499,7 +1476,7 @@ async def test_execute_with_streaming_opencode_uses_adapter_normalized_launch_sp
         launch_mode="foreground",
         status="queued",
     )
-    plan = _build_plan(HarnessId.OPENCODE, "opencode-gpt-5.3-codex").model_copy(
+    request = _build_plan(HarnessId.OPENCODE, "opencode-gpt-5.3-codex").model_copy(
         update={
             "skills": ("skill-a",),
             "mcp_tools": ("tool-a=echo a",),
@@ -1509,7 +1486,7 @@ async def test_execute_with_streaming_opencode_uses_adapter_normalized_launch_sp
     exit_code = await asyncio.wait_for(
         execute_with_streaming(
             run,
-            plan=plan,
+            request=request,
             repo_root=tmp_path,
             state_root=state_root,
             artifacts=artifacts,
@@ -1607,7 +1584,7 @@ async def test_execute_with_streaming_starts_and_ticks_runner_heartbeat(
     exit_code = await asyncio.wait_for(
         execute_with_streaming(
             run,
-            plan=_build_plan(),
+            request=_build_plan(),
             repo_root=tmp_path,
             state_root=state_root,
             artifacts=artifacts,
@@ -1684,7 +1661,7 @@ async def test_execute_with_streaming_marks_finalizing_before_terminal_finalize(
     exit_code = await asyncio.wait_for(
         execute_with_streaming(
             run,
-            plan=_build_plan(),
+            request=_build_plan(),
             repo_root=tmp_path,
             state_root=state_root,
             artifacts=artifacts,
@@ -1752,7 +1729,7 @@ async def test_execute_with_streaming_tolerates_mark_finalizing_cas_miss(
     exit_code = await asyncio.wait_for(
         execute_with_streaming(
             run,
-            plan=_build_plan(),
+            request=_build_plan(),
             repo_root=tmp_path,
             state_root=state_root,
             artifacts=artifacts,
@@ -1825,7 +1802,7 @@ async def test_execute_with_streaming_cancels_heartbeat_when_finalize_raises(
         await asyncio.wait_for(
             execute_with_streaming(
                 run,
-                plan=_build_plan(),
+                request=_build_plan(),
                 repo_root=tmp_path,
                 state_root=state_root,
                 artifacts=artifacts,
@@ -1896,7 +1873,7 @@ async def test_execute_with_streaming_cancels_heartbeat_when_finalize_raises_val
         await asyncio.wait_for(
             execute_with_streaming(
                 run,
-                plan=_build_plan(),
+                request=_build_plan(),
                 repo_root=tmp_path,
                 state_root=state_root,
                 artifacts=artifacts,
@@ -1969,7 +1946,7 @@ async def test_execute_with_streaming_continues_when_terminal_heartbeat_touch_fa
     exit_code = await asyncio.wait_for(
         execute_with_streaming(
             run,
-            plan=_build_plan(),
+            request=_build_plan(),
             repo_root=tmp_path,
             state_root=state_root,
             artifacts=artifacts,

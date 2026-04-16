@@ -39,7 +39,6 @@ from meridian.lib.utils.time import minutes_to_seconds
 from ..runtime import OperationRuntime, build_runtime, resolve_runtime_root_and_config
 from .context_ref import render_context_refs, resolve_context_ref
 from .models import SpawnCreateInput
-from .plan import ExecutionPolicy, PreparedSpawnPlan, SessionContinuation
 
 logger = structlog.get_logger(__name__)
 _DISCOVERED_MODEL_CONTEXT_LIMIT = 12
@@ -176,7 +175,7 @@ def build_create_payload(
     runtime: OperationRuntime | None = None,
     preflight_warning: str | None = None,
     ctx: RuntimeContext | None = None,
-) -> PreparedSpawnPlan:
+) -> SpawnRequest:
     _ = ctx
     runtime_view: _CreateRuntimeView
     if runtime is not None:
@@ -269,7 +268,8 @@ def build_create_payload(
         prior_output=prior_output,
         reference_mode=reference_mode,
     )
-    requested_harness_session_id = (payload.session.harness_session_id or "").strip() or None
+    _raw_req_hsid = payload.session.requested_harness_session_id or ""
+    requested_harness_session_id = _raw_req_hsid.strip() or None
     requested_continue_fork = payload.session.continue_fork
     resolved_forked_from = payload.session.forked_from_chat_id
     resolved_source_execution_cwd = payload.session.source_execution_cwd
@@ -311,7 +311,8 @@ def build_create_payload(
     warning = merge_warnings(preflight_warning, warning)
     from meridian.lib.harness.adapter import SpawnParams
 
-    permission_config, resolver = resolve_permission_pipeline(
+    # Build preview_command resolver; permission_config not stored (executor rebuilds it).
+    _preview_permission_config, resolver = resolve_permission_pipeline(
         sandbox=resolved.sandbox,
         allowed_tools=profile.tools if profile is not None else (),
         disallowed_tools=profile.disallowed_tools if profile is not None else (),
@@ -360,7 +361,7 @@ def build_create_payload(
     if resolved.autocompact is not None:
         agent_metadata["autocompact_pct"] = str(resolved.autocompact)
 
-    spawn_request = SpawnRequest(
+    return SpawnRequest(
         prompt=composed_prompt,
         model=policies.model,
         harness=str(harness.id),
@@ -384,10 +385,10 @@ def build_create_payload(
         ),
         session=SessionRequest(
             continue_chat_id=payload.session.continue_chat_id,
-            requested_harness_session_id=requested_harness_session_id,
-            continue_fork=payload.session.continue_fork,
-            source_execution_cwd=payload.session.source_execution_cwd,
-            forked_from_chat_id=payload.session.forked_from_chat_id,
+            requested_harness_session_id=resolved_continue_harness_session_id,
+            continue_fork=resolved_continue_fork,
+            source_execution_cwd=resolved_source_execution_cwd,
+            forked_from_chat_id=resolved_forked_from,
             continue_harness=payload.session.continue_harness,
             continue_source_tracked=payload.session.continue_source_tracked,
             continue_source_ref=payload.session.continue_source_ref,
@@ -397,50 +398,9 @@ def build_create_payload(
         template_vars=parsed_template_vars,
         work_id_hint=payload.work.strip() or None,
         agent_metadata=agent_metadata,
-    )
-
-    return PreparedSpawnPlan(
-        model=policies.model,
-        harness_id=str(harness.id),
-        effort=resolved.effort,
-        warning=warning,
-        prompt=composed_prompt,
-        skills=resolved_skills.skill_names,
-        agent_path=session_agent_path,
-        reference_files=tuple(str(reference.path) for reference in loaded_references),
-        template_vars=parsed_template_vars,
-        context_from_resolved=context_from_resolved,
-        mcp_tools=profile.mcp_tools if profile is not None else (),
-        agent_name=agent_for_params,
-        session_agent=profile.name if profile is not None else "",
-        session_agent_path=session_agent_path,
+        # Resolved metadata for dry-run display and spawn-row initialization.
         skill_paths=session_skill_paths,
-        adhoc_agent_payload=adhoc_agent_payload,
         cli_command=preview_command,
-        passthrough_args=payload.passthrough_args,
-        appended_system_prompt=appended_system_prompt,
-        autocompact=resolved.autocompact,
-        session=SessionContinuation(
-            harness_session_id=resolved_continue_harness_session_id,
-            continue_harness=payload.session.continue_harness,
-            continue_source_tracked=payload.session.continue_source_tracked,
-            continue_source_ref=payload.session.continue_source_ref,
-            continue_chat_id=payload.session.continue_chat_id,
-            continue_fork=resolved_continue_fork,
-            forked_from_chat_id=resolved_forked_from,
-            source_execution_cwd=resolved_source_execution_cwd,
-        ),
-        execution=ExecutionPolicy(
-            timeout_secs=timeout_secs,
-            kill_grace_secs=kill_grace_secs,
-            max_retries=runtime_view.config.max_retries,
-            retry_backoff_secs=runtime_view.config.retry_backoff_seconds,
-            permission_config=permission_config,
-            permission_resolver=resolver,
-            allowed_tools=profile.tools if profile is not None else (),
-            disallowed_tools=profile.disallowed_tools if profile is not None else (),
-        ),
-        request=spawn_request,
     )
 
 

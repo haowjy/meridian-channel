@@ -82,6 +82,11 @@ class SpawnRequest(BaseModel):
     work_id_hint: str | None = None
     agent_metadata: dict[str, str] = Field(default_factory=_empty_agent_metadata)
 
+    # Resolved metadata (computed at prepare time; NOT used by executors for composition)
+    skill_paths: tuple[str, ...] = ()
+    # Preview command for dry-run display only.  Executors MUST NOT use this field.
+    cli_command: tuple[str, ...] = ()
+
 
 class LaunchRuntime(BaseModel):
     """Runtime context known by the driving adapter, not provided by callers."""

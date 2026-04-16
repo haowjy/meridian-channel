@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from meridian.lib.core.types import HarnessId, ModelId
 from meridian.lib.harness.adapter import SubprocessHarness
 from meridian.lib.launch.launch_types import (
+    CompositionWarning,
     PermissionResolver,
     PreflightResult,
     ResolvedLaunchSpec,
@@ -32,12 +33,11 @@ from .cwd import resolve_child_execution_cwd
 from .env import build_env_plan, inherit_child_env
 from .env import merge_env_overrides as _merge_env_overrides
 from .permissions import resolve_permission_pipeline
-from .request import LaunchRuntime, SessionRequest, SpawnRequest
+from .request import LaunchRuntime, SpawnRequest
 from .run_inputs import ResolvedRunInputs, build_resolved_run_inputs
 
 if TYPE_CHECKING:
     from meridian.lib.harness.registry import HarnessRegistry
-    from meridian.lib.ops.spawn.plan import PreparedSpawnPlan
 
 _ALLOWED_MERIDIAN_KEYS: frozenset[str] = frozenset(
     {
@@ -147,6 +147,8 @@ class LaunchContext:
     report_output_path: Path
     harness: SubprocessHarness
     is_bypass: bool = False
+    # I-13: adapter input transformations surface here instead of silently mutating.
+    warnings: tuple[CompositionWarning, ...] = ()
 
 
 def merge_env_overrides(
@@ -358,88 +360,9 @@ def build_launch_context(
     )
 
 
-def prepare_launch_context(
-    *,
-    spawn_id: str,
-    run_prompt: str,
-    run_model: str | None,
-    plan: PreparedSpawnPlan,
-    harness: SubprocessHarness,
-    project_paths: ProjectPaths,
-    state_root: Path,
-    plan_overrides: Mapping[str, str],
-    report_output_path: Path,
-    runtime_work_id: str | None = None,
-) -> LaunchContext:
-    """Compatibility shim that bridges a prepared plan into the raw factory."""
-
-    from meridian.lib.harness.registry import HarnessRegistry
-
-    request = SpawnRequest(
-        prompt=run_prompt,
-        model=run_model,
-        harness=harness.id.value,
-        agent=plan.agent_name,
-        skills=plan.skills,
-        extra_args=plan.passthrough_args,
-        mcp_tools=plan.mcp_tools,
-        sandbox=plan.execution.permission_config.sandbox,
-        approval=plan.execution.permission_config.approval,
-        allowed_tools=plan.execution.allowed_tools,
-        disallowed_tools=plan.execution.disallowed_tools,
-        autocompact=plan.autocompact is not None,
-        effort=plan.effort,
-        session=SessionRequest(
-            continue_chat_id=plan.session.continue_chat_id,
-            requested_harness_session_id=plan.session.harness_session_id,
-            continue_fork=plan.session.continue_fork,
-            source_execution_cwd=plan.session.source_execution_cwd,
-            forked_from_chat_id=plan.session.forked_from_chat_id,
-            continue_harness=plan.session.continue_harness,
-            continue_source_tracked=plan.session.continue_source_tracked,
-            continue_source_ref=plan.session.continue_source_ref,
-        ),
-        context_from=plan.request.context_from if plan.request is not None else None,
-        work_id_hint=plan.request.work_id_hint if plan.request is not None else None,
-        agent_metadata={
-            "adhoc_agent_payload": plan.adhoc_agent_payload,
-            **(
-                {"appended_system_prompt": plan.appended_system_prompt}
-                if plan.appended_system_prompt
-                else {}
-            ),
-        },
-    )
-    runtime = LaunchRuntime(
-        launch_mode="child",
-        unsafe_no_permissions=(
-            plan.execution.permission_resolver.__class__.__name__
-            == "UnsafeNoOpPermissionResolver"
-        ),
-        debug=False,
-        harness_command_override=os.getenv("MERIDIAN_HARNESS_COMMAND", "").strip() or None,
-        report_output_path=report_output_path.as_posix(),
-        state_root=state_root.as_posix(),
-        project_paths_repo_root=project_paths.repo_root.as_posix(),
-        project_paths_execution_cwd=project_paths.execution_cwd.as_posix(),
-    )
-    harness_registry = HarnessRegistry()
-    harness_registry.register(harness)
-    return build_launch_context(
-        spawn_id=spawn_id,
-        request=request,
-        runtime=runtime,
-        harness_registry=harness_registry,
-        dry_run=False,
-        plan_overrides=plan_overrides,
-        runtime_work_id=runtime_work_id,
-    )
-
-
 __all__ = [
     "LaunchContext",
     "RuntimeContext",
     "build_launch_context",
     "merge_env_overrides",
-    "prepare_launch_context",
 ]

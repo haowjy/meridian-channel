@@ -16,7 +16,7 @@ from meridian.lib.launch.launch_types import PermissionResolver
 from meridian.lib.safety.permissions import PermissionConfig
 from meridian.lib.state.paths import resolve_state_paths
 
-from .command import build_launch_argv
+from .command import build_launch_argv, normalize_system_prompt_passthrough_args
 from .permissions import resolve_permission_pipeline
 from .policies import ResolvedPolicies, resolve_policies
 from .prompt import build_primary_inventory_prompt, compose_skill_injections
@@ -56,40 +56,6 @@ class ResolvedPrimaryLaunchPlan(BaseModel):
     warning: str | None = None
     resolved_work_id: str | None = None
     source_execution_cwd: str | None = None
-
-
-def normalize_system_prompt_passthrough_args(
-    passthrough_args: tuple[str, ...],
-) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """Extract system-prompt passthroughs and return args without duplicate prompt flags."""
-
-    cleaned: list[str] = []
-    prompt_fragments: list[str] = []
-    index = 0
-    while index < len(passthrough_args):
-        token = passthrough_args[index]
-
-        if token in {"--append-system-prompt", "--system-prompt"}:
-            if index + 1 >= len(passthrough_args):
-                raise ValueError(f"{token} requires a value")
-            prompt_fragments.append(passthrough_args[index + 1])
-            index += 2
-            continue
-
-        if token.startswith("--append-system-prompt="):
-            prompt_fragments.append(token.partition("=")[2])
-            index += 1
-            continue
-
-        if token.startswith("--system-prompt="):
-            prompt_fragments.append(token.partition("=")[2])
-            index += 1
-            continue
-
-        cleaned.append(token)
-        index += 1
-
-    return tuple(cleaned), tuple(prompt_fragments)
 
 
 def _build_session_metadata(
@@ -203,7 +169,8 @@ def resolve_primary_launch_plan(
         skill_paths=skill_paths,
     )
 
-    resolved_harness_session_id = (request.session.harness_session_id or "").strip() or None
+    _raw_hsid = request.session.requested_harness_session_id or ""
+    resolved_harness_session_id = _raw_hsid.strip() or None
     resolved_continue_chat_id = (request.session.continue_chat_id or "").strip() or None
     resolved_continue_fork = request.session.continue_fork
     resolved_forked_from_chat_id = request.session.forked_from_chat_id
@@ -211,7 +178,7 @@ def resolve_primary_launch_plan(
     source_execution_cwd = request.session.source_execution_cwd
     resolved_session = request.session.model_copy(
         update={
-            "harness_session_id": resolved_harness_session_id,
+            "requested_harness_session_id": resolved_harness_session_id,
             "continue_harness": resolved_continue_harness,
             "continue_chat_id": resolved_continue_chat_id,
             "continue_fork": resolved_continue_fork,
@@ -380,6 +347,5 @@ def resolve_primary_launch_plan(
 
 __all__ = [
     "ResolvedPrimaryLaunchPlan",
-    "normalize_system_prompt_passthrough_args",
     "resolve_primary_launch_plan",
 ]

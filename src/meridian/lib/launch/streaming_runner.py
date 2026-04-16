@@ -47,7 +47,7 @@ from meridian.lib.launch.extract import (
     reset_finalize_attempt_artifacts,
 )
 from meridian.lib.launch.launch_types import ResolvedLaunchSpec
-from meridian.lib.launch.request import LaunchRuntime, SessionRequest, SpawnRequest
+from meridian.lib.launch.request import LaunchRuntime, SpawnRequest
 from meridian.lib.launch.runner_helpers import (
     append_budget_exceeded_event as _append_budget_exceeded_event,
 )
@@ -67,7 +67,6 @@ from meridian.lib.launch.runner_helpers import (
     write_structured_failure_artifact as _write_structured_failure_artifact,
 )
 from meridian.lib.launch.signals import signal_coordinator, signal_to_exit_code
-from meridian.lib.ops.spawn.plan import PreparedSpawnPlan
 from meridian.lib.safety.budget import Budget, BudgetBreach, LiveBudgetTracker
 from meridian.lib.safety.guardrails import run_guardrails
 from meridian.lib.safety.redaction import SecretSpec, redact_secret_bytes
@@ -745,8 +744,7 @@ async def _run_streaming_attempt(
 async def execute_with_streaming(
     run: Spawn,
     *,
-    plan: PreparedSpawnPlan,
-    request: SpawnRequest | None = None,
+    request: SpawnRequest,
     launch_runtime: LaunchRuntime | None = None,
     repo_root: Path,
     state_root: Path,
@@ -773,42 +771,6 @@ async def execute_with_streaming(
     log_dir = resolve_spawn_log_dir(repo_root, run.spawn_id)
     output_log_path = log_dir / OUTPUT_FILENAME
     report_path = log_dir / REPORT_FILENAME
-    if request is None:
-        request = SpawnRequest(
-            prompt=run.prompt,
-            model=str(run.model),
-            harness=plan.harness_id,
-            agent=plan.agent_name,
-            skills=plan.skills,
-            extra_args=plan.passthrough_args,
-            mcp_tools=plan.mcp_tools,
-            sandbox=plan.execution.permission_config.sandbox,
-            approval=plan.execution.permission_config.approval,
-            allowed_tools=plan.execution.allowed_tools,
-            disallowed_tools=plan.execution.disallowed_tools,
-            autocompact=plan.autocompact is not None,
-            effort=plan.effort,
-            session=SessionRequest(
-                continue_chat_id=plan.session.continue_chat_id,
-                requested_harness_session_id=plan.session.harness_session_id,
-                continue_fork=plan.session.continue_fork,
-                source_execution_cwd=plan.session.source_execution_cwd,
-                forked_from_chat_id=plan.session.forked_from_chat_id,
-                continue_harness=plan.session.continue_harness,
-                continue_source_tracked=plan.session.continue_source_tracked,
-                continue_source_ref=plan.session.continue_source_ref,
-            ),
-            context_from=plan.request.context_from if plan.request is not None else None,
-            work_id_hint=runtime_work_id,
-            agent_metadata={
-                "adhoc_agent_payload": plan.adhoc_agent_payload,
-                **(
-                    {"appended_system_prompt": plan.appended_system_prompt}
-                    if plan.appended_system_prompt
-                    else {}
-                ),
-            },
-        )
     if launch_runtime is None:
         launch_runtime = LaunchRuntime(
             launch_mode=FOREGROUND_LAUNCH_MODE,
@@ -824,11 +786,15 @@ async def execute_with_streaming(
         update={"report_output_path": report_path.as_posix()}
     )
 
-    resolved_harness_id = HarnessId(plan.harness_id)
+    resolved_harness_id = HarnessId(request.harness or "")
 
-    timeout_seconds = plan.execution.timeout_secs
-    max_retries = plan.execution.max_retries
-    retry_backoff_seconds = plan.execution.retry_backoff_secs
+    timeout_seconds = (
+        float(request.budget.timeout_secs)
+        if request.budget.timeout_secs is not None
+        else None
+    )
+    max_retries = max(request.retry.max_attempts - 1, 0)
+    retry_backoff_seconds = request.retry.backoff_secs
 
     launch_context = build_launch_context(
         spawn_id=str(run.spawn_id),
@@ -857,12 +823,12 @@ async def execute_with_streaming(
 
     if (
         harness.id == HarnessId.CLAUDE
-        and plan.session.harness_session_id
-        and plan.session.source_execution_cwd
+        and request.session.requested_harness_session_id
+        and request.session.source_execution_cwd
     ):
         ensure_claude_session_accessible(
-            source_session_id=plan.session.harness_session_id,
-            source_cwd=Path(plan.session.source_execution_cwd),
+            source_session_id=request.session.requested_harness_session_id,
+            source_cwd=Path(request.session.source_execution_cwd),
             child_cwd=child_cwd,
         )
     tracer: DebugTracer | None = None
@@ -914,7 +880,7 @@ async def execute_with_streaming(
     observed_harness_session_id: str | None = None
     if (
         materialized_session_id
-        and materialized_session_id != (plan.session.harness_session_id or "")
+        and materialized_session_id != (request.session.requested_harness_session_id or "")
     ):
         spawn_store.update_spawn(
             state_root,

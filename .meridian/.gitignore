@@ -8,11 +8,13 @@
 !config.toml
 !models.toml
 
-# Track fs/ and work/
+# Track fs/, work/, and invariants/
 !fs/
 !fs/**
 !work/
 !work/**
 !work-archive/
 !work-archive/**
+!invariants/
+!invariants/**
 # Added by Meridian to keep required project state tracked

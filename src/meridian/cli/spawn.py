@@ -15,6 +15,7 @@ from meridian.cli.spawn_inject import inject_message
 from meridian.cli.utils import missing_fork_session_error, parse_csv_list
 from meridian.lib.core.domain import SpawnStatus
 from meridian.lib.core.spawn_lifecycle import ACTIVE_SPAWN_STATUSES
+from meridian.lib.launch.request import SessionRequest
 from meridian.lib.ops.reference import resolve_session_reference
 from meridian.lib.ops.runtime import resolve_runtime_root_and_config, resolve_state_root
 from meridian.lib.ops.spawn.api import (
@@ -39,7 +40,6 @@ from meridian.lib.ops.spawn.api import (
     spawn_wait_sync,
 )
 from meridian.lib.ops.spawn.log import SpawnLogInput, spawn_log_sync
-from meridian.lib.ops.spawn.plan import SessionContinuation
 from meridian.lib.ops.spawn.query import resolve_spawn_reference
 from meridian.lib.state import spawn_store
 
@@ -351,8 +351,8 @@ def _spawn_create(
                 or (resolved_reference.harness if not requested_model else None),
                 passthrough_args=passthrough,
                 debug=debug,
-                session=SessionContinuation(
-                    harness_session_id=resolved_reference.harness_session_id,
+                session=SessionRequest(
+                    requested_harness_session_id=resolved_reference.harness_session_id,
                     continue_harness=resolved_reference.harness,
                     continue_source_tracked=resolved_reference.tracked,
                     continue_source_ref=resolved_fork_from,

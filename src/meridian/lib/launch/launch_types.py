@@ -12,6 +12,16 @@ if TYPE_CHECKING:
     from meridian.lib.safety.permissions import PermissionConfig
 
 
+@dataclass(frozen=True)
+class CompositionWarning:
+    """Surface a lossy adapter transformation via LaunchContext.warnings (I-13)."""
+
+    field: str
+    original: object
+    coerced: object
+    reason: str
+
+
 @runtime_checkable
 class PermissionResolver(Protocol):
     """Transport-neutral permission intent resolver."""

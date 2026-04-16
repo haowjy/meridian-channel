@@ -103,7 +103,7 @@ def test_spawn_continue_passes_resume_details_in_session_dto_fields(
     assert captured_input.background is False
 
     # Session DTO carries the canonical continuation payload.
-    assert captured_input.session.harness_session_id == "session-21"
+    assert captured_input.session.requested_harness_session_id == "session-21"
     assert captured_input.session.continue_harness == "codex"
     assert captured_input.session.continue_source_tracked is True
     assert captured_input.session.continue_source_ref == "p21"

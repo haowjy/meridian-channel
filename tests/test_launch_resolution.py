@@ -69,7 +69,7 @@ def test_spawn_prepare_derives_harness_from_model_before_default_harness(tmp_pat
     )
 
     assert prepared.model == "claude-sonnet-4"
-    assert prepared.harness_id == "claude"
+    assert prepared.harness == "claude"
 
 
 def test_resolve_policies_cli_model_override_can_replace_profile_harness(tmp_path: Path) -> None:
