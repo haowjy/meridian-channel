@@ -20,7 +20,7 @@ SpawnRequest + LaunchRuntime  →  build_launch_context()  →  LaunchContext
 
 This means all composition logic — policy resolution, permission pipeline, prompt assembly, argv construction, child env — lives in one place. Reviewers check I-1/I-2 to confirm no driving adapter bypasses the factory. See `.meridian/invariants/launch-composition-invariant.md` (13 invariants).
 
-## Three Driving Adapters
+## Four Driving Adapters
 
 ### 1. Primary CLI path
 
@@ -41,7 +41,7 @@ Inside `run_harness_process()` (`process.py`):
 - Finalizes inline (exit code + durable report check); no `enrich_finalize`
 - Calls `harness_adapter.observe_session_id()` once post-execution (I-4)
 
-Work-item attachment is resolved at policy level in `launch_primary()` before entering `process.py`. `process.py` is pure mechanism.
+Explicit work-item attachment (`--work` flag → `work_id_hint`) is resolved at policy level in `launch_primary()` and passed in via `LaunchContext`. However, `run_harness_process()` also handles work-item resolution for resumed sessions: after `session_scope()` yields the managed chat, it reads `preserved_work_id` from the resumed session (if no explicit work_id was given) and calls `update_session_work_id()` to attach it. The work_id is then passed to the runtime context rebuild and the spawn row.
 
 ### 2. Spawn subprocess path
 
@@ -49,22 +49,34 @@ Work-item attachment is resolved at policy level in `launch_primary()` before en
 
 - **Foreground** (`execute_spawn_blocking()`): creates spawn row, builds `LaunchContext` (`SPEC_ONLY`), calls `asyncio.run(execute_with_streaming(...))`
 - **Background** (`execute_spawn_background()`): creates spawn row, persists `BackgroundWorkerLaunchRequest` to disk, detaches subprocess — background worker then calls `_execute_existing_spawn()` which builds `LaunchContext` and calls `execute_with_streaming()`
-- **Prepare** (`ops/spawn/prepare.py:build_create_payload()`): uses factory with `SPAWN_PREPARE` surface and `dry_run=True` for prompt composition and preview argv; returns `resolved_request` with `cli_command` populated
+- **Prepare** (`ops/spawn/prepare.py:build_create_payload()`): uses factory with `SPAWN_PREPARE` surface, `dry_run=True`, and **`LaunchArgvIntent.REQUIRED`** — it needs a real argv to populate `cli_command` on the returned `resolved_request` for display/preview purposes.
 
-All three use `LaunchArgvIntent.SPEC_ONLY` — the streaming runner operates from typed spec, not subprocess argv.
+Foreground and background execution paths use `LaunchArgvIntent.SPEC_ONLY` — the streaming runner operates from the typed spec, not subprocess argv. Prepare is the exception: it builds argv for preview/display, not for execution.
 
 `streaming_runner.py:execute_with_streaming()` is the async subprocess executor for this path. It handles heartbeat, `mark_finalizing` CAS, `enrich_finalize()`, and `finalize_spawn()`.
 
-### 3. App/streaming HTTP path
+### 3. REST app path
 
-`lib/app/server.py` and `cli/streaming_serve.py` use the factory with `SPEC_ONLY` and default surface (`DIRECT`), then use `launch_ctx.spec` to start streaming connections via `SpawnManager`:
+`lib/app/server.py` uses the factory with `SPEC_ONLY`, then passes `launch_ctx.spec` to the spawn manager to start a streaming connection:
 
 ```
 SpawnRequest + LaunchRuntime(SPEC_ONLY) → build_launch_context() → LaunchContext
 spawn_manager.start_spawn(config, launch_ctx.spec)
 ```
 
-These paths do not use `process.py` or `streaming_runner.py`.
+Finalization is handled asynchronously by a background task waiting on `spawn_manager.wait_for_completion()`. This path does not use `process.py` or `streaming_runner.py`.
+
+### 4. CLI streaming-serve path
+
+`cli/streaming_serve.py` uses the factory with `SPEC_ONLY`, then calls `run_streaming_spawn()` directly from `streaming_runner.py` and finalizes inline:
+
+```
+SpawnRequest + LaunchRuntime(SPEC_ONLY) → build_launch_context() → LaunchContext
+run_streaming_spawn(config, spec=launch_ctx.spec, ...)
+signal_coordinator().mask_sigterm() → spawn_store.finalize_spawn(...)
+```
+
+Unlike the REST app path, this path creates the spawn row itself (via `spawn_store.start_spawn`), calls `run_streaming_spawn` (which invokes the full async subprocess executor including heartbeat, `mark_finalizing` CAS, and `enrich_finalize`), and finalizes synchronously in the `finally` block under `mask_sigterm()`. It does not use `process.py` or `SpawnManager`.
 
 ## Core Typed Seam
 
@@ -146,7 +158,7 @@ launch/
 
 **Two-phase context building in the primary path**: `launch_primary()` calls the factory once (`dry_run=True`) for preview/display. After the spawn row is created, `run_harness_process()` calls the factory again with real paths (`report_output_path`, actual `state_root`, `work_id`). The preview context is used for the initial argv display; the runtime context drives actual execution.
 
-**Policy vs mechanism split**: `launch_primary()` resolves work-item attachment (policy). `process.py` manages subprocesses, state writes, and artifact persistence without caring about work items or override layers (mechanism).
+**Policy vs mechanism split**: `launch_primary()` resolves explicit work-item attachment (policy: parses `--work` flag, calls `resolve_work_item`). `process.py` inherits the resolved `work_id` via `LaunchContext`, but also handles the preserved-work-id case for resumed sessions — reading the prior session's attached work id and calling `update_session_work_id()` inside `run_harness_process()` after `session_scope()` yields the managed chat. This is mechanism (querying state after session allocation), not policy override. The subprocess lifecycle, state writes, and artifact persistence in `process.py` are otherwise unaware of work-item or override layers.
 
 **Crash tolerance**: `streaming_runner.py` writes a `heartbeat` artifact every 30s for the full active window (`running` + `finalizing`). The reaper uses heartbeat recency as its primary liveness signal. `mark_finalizing` CAS (after drain/report work, immediately before `finalize_spawn`) lets the reaper distinguish `orphan_finalization` from `orphan_run`. Runner-origin terminal writes supersede reconciler-origin via the projection authority rule. See `state/spawns.md`.
 

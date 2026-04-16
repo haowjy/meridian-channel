@@ -12,7 +12,13 @@ Precondition: caller has already built a preview LaunchContext via build_launch_
 1. session_scope() [session_scope.py]
    - Allocates chat_id (c1, c2, ...)
    - Acquires session lock + lease file
-   - Resolves work-item attachment (explicit work_id or preserved from resumed session)
+
+1a. Work-item attachment (inside session_scope block, before start_spawn)
+   - Reads explicit work_id from preview_context.work_id (set upstream by launch_primary)
+   - For resumed sessions with no explicit work_id: reads preserved_work_id from the prior
+     session via get_session_active_work_id(state_root, resume_chat_id)
+   - Calls update_session_work_id() if attachment needed; passes attached_work_id to start_spawn
+     and to the runtime context rebuild
 
 2. spawn_store.start_spawn() → registers spawn as queued
    - runner_pid=os.getpid() recorded in start event
@@ -89,43 +95,54 @@ Output is written to `.meridian/spawns/<id>/output.jsonl`.
 
 ## Signal Handling
 
-`SignalForwarder` and `SignalCoordinator` in `signals.py`:
+### Primary path (`process.py`)
 
-- `SignalCoordinator` is a process-global singleton managing SIGINT/SIGTERM handlers
-- `SignalForwarder` registers with the coordinator for the duration of a subprocess run
-- On first SIGINT/SIGTERM: forwarded to child process group via `os.killpg(pgid, signum)`
-- On second signal: escalates to SIGKILL immediately
-- When no forwarders are registered, previous signal handlers are restored
+`process.py` does **not** use `SignalForwarder`. Its signal handling is limited to:
 
-`SignalCoordinator.mask_sigterm()` context manager suppresses SIGTERM during critical sections (e.g., final state writes).
+- **SIGWINCH forwarding**: `_install_winsize_forwarding()` installs a `signal.signal(SIGWINCH, ...)` handler that forwards terminal resize events to the PTY master (PTY mode only). Restored via the returned cleanup callable.
+- **SIGINT passthrough**: PTY mode forwards stdin (including Ctrl-C bytes) to the PTY master directly. Pipe mode catches `KeyboardInterrupt` and sends SIGINT to the child process.
+
+### Streaming path (`streaming_runner.py`)
+
+`execute_with_streaming()` uses `signal_coordinator().mask_sigterm()` from `signals.py` to suppress SIGTERM during the final state-write window (inside `finalize_spawn`). This is the same mechanism used by `cli/streaming_serve.py` for its inline finalization.
+
+`SignalCoordinator` and `SignalForwarder` in `signals.py` are available for coordinated SIGINT/SIGTERM forwarding to child process groups, but `process.py` does not use them — only the streaming path does.
 
 ## Timeout Handling
 
-`timeout.py` provides:
+Timeout helpers live in `src/meridian/lib/launch/runner_helpers.py` (not a separate `timeout.py`):
 
 ```python
 terminate_process(process, grace_seconds=DEFAULT_KILL_GRACE_SECONDS)
   # Sends SIGTERM, waits grace_seconds, then SIGKILL
 
-wait_for_process_exit(process, timeout_seconds)
-  # Returns exit code or raises SpawnTimeoutError
+wait_for_process_exit(process, timeout_seconds, kill_grace_seconds)
+  # Returns exit code or raises SpawnTimeoutError on timeout, then terminates
 
 wait_for_process_returncode(process, timeout_seconds)
-  # Non-raising variant; returns None on timeout
+  # Raises SpawnTimeoutError on timeout without terminating
 ```
 
-Default kill grace is `config.kill_grace_minutes * 60` (default: 2 seconds).  
-Guardrail timeout: `config.guardrail_timeout_minutes * 60` (default: 30 seconds).
+Default kill grace is `MeridianConfig().kill_grace_minutes * 60` (default: 2 seconds). These helpers are used by the streaming executor path (`streaming_runner.py`); the primary path (`process.py`) blocks directly on `process.wait()` or the PTY select loop.
 
 ## Artifact Outputs
 
-Each spawn writes to `.meridian/spawns/<id>/`:
-- `output.jsonl` — harness stdout (JSONL stream events or raw text)
-- `stderr.log` — harness stderr
-- `tokens.json` — token usage (extracted from output stream)
-- `report.md` — extracted report (written by `enrich_finalize()` on spawn path; checked by primary path for durable completion)
+Artifacts are split by executor — not all artifacts exist on all paths.
 
-Spawn directories contain durable artifacts plus the runner heartbeat file. Runtime coordination (PIDs, exit status, timestamps) lives in the `spawns.jsonl` event stream. The `heartbeat` file is touched every 30s by the runner and read by the reaper for liveness.
+**Primary path** (`process.py`, `.meridian/spawns/<id>/`):
+- `output.jsonl` — harness stdout captured during PTY/pipe capture (written only in capture path; absent in pure pipe mode when no output log path is configured)
+- `report.md` — read by `process.py` to detect durable completion; written by the harness itself (not by `enrich_finalize`), checked via `has_durable_report_completion()`
+
+**Streaming path** (`streaming_runner.py`, `.meridian/spawns/<id>/`):
+- `output.jsonl` — harness stdout (JSONL stream events)
+- `stderr.log` — harness stderr (captured by `capture_stderr_stream`)
+- `tokens.json` — token usage extracted from the output stream (written by `enrich_finalize`)
+- `report.md` — extracted report written by `enrich_finalize()` via `report.py`
+
+**All active spawns**:
+- `heartbeat` — touched every 30s by `streaming_runner.py`'s heartbeat task; used by the reaper for liveness. Not written by the primary path.
+
+Runtime coordination (PIDs, exit status, timestamps) lives in the `spawns.jsonl` event stream regardless of executor.
 
 ## Error Classification
 

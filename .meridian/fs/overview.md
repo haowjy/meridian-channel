@@ -36,7 +36,8 @@ Composition is centralized in `lib/launch/context.py:build_launch_context()`. Ev
 3. Dispatch splits by launch surface:
    - **Primary (CLI) path:** `lib/launch/__init__.py:launch_primary()` builds `SpawnRequest`+`LaunchRuntime`, calls factory for preview, then delegates to `lib/launch/process.py:run_harness_process()`. Inside `run_harness_process()`: creates session, registers spawn as queued (recording runner_pid), materializes fork if needed (after row exists), rebuilds `LaunchContext` with real paths, runs PTY/pipe subprocess, finalizes inline (no `enrich_finalize`), calls `observe_session_id()` once post-execution
    - **Spawn/subagent path:** `ops/spawn/execute.py` builds `SpawnRequest`+`LaunchRuntime(SPEC_ONLY)`, calls factory after spawn row and session exist, then calls `lib/launch/streaming_runner.py:execute_with_streaming()` — `process.py` is not involved
-   - **App/streaming HTTP path:** `lib/app/server.py` and `cli/streaming_serve.py` build `SpawnRequest`+`LaunchRuntime(SPEC_ONLY)`, call factory, use `launch_ctx.spec` to start streaming connections via `SpawnManager`
+   - **REST app path:** `lib/app/server.py` builds `SpawnRequest`+`LaunchRuntime(SPEC_ONLY)`, calls factory, uses `launch_ctx.spec` to start streaming connections via `SpawnManager`; finalization is background-async
+   - **CLI streaming-serve path:** `cli/streaming_serve.py` builds `SpawnRequest`+`LaunchRuntime(SPEC_ONLY)`, calls factory, then calls `run_streaming_spawn()` from `streaming_runner.py` directly; finalizes inline under `signal_coordinator().mask_sigterm()`
 4. `lib/launch/streaming_runner.py:execute_with_streaming()` — async subprocess executor for spawn/subagent path: stdout/stderr capture, report watchdog, stdin feeding, exit code mapping, heartbeat task, `mark_finalizing` CAS, writes exited event after process exits
 5. `lib/launch/extract.py` + `report.py` — `enrich_finalize()`: extract usage/session/report from harness output, persist report artifact (subagent path only; called by `streaming_runner.py`)
 
@@ -90,4 +91,4 @@ Composition is centralized in `lib/launch/context.py:build_launch_context()`. Ev
 | MCP | `meridian serve` (FastMCP) | stdio, JSON-RPC |
 | Direct | `DirectAdapter` in-process | Python API, no subprocess |
 
-The MCP surface exposes a subset of operations suited for programmatic agent use. Config operations and session/work management are CLI-only. Spawn create/continue are MCP-only (the CLI's bare `meridian spawn` is the default action, not a registered subcommand).
+The MCP surface exposes a subset of operations suited for programmatic agent use. Config operations and session/work management are CLI-only. Spawn create is available via the bare `meridian spawn` CLI command; continue is available via `meridian spawn --continue ...`. Both operations are also exposed as MCP tools.
