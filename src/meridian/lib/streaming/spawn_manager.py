@@ -164,6 +164,11 @@ class SpawnManager:
 
         task.add_done_callback(_drop_heartbeat)
 
+    async def start_heartbeat(self, spawn_id: SpawnId) -> None:
+        """Public heartbeat entry point for external runner call sites."""
+
+        await self._start_heartbeat(spawn_id)
+
     async def _stop_heartbeat(self, spawn_id: SpawnId) -> None:
         """Stop heartbeat ownership for one spawn; idempotent."""
 
@@ -174,6 +179,11 @@ class SpawnManager:
             task.cancel()
         with suppress(asyncio.CancelledError):
             await task
+
+    async def stop_heartbeat(self, spawn_id: SpawnId) -> None:
+        """Public heartbeat stop entry point for external runner call sites."""
+
+        await self._stop_heartbeat(spawn_id)
 
     async def start_spawn(
         self,

@@ -321,6 +321,14 @@ class SubprocessHarness(HarnessAdapter[ResolvedLaunchSpec], Protocol):
         started_at_local_iso: str | None,
     ) -> str | None: ...
 
+    def ensure_session_accessible(
+        self,
+        *,
+        source_session_id: str,
+        source_cwd: Path,
+        child_cwd: Path,
+    ) -> None: ...
+
     def observe_session_id(
         self,
         *,
@@ -445,6 +453,15 @@ class BaseHarnessAdapter(Generic[SpecT], ABC):
     ) -> str | None:
         _ = repo_root, started_at_epoch, started_at_local_iso
         return None
+
+    def ensure_session_accessible(
+        self,
+        *,
+        source_session_id: str,
+        source_cwd: Path,
+        child_cwd: Path,
+    ) -> None:
+        _ = source_session_id, source_cwd, child_cwd
 
     def observe_session_id(
         self,

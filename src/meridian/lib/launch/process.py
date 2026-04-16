@@ -16,7 +16,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, assert_never, cast
 
 from pydantic import BaseModel, ConfigDict
 
@@ -24,8 +24,7 @@ from meridian.lib.core.spawn_lifecycle import (
     has_durable_report_completion,
     resolve_execution_terminal_state,
 )
-from meridian.lib.core.types import HarnessId, SpawnId
-from meridian.lib.harness.claude_preflight import ensure_claude_session_accessible
+from meridian.lib.core.types import SpawnId
 from meridian.lib.harness.registry import HarnessRegistry
 from meridian.lib.ops.spawn.plan import PreparedSpawnPlan
 from meridian.lib.state import spawn_store
@@ -40,8 +39,7 @@ from meridian.lib.state.session_store import (
 )
 from meridian.lib.state.spawn_store import FOREGROUND_LAUNCH_MODE
 
-from .context import BypassLaunchContext, build_launch_context
-from .fork import materialize_fork
+from .context import BypassLaunchContext, NormalLaunchContext, build_launch_context
 from .plan import ResolvedPrimaryLaunchPlan
 from .session_ids import extract_latest_session_id
 from .session_scope import session_scope
@@ -78,22 +76,11 @@ def _primary_plan_env_overrides(plan: ResolvedPrimaryLaunchPlan) -> dict[str, st
 
 
 def _materialize_primary_plan(plan: ResolvedPrimaryLaunchPlan) -> tuple[str, PreparedSpawnPlan]:
-    run_params = materialize_fork(
-        adapter=plan.adapter,
-        run_params=plan.run_params,
-        dry_run=plan.request.dry_run,
-    )
     resolved_harness_session_id = (
-        (run_params.continue_harness_session_id or "").strip() or plan.seed_harness_session_id
+        (plan.prepared_plan.session.harness_session_id or "").strip()
+        or plan.seed_harness_session_id
     )
-    session = plan.prepared_plan.session.model_copy(
-        update={
-            "harness_session_id": run_params.continue_harness_session_id,
-            "continue_fork": run_params.continue_fork,
-        }
-    )
-    prepared_plan = plan.prepared_plan.model_copy(update={"session": session})
-    return resolved_harness_session_id, prepared_plan
+    return resolved_harness_session_id, plan.prepared_plan
 
 
 def _copy_primary_pty_output(
@@ -353,33 +340,36 @@ def run_harness_process(
                     runtime_spawn_id=str(primary_spawn_id),
                 )
                 child_cwd = repo_root
-                if isinstance(launch_context, BypassLaunchContext):
-                    command = launch_context.argv
-                    child_env = dict(launch_context.env)
-                    child_cwd = launch_context.cwd
-                else:
-                    command = tuple(
-                        plan.adapter.build_command(
-                            launch_context.run_params,
-                            launch_context.perms,
+                match launch_context:
+                    case BypassLaunchContext(argv=argv, env=env, cwd=cwd):
+                        command = argv
+                        child_env = dict(env)
+                        child_cwd = cwd
+                    case NormalLaunchContext() as normal_launch_context:
+                        command = tuple(
+                            plan.adapter.build_command(
+                                normal_launch_context.run_params,
+                                normal_launch_context.perms,
+                            )
                         )
-                    )
-                    child_env = dict(launch_context.env)
-                    child_cwd = launch_context.child_cwd
-                    materialized_session_id = (
-                        launch_context.spec.continue_session_id or ""
-                    ).strip()
-                    if (
-                        materialized_session_id
-                        and materialized_session_id != resolved_harness_session_id.strip()
-                    ):
-                        resolved_harness_session_id = materialized_session_id
-                        managed.record_harness_session_id(resolved_harness_session_id)
-                        spawn_store.update_spawn(
-                            plan.state_root,
-                            primary_spawn_id,
-                            harness_session_id=resolved_harness_session_id,
-                        )
+                        child_env = dict(normal_launch_context.env)
+                        child_cwd = normal_launch_context.child_cwd
+                        materialized_session_id = (
+                            normal_launch_context.spec.continue_session_id or ""
+                        ).strip()
+                        if (
+                            materialized_session_id
+                            and materialized_session_id != resolved_harness_session_id.strip()
+                        ):
+                            resolved_harness_session_id = materialized_session_id
+                            managed.record_harness_session_id(resolved_harness_session_id)
+                            spawn_store.update_spawn(
+                                plan.state_root,
+                                primary_spawn_id,
+                                harness_session_id=resolved_harness_session_id,
+                            )
+                    case _ as unexpected_launch_context:
+                        assert_never(unexpected_launch_context)
                 spawn_store.update_spawn(
                     plan.state_root,
                     primary_spawn_id,
@@ -388,12 +378,8 @@ def run_harness_process(
                 output_log_path = log_dir / _PRIMARY_OUTPUT_FILENAME
 
                 # Symlink source session for primary fork launches.
-                if (
-                    plan.adapter.id == HarnessId.CLAUDE
-                    and plan.source_execution_cwd
-                    and resolved_harness_session_id
-                ):
-                    ensure_claude_session_accessible(
+                if plan.source_execution_cwd and resolved_harness_session_id:
+                    plan.adapter.ensure_session_accessible(
                         source_session_id=resolved_harness_session_id,
                         source_cwd=Path(plan.source_execution_cwd),
                         child_cwd=child_cwd,

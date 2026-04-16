@@ -211,7 +211,7 @@ class FakeManager:
         self._connections[config.spawn_id] = connection
         return connection
 
-    async def _start_heartbeat(self, spawn_id: SpawnId) -> None:
+    async def start_heartbeat(self, spawn_id: SpawnId) -> None:
         self._heartbeat_calls.append(spawn_id)
 
     async def wait_for_completion(self, spawn_id: SpawnId) -> DrainOutcome | None:

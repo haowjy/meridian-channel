@@ -1,8 +1,6 @@
 """Resolved primary-launch planning for one harness process run."""
 
 import logging
-import os
-import shlex
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
@@ -323,80 +321,6 @@ def resolve_primary_launch_plan(
             update={
                 "passthrough_args": (*resolved_request.passthrough_args, *seed.session_args)
             },
-        )
-
-    override = os.getenv("MERIDIAN_HARNESS_COMMAND", "").strip()
-    if override:
-        if continue_fork:
-            raise ValueError(
-                "Cannot use --fork with MERIDIAN_HARNESS_COMMAND override. "
-                "Fork requires native harness adapter support."
-            )
-        command = tuple([*shlex.split(override), *command_request.passthrough_args])
-        if not command:
-            raise ValueError("MERIDIAN_HARNESS_COMMAND resolved to an empty command.")
-        run_params = _build_run_params(
-            prompt=resolved_prompt,
-            model=model,
-            effort=resolved.effort,
-            skills=resolved_skills.skill_names,
-            agent=profile_name or None,
-            adhoc_agent_payload=adhoc_agent_payload,
-            extra_args=command_request.passthrough_args,
-            repo_root=resolved_root.as_posix(),
-            mcp_tools=profile.mcp_tools if profile is not None else (),
-            continue_harness_session_id=continuation_harness_session_id,
-            continue_fork=continue_fork,
-        )
-        permission_config, permission_resolver = resolve_permission_pipeline(
-            sandbox=None,
-            approval="default",
-        )
-        prepared_plan = _build_prepared_plan(
-            model_id=policies.model,
-            harness_id=str(harness),
-            effort=resolved.effort,
-            prompt=resolved_prompt,
-            agent_name=profile_name or None,
-            skill_names=resolved_skills.skill_names,
-            skill_paths=skill_paths,
-            agent_path=profile_path,
-            mcp_tools=profile.mcp_tools if profile is not None else (),
-            passthrough_args=command_request.passthrough_args,
-            continuation_session_id=continuation_harness_session_id,
-            continue_harness=resolved_request.session.continue_harness,
-            continue_source_tracked=resolved_request.session.continue_source_tracked,
-            continue_source_ref=resolved_request.session.continue_source_ref,
-            continue_chat_id=resolved_request.session.continue_chat_id,
-            continue_fork=continue_fork,
-            forked_from_chat_id=resolved_request.session.forked_from_chat_id,
-            source_execution_cwd=source_execution_cwd,
-            permission_config=permission_config,
-            permission_resolver=permission_resolver,
-            allowed_tools=profile.tools if profile is not None else (),
-            disallowed_tools=profile.disallowed_tools if profile is not None else (),
-            adhoc_agent_payload=adhoc_agent_payload,
-            appended_system_prompt=None,
-            autocompact=resolved.autocompact,
-            cli_command=command,
-        )
-        return ResolvedPrimaryLaunchPlan(
-            repo_root=resolved_root,
-            state_root=state_root,
-            prompt=resolved_prompt,
-            request=resolved_request,
-            config=resolved_config,
-            adapter=adapter,
-            session_metadata=session_metadata,
-            prepared_plan=prepared_plan,
-            run_params=run_params,
-            permission_config=permission_config,
-            permission_resolver=permission_resolver,
-            command=command,
-            seed_harness_session_id=seed_harness_session_id,
-            command_request=command_request,
-            warning=policies.warning,
-            source_execution_cwd=source_execution_cwd,
         )
 
     passthrough_args, passthrough_prompt_fragments = normalize_system_prompt_passthrough_args(

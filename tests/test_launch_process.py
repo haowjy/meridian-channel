@@ -200,7 +200,9 @@ def test_run_harness_process_fork_uses_new_chat_and_materialized_session(
     assert captured["build_continue_session"] == "forked-session"
     assert captured["command_session"] == "forked-session"
     assert captured["chat_id_arg"] is None
-    assert captured["start_harness_session_id"] == "forked-session"
+    # Session scope starts with the source continuation ID and records the
+    # materialized forked ID after launch context composition.
+    assert captured["start_harness_session_id"] == "source-session"
     assert captured["forked_from_chat_id"] == "c7"
     assert outcome.chat_id == "c999"
     events = [

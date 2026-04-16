@@ -12,7 +12,7 @@ from collections.abc import Callable, Iterable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, assert_never, cast
 
 import structlog
 
@@ -25,7 +25,6 @@ from meridian.lib.core.spawn_lifecycle import (
 from meridian.lib.core.types import HarnessId, SpawnId
 from meridian.lib.harness.adapter import StreamEvent
 from meridian.lib.harness.bundle import get_harness_bundle
-from meridian.lib.harness.claude_preflight import ensure_claude_session_accessible
 from meridian.lib.harness.common import parse_json_stream_event, unwrap_event_payload
 from meridian.lib.harness.connections.base import ConnectionConfig, HarnessConnection
 from meridian.lib.harness.extractor import StreamingExtractor
@@ -39,7 +38,11 @@ from meridian.lib.launch.constants import (
     STDERR_FILENAME,
     TOKENS_FILENAME,
 )
-from meridian.lib.launch.context import NormalLaunchContext, build_launch_context
+from meridian.lib.launch.context import (
+    BypassLaunchContext,
+    NormalLaunchContext,
+    build_launch_context,
+)
 from meridian.lib.launch.errors import ErrorCategory, classify_error, should_retry
 from meridian.lib.launch.extract import (
     FinalizeExtraction,
@@ -424,7 +427,7 @@ async def _run_streaming_attempt(
 
     try:
         connection = await manager.start_spawn(config, run_spec)
-        await manager._start_heartbeat(run.spawn_id)  # pyright: ignore[reportPrivateUsage]
+        await manager.start_heartbeat(run.spawn_id)
         mark_spawn_running(
             state_root,
             run.spawn_id,
@@ -643,11 +646,15 @@ async def execute_with_streaming(
         report_output_path=report_path,
         runtime_work_id=runtime_work_id,
     )
-    if not isinstance(launch_context, NormalLaunchContext):
-        raise RuntimeError("Streaming spawn execution does not support harness command bypass.")
-    child_cwd = launch_context.child_cwd
-    spec = launch_context.spec
-    child_env = dict(launch_context.env)
+    match launch_context:
+        case NormalLaunchContext() as normal_launch_context:
+            child_cwd = normal_launch_context.child_cwd
+            spec = normal_launch_context.spec
+            child_env = dict(normal_launch_context.env)
+        case BypassLaunchContext():
+            raise RuntimeError("Streaming spawn execution does not support harness command bypass.")
+        case _ as unexpected_launch_context:
+            assert_never(unexpected_launch_context)
     harness_bundle = get_harness_bundle(resolved_harness_id)
 
     spawn_store.update_spawn(
@@ -656,12 +663,8 @@ async def execute_with_streaming(
         execution_cwd=str(child_cwd),
     )
 
-    if (
-        harness.id == HarnessId.CLAUDE
-        and plan.session.harness_session_id
-        and plan.session.source_execution_cwd
-    ):
-        ensure_claude_session_accessible(
+    if plan.session.harness_session_id and plan.session.source_execution_cwd:
+        harness.ensure_session_accessible(
             source_session_id=plan.session.harness_session_id,
             source_cwd=Path(plan.session.source_execution_cwd),
             child_cwd=child_cwd,

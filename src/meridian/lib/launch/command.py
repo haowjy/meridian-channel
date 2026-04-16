@@ -48,14 +48,6 @@ def build_launch_env(
     if autocompact_pct is not None:
         env_overrides["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"] = str(autocompact_pct)
 
-    # Preserve command override behavior: explicit command launch bypasses harness-specific
-    # permission env shaping and inherits the base environment only.
-    if os.getenv("MERIDIAN_HARNESS_COMMAND", "").strip():
-        return inherit_child_env(
-            base_env=os.environ,
-            env_overrides=env_overrides,
-        )
-
     if adapter is not None and run_params is not None and permission_config is not None:
         return build_harness_child_env(
             base_env=os.environ,

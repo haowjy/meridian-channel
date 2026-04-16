@@ -20,7 +20,10 @@ from meridian.lib.harness.adapter import (
     SpawnParams,
 )
 from meridian.lib.harness.bundle import HarnessBundle, register_harness_bundle
-from meridian.lib.harness.claude_preflight import build_claude_preflight_result
+from meridian.lib.harness.claude_preflight import (
+    build_claude_preflight_result,
+    ensure_claude_session_accessible,
+)
 from meridian.lib.harness.common import (
     extract_claude_report,
     extract_session_id_from_artifacts_with_patterns,
@@ -419,6 +422,19 @@ class ClaudeAdapter(BaseHarnessAdapter[ClaudeLaunchSpec]):
     ) -> str | None:
         _ = started_at_local_iso
         return _detect_primary_session_id(repo_root, started_at_epoch)
+
+    def ensure_session_accessible(
+        self,
+        *,
+        source_session_id: str,
+        source_cwd: Path,
+        child_cwd: Path,
+    ) -> None:
+        ensure_claude_session_accessible(
+            source_session_id=source_session_id,
+            source_cwd=source_cwd,
+            child_cwd=child_cwd,
+        )
 
     def resolve_session_file(self, *, repo_root: Path, session_id: str) -> Path | None:
         normalized_session_id = session_id.strip()

@@ -364,7 +364,7 @@ def create_app(
         if not isinstance(launch_context, NormalLaunchContext):
             raise http_exception_cls(
                 status_code=400,
-                detail="MERIDIAN_HARNESS_COMMAND override is not supported for app spawns.",
+                detail="Harness command override is not supported for app spawns.",
             )
         config = ConnectionConfig(
             spawn_id=spawn_id,
@@ -377,7 +377,7 @@ def create_app(
 
         try:
             connection = await spawn_manager.start_spawn(config, spec)
-            await spawn_manager._start_heartbeat(spawn_id)  # pyright: ignore[reportPrivateUsage]
+            await spawn_manager.start_heartbeat(spawn_id)
         except Exception as exc:
             spawn_store.finalize_spawn(
                 state_root,

@@ -40,5 +40,8 @@ jobs:
       - name: Test
         run: uv run pytest
 
+      - name: Check launch invariants
+        run: bash scripts/check-launch-invariants.sh
+
       - name: Build distributions
         run: uv build --no-sources
