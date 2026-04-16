@@ -768,7 +768,8 @@ spawn_app = App(
     name="spawn",
     help=(
         "Run subagents with a model and prompt.\n"
-        "Runs in background by default. Use --foreground to block."
+        "Runs in foreground by default; returns when the spawn reaches a terminal state. "
+        "Use --background to return immediately with the spawn ID."
     ),
     help_epilogue=(
         "Examples:\n\n"
