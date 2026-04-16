@@ -554,9 +554,23 @@ async def _execute_existing_spawn(
             ctx=resolved_context,
         )
         runtime_work_id = session_context.work_id or spawn_record.work_id
+        resolved_request = _spawn_request_from_prepared(
+            prepared=resolved_plan,
+            work_id_hint=runtime_work_id,
+        )
+        launch_runtime = runtime_request.model_copy(
+            update={
+                "launch_mode": BACKGROUND_LAUNCH_MODE,
+                "state_root": state_root.as_posix(),
+                "project_paths_repo_root": project_paths.repo_root.as_posix(),
+                "project_paths_execution_cwd": resolved_execution_cwd,
+            }
+        )
         return await execute_with_streaming(
             spawn,
             plan=resolved_plan,
+            request=resolved_request,
+            launch_runtime=launch_runtime,
             repo_root=project_paths.repo_root,
             state_root=state_root,
             artifacts=runtime.artifacts,
@@ -918,10 +932,24 @@ def execute_spawn_blocking(
             ctx=resolved_context,
         )
         runtime_work_id = session_context.work_id or context.work_id
+        launch_request = _spawn_request_from_prepared(
+            prepared=resolved_plan,
+            work_id_hint=runtime_work_id,
+        )
+        launch_runtime = LaunchRuntime(
+            launch_mode=FOREGROUND_LAUNCH_MODE,
+            debug=payload.debug,
+            harness_command_override=os.getenv("MERIDIAN_HARNESS_COMMAND", "").strip() or None,
+            state_root=context.state_root.as_posix(),
+            project_paths_repo_root=project_paths.repo_root.as_posix(),
+            project_paths_execution_cwd=project_paths.execution_cwd.as_posix(),
+        )
         exit_code = asyncio.run(
             execute_with_streaming(
                 spawn,
                 plan=resolved_plan,
+                request=launch_request,
+                launch_runtime=launch_runtime,
                 repo_root=project_paths.repo_root,
                 state_root=context.state_root,
                 artifacts=runtime.artifacts,

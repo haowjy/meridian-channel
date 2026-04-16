@@ -39,7 +39,7 @@ from meridian.lib.launch.constants import (
     STDERR_FILENAME,
     TOKENS_FILENAME,
 )
-from meridian.lib.launch.context import prepare_launch_context
+from meridian.lib.launch.context import build_launch_context
 from meridian.lib.launch.errors import ErrorCategory, classify_error, should_retry
 from meridian.lib.launch.extract import (
     FinalizeExtraction,
@@ -47,6 +47,7 @@ from meridian.lib.launch.extract import (
     reset_finalize_attempt_artifacts,
 )
 from meridian.lib.launch.launch_types import PermissionResolver, ResolvedLaunchSpec
+from meridian.lib.launch.request import LaunchRuntime, SessionRequest, SpawnRequest
 from meridian.lib.launch.runner_helpers import (
     append_budget_exceeded_event as _append_budget_exceeded_event,
 )
@@ -75,7 +76,7 @@ from meridian.lib.state import paths as state_paths
 from meridian.lib.state import spawn_store
 from meridian.lib.state.artifact_store import ArtifactStore, make_artifact_key
 from meridian.lib.state.atomic import atomic_write_bytes
-from meridian.lib.state.paths import resolve_project_paths, resolve_spawn_log_dir
+from meridian.lib.state.paths import resolve_spawn_log_dir
 from meridian.lib.state.spawn_store import (
     BACKGROUND_LAUNCH_MODE,
     FOREGROUND_LAUNCH_MODE,
@@ -745,6 +746,8 @@ async def execute_with_streaming(
     run: Spawn,
     *,
     plan: PreparedSpawnPlan,
+    request: SpawnRequest | None = None,
+    launch_runtime: LaunchRuntime | None = None,
     repo_root: Path,
     state_root: Path,
     artifacts: ArtifactStore,
@@ -767,33 +770,83 @@ async def execute_with_streaming(
 
     _ = stream_stderr_to_terminal
     execution_cwd = (cwd or Path.cwd()).resolve()
-    project_paths = resolve_project_paths(repo_root=repo_root, execution_cwd=execution_cwd)
     log_dir = resolve_spawn_log_dir(repo_root, run.spawn_id)
     output_log_path = log_dir / OUTPUT_FILENAME
     report_path = log_dir / REPORT_FILENAME
+    if request is None:
+        request = SpawnRequest(
+            prompt=run.prompt,
+            model=str(run.model),
+            harness=plan.harness_id,
+            agent=plan.agent_name,
+            skills=plan.skills,
+            extra_args=plan.passthrough_args,
+            mcp_tools=plan.mcp_tools,
+            sandbox=plan.execution.permission_config.sandbox,
+            approval=plan.execution.permission_config.approval,
+            allowed_tools=plan.execution.allowed_tools,
+            disallowed_tools=plan.execution.disallowed_tools,
+            autocompact=plan.autocompact is not None,
+            effort=plan.effort,
+            session=SessionRequest(
+                continue_chat_id=plan.session.continue_chat_id,
+                requested_harness_session_id=plan.session.harness_session_id,
+                continue_fork=plan.session.continue_fork,
+                source_execution_cwd=plan.session.source_execution_cwd,
+                forked_from_chat_id=plan.session.forked_from_chat_id,
+                continue_harness=plan.session.continue_harness,
+                continue_source_tracked=plan.session.continue_source_tracked,
+                continue_source_ref=plan.session.continue_source_ref,
+            ),
+            context_from=plan.request.context_from if plan.request is not None else None,
+            work_id_hint=runtime_work_id,
+            agent_metadata={
+                "adhoc_agent_payload": plan.adhoc_agent_payload,
+                **(
+                    {"appended_system_prompt": plan.appended_system_prompt}
+                    if plan.appended_system_prompt
+                    else {}
+                ),
+            },
+        )
+    if launch_runtime is None:
+        launch_runtime = LaunchRuntime(
+            launch_mode=FOREGROUND_LAUNCH_MODE,
+            debug=debug,
+            harness_command_override=os.getenv("MERIDIAN_HARNESS_COMMAND", "").strip() or None,
+            report_output_path=report_path.as_posix(),
+            state_root=state_root.as_posix(),
+            project_paths_repo_root=repo_root.as_posix(),
+            project_paths_execution_cwd=execution_cwd.as_posix(),
+        )
+
+    resolved_runtime = launch_runtime.model_copy(
+        update={"report_output_path": report_path.as_posix()}
+    )
 
     resolved_harness_id = HarnessId(plan.harness_id)
-    harness = registry.get_subprocess_harness(resolved_harness_id)
 
     timeout_seconds = plan.execution.timeout_secs
     max_retries = plan.execution.max_retries
     retry_backoff_seconds = plan.execution.retry_backoff_secs
 
-    launch_context = prepare_launch_context(
+    launch_context = build_launch_context(
         spawn_id=str(run.spawn_id),
-        run_prompt=run.prompt,
-        run_model=str(run.model) if str(run.model).strip() else None,
-        plan=plan,
-        harness=harness,
-        project_paths=project_paths,
-        state_root=state_root,
+        request=request,
+        runtime=resolved_runtime,
+        harness_registry=registry,
+        dry_run=False,
         plan_overrides=env_overrides or {},
-        report_output_path=report_path,
         runtime_work_id=runtime_work_id,
     )
     child_cwd = launch_context.child_cwd
     spec = launch_context.spec
     child_env = dict(launch_context.env)
+    harness = launch_context.harness
+    if launch_context.is_bypass:
+        raise RuntimeError(
+            "MERIDIAN_HARNESS_COMMAND bypass is not supported for streaming spawn execution."
+        )
     harness_bundle = get_harness_bundle(resolved_harness_id)
 
     spawn_store.update_spawn(

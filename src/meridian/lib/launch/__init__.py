@@ -11,6 +11,7 @@ if TYPE_CHECKING:
         build_launch_env,
         normalize_system_prompt_passthrough_args,
     )
+    from meridian.lib.launch.context import build_launch_context
     from meridian.lib.launch.plan import ResolvedPrimaryLaunchPlan, resolve_primary_launch_plan
     from meridian.lib.launch.policies import ResolvedPolicies
     from meridian.lib.launch.process import ProcessOutcome, run_harness_process
@@ -98,6 +99,7 @@ def __getattr__(name: str) -> Any:
         "SessionIntent": (".types", "SessionIntent"),
         "SessionMode": (".types", "SessionMode"),
         "build_launch_env": (".command", "build_launch_env"),
+        "build_launch_context": (".context", "build_launch_context"),
         "build_primary_prompt": (".types", "build_primary_prompt"),
         "load_agent_profile_with_fallback": (".resolve", "load_agent_profile_with_fallback"),
         "normalize_system_prompt_passthrough_args": (
@@ -133,6 +135,7 @@ __all__ = [
     "ResolvedSkills",
     "SessionIntent",
     "SessionMode",
+    "build_launch_context",
     "build_launch_env",
     "build_primary_prompt",
     "launch_primary",

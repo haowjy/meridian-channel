@@ -3,28 +3,40 @@
 from __future__ import annotations
 
 import os
+import shlex
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from meridian.lib.core.types import ModelId
+from meridian.lib.core.types import HarnessId, ModelId
 from meridian.lib.harness.adapter import SubprocessHarness
 from meridian.lib.launch.launch_types import (
     PermissionResolver,
     PreflightResult,
     ResolvedLaunchSpec,
 )
-from meridian.lib.state.paths import ProjectPaths, resolve_work_scratch_dir
+from meridian.lib.state.paths import (
+    ProjectPaths,
+    resolve_spawn_log_dir,
+    resolve_work_scratch_dir,
+)
 
-from .command import apply_workspace_projection, resolve_launch_spec_stage
+from .command import (
+    apply_workspace_projection,
+    build_launch_argv,
+    resolve_launch_spec_stage,
+)
 from .cwd import resolve_child_execution_cwd
-from .env import build_env_plan
+from .env import build_env_plan, inherit_child_env
 from .env import merge_env_overrides as _merge_env_overrides
+from .permissions import resolve_permission_pipeline
+from .request import LaunchRuntime, SessionRequest, SpawnRequest
 from .run_inputs import ResolvedRunInputs, build_resolved_run_inputs
 
 if TYPE_CHECKING:
+    from meridian.lib.harness.registry import HarnessRegistry
     from meridian.lib.ops.spawn.plan import PreparedSpawnPlan
 
 _ALLOWED_MERIDIAN_KEYS: frozenset[str] = frozenset(
@@ -125,6 +137,7 @@ class RuntimeContext:
 
 @dataclass(frozen=True)
 class LaunchContext:
+    argv: tuple[str, ...]
     run_params: ResolvedRunInputs
     perms: PermissionResolver
     spec: ResolvedLaunchSpec
@@ -132,6 +145,8 @@ class LaunchContext:
     env: Mapping[str, str]
     env_overrides: Mapping[str, str]
     report_output_path: Path
+    harness: SubprocessHarness
+    is_bypass: bool = False
 
 
 def merge_env_overrides(
@@ -149,21 +164,91 @@ def merge_env_overrides(
     )
 
 
-def prepare_launch_context(
+def _resolve_harness_id(
+    *,
+    request: SpawnRequest,
+    runtime: LaunchRuntime,
+) -> HarnessId:
+    explicit_harness = (request.harness or "").strip()
+    if explicit_harness:
+        try:
+            return HarnessId(explicit_harness)
+        except ValueError as exc:
+            raise ValueError(f"Unknown harness '{explicit_harness}'.") from exc
+
+    override = (runtime.harness_command_override or "").strip()
+    if override:
+        command_tokens = shlex.split(override)
+        if command_tokens:
+            command_name = Path(command_tokens[0]).name.strip().lower()
+            if command_name:
+                try:
+                    return HarnessId(command_name)
+                except ValueError as exc:
+                    raise ValueError(
+                        "LaunchRuntime.harness_command_override must start with a known harness "
+                        f"binary name; got '{command_name}'."
+                    ) from exc
+
+    raise ValueError("SpawnRequest.harness is required when no command override is present.")
+
+
+def _resolve_report_output_path(
+    *,
+    runtime: LaunchRuntime,
+    project_paths: ProjectPaths,
+    spawn_id: str,
+) -> Path:
+    report_path_raw = (runtime.report_output_path or "").strip()
+    if report_path_raw:
+        return Path(report_path_raw).expanduser()
+    return resolve_spawn_log_dir(project_paths.repo_root, spawn_id) / "report.md"
+
+
+def _build_bypass_context(
+    *,
+    override: str,
+    preflight: PreflightResult,
+    env_overrides: Mapping[str, str],
+) -> tuple[tuple[str, ...], dict[str, str]]:
+    command = tuple(
+        [*shlex.split(override), *preflight.expanded_passthrough_args]
+    )
+    if not command:
+        raise ValueError("MERIDIAN_HARNESS_COMMAND resolved to an empty command.")
+    env = inherit_child_env(
+        base_env=os.environ,
+        env_overrides=env_overrides,
+    )
+    return command, env
+
+
+def build_launch_context(
     *,
     spawn_id: str,
-    run_prompt: str,
-    run_model: str | None,
-    plan: PreparedSpawnPlan,
-    harness: SubprocessHarness,
-    project_paths: ProjectPaths,
-    state_root: Path,
-    plan_overrides: Mapping[str, str],
-    report_output_path: Path,
+    request: SpawnRequest,
+    runtime: LaunchRuntime,
+    harness_registry: HarnessRegistry,
+    dry_run: bool = False,
+    plan_overrides: Mapping[str, str] | None = None,
     runtime_work_id: str | None = None,
 ) -> LaunchContext:
-    """Build deterministic launch context for one runner attempt."""
+    """Build deterministic launch context from raw request/runtime inputs."""
 
+    _ = dry_run
+    project_paths = ProjectPaths(
+        repo_root=Path(runtime.project_paths_repo_root).expanduser().resolve(),
+        execution_cwd=Path(runtime.project_paths_execution_cwd).expanduser().resolve(),
+    )
+    state_root = Path(runtime.state_root).expanduser().resolve()
+    harness_id = _resolve_harness_id(request=request, runtime=runtime)
+    harness = harness_registry.get_subprocess_harness(harness_id)
+
+    report_output_path = _resolve_report_output_path(
+        runtime=runtime,
+        project_paths=project_paths,
+        spawn_id=spawn_id,
+    )
     execution_cwd = project_paths.execution_cwd
     child_cwd = resolve_child_execution_cwd(
         repo_root=execution_cwd,
@@ -177,52 +262,90 @@ def prepare_launch_context(
         preflight = harness.preflight(
             execution_cwd=execution_cwd,
             child_cwd=child_cwd,
-            passthrough_args=tuple(plan.passthrough_args),
+            passthrough_args=tuple(request.extra_args),
         )
     except AttributeError:
         preflight = PreflightResult.build(
-            expanded_passthrough_args=tuple(plan.passthrough_args)
+            expanded_passthrough_args=tuple(request.extra_args)
         )
 
+    resolved_agent_metadata = request.agent_metadata
+    model = (request.model or "").strip()
+    requested_harness_session_id = (
+        (request.session.requested_harness_session_id or "").strip() or None
+    )
+    appended_system_prompt = (
+        (resolved_agent_metadata.get("appended_system_prompt") or "").strip() or None
+    )
     run_params = build_resolved_run_inputs(
-        prompt=run_prompt,
-        model=ModelId(run_model) if run_model and run_model.strip() else None,
-        effort=plan.effort,
-        skills=plan.skills,
-        agent=plan.agent_name,
-        adhoc_agent_payload=plan.adhoc_agent_payload,
+        prompt=request.prompt,
+        model=ModelId(model) if model else None,
+        effort=request.effort,
+        skills=request.skills,
+        agent=request.agent,
+        adhoc_agent_payload=(resolved_agent_metadata.get("adhoc_agent_payload") or "").strip(),
         extra_args=preflight.expanded_passthrough_args,
         repo_root=child_cwd.as_posix(),
-        mcp_tools=plan.mcp_tools,
-        continue_harness_session_id=plan.session.harness_session_id,
-        continue_fork=plan.session.continue_fork,
+        mcp_tools=request.mcp_tools,
+        continue_harness_session_id=requested_harness_session_id,
+        continue_fork=request.session.continue_fork,
         report_output_path=report_output_path.as_posix(),
-        appended_system_prompt=plan.appended_system_prompt,
-        context_from_payload=plan.request.context_from if plan.request is not None else None,
+        appended_system_prompt=appended_system_prompt,
+        context_from_payload=request.context_from,
     )
 
-    perms = plan.execution.permission_resolver
+    permission_config, perms = resolve_permission_pipeline(
+        sandbox=request.sandbox,
+        allowed_tools=request.allowed_tools,
+        disallowed_tools=request.disallowed_tools,
+        approval=request.approval or "default",
+        unsafe_no_permissions=runtime.unsafe_no_permissions,
+    )
     spec = resolve_launch_spec_stage(adapter=harness, run_inputs=run_params, perms=perms)
     spec = apply_workspace_projection(adapter=harness, spec=spec)
+    override = (runtime.harness_command_override or "").strip()
+    argv: tuple[str, ...] = ()
+    if not override:
+        try:
+            argv = build_launch_argv(
+                adapter=harness,
+                run_inputs=run_params,
+                perms=perms,
+                projected_spec=spec,
+            )
+        except Exception:
+            launch_mode = runtime.launch_mode.strip().lower()
+            # Streaming executors launch from typed specs, not subprocess argv.
+            if launch_mode not in {"foreground", "background"}:
+                raise
 
     runtime_ctx = RuntimeContext.from_environment(
         project_paths=project_paths,
         state_root=state_root,
-    ).with_work_id(runtime_work_id)
+    ).with_work_id(runtime_work_id or request.work_id_hint)
     merged_overrides = merge_env_overrides(
-        plan_overrides=plan_overrides,
+        plan_overrides=plan_overrides or {},
         runtime_overrides=runtime_ctx.child_context(),
         preflight_overrides=preflight.extra_env,
     )
-    env = build_env_plan(
-        base_env=os.environ,
-        adapter=harness,
-        run_inputs=run_params,
-        permission_config=plan.execution.permission_config,
-        runtime_env_overrides=merged_overrides,
-    )
+    is_bypass = bool(override)
+    if is_bypass:
+        argv, env = _build_bypass_context(
+            override=override,
+            preflight=preflight,
+            env_overrides=merged_overrides,
+        )
+    else:
+        env = build_env_plan(
+            base_env=os.environ,
+            adapter=harness,
+            run_inputs=run_params,
+            permission_config=permission_config,
+            runtime_env_overrides=merged_overrides,
+        )
 
     return LaunchContext(
+        argv=argv,
         run_params=run_params,
         perms=perms,
         spec=spec,
@@ -230,12 +353,93 @@ def prepare_launch_context(
         env=MappingProxyType(env),
         env_overrides=MappingProxyType(merged_overrides),
         report_output_path=report_output_path,
+        harness=harness,
+        is_bypass=is_bypass,
+    )
+
+
+def prepare_launch_context(
+    *,
+    spawn_id: str,
+    run_prompt: str,
+    run_model: str | None,
+    plan: PreparedSpawnPlan,
+    harness: SubprocessHarness,
+    project_paths: ProjectPaths,
+    state_root: Path,
+    plan_overrides: Mapping[str, str],
+    report_output_path: Path,
+    runtime_work_id: str | None = None,
+) -> LaunchContext:
+    """Compatibility shim that bridges a prepared plan into the raw factory."""
+
+    from meridian.lib.harness.registry import HarnessRegistry
+
+    request = SpawnRequest(
+        prompt=run_prompt,
+        model=run_model,
+        harness=harness.id.value,
+        agent=plan.agent_name,
+        skills=plan.skills,
+        extra_args=plan.passthrough_args,
+        mcp_tools=plan.mcp_tools,
+        sandbox=plan.execution.permission_config.sandbox,
+        approval=plan.execution.permission_config.approval,
+        allowed_tools=plan.execution.allowed_tools,
+        disallowed_tools=plan.execution.disallowed_tools,
+        autocompact=plan.autocompact is not None,
+        effort=plan.effort,
+        session=SessionRequest(
+            continue_chat_id=plan.session.continue_chat_id,
+            requested_harness_session_id=plan.session.harness_session_id,
+            continue_fork=plan.session.continue_fork,
+            source_execution_cwd=plan.session.source_execution_cwd,
+            forked_from_chat_id=plan.session.forked_from_chat_id,
+            continue_harness=plan.session.continue_harness,
+            continue_source_tracked=plan.session.continue_source_tracked,
+            continue_source_ref=plan.session.continue_source_ref,
+        ),
+        context_from=plan.request.context_from if plan.request is not None else None,
+        work_id_hint=plan.request.work_id_hint if plan.request is not None else None,
+        agent_metadata={
+            "adhoc_agent_payload": plan.adhoc_agent_payload,
+            **(
+                {"appended_system_prompt": plan.appended_system_prompt}
+                if plan.appended_system_prompt
+                else {}
+            ),
+        },
+    )
+    runtime = LaunchRuntime(
+        launch_mode="child",
+        unsafe_no_permissions=(
+            plan.execution.permission_resolver.__class__.__name__
+            == "UnsafeNoOpPermissionResolver"
+        ),
+        debug=False,
+        harness_command_override=os.getenv("MERIDIAN_HARNESS_COMMAND", "").strip() or None,
+        report_output_path=report_output_path.as_posix(),
+        state_root=state_root.as_posix(),
+        project_paths_repo_root=project_paths.repo_root.as_posix(),
+        project_paths_execution_cwd=project_paths.execution_cwd.as_posix(),
+    )
+    harness_registry = HarnessRegistry()
+    harness_registry.register(harness)
+    return build_launch_context(
+        spawn_id=spawn_id,
+        request=request,
+        runtime=runtime,
+        harness_registry=harness_registry,
+        dry_run=False,
+        plan_overrides=plan_overrides,
+        runtime_work_id=runtime_work_id,
     )
 
 
 __all__ = [
     "LaunchContext",
     "RuntimeContext",
+    "build_launch_context",
     "merge_env_overrides",
     "prepare_launch_context",
 ]

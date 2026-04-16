@@ -21,9 +21,11 @@ from meridian.lib.launch import process
 from meridian.lib.launch.constants import DEFAULT_INFRA_EXIT_CODE
 from meridian.lib.launch.context import (
     LaunchContext,
+    build_launch_context,
     prepare_launch_context,
 )
 from meridian.lib.launch.plan import ResolvedPrimaryLaunchPlan
+from meridian.lib.launch.request import LaunchRuntime, SpawnRequest
 from meridian.lib.launch.types import LaunchRequest, PrimarySessionMetadata, SessionMode
 from meridian.lib.ops.spawn.plan import ExecutionPolicy, PreparedSpawnPlan, SessionContinuation
 from meridian.lib.safety.permissions import PermissionConfig, TieredPermissionResolver
@@ -251,6 +253,101 @@ def _build_context_run(plan: PreparedSpawnPlan, spawn_id: str = "p-ctx") -> Spaw
         model=ModelId(plan.model),
         status="queued",
     )
+
+
+def _build_spawn_request(plan: PreparedSpawnPlan) -> SpawnRequest:
+    return SpawnRequest(
+        prompt=plan.prompt,
+        model=plan.model,
+        harness=plan.harness_id,
+        agent=plan.agent_name,
+        skills=plan.skills,
+        extra_args=plan.passthrough_args,
+        mcp_tools=plan.mcp_tools,
+        sandbox=plan.execution.permission_config.sandbox,
+        approval=plan.execution.permission_config.approval,
+        allowed_tools=plan.execution.allowed_tools,
+        disallowed_tools=plan.execution.disallowed_tools,
+        effort=plan.effort,
+    )
+
+
+def _build_launch_runtime(
+    *,
+    tmp_path: Path,
+    override: str | None = None,
+) -> LaunchRuntime:
+    return LaunchRuntime(
+        launch_mode="foreground",
+        harness_command_override=override,
+        report_output_path=(tmp_path / "report.md").as_posix(),
+        state_root=(tmp_path / ".meridian").as_posix(),
+        project_paths_repo_root=tmp_path.as_posix(),
+        project_paths_execution_cwd=tmp_path.as_posix(),
+    )
+
+
+def test_build_launch_context_dry_run_runtime_share_same_argv_for_raw_request(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("MERIDIAN_HARNESS_COMMAND", raising=False)
+    plan = _build_context_plan()
+    request = _build_spawn_request(plan)
+    runtime = _build_launch_runtime(tmp_path=tmp_path)
+    registry = get_default_harness_registry()
+
+    runtime_ctx = build_launch_context(
+        spawn_id="p-ctx",
+        request=request,
+        runtime=runtime,
+        harness_registry=registry,
+        dry_run=False,
+    )
+    dry_run_ctx = build_launch_context(
+        spawn_id="p-ctx",
+        request=request,
+        runtime=runtime,
+        harness_registry=registry,
+        dry_run=True,
+    )
+
+    assert runtime_ctx.argv == dry_run_ctx.argv
+    assert runtime_ctx.is_bypass is False
+    assert dry_run_ctx.is_bypass is False
+
+
+def test_build_launch_context_bypass_command_owned_by_factory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("MERIDIAN_HARNESS_COMMAND", raising=False)
+    plan = _build_context_plan()
+    request = _build_spawn_request(
+        plan.model_copy(update={"passthrough_args": ("--json", "--verbose")})
+    )
+    runtime = _build_launch_runtime(tmp_path=tmp_path, override="codex exec")
+    registry = get_default_harness_registry()
+
+    runtime_ctx = build_launch_context(
+        spawn_id="p-ctx",
+        request=request,
+        runtime=runtime,
+        harness_registry=registry,
+        dry_run=False,
+    )
+    dry_run_ctx = build_launch_context(
+        spawn_id="p-ctx",
+        request=request,
+        runtime=runtime,
+        harness_registry=registry,
+        dry_run=True,
+    )
+
+    assert runtime_ctx.is_bypass is True
+    assert dry_run_ctx.is_bypass is True
+    assert runtime_ctx.argv == ("codex", "exec", "--json", "--verbose")
+    assert runtime_ctx.argv == dry_run_ctx.argv
 
 
 def test_prepare_launch_context_is_deterministic_and_immutable(
