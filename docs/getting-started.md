@@ -8,9 +8,7 @@ Meridian is a coordination layer — it needs at least one harness installed to 
 | ----------- | ------------------------------- | -------------------------------------------------------------------- |
 | Claude Code | `claude-*`, `sonnet*`, `opus*`  | [docs.anthropic.com](https://docs.anthropic.com/en/docs/claude-code) |
 | Codex CLI   | `gpt-*`, `codex*`, `o3*`, `o4*` | [github.com/openai/codex](https://github.com/openai/codex) |
-| OpenCode    | `opencode-*`, `gemini*`, contains `/` | [opencode.ai](https://opencode.ai) |
-
-Model IDs that match none of the above patterns fall back to Codex with a warning rather than routing to OpenCode.
+| OpenCode    | anything else                   | [opencode.ai](https://opencode.ai) |
 
 **Claude Code** is the primary session harness — it supports system prompt injection and interactive use. Codex and OpenCode work well as spawn targets for delegated tasks.
 

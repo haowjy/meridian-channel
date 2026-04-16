@@ -6,25 +6,20 @@ from typing import cast
 
 import pytest
 
-from meridian.lib.core.domain import Spawn
-from meridian.lib.core.types import HarnessId, ModelId, SpawnId
-from meridian.lib.harness.codex import CodexAdapter
+from meridian.lib.core.types import HarnessId, SpawnId
+from meridian.lib.harness.adapter import SpawnParams
 from meridian.lib.harness.connections.base import (
     ConnectionCapabilities,
     ConnectionConfig,
     HarnessEvent,
 )
-from meridian.lib.harness.registry import HarnessRegistry
 from meridian.lib.launch.signals import (
     SignalCoordinator,
     SignalForwarder,
     map_process_exit_code,
     signal_to_exit_code,
 )
-from meridian.lib.ops.spawn.plan import ExecutionPolicy, PreparedSpawnPlan, SessionContinuation
 from meridian.lib.safety.permissions import PermissionConfig, TieredPermissionResolver
-from meridian.lib.state import spawn_store
-from meridian.lib.state.artifact_store import LocalStore
 from meridian.lib.state.paths import resolve_state_paths
 from meridian.lib.streaming import spawn_manager as spawn_manager_module
 
@@ -35,10 +30,9 @@ async def test_streaming_runner_signal_cancel_invokes_send_cancel_once(
     tmp_path: Path,
 ) -> None:
     state_root = resolve_state_paths(tmp_path).root_dir
-    streaming_runner_module = importlib.import_module(
+    run_streaming_spawn = importlib.import_module(
         "meridian.lib.launch.streaming_runner"
-    )
-    execute_with_streaming = streaming_runner_module.execute_with_streaming
+    ).run_streaming_spawn
 
     class _FakeControlSocketServer:
         def __init__(self, spawn_id: str, socket_path: Path, manager: object) -> None:
@@ -133,57 +127,25 @@ async def test_streaming_runner_signal_cancel_invokes_send_cancel_once(
         _fake_install_signal_handlers,
     )
 
-    run = Spawn(
-        spawn_id=SpawnId("p-signal"),
-        prompt="hello",
-        model=ModelId("gpt-5.3-codex"),
-        status="queued",
-    )
-    plan = PreparedSpawnPlan(
-        model="gpt-5.3-codex",
-        harness_id=HarnessId.CODEX.value,
-        prompt="hello",
-        agent_name=None,
-        skills=(),
-        skill_paths=(),
-        reference_files=(),
-        template_vars={},
-        mcp_tools=(),
-        session_agent="",
-        session_agent_path="",
-        session=SessionContinuation(),
-        execution=ExecutionPolicy(
-            timeout_secs=None,
-            kill_grace_secs=30.0,
-            max_retries=0,
-            retry_backoff_secs=0.0,
-            permission_config=PermissionConfig(),
-            permission_resolver=TieredPermissionResolver(config=PermissionConfig()),
-            allowed_tools=(),
-        ),
-        cli_command=(),
-    )
-    registry = HarnessRegistry()
-    registry.register(CodexAdapter())
-    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
-
-    exit_code = await asyncio.wait_for(
-        execute_with_streaming(
-            run,
-            plan=plan,
-            repo_root=tmp_path,
+    outcome = await asyncio.wait_for(
+        run_streaming_spawn(
+            config=ConnectionConfig(
+                spawn_id=SpawnId("p-signal"),
+                harness_id=HarnessId.CODEX,
+                prompt="hello",
+                repo_root=tmp_path,
+                env_overrides={},
+            ),
+            params=SpawnParams(prompt="hello"),
+            perms=TieredPermissionResolver(config=PermissionConfig()),
             state_root=state_root,
-            artifacts=artifacts,
-            registry=registry,
-            cwd=tmp_path,
+            repo_root=tmp_path,
+            spawn_id=SpawnId("p-signal"),
         ),
         timeout=1.0,
     )
 
-    assert exit_code != 0
-    row = spawn_store.get_spawn(state_root, run.spawn_id)
-    assert row is not None
-    assert row.status == "cancelled"
+    assert outcome.status == "cancelled"
     assert _SignalDrivenConnection.send_cancel_calls == 1
 
 

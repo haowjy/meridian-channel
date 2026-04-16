@@ -1,6 +1,8 @@
 """Resolved primary-launch planning for one harness process run."""
 
 import logging
+import os
+import shlex
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
@@ -11,7 +13,6 @@ from meridian.lib.core.types import HarnessId, ModelId
 from meridian.lib.harness.adapter import SpawnParams, SubprocessHarness
 from meridian.lib.harness.registry import HarnessRegistry
 from meridian.lib.launch.launch_types import PermissionResolver
-from meridian.lib.ops.spawn.plan import ExecutionPolicy, PreparedSpawnPlan, SessionContinuation
 from meridian.lib.safety.permissions import (
     PermissionConfig,
     resolve_permission_pipeline,
@@ -47,7 +48,6 @@ class ResolvedPrimaryLaunchPlan(BaseModel):
     config: MeridianConfig
     adapter: SubprocessHarness
     session_metadata: PrimarySessionMetadata
-    prepared_plan: PreparedSpawnPlan
     run_params: SpawnParams
     permission_config: PermissionConfig
     permission_resolver: PermissionResolver | None = None
@@ -143,73 +143,6 @@ def _build_run_params(
         continue_fork=continue_fork,
         appended_system_prompt=appended_system_prompt,
         report_output_path=report_output_path,
-    )
-
-
-def _build_prepared_plan(
-    *,
-    model_id: str,
-    harness_id: str,
-    effort: str | None,
-    prompt: str,
-    agent_name: str | None,
-    skill_names: tuple[str, ...],
-    skill_paths: tuple[str, ...],
-    agent_path: str,
-    mcp_tools: tuple[str, ...],
-    passthrough_args: tuple[str, ...],
-    continuation_session_id: str | None,
-    continue_harness: str | None,
-    continue_source_tracked: bool,
-    continue_source_ref: str | None,
-    continue_chat_id: str | None,
-    continue_fork: bool,
-    forked_from_chat_id: str | None,
-    source_execution_cwd: str | None,
-    permission_config: PermissionConfig,
-    permission_resolver: PermissionResolver,
-    allowed_tools: tuple[str, ...],
-    disallowed_tools: tuple[str, ...],
-    adhoc_agent_payload: str,
-    appended_system_prompt: str | None,
-    autocompact: int | None,
-    cli_command: tuple[str, ...],
-) -> PreparedSpawnPlan:
-    return PreparedSpawnPlan(
-        model=model_id,
-        harness_id=harness_id,
-        effort=effort,
-        prompt=prompt,
-        agent_name=agent_name,
-        skills=skill_names,
-        skill_paths=skill_paths,
-        agent_path=agent_path,
-        reference_files=(),
-        template_vars={},
-        mcp_tools=mcp_tools,
-        session_agent=agent_name or "",
-        session_agent_path=agent_path,
-        session=SessionContinuation(
-            harness_session_id=continuation_session_id,
-            continue_harness=continue_harness,
-            continue_source_tracked=continue_source_tracked,
-            continue_source_ref=continue_source_ref,
-            continue_chat_id=continue_chat_id,
-            continue_fork=continue_fork,
-            forked_from_chat_id=forked_from_chat_id,
-            source_execution_cwd=source_execution_cwd,
-        ),
-        execution=ExecutionPolicy(
-            permission_config=permission_config,
-            permission_resolver=permission_resolver,
-            allowed_tools=allowed_tools,
-            disallowed_tools=disallowed_tools,
-        ),
-        adhoc_agent_payload=adhoc_agent_payload,
-        appended_system_prompt=appended_system_prompt,
-        autocompact=autocompact,
-        cli_command=cli_command,
-        passthrough_args=passthrough_args,
     )
 
 
@@ -323,6 +256,47 @@ def resolve_primary_launch_plan(
             },
         )
 
+    override = os.getenv("MERIDIAN_HARNESS_COMMAND", "").strip()
+    if override:
+        if continue_fork:
+            raise ValueError(
+                "Cannot use --fork with MERIDIAN_HARNESS_COMMAND override. "
+                "Fork requires native harness adapter support."
+            )
+        command = tuple([*shlex.split(override), *command_request.passthrough_args])
+        if not command:
+            raise ValueError("MERIDIAN_HARNESS_COMMAND resolved to an empty command.")
+        run_params = _build_run_params(
+            prompt=resolved_prompt,
+            model=model,
+            effort=resolved.effort,
+            skills=resolved_skills.skill_names,
+            agent=profile_name or None,
+            adhoc_agent_payload=adhoc_agent_payload,
+            extra_args=command_request.passthrough_args,
+            repo_root=resolved_root.as_posix(),
+            mcp_tools=profile.mcp_tools if profile is not None else (),
+            continue_harness_session_id=continuation_harness_session_id,
+            continue_fork=continue_fork,
+        )
+        return ResolvedPrimaryLaunchPlan(
+            repo_root=resolved_root,
+            state_root=state_root,
+            prompt=resolved_prompt,
+            request=resolved_request,
+            config=resolved_config,
+            adapter=adapter,
+            session_metadata=session_metadata,
+            run_params=run_params,
+            permission_config=PermissionConfig(),
+            permission_resolver=None,
+            command=command,
+            seed_harness_session_id=seed_harness_session_id,
+            command_request=command_request,
+            warning=policies.warning,
+            source_execution_cwd=source_execution_cwd,
+        )
+
     passthrough_args, passthrough_prompt_fragments = normalize_system_prompt_passthrough_args(
         command_request.passthrough_args
     )
@@ -381,34 +355,6 @@ def resolve_primary_launch_plan(
         appended_system_prompt=appended_system_prompt,
     )
     command = tuple(adapter.build_command(run_params, resolver))
-    prepared_plan = _build_prepared_plan(
-        model_id=policies.model,
-        harness_id=str(harness),
-        effort=resolved.effort,
-        prompt=appended_prompt,
-        agent_name=profile_name or None,
-        skill_names=resolved_skills.skill_names,
-        skill_paths=skill_paths,
-        agent_path=profile_path,
-        mcp_tools=profile.mcp_tools if profile is not None else (),
-        passthrough_args=passthrough_args,
-        continuation_session_id=continuation_harness_session_id,
-        continue_harness=resolved_request.session.continue_harness,
-        continue_source_tracked=resolved_request.session.continue_source_tracked,
-        continue_source_ref=resolved_request.session.continue_source_ref,
-        continue_chat_id=resolved_request.session.continue_chat_id,
-        continue_fork=continue_fork,
-        forked_from_chat_id=resolved_request.session.forked_from_chat_id,
-        source_execution_cwd=source_execution_cwd,
-        permission_config=permission_config,
-        permission_resolver=resolver,
-        allowed_tools=profile.tools if profile is not None else (),
-        disallowed_tools=profile.disallowed_tools if profile is not None else (),
-        adhoc_agent_payload=adhoc_agent_payload,
-        appended_system_prompt=appended_system_prompt,
-        autocompact=resolved.autocompact,
-        cli_command=command,
-    )
 
     return ResolvedPrimaryLaunchPlan(
         repo_root=resolved_root,
@@ -418,7 +364,6 @@ def resolve_primary_launch_plan(
         config=resolved_config,
         adapter=adapter,
         session_metadata=session_metadata,
-        prepared_plan=prepared_plan,
         run_params=run_params,
         permission_config=permission_config,
         permission_resolver=resolver,

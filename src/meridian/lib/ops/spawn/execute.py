@@ -26,7 +26,7 @@ from meridian.lib.launch.streaming_runner import execute_with_streaming
 from meridian.lib.ops.work_attachment import ensure_explicit_work_item
 from meridian.lib.safety.permissions import (
     PermissionConfig,
-    build_permission_resolver,
+    resolve_permission_pipeline,
 )
 from meridian.lib.state import spawn_store
 from meridian.lib.state.atomic import atomic_write_text
@@ -88,9 +88,9 @@ class BackgroundWorkerParams(BaseModel):
     skills: tuple[str, ...] = ()
     agent_name: str | None = None
     mcp_tools: tuple[str, ...] = ()
-    permission_config: PermissionConfig = Field(default_factory=PermissionConfig)
+    sandbox: str | None = None
+    approval: str = "default"
     allowed_tools: tuple[str, ...] = ()
-    disallowed_tools: tuple[str, ...] = ()
     passthrough_args: tuple[str, ...] = ()
     session: SessionContinuation = Field(default_factory=SessionContinuation)
     session_agent: str = ""
@@ -156,7 +156,7 @@ def _spawn_child_env(
 ) -> dict[str, str]:
     _ = spawn_id, work_id, state_root, ctx
     child_env: dict[str, str] = {}
-    # K5 boundary: RuntimeContext.child_context() in core/context.py is the sole
+    # K5 boundary: RuntimeContext.child_context() in launch/context.py is the sole
     # producer of MERIDIAN_* child overrides. Plan overrides stay non-MERIDIAN.
     if autocompact is not None:
         child_env["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"] = str(autocompact)
@@ -543,9 +543,9 @@ def execute_spawn_background(
             skills=prepared.skills,
             agent_name=prepared.agent_name,
             mcp_tools=prepared.mcp_tools,
-            permission_config=prepared.execution.permission_config,
+            sandbox=prepared.execution.permission_config.sandbox,
+            approval=prepared.execution.permission_config.approval,
             allowed_tools=prepared.execution.allowed_tools,
-            disallowed_tools=prepared.execution.disallowed_tools,
             passthrough_args=prepared.passthrough_args,
             session=prepared.session,
             session_agent=prepared.session_agent,
@@ -858,11 +858,10 @@ def _background_worker_main(
             )
             return 1
 
-        permission_config = params.permission_config
-        permission_resolver = build_permission_resolver(
+        permission_config, permission_resolver = resolve_permission_pipeline(
+            sandbox=params.sandbox,
             allowed_tools=params.allowed_tools,
-            disallowed_tools=params.disallowed_tools,
-            permission_config=permission_config,
+            approval=params.approval,
         )
         return asyncio.run(
             _execute_existing_spawn(

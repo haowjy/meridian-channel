@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import os
 import signal
 from itertools import pairwise
 from pathlib import Path
@@ -47,6 +48,7 @@ from meridian.lib.streaming import spawn_manager as spawn_manager_module
 
 streaming_runner_module = importlib.import_module("meridian.lib.launch.streaming_runner")
 execute_with_streaming = streaming_runner_module.execute_with_streaming
+run_streaming_spawn = streaming_runner_module.run_streaming_spawn
 
 
 def _fake_connection_class(_harness_id: HarnessId) -> type[_TurnCompletedThenCloseConnection]:
@@ -524,6 +526,114 @@ def _build_plan(
 
 
 @pytest.mark.asyncio
+async def test_run_streaming_spawn_finishes_after_turn_completed_when_stream_drains(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_root = resolve_state_paths(tmp_path).root_dir
+    monkeypatch.setattr(spawn_manager_module, "ControlSocketServer", _FakeControlSocketServer)
+    monkeypatch.setattr(
+        "meridian.lib.harness.connections.get_connection_class",
+        _fake_connection_class,
+    )
+
+    outcome = await asyncio.wait_for(
+        run_streaming_spawn(
+            config=ConnectionConfig(
+                spawn_id=SpawnId("p1"),
+                harness_id=HarnessId.CODEX,
+                prompt="hello",
+                repo_root=tmp_path,
+                env_overrides={},
+            ),
+            params=SpawnParams(prompt="hello"),
+            perms=TieredPermissionResolver(config=PermissionConfig()),
+            state_root=state_root,
+            repo_root=tmp_path,
+            spawn_id=SpawnId("p1"),
+        ),
+        timeout=1.0,
+    )
+
+    assert outcome.status == "succeeded"
+    assert outcome.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_run_streaming_spawn_threads_caller_permission_resolver_without_swapping(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_root = resolve_state_paths(tmp_path).root_dir
+    monkeypatch.setattr(spawn_manager_module, "ControlSocketServer", _FakeControlSocketServer)
+    monkeypatch.setattr(
+        "meridian.lib.harness.connections.get_connection_class",
+        _fake_codex_capture_spec_connection_class,
+    )
+    _CodexCaptureSpecThenIdleConnection.seen_spec = None
+    resolver = TieredPermissionResolver(
+        config=PermissionConfig(sandbox="read-only", approval="auto")
+    )
+
+    outcome = await asyncio.wait_for(
+        run_streaming_spawn(
+            config=ConnectionConfig(
+                spawn_id=SpawnId("p-resolver"),
+                harness_id=HarnessId.CODEX,
+                prompt="hello",
+                repo_root=tmp_path,
+                env_overrides={},
+            ),
+            params=SpawnParams(prompt="hello", model=ModelId("gpt-5.3-codex")),
+            perms=resolver,
+            state_root=state_root,
+            repo_root=tmp_path,
+            spawn_id=SpawnId("p-resolver"),
+        ),
+        timeout=1.0,
+    )
+
+    assert outcome.status == "succeeded"
+    observed_spec = _CodexCaptureSpecThenIdleConnection.seen_spec
+    assert isinstance(observed_spec, CodexLaunchSpec)
+    assert observed_spec.permission_resolver is resolver
+
+
+@pytest.mark.asyncio
+async def test_run_streaming_spawn_raises_structured_missing_binary_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_root = resolve_state_paths(tmp_path).root_dir
+    monkeypatch.setattr(spawn_manager_module, "ControlSocketServer", _FakeControlSocketServer)
+    monkeypatch.setattr(
+        "meridian.lib.harness.connections.get_connection_class",
+        lambda _harness_id: _MissingBinaryConnection,
+    )
+
+    with pytest.raises(HarnessBinaryNotFound) as exc_info:
+        await run_streaming_spawn(
+            config=ConnectionConfig(
+                spawn_id=SpawnId("p-missing"),
+                harness_id=HarnessId.CODEX,
+                prompt="hello",
+                repo_root=tmp_path,
+                env_overrides={},
+            ),
+            params=SpawnParams(prompt="hello"),
+            perms=TieredPermissionResolver(config=PermissionConfig()),
+            state_root=state_root,
+            repo_root=tmp_path,
+            spawn_id=SpawnId("p-missing"),
+        )
+
+    err = exc_info.value
+    assert err.harness_id == "codex"
+    assert err.binary_name == "codex"
+    assert err.searched_path == str(os.environ.get("PATH", ""))
+
+
+@pytest.mark.asyncio
 async def test_execute_with_streaming_succeeds_when_turn_completes_and_stream_drains(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -674,7 +784,7 @@ async def test_execute_with_streaming_waits_for_delayed_terminal_failure_after_d
                 return
             if terminal_event_future is None or terminal_event_future.done():
                 continue
-            terminal_outcome = streaming_runner_module.terminal_event_outcome(event)
+            terminal_outcome = streaming_runner_module._terminal_event_outcome(event)
             if terminal_outcome is None:
                 continue
             await asyncio.sleep(0.05)
@@ -769,7 +879,7 @@ async def test_execute_with_streaming_prefers_terminal_over_same_wakeup_signal(
                 return
             if terminal_event_future is None or terminal_event_future.done():
                 continue
-            terminal_outcome = streaming_runner_module.terminal_event_outcome(event)
+            terminal_outcome = streaming_runner_module._terminal_event_outcome(event)
             if terminal_outcome is None:
                 continue
             terminal_event_future.set_result(terminal_outcome)
@@ -891,7 +1001,7 @@ async def test_execute_with_streaming_signal_wins_without_spawn_terminal_event(
                 return
             if terminal_event_future is None or terminal_event_future.done():
                 continue
-            terminal_outcome = streaming_runner_module.terminal_event_outcome(event)
+            terminal_outcome = streaming_runner_module._terminal_event_outcome(event)
             if terminal_outcome is None:
                 continue
             # Keep terminal pending long enough for completion+signal to be observed first.
@@ -1042,6 +1152,40 @@ async def test_execute_with_streaming_codex_uses_adapter_resolved_launch_spec(
     assert observed_spec.report_output_path.endswith("/report.md")
 
 
+@pytest.mark.asyncio
+async def test_run_streaming_spawn_finishes_on_claude_result_without_connection_close(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_root = resolve_state_paths(tmp_path).root_dir
+    monkeypatch.setattr(spawn_manager_module, "ControlSocketServer", _FakeControlSocketServer)
+    monkeypatch.setattr(
+        "meridian.lib.harness.connections.get_connection_class",
+        _fake_claude_result_connection_class,
+    )
+
+    outcome = await asyncio.wait_for(
+        run_streaming_spawn(
+            config=ConnectionConfig(
+                spawn_id=SpawnId("p2"),
+                harness_id=HarnessId.CLAUDE,
+                prompt="hello",
+                repo_root=tmp_path,
+                env_overrides={},
+            ),
+            params=SpawnParams(prompt="hello"),
+            perms=TieredPermissionResolver(config=PermissionConfig()),
+            state_root=state_root,
+            repo_root=tmp_path,
+            spawn_id=SpawnId("p2"),
+        ),
+        timeout=1.0,
+    )
+
+    assert outcome.status == "succeeded"
+    assert outcome.exit_code == 0
+
+
 # TODO: Redesign this test — it depends on import-order side effects for
 # the global bundle registry (ClaudeAdapter import triggers registration),
 # and the assertion conflates the report.md-vs-result-event extraction
@@ -1096,14 +1240,45 @@ async def test_execute_with_streaming_codex_uses_adapter_resolved_launch_spec(
 
 
 @pytest.mark.asyncio
-async def test_execute_with_streaming_preserves_none_model_in_launch_spec(
+async def test_run_streaming_spawn_finishes_on_opencode_idle_without_connection_close(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state_root = resolve_state_paths(tmp_path).root_dir
-    artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
-    registry = HarnessRegistry()
-    registry.register(_DummyOpenCodeHarness())
+    monkeypatch.setattr(spawn_manager_module, "ControlSocketServer", _FakeControlSocketServer)
+    monkeypatch.setattr(
+        "meridian.lib.harness.connections.get_connection_class",
+        _fake_opencode_idle_connection_class,
+    )
+
+    outcome = await asyncio.wait_for(
+        run_streaming_spawn(
+            config=ConnectionConfig(
+                spawn_id=SpawnId("p3"),
+                harness_id=HarnessId.OPENCODE,
+                prompt="hello",
+                repo_root=tmp_path,
+                env_overrides={},
+            ),
+            params=SpawnParams(prompt="hello"),
+            perms=TieredPermissionResolver(config=PermissionConfig()),
+            state_root=state_root,
+            repo_root=tmp_path,
+            spawn_id=SpawnId("p3"),
+        ),
+        timeout=1.0,
+    )
+
+    assert outcome.status == "succeeded"
+    assert outcome.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_run_streaming_spawn_preserves_none_model_in_launch_spec(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_root = resolve_state_paths(tmp_path).root_dir
     monkeypatch.setattr(spawn_manager_module, "ControlSocketServer", _FakeControlSocketServer)
     monkeypatch.setattr(
         "meridian.lib.harness.connections.get_connection_class",
@@ -1111,26 +1286,26 @@ async def test_execute_with_streaming_preserves_none_model_in_launch_spec(
     )
     _OpenCodeCaptureSpecThenIdleConnection.seen_spec = None
 
-    run = Spawn(
-        spawn_id=SpawnId("p4"),
-        prompt="hello",
-        model=ModelId(""),
-        status="queued",
-    )
-    exit_code = await asyncio.wait_for(
-        execute_with_streaming(
-            run,
-            plan=_build_plan(HarnessId.OPENCODE, model=""),
-            repo_root=tmp_path,
+    outcome = await asyncio.wait_for(
+        run_streaming_spawn(
+            config=ConnectionConfig(
+                spawn_id=SpawnId("p4"),
+                harness_id=HarnessId.OPENCODE,
+                prompt="hello",
+                repo_root=tmp_path,
+                env_overrides={},
+            ),
+            params=SpawnParams(prompt="hello", model=None),
+            perms=TieredPermissionResolver(config=PermissionConfig()),
             state_root=state_root,
-            artifacts=artifacts,
-            registry=registry,
-            cwd=tmp_path,
+            repo_root=tmp_path,
+            spawn_id=SpawnId("p4"),
         ),
         timeout=1.0,
     )
 
-    assert exit_code == 0
+    assert outcome.status == "succeeded"
+    assert outcome.exit_code == 0
     observed_spec = _OpenCodeCaptureSpecThenIdleConnection.seen_spec
     assert observed_spec is not None
     assert observed_spec.model is None
@@ -1275,7 +1450,7 @@ async def test_execute_with_streaming_starts_and_ticks_runner_heartbeat(
                 return
             if terminal_event_future is None or terminal_event_future.done():
                 continue
-            terminal_outcome = streaming_runner_module.terminal_event_outcome(event)
+            terminal_outcome = streaming_runner_module._terminal_event_outcome(event)
             if terminal_outcome is None:
                 continue
             await asyncio.sleep(0.07)

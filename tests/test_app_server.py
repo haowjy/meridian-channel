@@ -211,7 +211,7 @@ class FakeManager:
         self._connections[config.spawn_id] = connection
         return connection
 
-    async def start_heartbeat(self, spawn_id: SpawnId) -> None:
+    async def _start_heartbeat(self, spawn_id: SpawnId) -> None:
         self._heartbeat_calls.append(spawn_id)
 
     async def wait_for_completion(self, spawn_id: SpawnId) -> DrainOutcome | None:
@@ -459,19 +459,10 @@ async def test_app_server_threads_permission_resolver_into_streaming_spec(
     class _CaptureAdapter:
         def __init__(self) -> None:
             self.seen_resolver: object | None = None
-            self.id = HarnessId.CODEX
 
         def resolve_launch_spec(self, run: SpawnParams, perms: object) -> ResolvedLaunchSpec:
             self.seen_resolver = perms
             return ResolvedLaunchSpec(prompt=run.prompt, permission_resolver=cast("Any", perms))
-
-        def env_overrides(self, config: object) -> dict[str, str]:
-            _ = config
-            return {}
-
-        def mcp_config(self, run: SpawnParams) -> None:
-            _ = run
-            return None
 
     class _CaptureRegistry:
         def __init__(self, adapter: _CaptureAdapter) -> None:

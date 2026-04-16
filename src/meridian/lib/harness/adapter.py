@@ -6,7 +6,7 @@ import logging
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Generic, Literal, Protocol, TypeVar, cast, runtime_checkable
+from typing import Any, Generic, Literal, Protocol, TypeVar, cast, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -25,9 +25,6 @@ from meridian.lib.safety.permissions import PermissionConfig
 
 AdapterSpecT = TypeVar("AdapterSpecT", bound=ResolvedLaunchSpec, covariant=True)
 logger = logging.getLogger(__name__)
-
-if TYPE_CHECKING:
-    from meridian.lib.launch.context import LaunchOutcome, NormalLaunchContext
 
 
 def _empty_metadata() -> dict[str, object]:
@@ -145,21 +142,6 @@ class RunPromptPolicy(BaseModel):
     include_agent_body: bool = True
     include_skills: bool = True
     skill_injection_mode: Literal["none", "append-system-prompt"] = "none"
-
-
-class SpawnRequest(BaseModel):
-    """User-facing arguments for requesting a spawn."""
-
-    model_config = ConfigDict(frozen=True)
-
-    prompt: str
-    model: ModelId | None = None
-    effort: str | None = None
-    skills: tuple[str, ...] = ()
-    agent: str | None = None
-    extra_args: tuple[str, ...] = ()
-    interactive: bool = False
-    mcp_tools: tuple[str, ...] = ()
 
 
 class SpawnParams(BaseModel):
@@ -280,8 +262,6 @@ class SubprocessHarness(HarnessAdapter[ResolvedLaunchSpec], Protocol):
 
     def build_command(self, run: SpawnParams, perms: PermissionResolver) -> list[str]: ...
 
-    def fork_session(self, source_session_id: str) -> str: ...
-
     def mcp_config(self, run: SpawnParams) -> McpConfig | None: ...
 
     def env_overrides(self, config: PermissionConfig) -> dict[str, str]: ...
@@ -319,21 +299,6 @@ class SubprocessHarness(HarnessAdapter[ResolvedLaunchSpec], Protocol):
         repo_root: Path,
         started_at_epoch: float,
         started_at_local_iso: str | None,
-    ) -> str | None: ...
-
-    def ensure_session_accessible(
-        self,
-        *,
-        source_session_id: str,
-        source_cwd: Path,
-        child_cwd: Path,
-    ) -> None: ...
-
-    def observe_session_id(
-        self,
-        *,
-        launch_context: NormalLaunchContext,
-        launch_outcome: LaunchOutcome,
     ) -> str | None: ...
 
     def owns_untracked_session(self, *, repo_root: Path, session_ref: str) -> bool:
@@ -452,24 +417,6 @@ class BaseHarnessAdapter(Generic[SpecT], ABC):
         started_at_local_iso: str | None,
     ) -> str | None:
         _ = repo_root, started_at_epoch, started_at_local_iso
-        return None
-
-    def ensure_session_accessible(
-        self,
-        *,
-        source_session_id: str,
-        source_cwd: Path,
-        child_cwd: Path,
-    ) -> None:
-        _ = source_session_id, source_cwd, child_cwd
-
-    def observe_session_id(
-        self,
-        *,
-        launch_context: NormalLaunchContext,
-        launch_outcome: LaunchOutcome,
-    ) -> str | None:
-        _ = launch_context, launch_outcome
         return None
 
     def mcp_config(self, run: SpawnParams) -> McpConfig | None:

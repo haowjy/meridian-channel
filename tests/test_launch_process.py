@@ -21,7 +21,7 @@ from meridian.lib.launch import process
 from meridian.lib.launch.constants import DEFAULT_INFRA_EXIT_CODE
 from meridian.lib.launch.context import (
     LaunchContext,
-    build_launch_context,
+    prepare_launch_context,
 )
 from meridian.lib.launch.plan import ResolvedPrimaryLaunchPlan
 from meridian.lib.launch.types import LaunchRequest, PrimarySessionMetadata, SessionMode
@@ -124,14 +124,6 @@ def test_run_harness_process_fork_uses_new_chat_and_materialized_session(
             skills=(),
             skill_paths=(),
         ),
-        prepared_plan=_build_context_plan("fork prompt").model_copy(
-            update={
-                "session": SessionContinuation(
-                    harness_session_id="source-session",
-                    continue_fork=True,
-                )
-            }
-        ),
         run_params=SpawnParams(
             prompt="fork prompt",
             model=ModelId("gpt-5.4"),
@@ -156,6 +148,10 @@ def test_run_harness_process_fork_uses_new_chat_and_materialized_session(
     def fake_fork_session(source_session_id: str) -> str:
         captured["fork_source_session"] = source_session_id
         return "forked-session"
+
+    def fake_build_launch_env(*args: object, **kwargs: object) -> dict[str, str]:
+        _ = args, kwargs
+        return {}
 
     def fake_run_primary_process_with_capture(**kwargs: object) -> tuple[int, int]:
         captured["command_session"] = tuple(kwargs["command"])[2]
@@ -184,6 +180,7 @@ def test_run_harness_process_fork_uses_new_chat_and_materialized_session(
 
     monkeypatch.setattr(codex_adapter, "build_command", fake_build_command)
     monkeypatch.setattr(codex_adapter, "fork_session", fake_fork_session)
+    monkeypatch.setattr(process, "build_launch_env", fake_build_launch_env)
     monkeypatch.setattr(
         process,
         "_run_primary_process_with_capture",
@@ -200,9 +197,7 @@ def test_run_harness_process_fork_uses_new_chat_and_materialized_session(
     assert captured["build_continue_session"] == "forked-session"
     assert captured["command_session"] == "forked-session"
     assert captured["chat_id_arg"] is None
-    # Session scope starts with the source continuation ID and records the
-    # materialized forked ID after launch context composition.
-    assert captured["start_harness_session_id"] == "source-session"
+    assert captured["start_harness_session_id"] == "forked-session"
     assert captured["forked_from_chat_id"] == "c7"
     assert outcome.chat_id == "c999"
     events = [
@@ -257,7 +252,7 @@ def _build_context_run(plan: PreparedSpawnPlan, spawn_id: str = "p-ctx") -> Spaw
     )
 
 
-def test_build_launch_context_is_deterministic_and_immutable(
+def test_prepare_launch_context_is_deterministic_and_immutable(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -271,7 +266,7 @@ def test_build_launch_context_is_deterministic_and_immutable(
     report_path = tmp_path / "report.md"
     plan_overrides = {"CUSTOM_TOOL_HOME": "/tmp/tool"}
 
-    ctx_a = build_launch_context(
+    ctx_a = prepare_launch_context(
         spawn_id="p-ctx",
         run_prompt=plan.prompt,
         run_model=plan.model,
@@ -282,7 +277,7 @@ def test_build_launch_context_is_deterministic_and_immutable(
         plan_overrides=plan_overrides,
         report_output_path=report_path,
     )
-    ctx_b = build_launch_context(
+    ctx_b = prepare_launch_context(
         spawn_id="p-ctx",
         run_prompt=plan.prompt,
         run_model=plan.model,
@@ -311,7 +306,7 @@ def test_build_launch_context_is_deterministic_and_immutable(
         ctx_a.env_overrides["NEW_KEY"] = "value"  # type: ignore[index]
 
 
-def test_build_launch_context_changes_deterministic_tuple_when_inputs_change(
+def test_prepare_launch_context_changes_deterministic_tuple_when_inputs_change(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -323,12 +318,13 @@ def test_build_launch_context_changes_deterministic_tuple_when_inputs_change(
         update={
             "session": SessionContinuation(
                 harness_session_id="session-123",
+                continue_fork=True,
             )
         }
     )
     report_path = tmp_path / "report.md"
 
-    base_ctx = build_launch_context(
+    base_ctx = prepare_launch_context(
         spawn_id="p-ctx",
         run_prompt=base_plan.prompt,
         run_model=base_plan.model,
@@ -339,7 +335,7 @@ def test_build_launch_context_changes_deterministic_tuple_when_inputs_change(
         plan_overrides={},
         report_output_path=report_path,
     )
-    fork_ctx = build_launch_context(
+    fork_ctx = prepare_launch_context(
         spawn_id="p-ctx",
         run_prompt=fork_plan.prompt,
         run_model=fork_plan.model,
@@ -354,7 +350,7 @@ def test_build_launch_context_changes_deterministic_tuple_when_inputs_change(
     assert _deterministic_launch_tuple(base_ctx) != _deterministic_launch_tuple(fork_ctx)
 
 
-def test_build_launch_context_runtime_work_id_override_sets_work_env(
+def test_prepare_launch_context_runtime_work_id_override_sets_work_env(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -364,7 +360,7 @@ def test_build_launch_context_runtime_work_id_override_sets_work_env(
     adapter = CodexAdapter()
     plan = _build_context_plan()
     state_root = tmp_path / ".meridian"
-    ctx = build_launch_context(
+    ctx = prepare_launch_context(
         spawn_id="p-ctx",
         run_prompt=plan.prompt,
         run_model=plan.model,

@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import os
-import shlex
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from meridian.lib.core.context import RuntimeContext
 from meridian.lib.core.types import ModelId
 from meridian.lib.harness.adapter import SpawnParams, SubprocessHarness
 from meridian.lib.launch.launch_types import (
@@ -18,20 +16,111 @@ from meridian.lib.launch.launch_types import (
     PreflightResult,
     ResolvedLaunchSpec,
 )
+from meridian.lib.state.paths import resolve_work_scratch_dir
 
 from .cwd import resolve_child_execution_cwd
-from .env import build_harness_child_env, inherit_child_env
+from .env import build_harness_child_env
 from .env import merge_env_overrides as _merge_env_overrides
-from .fork import materialize_fork
 
 if TYPE_CHECKING:
     from meridian.lib.ops.spawn.plan import PreparedSpawnPlan
 
+_ALLOWED_MERIDIAN_KEYS: frozenset[str] = frozenset(
+    {
+        "MERIDIAN_REPO_ROOT",
+        "MERIDIAN_STATE_ROOT",
+        "MERIDIAN_DEPTH",
+        "MERIDIAN_CHAT_ID",
+        "MERIDIAN_FS_DIR",
+        "MERIDIAN_WORK_ID",
+        "MERIDIAN_WORK_DIR",
+    }
+)
+
 
 @dataclass(frozen=True)
-class NormalLaunchContext:
-    """Complete resolved launch context for one harness run."""
+class RuntimeContext:
+    """Sole producer for child `MERIDIAN_*` environment overrides."""
 
+    repo_root: Path
+    state_root: Path
+    parent_chat_id: str | None
+    parent_depth: int
+    fs_dir: Path | None
+    work_id: str | None
+    work_dir: Path | None
+
+    @classmethod
+    def from_environment(
+        cls,
+        *,
+        repo_root: Path,
+        state_root: Path,
+    ) -> RuntimeContext:
+        parent_chat_id = os.getenv("MERIDIAN_CHAT_ID", "").strip() or None
+        parent_depth_raw = os.getenv("MERIDIAN_DEPTH", "0").strip()
+        parent_depth = 0
+        try:
+            parent_depth = max(0, int(parent_depth_raw))
+        except (TypeError, ValueError):
+            parent_depth = 0
+
+        fs_dir_raw = os.getenv("MERIDIAN_FS_DIR", "").strip()
+        work_id_raw = os.getenv("MERIDIAN_WORK_ID", "").strip()
+        work_dir_raw = os.getenv("MERIDIAN_WORK_DIR", "").strip()
+
+        return cls(
+            repo_root=repo_root.resolve(),
+            state_root=state_root.resolve(),
+            parent_chat_id=parent_chat_id,
+            parent_depth=parent_depth,
+            fs_dir=Path(fs_dir_raw) if fs_dir_raw else None,
+            work_id=work_id_raw or None,
+            work_dir=Path(work_dir_raw) if work_dir_raw else None,
+        )
+
+    def with_work_id(self, work_id: str | None) -> RuntimeContext:
+        normalized = (work_id or "").strip()
+        if not normalized:
+            return self
+        return RuntimeContext(
+            repo_root=self.repo_root,
+            state_root=self.state_root,
+            parent_chat_id=self.parent_chat_id,
+            parent_depth=self.parent_depth,
+            fs_dir=self.fs_dir,
+            work_id=normalized,
+            work_dir=resolve_work_scratch_dir(self.state_root, normalized),
+        )
+
+    def child_context(self) -> dict[str, str]:
+        overrides: dict[str, str] = {
+            "MERIDIAN_REPO_ROOT": self.repo_root.as_posix(),
+            "MERIDIAN_STATE_ROOT": self.state_root.as_posix(),
+            "MERIDIAN_DEPTH": str(self.parent_depth + 1),
+        }
+        if self.parent_chat_id:
+            overrides["MERIDIAN_CHAT_ID"] = self.parent_chat_id
+        if self.fs_dir is not None:
+            overrides["MERIDIAN_FS_DIR"] = self.fs_dir.as_posix()
+        if self.work_id:
+            overrides["MERIDIAN_WORK_ID"] = self.work_id
+        if self.work_dir is not None:
+            overrides["MERIDIAN_WORK_DIR"] = self.work_dir.as_posix()
+        elif self.work_id:
+            overrides["MERIDIAN_WORK_DIR"] = resolve_work_scratch_dir(
+                self.state_root,
+                self.work_id,
+            ).as_posix()
+
+        if not set(overrides).issubset(_ALLOWED_MERIDIAN_KEYS):
+            missing = sorted(set(overrides) - _ALLOWED_MERIDIAN_KEYS)
+            raise RuntimeError(f"RuntimeContext.child_context drifted keys: {missing}")
+        return overrides
+
+
+@dataclass(frozen=True)
+class LaunchContext:
     run_params: SpawnParams
     perms: PermissionResolver
     spec: ResolvedLaunchSpec
@@ -39,36 +128,6 @@ class NormalLaunchContext:
     env: Mapping[str, str]
     env_overrides: Mapping[str, str]
     report_output_path: Path
-
-
-@dataclass(frozen=True)
-class BypassLaunchContext:
-    """Launch context for MERIDIAN_HARNESS_COMMAND bypass."""
-
-    argv: tuple[str, ...]
-    env: Mapping[str, str]
-    cwd: Path
-
-
-LaunchContext = NormalLaunchContext | BypassLaunchContext
-
-
-@dataclass(frozen=True)
-class LaunchOutcome:
-    """Raw executor output before adapter post-processing."""
-
-    exit_code: int
-    child_pid: int | None = None
-    captured_stdout: bytes | None = None
-
-
-@dataclass(frozen=True)
-class LaunchResult:
-    """Post-processed launch result returned to driving adapters."""
-
-    exit_code: int
-    child_pid: int | None = None
-    session_id: str | None = None
 
 
 def merge_env_overrides(
@@ -86,7 +145,7 @@ def merge_env_overrides(
     )
 
 
-def build_launch_context(
+def prepare_launch_context(
     *,
     spawn_id: str,
     run_prompt: str,
@@ -98,15 +157,8 @@ def build_launch_context(
     plan_overrides: Mapping[str, str],
     report_output_path: Path,
     runtime_work_id: str | None = None,
-    runtime_chat_id: str | None = None,
-    runtime_spawn_id: str | None = None,
-    harness_command_override: str | None = None,
 ) -> LaunchContext:
-    """Build deterministic launch context for one runner attempt.
-
-    This is the canonical entry point for launch composition.
-    All driving adapters must call this factory.
-    """
+    """Build deterministic launch context for one runner attempt."""
 
     child_cwd = resolve_child_execution_cwd(
         repo_root=execution_cwd,
@@ -127,51 +179,6 @@ def build_launch_context(
             expanded_passthrough_args=tuple(plan.passthrough_args)
         )
 
-    parent_runtime_ctx = RuntimeContext.from_environment()
-    runtime_ctx = parent_runtime_ctx.model_copy(
-        update={
-            "repo_root": execution_cwd.resolve(),
-            "state_root": state_root.resolve(),
-            "chat_id": (
-                runtime_chat_id.strip()
-                if runtime_chat_id is not None and runtime_chat_id.strip()
-                else parent_runtime_ctx.chat_id
-            ),
-        }
-    )
-    runtime_ctx = runtime_ctx.with_work_id(runtime_work_id)
-    runtime_overrides = runtime_ctx.child_context()
-    normalized_runtime_spawn_id = (runtime_spawn_id or "").strip()
-    if normalized_runtime_spawn_id:
-        runtime_overrides["MERIDIAN_SPAWN_ID"] = normalized_runtime_spawn_id
-    merged_overrides = merge_env_overrides(
-        plan_overrides=plan_overrides,
-        runtime_overrides=runtime_overrides,
-        preflight_overrides=preflight.extra_env,
-    )
-
-    normalized_override = (
-        harness_command_override.strip() if harness_command_override is not None else ""
-    )
-    if normalized_override:
-        if plan.session.continue_fork:
-            raise ValueError(
-                "Cannot use --fork with MERIDIAN_HARNESS_COMMAND override. "
-                "Fork requires native harness adapter support."
-            )
-        argv = tuple([*shlex.split(normalized_override), *preflight.expanded_passthrough_args])
-        if not argv:
-            raise ValueError("MERIDIAN_HARNESS_COMMAND resolved to an empty command.")
-        env = inherit_child_env(
-            base_env=os.environ,
-            env_overrides=merged_overrides,
-        )
-        return BypassLaunchContext(
-            argv=argv,
-            env=MappingProxyType(env),
-            cwd=child_cwd,
-        )
-
     run_params = SpawnParams(
         prompt=run_prompt,
         model=ModelId(run_model) if run_model and run_model.strip() else None,
@@ -187,13 +194,19 @@ def build_launch_context(
         report_output_path=report_output_path.as_posix(),
         appended_system_prompt=plan.appended_system_prompt,
     )
-    run_params = materialize_fork(
-        adapter=harness,
-        run_params=run_params,
-    )
 
     perms = plan.execution.permission_resolver
     spec = harness.resolve_launch_spec(run_params, perms)
+
+    runtime_ctx = RuntimeContext.from_environment(
+        repo_root=execution_cwd,
+        state_root=state_root,
+    ).with_work_id(runtime_work_id)
+    merged_overrides = merge_env_overrides(
+        plan_overrides=plan_overrides,
+        runtime_overrides=runtime_ctx.child_context(),
+        preflight_overrides=preflight.extra_env,
+    )
     env = build_harness_child_env(
         base_env=os.environ,
         adapter=harness,
@@ -202,7 +215,7 @@ def build_launch_context(
         runtime_env_overrides=merged_overrides,
     )
 
-    return NormalLaunchContext(
+    return LaunchContext(
         run_params=run_params,
         perms=perms,
         spec=spec,
@@ -214,12 +227,8 @@ def build_launch_context(
 
 
 __all__ = [
-    "BypassLaunchContext",
     "LaunchContext",
-    "LaunchOutcome",
-    "LaunchResult",
-    "NormalLaunchContext",
     "RuntimeContext",
-    "build_launch_context",
     "merge_env_overrides",
+    "prepare_launch_context",
 ]

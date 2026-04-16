@@ -12,7 +12,7 @@ from collections.abc import Callable, Iterable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, assert_never, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import structlog
 
@@ -23,12 +23,13 @@ from meridian.lib.core.spawn_lifecycle import (
     resolve_execution_terminal_state,
 )
 from meridian.lib.core.types import HarnessId, SpawnId
-from meridian.lib.harness.adapter import StreamEvent
+from meridian.lib.harness.adapter import SpawnParams, StreamEvent
 from meridian.lib.harness.bundle import get_harness_bundle
+from meridian.lib.harness.claude_preflight import ensure_claude_session_accessible
 from meridian.lib.harness.common import parse_json_stream_event, unwrap_event_payload
 from meridian.lib.harness.connections.base import ConnectionConfig, HarnessConnection
 from meridian.lib.harness.extractor import StreamingExtractor
-from meridian.lib.harness.registry import HarnessRegistry
+from meridian.lib.harness.registry import HarnessRegistry, get_default_harness_registry
 from meridian.lib.launch.constants import (
     DEFAULT_INFRA_EXIT_CODE,
     OUTPUT_FILENAME,
@@ -38,18 +39,14 @@ from meridian.lib.launch.constants import (
     STDERR_FILENAME,
     TOKENS_FILENAME,
 )
-from meridian.lib.launch.context import (
-    BypassLaunchContext,
-    NormalLaunchContext,
-    build_launch_context,
-)
+from meridian.lib.launch.context import prepare_launch_context
 from meridian.lib.launch.errors import ErrorCategory, classify_error, should_retry
 from meridian.lib.launch.extract import (
     FinalizeExtraction,
     enrich_finalize,
     reset_finalize_attempt_artifacts,
 )
-from meridian.lib.launch.launch_types import ResolvedLaunchSpec
+from meridian.lib.launch.launch_types import PermissionResolver, ResolvedLaunchSpec
 from meridian.lib.launch.runner_helpers import (
     append_budget_exceeded_event as _append_budget_exceeded_event,
 )
@@ -389,6 +386,151 @@ async def _report_watchdog(
     return True
 
 
+async def run_streaming_spawn(
+    *,
+    config: ConnectionConfig,
+    params: SpawnParams,
+    perms: PermissionResolver,
+    state_root: Path,
+    repo_root: Path,
+    spawn_id: SpawnId,
+    stream_to_terminal: bool = False,
+) -> DrainOutcome:
+    """Run one streaming spawn to completion without spawn-store finalization."""
+
+    manager = SpawnManager(
+        state_root=state_root,
+        repo_root=repo_root,
+        heartbeat_interval_secs=_HEARTBEAT_INTERVAL_SECS,
+        heartbeat_touch=_touch_heartbeat_file,
+    )
+
+    loop = asyncio.get_running_loop()
+    shutdown_event = asyncio.Event()
+    received_signal: list[signal.Signals | None] = [None]
+    installed_signals = _install_signal_handlers(loop, shutdown_event, received_signal)
+
+    completion_task: asyncio.Task[DrainOutcome | None] | None = None
+    signal_task: asyncio.Task[bool] | None = None
+    consume_task: asyncio.Task[None] | None = None
+    terminal_event_future: asyncio.Future[TerminalEventOutcome] | None = None
+    terminal_outcome: TerminalEventOutcome | None = None
+    subscriber: asyncio.Queue[HarnessEvent | None] | None = None
+    adapter = get_default_harness_registry().get_subprocess_harness(config.harness_id)
+    run_spec = adapter.resolve_launch_spec(params, perms)
+    spawn_store.update_spawn(
+        state_root,
+        spawn_id,
+        runner_pid=os.getpid(),
+    )
+    try:
+        await manager.start_spawn(config, run_spec)
+        await manager._start_heartbeat(spawn_id)  # pyright: ignore[reportPrivateUsage]
+        subscriber = manager.subscribe(spawn_id)
+        if subscriber is None:
+            raise RuntimeError("failed to subscribe to spawn stream")
+
+        terminal_event_future = loop.create_future()
+        completion_task = asyncio.create_task(manager.wait_for_completion(spawn_id))
+        consume_task = asyncio.create_task(
+            _consume_subscriber_events(
+                subscriber=subscriber,
+                budget_tracker=None,
+                budget_signal=asyncio.Event(),
+                budget_breach_holder=[None],
+                event_observer=None,
+                stream_stdout_to_terminal=stream_to_terminal,
+                terminal_event_future=terminal_event_future,
+            )
+        )
+        signal_task = asyncio.create_task(shutdown_event.wait())
+
+        done, _ = await asyncio.wait(
+            {
+                cast("asyncio.Task[object]", completion_task),
+                cast("asyncio.Task[object]", signal_task),
+                cast("asyncio.Future[object]", terminal_event_future),
+            },
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if terminal_event_future in done:
+            terminal_outcome = terminal_event_future.result()
+            await manager.stop_spawn(
+                spawn_id,
+                status=terminal_outcome.status,
+                exit_code=terminal_outcome.exit_code,
+                error=terminal_outcome.error,
+            )
+        elif completion_task in done:
+            # Completion and signal can resolve in the same wakeup while a terminal
+            # frame is still queued; run completion grace first to preserve terminal
+            # precedence when that frame lands shortly after drain completion.
+            terminal_outcome = await _await_terminal_outcome_after_completion(
+                completion_task=completion_task,
+                terminal_event_future=terminal_event_future,
+            )
+            if terminal_outcome is not None:
+                await manager.stop_spawn(
+                    spawn_id,
+                    status=terminal_outcome.status,
+                    exit_code=terminal_outcome.exit_code,
+                    error=terminal_outcome.error,
+                )
+        elif signal_task in done and shutdown_event.is_set():
+            if completion_task.done():
+                terminal_outcome = await _await_terminal_outcome_after_completion(
+                    completion_task=completion_task,
+                    terminal_event_future=terminal_event_future,
+                )
+                if terminal_outcome is not None:
+                    await manager.stop_spawn(
+                        spawn_id,
+                        status=terminal_outcome.status,
+                        exit_code=terminal_outcome.exit_code,
+                        error=terminal_outcome.error,
+                    )
+            else:
+                signal_exit = signal_to_exit_code(received_signal[0]) or 130
+                await manager.stop_spawn(
+                    spawn_id,
+                    status="cancelled",
+                    exit_code=signal_exit,
+                    error="cancelled",
+                )
+
+        outcome = await completion_task
+        if outcome is None:
+            raise RuntimeError("streaming spawn completed without drain outcome")
+        if terminal_outcome is not None:
+            resolved_outcome = DrainOutcome(
+                status=terminal_outcome.status,
+                exit_code=terminal_outcome.exit_code,
+                error=terminal_outcome.error,
+                duration_secs=outcome.duration_secs,
+            )
+        else:
+            resolved_outcome = outcome
+        with suppress(Exception):
+            spawn_store.record_spawn_exited(
+                state_root,
+                spawn_id,
+                exit_code=resolved_outcome.exit_code,
+            )
+        return resolved_outcome
+    finally:
+        with signal_coordinator().mask_sigterm():
+            if subscriber is not None:
+                manager.unsubscribe(spawn_id)
+            for task in (completion_task, signal_task, consume_task):
+                if task is not None and not task.done():
+                    task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await task
+            _remove_signal_handlers(loop, installed_signals)
+            with suppress(Exception):
+                await manager.shutdown(status="cancelled", exit_code=1, error="shutdown")
+
+
 async def _run_streaming_attempt(
     *,
     run: Spawn,
@@ -427,7 +569,7 @@ async def _run_streaming_attempt(
 
     try:
         connection = await manager.start_spawn(config, run_spec)
-        await manager.start_heartbeat(run.spawn_id)
+        await manager._start_heartbeat(run.spawn_id)  # pyright: ignore[reportPrivateUsage]
         mark_spawn_running(
             state_root,
             run.spawn_id,
@@ -634,7 +776,7 @@ async def execute_with_streaming(
     max_retries = plan.execution.max_retries
     retry_backoff_seconds = plan.execution.retry_backoff_secs
 
-    launch_context = build_launch_context(
+    launch_context = prepare_launch_context(
         spawn_id=str(run.spawn_id),
         run_prompt=run.prompt,
         run_model=str(run.model) if str(run.model).strip() else None,
@@ -646,15 +788,9 @@ async def execute_with_streaming(
         report_output_path=report_path,
         runtime_work_id=runtime_work_id,
     )
-    match launch_context:
-        case NormalLaunchContext() as normal_launch_context:
-            child_cwd = normal_launch_context.child_cwd
-            spec = normal_launch_context.spec
-            child_env = dict(normal_launch_context.env)
-        case BypassLaunchContext():
-            raise RuntimeError("Streaming spawn execution does not support harness command bypass.")
-        case _ as unexpected_launch_context:
-            assert_never(unexpected_launch_context)
+    child_cwd = launch_context.child_cwd
+    spec = launch_context.spec
+    child_env = dict(launch_context.env)
     harness_bundle = get_harness_bundle(resolved_harness_id)
 
     spawn_store.update_spawn(
@@ -663,8 +799,12 @@ async def execute_with_streaming(
         execution_cwd=str(child_cwd),
     )
 
-    if plan.session.harness_session_id and plan.session.source_execution_cwd:
-        harness.ensure_session_accessible(
+    if (
+        harness.id == HarnessId.CLAUDE
+        and plan.session.harness_session_id
+        and plan.session.source_execution_cwd
+    ):
+        ensure_claude_session_accessible(
             source_session_id=plan.session.harness_session_id,
             source_cwd=Path(plan.session.source_execution_cwd),
             child_cwd=child_cwd,
@@ -1113,5 +1253,6 @@ __all__ = [
     "DEFAULT_GUARDRAIL_TIMEOUT_SECONDS",
     "TerminalEventOutcome",
     "execute_with_streaming",
+    "run_streaming_spawn",
     "terminal_event_outcome",
 ]

@@ -15,10 +15,12 @@ from typing import TYPE_CHECKING, Any, cast
 from meridian.lib.core.domain import SpawnStatus
 from meridian.lib.core.spawn_lifecycle import TERMINAL_SPAWN_STATUSES
 from meridian.lib.core.types import HarnessId, SpawnId
+from meridian.lib.harness.adapter import SpawnParams
 from meridian.lib.harness.bundle import get_harness_bundle
 from meridian.lib.harness.connections.base import HarnessEvent
 from meridian.lib.harness.errors import HarnessBinaryNotFound
 from meridian.lib.launch.launch_types import ResolvedLaunchSpec
+from meridian.lib.safety.permissions import UnsafeNoOpPermissionResolver
 from meridian.lib.state import spawn_store
 from meridian.lib.state.atomic import append_text_line
 from meridian.lib.streaming.control_socket import ControlSocketServer
@@ -164,11 +166,6 @@ class SpawnManager:
 
         task.add_done_callback(_drop_heartbeat)
 
-    async def start_heartbeat(self, spawn_id: SpawnId) -> None:
-        """Public heartbeat entry point for external runner call sites."""
-
-        await self._start_heartbeat(spawn_id)
-
     async def _stop_heartbeat(self, spawn_id: SpawnId) -> None:
         """Stop heartbeat ownership for one spawn; idempotent."""
 
@@ -180,15 +177,10 @@ class SpawnManager:
         with suppress(asyncio.CancelledError):
             await task
 
-    async def stop_heartbeat(self, spawn_id: SpawnId) -> None:
-        """Public heartbeat stop entry point for external runner call sites."""
-
-        await self._stop_heartbeat(spawn_id)
-
     async def start_spawn(
         self,
         config: ConnectionConfig,
-        spec: ResolvedLaunchSpec,
+        spec: ResolvedLaunchSpec | None = None,
     ) -> HarnessConnection[Any]:
         """Start one connection and register durable drain/control resources."""
 
@@ -199,6 +191,15 @@ class SpawnManager:
 
         started_monotonic = time.monotonic()
         completion_future: asyncio.Future[DrainOutcome] = asyncio.get_running_loop().create_future()
+        _ensure_harness_bootstrap()
+        bundle = get_harness_bundle(config.harness_id)
+        if spec is None:
+            resolved_spec = bundle.adapter.resolve_launch_spec(
+                SpawnParams(prompt=config.prompt),
+                UnsafeNoOpPermissionResolver(_suppress_warning=True),
+            )
+        else:
+            resolved_spec = spec
 
         tracer = config.debug_tracer
         if tracer is None and self._debug:
@@ -210,7 +211,7 @@ class SpawnManager:
             )
 
         try:
-            connection = await dispatch_start(config, spec)
+            connection = await dispatch_start(config, resolved_spec)
         except Exception:
             if tracer is not None:
                 tracer.close()

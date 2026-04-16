@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import shlex
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -63,20 +61,8 @@ def launch_primary(
     )
 
     if request.dry_run:
-        preview_command = plan.command
-        command_override = os.getenv("MERIDIAN_HARNESS_COMMAND", "").strip()
-        if command_override:
-            if request.session.continue_fork:
-                raise ValueError(
-                    "Cannot use --fork with MERIDIAN_HARNESS_COMMAND override. "
-                    "Fork requires native harness adapter support."
-                )
-            override_argv = tuple(shlex.split(command_override))
-            if not override_argv:
-                raise ValueError("MERIDIAN_HARNESS_COMMAND resolved to an empty command.")
-            preview_command = (*override_argv, *plan.command_request.passthrough_args)
         return LaunchResult(
-            command=preview_command,
+            command=plan.command,
             exit_code=0,
             continue_ref=None,
             warning=plan.warning,
