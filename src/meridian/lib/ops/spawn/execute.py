@@ -156,7 +156,7 @@ def _spawn_child_env(
 ) -> dict[str, str]:
     _ = spawn_id, work_id, state_root, ctx
     child_env: dict[str, str] = {}
-    # K5 boundary: RuntimeContext.child_context() in launch/context.py is the sole
+    # K5 boundary: RuntimeContext.child_context() in core/context.py is the sole
     # producer of MERIDIAN_* child overrides. Plan overrides stay non-MERIDIAN.
     if autocompact is not None:
         child_env["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"] = str(autocompact)

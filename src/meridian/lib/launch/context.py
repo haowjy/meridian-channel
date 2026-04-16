@@ -9,6 +9,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+from meridian.lib.core.context import RuntimeContext
 from meridian.lib.core.types import ModelId
 from meridian.lib.harness.adapter import SpawnParams, SubprocessHarness
 from meridian.lib.launch.launch_types import (
@@ -16,7 +17,6 @@ from meridian.lib.launch.launch_types import (
     PreflightResult,
     ResolvedLaunchSpec,
 )
-from meridian.lib.state.paths import resolve_work_scratch_dir
 
 from .cwd import resolve_child_execution_cwd
 from .env import build_harness_child_env
@@ -24,100 +24,6 @@ from .env import merge_env_overrides as _merge_env_overrides
 
 if TYPE_CHECKING:
     from meridian.lib.ops.spawn.plan import PreparedSpawnPlan
-
-_ALLOWED_MERIDIAN_KEYS: frozenset[str] = frozenset(
-    {
-        "MERIDIAN_REPO_ROOT",
-        "MERIDIAN_STATE_ROOT",
-        "MERIDIAN_DEPTH",
-        "MERIDIAN_CHAT_ID",
-        "MERIDIAN_FS_DIR",
-        "MERIDIAN_WORK_ID",
-        "MERIDIAN_WORK_DIR",
-    }
-)
-
-
-@dataclass(frozen=True)
-class RuntimeContext:
-    """Sole producer for child `MERIDIAN_*` environment overrides."""
-
-    repo_root: Path
-    state_root: Path
-    parent_chat_id: str | None
-    parent_depth: int
-    fs_dir: Path | None
-    work_id: str | None
-    work_dir: Path | None
-
-    @classmethod
-    def from_environment(
-        cls,
-        *,
-        repo_root: Path,
-        state_root: Path,
-    ) -> RuntimeContext:
-        parent_chat_id = os.getenv("MERIDIAN_CHAT_ID", "").strip() or None
-        parent_depth_raw = os.getenv("MERIDIAN_DEPTH", "0").strip()
-        parent_depth = 0
-        try:
-            parent_depth = max(0, int(parent_depth_raw))
-        except (TypeError, ValueError):
-            parent_depth = 0
-
-        fs_dir_raw = os.getenv("MERIDIAN_FS_DIR", "").strip()
-        work_id_raw = os.getenv("MERIDIAN_WORK_ID", "").strip()
-        work_dir_raw = os.getenv("MERIDIAN_WORK_DIR", "").strip()
-
-        return cls(
-            repo_root=repo_root.resolve(),
-            state_root=state_root.resolve(),
-            parent_chat_id=parent_chat_id,
-            parent_depth=parent_depth,
-            fs_dir=Path(fs_dir_raw) if fs_dir_raw else None,
-            work_id=work_id_raw or None,
-            work_dir=Path(work_dir_raw) if work_dir_raw else None,
-        )
-
-    def with_work_id(self, work_id: str | None) -> RuntimeContext:
-        normalized = (work_id or "").strip()
-        if not normalized:
-            return self
-        return RuntimeContext(
-            repo_root=self.repo_root,
-            state_root=self.state_root,
-            parent_chat_id=self.parent_chat_id,
-            parent_depth=self.parent_depth,
-            fs_dir=self.fs_dir,
-            work_id=normalized,
-            work_dir=resolve_work_scratch_dir(self.state_root, normalized),
-        )
-
-    def child_context(self) -> dict[str, str]:
-        overrides: dict[str, str] = {
-            "MERIDIAN_REPO_ROOT": self.repo_root.as_posix(),
-            "MERIDIAN_STATE_ROOT": self.state_root.as_posix(),
-            "MERIDIAN_DEPTH": str(self.parent_depth + 1),
-        }
-        if self.parent_chat_id:
-            overrides["MERIDIAN_CHAT_ID"] = self.parent_chat_id
-        if self.fs_dir is not None:
-            overrides["MERIDIAN_FS_DIR"] = self.fs_dir.as_posix()
-        if self.work_id:
-            overrides["MERIDIAN_WORK_ID"] = self.work_id
-        if self.work_dir is not None:
-            overrides["MERIDIAN_WORK_DIR"] = self.work_dir.as_posix()
-        elif self.work_id:
-            overrides["MERIDIAN_WORK_DIR"] = resolve_work_scratch_dir(
-                self.state_root,
-                self.work_id,
-            ).as_posix()
-
-        if not set(overrides).issubset(_ALLOWED_MERIDIAN_KEYS):
-            missing = sorted(set(overrides) - _ALLOWED_MERIDIAN_KEYS)
-            raise RuntimeError(f"RuntimeContext.child_context drifted keys: {missing}")
-        return overrides
-
 
 @dataclass(frozen=True)
 class LaunchContext:
@@ -198,9 +104,11 @@ def prepare_launch_context(
     perms = plan.execution.permission_resolver
     spec = harness.resolve_launch_spec(run_params, perms)
 
-    runtime_ctx = RuntimeContext.from_environment(
-        repo_root=execution_cwd,
-        state_root=state_root,
+    runtime_ctx = RuntimeContext.from_environment().model_copy(
+        update={
+            "repo_root": execution_cwd.resolve(),
+            "state_root": state_root.resolve(),
+        }
     ).with_work_id(runtime_work_id)
     merged_overrides = merge_env_overrides(
         plan_overrides=plan_overrides,

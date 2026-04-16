@@ -144,6 +144,21 @@ class RunPromptPolicy(BaseModel):
     skill_injection_mode: Literal["none", "append-system-prompt"] = "none"
 
 
+class SpawnRequest(BaseModel):
+    """User-facing arguments for requesting a spawn."""
+
+    model_config = ConfigDict(frozen=True)
+
+    prompt: str
+    model: ModelId | None = None
+    effort: str | None = None
+    skills: tuple[str, ...] = ()
+    agent: str | None = None
+    extra_args: tuple[str, ...] = ()
+    interactive: bool = False
+    mcp_tools: tuple[str, ...] = ()
+
+
 class SpawnParams(BaseModel):
     """Inputs required to launch one harness run."""
 
