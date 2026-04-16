@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
-
 from meridian.lib.core.types import ModelId
 from meridian.lib.harness.adapter import SpawnParams, SubprocessHarness
 from meridian.lib.launch.launch_types import PermissionResolver, ResolvedLaunchSpec
@@ -60,53 +58,6 @@ def resolve_launch_spec_stage(
     return adapter.resolve_launch_spec(to_spawn_params(run_inputs), perms)
 
 
-def apply_workspace_projection(
-    *,
-    adapter: SubprocessHarness,
-    spec: ResolvedLaunchSpec,
-) -> ResolvedLaunchSpec:
-    """Workspace projection seam between spec resolution and argv projection."""
-
-    project_workspace = getattr(adapter, "project_workspace", None)
-    if not callable(project_workspace):
-        return spec
-
-    signature = inspect.signature(project_workspace)
-    if _can_bind_workspace_projection(signature, with_keyword=True):
-        projected = project_workspace(spec=spec)
-    elif _can_bind_workspace_projection(signature, with_keyword=False):
-        projected = project_workspace(spec)
-    else:
-        raise TypeError(
-            "adapter.project_workspace() must accept a single ResolvedLaunchSpec "
-            "parameter (positional or `spec=` keyword)."
-        )
-
-    if projected is None:
-        return spec
-    if isinstance(projected, ResolvedLaunchSpec):
-        return projected
-    raise TypeError(
-        "adapter.project_workspace() must return ResolvedLaunchSpec | None; "
-        f"got {type(projected).__name__}"
-    )
-
-
-def _can_bind_workspace_projection(
-    signature: inspect.Signature,
-    *,
-    with_keyword: bool,
-) -> bool:
-    try:
-        if with_keyword:
-            signature.bind_partial(spec=None)
-        else:
-            signature.bind_partial(None)
-        return True
-    except TypeError:
-        return False
-
-
 def _projected_spec_to_run_inputs(
     *,
     run_inputs: ResolvedRunInputs,
@@ -145,7 +96,6 @@ def build_launch_argv(
 
 
 __all__ = [
-    "apply_workspace_projection",
     "build_launch_argv",
     "normalize_system_prompt_passthrough_args",
     "resolve_launch_spec_stage",

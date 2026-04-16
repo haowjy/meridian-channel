@@ -44,7 +44,7 @@ class ControlSocketServer:
             if not raw:
                 response = {"ok": False, "error": "empty request"}
             else:
-                response = await self._handle_request(raw, writer)
+                response = await self._handle_request(raw)
         except Exception as exc:
             response = {"ok": False, "error": str(exc)}
 
@@ -62,7 +62,6 @@ class ControlSocketServer:
     async def _handle_request(
         self,
         raw: bytes,
-        writer: asyncio.StreamWriter,
     ) -> dict[str, object]:
         """Decode and route one control request."""
 
@@ -112,8 +111,6 @@ class ControlSocketServer:
             return response or self._result_to_response(result)
         else:
             return {"ok": False, "error": f"unsupported request type: {message_type}"}
-
-        return self._result_to_response(result)
 
     @staticmethod
     def _result_to_response(result: InjectResult) -> dict[str, object]:

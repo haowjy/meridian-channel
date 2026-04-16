@@ -25,7 +25,6 @@ from meridian.lib.launch.launch_types import (
 from meridian.lib.state.paths import resolve_spawn_log_dir, resolve_work_scratch_dir
 
 from .command import (
-    apply_workspace_projection,
     build_launch_argv,
     normalize_system_prompt_passthrough_args,
     resolve_launch_spec_stage,
@@ -648,7 +647,6 @@ def build_launch_context(
         unsafe_no_permissions=runtime.unsafe_no_permissions,
     )
     spec = resolve_launch_spec_stage(adapter=harness, run_inputs=run_params, perms=perms)
-    spec = apply_workspace_projection(adapter=harness, spec=spec)
     override = (runtime.harness_command_override or "").strip()
     argv: tuple[str, ...] = ()
     if not override:

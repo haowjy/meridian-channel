@@ -70,12 +70,6 @@ def _apply_warning_trigger(
             create_skills_dir=True,
         )
         return
-    if trigger == "legacy_install_artifacts":
-        _setup_warning_shape_case(repo_root, monkeypatch)
-        legacy_file = repo_root / ".meridian" / "agents.toml"
-        legacy_file.parent.mkdir(parents=True, exist_ok=True)
-        legacy_file.write_text("[legacy]\n", encoding="utf-8")
-        return
     if trigger == "active_spawns_present":
         _setup_warning_shape_case(repo_root, monkeypatch)
         monkeypatch.setattr(
@@ -93,7 +87,6 @@ def _apply_warning_trigger(
     [
         ("missing_skills_directories", "missing_skills_directories", ()),
         ("missing_agent_profile_directories", "missing_agent_profile_directories", ()),
-        ("legacy_install_artifacts", "legacy_install_artifacts", ("paths",)),
         ("active_spawns_present", "active_spawns_present", ("spawn_ids",)),
     ],
 )

@@ -48,7 +48,7 @@ async def test_interrupt_request_routes_to_manager(tmp_path: Path) -> None:
     manager = _FakeManager(state_root=tmp_path / ".meridian")
     server = ControlSocketServer(SpawnId("p1"), tmp_path / "control.sock", manager)
 
-    result = await server._handle_request(b'{"type":"interrupt"}\n', object())  # type: ignore[arg-type]
+    result = await server._handle_request(b'{"type":"interrupt"}\n')
 
     assert result == {"ok": True, "inbound_seq": 7}
     assert manager.interrupt_calls == [(SpawnId("p1"), "control_socket")]
@@ -60,7 +60,7 @@ async def test_user_message_request_requires_text(tmp_path: Path) -> None:
     manager = _FakeManager(state_root=tmp_path / ".meridian")
     server = ControlSocketServer(SpawnId("p1"), tmp_path / "control.sock", manager)
 
-    result = await server._handle_request(b'{"type":"user_message"}\n', object())  # type: ignore[arg-type]
+    result = await server._handle_request(b'{"type":"user_message"}\n')
 
     assert result == {"ok": False, "error": "user_message requires text"}
     assert manager.interrupt_calls == []
@@ -72,7 +72,7 @@ async def test_control_socket_rejects_unsupported_message_types(tmp_path: Path) 
     manager = _FakeManager(state_root=tmp_path / ".meridian")
     server = ControlSocketServer(SpawnId("p1"), tmp_path / "control.sock", manager)
 
-    result = await server._handle_request(b'{"type":"unknown"}\n', object())  # type: ignore[arg-type]
+    result = await server._handle_request(b'{"type":"unknown"}\n')
 
     assert result == {"ok": False, "error": "unsupported request type: unknown"}
     assert manager.interrupt_calls == []

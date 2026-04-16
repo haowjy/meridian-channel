@@ -78,34 +78,6 @@ def _repair_orphan_runs(repo_root: Path) -> int:
     return running_before - running_after
 
 
-def _legacy_install_artifacts_warning(repo_root: Path) -> DoctorWarning | None:
-    state_root = resolve_state_root(repo_root)
-    candidates = (
-        state_root / "agents.toml",
-        state_root / "agents.lock",
-        state_root / "cache" / "agents",
-    )
-    found_paths: list[str] = []
-    for candidate in candidates:
-        if not candidate.exists():
-            continue
-        relative = candidate.relative_to(state_root).as_posix()
-        display = f".meridian/{relative}"
-        if candidate.is_dir():
-            display = f"{display}/"
-        found_paths.append(display)
-    if not found_paths:
-        return None
-    return DoctorWarning(
-        code="legacy_install_artifacts",
-        message=(
-            "Legacy meridian install artifacts from pre-mars versions were found: "
-            f"{', '.join(found_paths)}. They are safe to delete."
-        ),
-        payload={"paths": found_paths},
-    )
-
-
 def doctor_sync(payload: DoctorInput) -> DoctorOutput:
     runtime = build_runtime(payload.repo_root)
 
@@ -139,9 +111,6 @@ def doctor_sync(payload: DoctorInput) -> DoctorOutput:
                 message="No configured agent profile directories were found.",
             )
         )
-    legacy_install_artifacts = _legacy_install_artifacts_warning(runtime.repo_root)
-    if legacy_install_artifacts is not None:
-        warnings.append(legacy_install_artifacts)
 
     availability = check_upgrade_availability(runtime.repo_root)
     if availability is None:
