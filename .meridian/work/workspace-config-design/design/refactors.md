@@ -606,6 +606,75 @@ convergent reviews that drove the redesign.
     given a `SessionRequest` with all eight fields populated,
     round-trip through `SpawnRequest.model_dump_json` /
     `model_validate_json`; assert no field is lost.
+  - `test_fork_produces_consistent_lineage_across_jsonl_stores`
+    (closes I-11, smoke-driven) — fork a spawn; assert the new
+    `sessions.jsonl` chat row's id matches the new `spawns.jsonl` start
+    row's `chat_id`; assert `forked_from_chat_id` on the new sessions
+    row names the parent's chat; assert `spawn children <parent>`
+    returns the forked child. Cover all three harness families.
+  - `test_fork_start_row_omits_harness_session_id` (closes tightened
+    I-10, smoke-driven) — inspect the first `start` event written for a
+    forked child's spawn row; assert `harness_session_id` is absent.
+    Contrast with a later `update` event that carries it. Covers all
+    three harness families.
+  - `test_report_content_contract_across_harnesses` (closes I-12,
+    smoke-driven) — run a successful spawn on each of claude, codex,
+    opencode; assert `report.md` starts with the agent's text content
+    and contains no `event_type`, `session.idle`, `connection.open`, or
+    other protocol-event markers. Typed contract, not regex-brittle:
+    parse the report and reject any JSON-object top-level with a
+    recognized transport-event discriminator.
+  - `test_workspace_projection_produces_semantically_correct_argv`
+    (augments `test_workspace_projection_seam_reachable`, smoke-driven)
+    — reach-only is insufficient; assert the projected argv is
+    semantically correct for the target harness (the sentinel is not
+    just present but in the right argv position with the right flag
+    context, per harness). Covers the gap where a seam was reachable
+    yet produced wrong output in the content-extraction adjacent seam
+    (OpenCode lane 2).
+
+  **Invariant → test coverage audit.** Before any implementation phase
+  opens, the planning impl-orch MUST map each of I-1..I-13 to at least
+  one behavioral test in this file. Invariants without a behavioral
+  test are claims the design cannot verify and become planner-level
+  blockers. Current mapping (to be refined during planning):
+
+  | Invariant | Test(s) |
+  |---|---|
+  | I-1 centralization | implied by factory-signature tests |
+  | I-2 driving-adapter prohibition | CI drift gate (semantic check, not unit test) |
+  | I-3 single-callsite ownership | CI drift gate |
+  | I-4 observe_session_id contract | `test_observe_session_id_reads_per_launch_state_only` (to spec) |
+  | I-5 DTO discipline | `test_spawn_request_round_trip_json_serializable`, `test_no_pre_resolved_permission_resolver_in_persisted_artifact` |
+  | I-6 stage modules own real logic | CI drift gate |
+  | I-7 driven port shape only | CI drift gate + `test_report_content_contract_across_harnesses` for content-contract half |
+  | I-8 executors mechanism-only | CI drift gate |
+  | I-9 workspace seam reachable + correct | `test_workspace_projection_seam_reachable`, `test_workspace_projection_produces_semantically_correct_argv` |
+  | I-10 fork-after-row + no pre-populated session-id | `test_child_cwd_not_created_before_spawn_row`, `test_fork_start_row_omits_harness_session_id` |
+  | I-11 fork lineage coherence | `test_fork_produces_consistent_lineage_across_jsonl_stores` |
+  | I-12 report content type | `test_report_content_contract_across_harnesses` |
+  | I-13 adapter transforms observable | `test_composition_warnings_propagate_to_launch_context` (covers channel); additional per-adapter test specs welcome during planning |
+
+  **Plan-level constraints driven by R06-v1 smoke evidence.** The
+  planning impl-orch MUST encode these in `plan/overview.md`:
+  - Net pytest count must be non-negative across the whole R06 series.
+    R06-v1 skeleton landed with a 5-test reduction (658 → 653 pre-Fix-A
+    → post-revert tree); the retry plan must not repeat this silently.
+    Phases that remove tests require an explicit decision-log entry
+    naming the replacement coverage.
+  - Per-phase smoke lane in addition to per-phase unit tests. Use the
+    5-lane pattern from R06-v1 smoke (streaming-parity, primary-
+    lifecycle, dry-run-bypass, fork-continuation, adversarial-state);
+    map each phase to the lane(s) matching the surface it touches.
+  - Pre-implementation smoke baseline. Before Phase 1 coder opens, run
+    all 5 smoke lanes against HEAD and preserve their reports under
+    `plan/pre-impl-smoke-baseline/`. Any regression during
+    implementation is diff-checked against this baseline, not compared
+    retroactively.
+  - Implementation MUST run against meridian-cli ≥ v0.0.30 (post-Fix-A).
+    R06-v1 was built under the codex 50 KiB silent-truncation bug;
+    coders received partial briefs. Any prior R06 code artifact is
+    evidence-zero and the retry starts from HEAD.
 
   **2. CI-spawned `@reviewer` as architectural drift gate.** A new file
   `.meridian/invariants/launch-composition-invariant.md` declares the

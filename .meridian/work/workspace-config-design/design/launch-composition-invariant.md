@@ -190,6 +190,68 @@ In particular, the streaming-runner fallback path (`execute_with_streaming`)
 MUST raise a precondition error rather than create a row mid-flight when
 no row exists.
 
+The `start` event for the forked child's spawn row MUST NOT pre-populate
+`harness_session_id`. That field is written later by `update`, identical
+to non-fork starts. Fork paths have no special access to the session-id
+field on `start`; smuggling the child's future session id into the start
+row is a violation. (Added after R06-v1 smoke revealed fork start rows
+were being populated out-of-order versus non-fork start rows.)
+
+### I-11 Fork lineage coherence
+
+Every fork MUST produce exactly one new chat row in `sessions.jsonl`
+AND one `start` event in `spawns.jsonl`, written such that no persisted
+read ever observes one without the other. The new `spawns.jsonl` row's
+`chat_id` MUST reference the new `sessions.jsonl` chat row (not the
+parent's chat). `spawn children <parent>` MUST return the forked child.
+`forked_from_chat_id` on the new sessions row MUST name the parent's
+chat id.
+
+Failure mode this invariant closes: fork paths that keep the parent's
+`chat_id` on the child's spawns.jsonl row while `sessions.jsonl` creates
+a new chat — producing orphaned `spawn children` results, poisoned
+`--fork <session_id>` follow-ons, and reports that disagree with the
+persisted spawn row. Observed empirically in R06-v1 smoke lane 4; a
+violation the original 10 invariants did not name.
+
+### I-12 Report content type
+
+The `report.md` file written for any spawn MUST contain the agent's
+final user-facing assistant message as plain text, across every harness
+family. It MUST NOT contain raw transport event envelopes (for example
+`{"event_type":"session.idle","harness_id":"opencode","payload":{...}}`),
+protocol framing, transport-state objects, or any JSON blob that was
+never intended as user-visible content.
+
+Driven-port methods that produce report content (`extract_report_content()`
+or equivalent per-adapter) are typed and documented to return user-facing
+message text only. "The returned string happens to contain a stringified
+envelope" is not compliant. Driven-port typing SHOULD expose content
+contracts beyond Python shape — a `-> str` return type that documents
+"user-facing assistant message text, no transport envelopes" is the bar,
+not just `-> str`.
+
+Failure mode this invariant closes: OpenCode report extraction returning
+raw `session.idle` event envelopes instead of the agent's message,
+observed in R06-v1 smoke lane 2. Likely fallout from the streaming
+runner consolidation where a content-extraction seam was collapsed
+without preserving its semantic contract.
+
+### I-13 Adapter transforms are observable
+
+Driven adapters MUST NOT silently lossy-transform caller inputs. Any
+transformation either preserves semantics (idempotent) or surfaces via a
+`CompositionWarning` on the `LaunchContext.warnings` channel. "Accepted
+with modification" is not a valid adapter behavior.
+
+Scope note: this invariant is cross-cutting and slightly wider than the
+original R06 composition scope. It is included here because the class of
+bug it prevents — silent input mutation at adapter boundaries — is what
+corrupted the R06-v1 implementation cycle itself (codex silently
+truncating coder briefs at 50 KiB). The factory-side output channel for
+warnings (`LaunchContext.warnings`) is the enforcement mechanism R06
+already provides, so adding I-13 costs no new machinery.
+
 ## What does NOT count as a violation
 
 - Renaming a stage function while preserving its single-callsite

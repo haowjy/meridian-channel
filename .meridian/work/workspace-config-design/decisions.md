@@ -977,24 +977,165 @@ drift gate carries the same constraint as the behavioral test.
 - Spec leaves unchanged: convergence-2 is still structural and DTO-shape;
   no user-facing EARS contract changes.
 
+## D21 — R06-v1 smoke evidence folded back into design
+
+**Date:** 2026-04-16 (post v0.0.30 release)
+**Status:** design refinement, no structural shape change
+**Trigger:** R06-v1 skeleton (reverted in `d1360df` after shipping as
+unreleased commits `3f8ad4c..45d18d7`) was smoke-tested across 5
+parallel lanes (reports at `smoke/lane-{1..5}-*.md`). Two HIGH-severity
+regressions were R06-adjacent: fork lineage split-brain in the new
+`launch/fork.py`, and row-before-fork ordering questionable (I-10
+signal). One MEDIUM was R06-plausible: OpenCode report extraction
+returning raw `session.idle` envelopes instead of the assistant message.
+Three others were likely pre-existing state-layer issues orthogonal to
+R06 (`meridian doctor` reconciliation gap, LIFE-7 finalizing filter,
+stale `.flock` sidecars).
+
+**Root-cause context:** the R06-v1 skeleton was built while the codex
+harness silently truncated coder briefs above 50 KiB (bug fixed in
+aeb160e for v0.0.30). We cannot rule out that some of the skeleton's
+bugs were artifacts of truncated context rather than design flaws. But
+three of the smoke findings point at design gaps the current R06 design
+did not name explicitly. Folding them back in strengthens the design
+for the retry regardless of skeleton-quality attribution.
+
+### D21.1 — Fork lineage coherence as I-11
+
+The current 10 invariants enforce pipeline ownership, stage ordering,
+and DTO discipline. None assert that `spawns.jsonl` and `sessions.jsonl`
+stay coherent across a fork transaction. Smoke lane 4 showed these
+diverging: `spawns.jsonl.chat_id` held the parent's chat while
+`sessions.jsonl` created a new chat, silently breaking `spawn children`
+and `--fork <session_id>` follow-ons.
+
+Added **I-11 Fork lineage coherence** to
+`design/launch-composition-invariant.md`. Behavioral test
+`test_fork_produces_consistent_lineage_across_jsonl_stores` added to
+`design/refactors.md` R06 verification section.
+
+### D21.2 — Report content type as I-12
+
+The `observe_session_id` contract was tightened in D20. A sibling seam
+— the method returning report content — was not. Smoke lane 2 showed
+OpenCode's `report.md` containing a raw `session.idle` event envelope
+instead of the assistant message, likely fallout from the streaming-
+runner consolidation where a content-extraction seam was collapsed
+without preserving its semantic contract.
+
+Added **I-12 Report content type** to
+`design/launch-composition-invariant.md`. Behavioral test
+`test_report_content_contract_across_harnesses` added. I-7 prose also
+tightened: driven-port typing should expose content contracts beyond
+Python shape — a `-> str` return type documented as "user-facing
+assistant message text" is the bar.
+
+### D21.3 — I-10 tightened on fork start-row shape
+
+Current I-10 says "spawn row created before fork transaction opens."
+Smoke lane 4 observed that fork spawn *start* rows pre-populated
+`harness_session_id`, unlike non-fork starts that receive it via a
+later `update` event. That violates the spirit of row-before-fork
+without violating the letter.
+
+Tightened **I-10** wording to explicitly forbid pre-populating
+`harness_session_id` on a fork child's `start` event. Behavioral test
+`test_fork_start_row_omits_harness_session_id` added.
+
+### D21.4 — Adapter transforms observable as I-13 (scope-wider addition)
+
+Cross-cutting invariant inspired by the codex truncation bug that
+corrupted the R06-v1 implementation cycle itself. Silent lossy
+transforms at adapter boundaries produce work product that looks right
+and is built against partial input. The `LaunchContext.warnings`
+channel R06 already provides is the enforcement mechanism; the new
+rule is that adapters either preserve semantics or surface a
+`CompositionWarning`.
+
+Added **I-13 Adapter transforms are observable** to
+`design/launch-composition-invariant.md`. Noted as slightly wider than
+original R06 scope but free to include given the machinery already
+exists.
+
+### D21.5 — Workspace-projection test tightened from reach to content
+
+`test_workspace_projection_seam_reachable` asserts the seam runs inside
+the pipeline. Smoke lane 2 showed reachable-but-wrong: a nearby seam
+(report extraction) was reachable yet produced wrong content. Added
+`test_workspace_projection_produces_semantically_correct_argv` to
+assert the projected argv is semantically correct per harness, not
+just that the sentinel appears somewhere.
+
+### D21.6 — Plan-level constraints encoded as design inputs
+
+Four new constraints added to `design/refactors.md` R06 for the
+planning impl-orch to honor:
+- Net pytest count non-negative across the R06 series (skeleton's
+  landing deleted 5 tests without explicit replacement).
+- Per-phase smoke lane assignment in `plan/overview.md`, not just
+  per-phase unit-test lanes. Use the 5-lane pattern from R06-v1 smoke.
+- Pre-implementation smoke baseline against HEAD before Phase 1, stored
+  under `plan/pre-impl-smoke-baseline/`.
+- Implementation runs against meridian-cli ≥ v0.0.30 (post-Fix-A).
+  Prior R06 code artifacts are evidence-zero.
+
+### D21.7 — Invariant → test coverage audit mandated before planning
+
+Added a coverage-audit table in `refactors.md` mapping each of I-1..I-13
+to at least one behavioral test. Invariants without a test are claims
+the design cannot verify. The planning impl-orch MUST refine this
+mapping during planning; gaps become planner-level blockers, not
+implementation-level surprises.
+
+### What D21 does not change
+
+- DTO shape: unchanged. The 4 user-visible + 1 auxiliary + 2 internal
+  type ladder from D20 holds.
+- Pipeline stage decomposition: unchanged. 10 stages with sole owners
+  remain.
+- `observe_session_id` contract (D20): unchanged. Per-launch state
+  legitimate, adapter-singleton forbidden.
+- Verification triad: unchanged. Behavioral factory tests + CI drift
+  gate + pyright/ruff/pytest. The drift gate now enforces 13 invariants
+  instead of 10.
+- Convergence verdict: the existing `ready-with-minor-followups` +
+  architect closure still stands. D21 is additive refinement, not a
+  convergence gap that requires another review round.
+
+### Preserved findings / still out of scope
+
+- Background-worker `disallowed_tools` correctness (unblocked by R06,
+  separate work item).
+- Issue #34 Popen-fallback session-ID observation (unblocked by
+  `observe_session_id` seam, separate work item).
+- `meridian doctor` reconciliation gap (smoke lane 5, likely
+  pre-existing, state-layer; track as new work item after verifying via
+  `git log` whether it predates the skeleton).
+- LIFE-7 `spawn list --status finalizing` filter (smoke lane 2,
+  unclear R06-relation).
+- Stale `.flock` sidecars (smoke lane 5, cosmetic).
+
 ## How this file is used
 
 - Reviewers: validate that every F1–F19 response is actually encoded in the
   spec/architecture leaves named under "Encoded in" for each row. If a response
   points at a spec/architecture leaf but the leaf does not make the claim, that
   is a convergence gap to flag.
-- Planner: use D1–D20 as constraints that survive into the plan. D2, D3, D17,
-  D18, D19, and D20 in particular govern phase sequencing, the R06 typed-pipeline
-  invariants (3 driving adapters through one factory, raw `SpawnRequest` +
-  `LaunchRuntime` at the boundary, split spec/projection/argv stages, fork
-  after spawn row, `LaunchContext.warnings` as the only composition-warning
-  sidechannel, reviewer drift gate verification with the drafted invariant
-  prompt), and workspace-loading behavior. **D19 supersedes parts of D17
-  that named "hexagonal" as the load-bearing pattern**; the framing inside
-  the shell is a typed pipeline. **D20 supersedes parts of D19 that named
-  `project_launch_command` as a single stage**; the spec/projection/argv
-  split is what makes the A04 seam reachable inside the A06 ordering.
-  Hexagonal labels can stay as outer naming, but composition centralization
-  is what makes R06 honest.
+- Planner: use D1–D21 as constraints that survive into the plan. D2, D3, D17,
+  D18, D19, D20, and D21 in particular govern phase sequencing, the R06
+  typed-pipeline invariants (3 driving adapters through one factory, raw
+  `SpawnRequest` + `LaunchRuntime` at the boundary, split spec/projection/argv
+  stages, fork after spawn row with no pre-populated session-id on start,
+  fork lineage coherence across jsonl stores, report content type discipline,
+  adapter transforms observable via `CompositionWarning`, `LaunchContext.warnings`
+  as the only composition-warning sidechannel, reviewer drift gate verification
+  with the 13-invariant prompt), and workspace-loading behavior. **D19 supersedes
+  parts of D17 that named "hexagonal" as the load-bearing pattern**; the framing
+  inside the shell is a typed pipeline. **D20 supersedes parts of D19 that named
+  `project_launch_command` as a single stage**; the spec/projection/argv split is
+  what makes the A04 seam reachable inside the A06 ordering. **D21 adds I-11,
+  I-12, I-13 and tightens I-10 + I-7** based on R06-v1 smoke evidence; these are
+  additive refinements, not convergence gaps. Hexagonal labels can stay as outer
+  naming, but composition centralization is what makes R06 honest.
 - Future rounds: when a new prior-round feedback file gets produced, append a
   new section here rather than rewriting these rows.
