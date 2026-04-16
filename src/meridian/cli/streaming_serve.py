@@ -5,14 +5,15 @@ from __future__ import annotations
 import time
 from uuid import uuid4
 
-from meridian.lib.core.domain import SpawnStatus
+from meridian.lib.core.domain import Spawn
 from meridian.lib.core.types import HarnessId, ModelId
-from meridian.lib.harness.adapter import SpawnParams
-from meridian.lib.harness.connections.base import ConnectionConfig
-from meridian.lib.launch.streaming_runner import run_streaming_spawn, signal_coordinator
+from meridian.lib.harness.registry import get_default_harness_registry
+from meridian.lib.launch.streaming_runner import execute_with_streaming
 from meridian.lib.ops.runtime import resolve_runtime_root_and_config
-from meridian.lib.safety.permissions import PermissionConfig, TieredPermissionResolver
+from meridian.lib.ops.spawn.plan import ExecutionPolicy, PreparedSpawnPlan, SessionContinuation
+from meridian.lib.safety.permissions import resolve_permission_pipeline
 from meridian.lib.state import spawn_store
+from meridian.lib.state.artifact_store import LocalStore
 from meridian.lib.state.paths import resolve_state_paths
 
 
@@ -45,44 +46,51 @@ async def streaming_serve(
     repo_root, _ = resolve_runtime_root_and_config(None)
     state_paths = resolve_state_paths(repo_root)
     state_root = state_paths.root_dir
+    artifacts = LocalStore(root_dir=state_paths.artifacts_dir)
     start_monotonic = time.monotonic()
+    model_name = normalized_model or "unknown"
+    agent_name = normalized_agent or "unknown"
     spawn_id = spawn_store.start_spawn(
         state_root,
         chat_id=str(uuid4()),
-        model=normalized_model or "unknown",
-        agent=normalized_agent or "unknown",
+        model=model_name,
+        agent=agent_name,
         harness=harness_id.value,
         kind="streaming",
-        prompt=prompt,
+        prompt=normalized_prompt,
         launch_mode="foreground",
-        status="running",
+        status="queued",
     )
 
-    tracer = None
-    if debug:
-        from meridian.lib.observability.debug_tracer import DebugTracer
-
-        spawn_dir = state_root / "spawns" / str(spawn_id)
-        tracer = DebugTracer(
-            spawn_id=str(spawn_id),
-            debug_path=spawn_dir / "debug.jsonl",
-            echo_stderr=True,
-        )
-
-    config = ConnectionConfig(
+    permission_config, permission_resolver = resolve_permission_pipeline(
+        sandbox=None,
+        approval="default",
+    )
+    plan = PreparedSpawnPlan(
+        model=model_name,
+        harness_id=harness_id.value,
+        prompt=normalized_prompt,
+        agent_name=normalized_agent if normalized_agent else None,
+        skills=(),
+        skill_paths=(),
+        reference_files=(),
+        template_vars={},
+        mcp_tools=(),
+        session_agent=agent_name,
+        session_agent_path="",
+        session=SessionContinuation(),
+        execution=ExecutionPolicy(
+            permission_config=permission_config,
+            permission_resolver=permission_resolver,
+        ),
+        cli_command=(),
+    )
+    spawn = Spawn(
         spawn_id=spawn_id,
-        harness_id=harness_id,
-        prompt=prompt,
-        repo_root=repo_root,
-        env_overrides={},
-        debug_tracer=tracer,
+        prompt=normalized_prompt,
+        model=ModelId(normalized_model or ""),
+        status="queued",
     )
-    params = SpawnParams(
-        prompt=prompt,
-        model=ModelId(normalized_model) if normalized_model else None,
-        agent=normalized_agent,
-    )
-    perms = TieredPermissionResolver(config=PermissionConfig())
 
     output_path = state_root / "spawns" / str(spawn_id) / "output.jsonl"
     socket_path = state_root / "spawns" / str(spawn_id) / "control.sock"
@@ -91,34 +99,39 @@ async def streaming_serve(
     print(f"Control socket: {socket_path}")
     print(f"Events: {output_path}")
 
-    outcome_status: SpawnStatus = "failed"
+    outcome_status = "failed"
     outcome_exit_code = 1
     failure_message: str | None = None
     try:
-        outcome = await run_streaming_spawn(
-            config=config,
-            params=params,
-            perms=perms,
-            state_root=state_root,
+        outcome_exit_code = await execute_with_streaming(
+            run=spawn,
+            plan=plan,
             repo_root=repo_root,
-            spawn_id=spawn_id,
+            state_root=state_root,
+            artifacts=artifacts,
+            registry=get_default_harness_registry(),
+            cwd=repo_root,
+            debug=debug,
         )
-        outcome_status = outcome.status
-        outcome_exit_code = outcome.exit_code
-        if outcome_status == "failed":
-            failure_message = outcome.error
+        row = spawn_store.get_spawn(state_root, spawn_id)
+        if row is not None:
+            outcome_status = row.status
+            if row.exit_code is not None:
+                outcome_exit_code = row.exit_code
+            failure_message = row.error
+        elif outcome_exit_code == 0:
+            outcome_status = "succeeded"
     except Exception as exc:
         failure_message = str(exc)
+        spawn_store.finalize_spawn(
+            state_root,
+            spawn_id,
+            status="failed",
+            exit_code=outcome_exit_code,
+            origin="launcher",
+            duration_secs=max(0.0, time.monotonic() - start_monotonic),
+            error=failure_message,
+        )
         raise
     finally:
-        with signal_coordinator().mask_sigterm():
-            spawn_store.finalize_spawn(
-                state_root,
-                spawn_id,
-                status=outcome_status,
-                exit_code=outcome_exit_code,
-                origin="launcher",
-                duration_secs=max(0.0, time.monotonic() - start_monotonic),
-                error=failure_message if outcome_status == "failed" else None,
-            )
-            print(f"Stopped spawn {spawn_id} (status={outcome_status}, exit={outcome_exit_code})")
+        print(f"Stopped spawn {spawn_id} (status={outcome_status}, exit={outcome_exit_code})")

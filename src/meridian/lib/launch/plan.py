@@ -16,7 +16,6 @@ from meridian.lib.launch.launch_types import PermissionResolver
 from meridian.lib.ops.spawn.plan import ExecutionPolicy, PreparedSpawnPlan, SessionContinuation
 from meridian.lib.safety.permissions import (
     PermissionConfig,
-    TieredPermissionResolver,
     resolve_permission_pipeline,
 )
 from meridian.lib.state.paths import resolve_state_paths
@@ -349,8 +348,10 @@ def resolve_primary_launch_plan(
             continue_harness_session_id=continuation_harness_session_id,
             continue_fork=continue_fork,
         )
-        permission_config = PermissionConfig()
-        permission_resolver = TieredPermissionResolver(config=permission_config)
+        permission_config, permission_resolver = resolve_permission_pipeline(
+            sandbox=None,
+            approval="default",
+        )
         prepared_plan = _build_prepared_plan(
             model_id=policies.model,
             harness_id=str(harness),
