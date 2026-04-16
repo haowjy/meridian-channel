@@ -25,8 +25,11 @@ from .env import merge_env_overrides as _merge_env_overrides
 if TYPE_CHECKING:
     from meridian.lib.ops.spawn.plan import PreparedSpawnPlan
 
+
 @dataclass(frozen=True)
-class LaunchContext:
+class NormalLaunchContext:
+    """Complete resolved launch context for one harness run."""
+
     run_params: SpawnParams
     perms: PermissionResolver
     spec: ResolvedLaunchSpec
@@ -34,6 +37,36 @@ class LaunchContext:
     env: Mapping[str, str]
     env_overrides: Mapping[str, str]
     report_output_path: Path
+
+
+@dataclass(frozen=True)
+class BypassLaunchContext:
+    """Launch context for MERIDIAN_HARNESS_COMMAND bypass."""
+
+    argv: tuple[str, ...]
+    env: Mapping[str, str]
+    cwd: Path
+
+
+LaunchContext = NormalLaunchContext | BypassLaunchContext
+
+
+@dataclass(frozen=True)
+class LaunchOutcome:
+    """Raw executor output before adapter post-processing."""
+
+    exit_code: int
+    child_pid: int | None = None
+    captured_stdout: bytes | None = None
+
+
+@dataclass(frozen=True)
+class LaunchResult:
+    """Post-processed launch result returned to driving adapters."""
+
+    exit_code: int
+    child_pid: int | None = None
+    session_id: str | None = None
 
 
 def merge_env_overrides(
@@ -51,6 +84,39 @@ def merge_env_overrides(
     )
 
 
+def build_launch_context(
+    *,
+    spawn_id: str,
+    run_prompt: str,
+    run_model: str | None,
+    plan: PreparedSpawnPlan,
+    harness: SubprocessHarness,
+    execution_cwd: Path,
+    state_root: Path,
+    plan_overrides: Mapping[str, str],
+    report_output_path: Path,
+    runtime_work_id: str | None = None,
+) -> NormalLaunchContext:
+    """Build deterministic launch context for one runner attempt.
+
+    This is the canonical entry point for launch composition.
+    All driving adapters must call this factory.
+    """
+
+    return prepare_launch_context(
+        spawn_id=spawn_id,
+        run_prompt=run_prompt,
+        run_model=run_model,
+        plan=plan,
+        harness=harness,
+        execution_cwd=execution_cwd,
+        state_root=state_root,
+        plan_overrides=plan_overrides,
+        report_output_path=report_output_path,
+        runtime_work_id=runtime_work_id,
+    )
+
+
 def prepare_launch_context(
     *,
     spawn_id: str,
@@ -63,7 +129,7 @@ def prepare_launch_context(
     plan_overrides: Mapping[str, str],
     report_output_path: Path,
     runtime_work_id: str | None = None,
-) -> LaunchContext:
+) -> NormalLaunchContext:
     """Build deterministic launch context for one runner attempt."""
 
     child_cwd = resolve_child_execution_cwd(
@@ -123,7 +189,7 @@ def prepare_launch_context(
         runtime_env_overrides=merged_overrides,
     )
 
-    return LaunchContext(
+    return NormalLaunchContext(
         run_params=run_params,
         perms=perms,
         spec=spec,
@@ -135,8 +201,13 @@ def prepare_launch_context(
 
 
 __all__ = [
+    "BypassLaunchContext",
     "LaunchContext",
+    "LaunchOutcome",
+    "LaunchResult",
+    "NormalLaunchContext",
     "RuntimeContext",
+    "build_launch_context",
     "merge_env_overrides",
     "prepare_launch_context",
 ]
