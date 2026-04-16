@@ -16,8 +16,8 @@ commit = "18ba06effc76fe2a1f493e66fa1a6fb08a612b35"
 
 [dependencies.meridian-dev-workflow]
 url = "https://github.com/meridian-flow/meridian-dev-workflow"
-version = "v0.0.23"
-commit = "33de2cdd989b6a46f8c6d32b0ea573ec90259271"
+version = "v0.0.24"
+commit = "40fdc57293f033d959794b3bb8517070ae833fa1"
 
 [items."agents/architect.md"]
 source = "meridian-dev-workflow"
