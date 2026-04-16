@@ -68,15 +68,16 @@ Finalization is handled asynchronously by a background task waiting on `spawn_ma
 
 ### 4. CLI streaming-serve path
 
-`cli/streaming_serve.py` uses the factory with `SPEC_ONLY`, then calls `run_streaming_spawn()` directly from `streaming_runner.py` and finalizes inline:
+`cli/streaming_serve.py` uses the factory with `SPEC_ONLY`, creates the spawn row itself, then calls `run_streaming_spawn()` from `streaming_runner.py` and finalizes inline:
 
 ```
 SpawnRequest + LaunchRuntime(SPEC_ONLY) → build_launch_context() → LaunchContext
-run_streaming_spawn(config, spec=launch_ctx.spec, ...)
+spawn_store.start_spawn(...)              # row created by streaming_serve.py
+run_streaming_spawn(config, spec=launch_ctx.spec, ...)  → DrainOutcome
 signal_coordinator().mask_sigterm() → spawn_store.finalize_spawn(...)
 ```
 
-Unlike the REST app path, this path creates the spawn row itself (via `spawn_store.start_spawn`), calls `run_streaming_spawn` (which invokes the full async subprocess executor including heartbeat, `mark_finalizing` CAS, and `enrich_finalize`), and finalizes synchronously in the `finally` block under `mask_sigterm()`. It does not use `process.py` or `SpawnManager`.
+`run_streaming_spawn()` is a focused executor that creates a `SpawnManager`, starts the harness connection via `manager.start_spawn()`, starts heartbeat via `manager._start_heartbeat()`, awaits drain via `manager.wait_for_completion()`, records the exited event, and returns a `DrainOutcome`. It does **not** call `enrich_finalize()`, `mark_finalizing()`, or `execute_with_streaming()`. The `finally` block in `streaming_serve.py` calls `spawn_store.finalize_spawn()` synchronously under `mask_sigterm()`. This path does not use `process.py`.
 
 ## Core Typed Seam
 

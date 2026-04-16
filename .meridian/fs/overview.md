@@ -32,7 +32,7 @@ src/meridian/
 Composition is centralized in `lib/launch/context.py:build_launch_context()`. Every launch path builds a `SpawnRequest` (caller intent DTO) and `LaunchRuntime` (surface/env/paths), calls the factory, then executes or observes. Driving adapters do not compose directly — see `fs/launch/overview.md` for invariant details.
 
 1. `ops/spawn/prepare.py` — validates input, resolves model aliases (via catalog), builds `SpawnRequest` with `SPAWN_PREPARE` surface, calls `build_launch_context(dry_run=True)` for prompt composition and preview argv
-2. `lib/launch/context.py:build_launch_context()` — sole composition seam: resolves policies (via `resolve.py` two-pass override merge), permission pipeline, prompt, argv, child env — returns `LaunchContext`
+2. `lib/launch/context.py:build_launch_context()` — sole composition seam: resolves policies (via `policies.py:resolve_policies()`), permission pipeline, prompt, argv, child env — returns `LaunchContext`
 3. Dispatch splits by launch surface:
    - **Primary (CLI) path:** `lib/launch/__init__.py:launch_primary()` builds `SpawnRequest`+`LaunchRuntime`, calls factory for preview, then delegates to `lib/launch/process.py:run_harness_process()`. Inside `run_harness_process()`: creates session, registers spawn as queued (recording runner_pid), materializes fork if needed (after row exists), rebuilds `LaunchContext` with real paths, runs PTY/pipe subprocess, finalizes inline (no `enrich_finalize`), calls `observe_session_id()` once post-execution
    - **Spawn/subagent path:** `ops/spawn/execute.py` builds `SpawnRequest`+`LaunchRuntime(SPEC_ONLY)`, calls factory after spawn row and session exist, then calls `lib/launch/streaming_runner.py:execute_with_streaming()` — `process.py` is not involved

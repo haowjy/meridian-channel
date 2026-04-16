@@ -81,13 +81,12 @@ Output is written to `.meridian/spawns/<id>/output.jsonl`.
 `execute_with_streaming()` in `streaming_runner.py` is the async executor for subagent spawns (non-primary). It is called by `ops/spawn/execute.py` after the spawn row and session exist. Key behaviors:
 
 - Captures stdout → `output.jsonl`, stderr → `stderr.log`
-- Feeds stdin from `run_params.stdin_prompt` if set (stdin-based prompt delivery)
 - Runs a report watchdog: if `report.md` appears during execution, can consider spawn done
 - Maps raw return codes to meridian exit codes
 - After process exit, writes the `exited` event inline (via `record_spawn_exited`)
 - Calls `enrich_finalize()` (`extract.py`) to extract and persist usage/session/report artifacts
 
-**Heartbeat task:** `_run_heartbeat_task()` touches `.meridian/spawns/<id>/heartbeat` every 30 seconds. Started when the worker process starts. Cancelled in the **outer `finally`** block — the heartbeat covers the entire active window (`running` + `finalizing`). This is the primary liveness signal the reaper uses; see `state/spawns.md`.
+**Heartbeat:** started via `SpawnManager._start_heartbeat()` inside `_run_streaming_attempt()`, which runs `heartbeat_loop()` touching `.meridian/spawns/<id>/heartbeat` every 30 seconds. Started when the harness connection starts. Stopped when `SpawnManager.shutdown()` is called in the outer `finally` block — the heartbeat covers the entire active window (`running` + `finalizing`). This is the primary liveness signal the reaper uses; see `state/spawns.md`.
 
 **`mark_finalizing` CAS:** in the finalization `finally` block, after the harness has exited and drain/report extraction and retry handling are complete, `spawn_store.mark_finalizing(...)` is called immediately before `finalize_spawn()`. This is a CAS: acquires spawns flock, checks current status is exactly `running`, appends `status="finalizing"` only if so. Returns `True` on success, `False` on miss (already terminal, reaper won the race, etc.). On miss, the runner logs INFO and proceeds — `finalize_spawn(origin="runner")` still runs. The `finalizing` window is narrow: it signals "terminal state is being committed" rather than "draining output."
 
@@ -104,9 +103,9 @@ Output is written to `.meridian/spawns/<id>/output.jsonl`.
 
 ### Streaming path (`streaming_runner.py`)
 
-`execute_with_streaming()` uses `signal_coordinator().mask_sigterm()` from `signals.py` to suppress SIGTERM during the final state-write window (inside `finalize_spawn`). This is the same mechanism used by `cli/streaming_serve.py` for its inline finalization.
+Both `execute_with_streaming()` and `run_streaming_spawn()` install local asyncio signal handlers via `_install_signal_handlers()` that capture SIGINT and SIGTERM into a `shutdown_event`. Ordinary signal handling flows through that asyncio event — `SignalForwarder` and `SignalCoordinator` are not involved in the active execution window.
 
-`SignalCoordinator` and `SignalForwarder` in `signals.py` are available for coordinated SIGINT/SIGTERM forwarding to child process groups, but `process.py` does not use them — only the streaming path does.
+`signal_coordinator().mask_sigterm()` is used only in the narrow final write window: in `execute_with_streaming()` it wraps `mark_finalizing` + `finalize_spawn`; in `run_streaming_spawn()` (and `cli/streaming_serve.py`) it wraps the final cleanup and `finalize_spawn` calls. The mask prevents a late SIGTERM from interrupting state commits, not from driving the spawns themselves.
 
 ## Timeout Handling
 
