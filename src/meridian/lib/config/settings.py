@@ -208,7 +208,7 @@ def _resolve_project_toml(repo_root: Path) -> Path | None:
     return resolve_project_config_state(repo_root).path
 
 
-def _resolve_user_config_path(user_config: Path | None) -> Path | None:
+def resolve_user_config_path(user_config: Path | None) -> Path | None:
     resolved = user_config.expanduser() if user_config is not None else None
     if resolved is None:
         raw_env = os.getenv(USER_CONFIG_ENV_VAR, "").strip()
@@ -770,7 +770,7 @@ def load_config(repo_root: Path, *, user_config: Path | None = None) -> Meridian
     """
 
     resolved_repo_root = repo_root.expanduser().resolve()
-    resolved_user_config = _resolve_user_config_path(user_config)
+    resolved_user_config = resolve_user_config_path(user_config)
 
     token = _SETTINGS_CONTEXT.set(
         _SettingsLoadContext(

@@ -2,13 +2,15 @@ from pathlib import Path
 
 import pytest
 
+from meridian.lib.config import settings as settings_mod
 from meridian.lib.config.settings import load_config
-from meridian.lib.ops import config as config_ops
 from meridian.lib.ops.config import (
+    ConfigGetInput,
     ConfigInitInput,
     ConfigResetInput,
     ConfigSetInput,
     ConfigShowInput,
+    config_get_sync,
     config_init_sync,
     config_reset_sync,
     config_set_sync,
@@ -25,15 +27,9 @@ def _repo(tmp_path: Path) -> Path:
 
 def test_config_init_creates_meridian_toml_and_is_idempotent(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_root = _repo(tmp_path)
     config_path = repo_root / "meridian.toml"
-
-    def _noop_mars_init(_repo_root: Path, *, link: tuple[str, ...] = ()) -> None:
-        _ = link
-
-    monkeypatch.setattr(config_ops, "_ensure_mars_init", _noop_mars_init)
 
     first = config_init_sync(ConfigInitInput(repo_root=repo_root.as_posix()))
     config_path.write_text("[defaults]\nharness = \"claude\"\n", encoding="utf-8")
@@ -45,20 +41,12 @@ def test_config_init_creates_meridian_toml_and_is_idempotent(
     assert second.path == config_path.as_posix()
     assert config_path.is_file()
     assert config_path.read_text(encoding="utf-8") == "[defaults]\nharness = \"claude\"\n"
+    assert not (repo_root / "mars.toml").exists()
+    assert not (repo_root / ".mars").exists()
 
 
-def test_runtime_bootstrap_does_not_create_meridian_toml(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_runtime_bootstrap_does_not_create_meridian_toml(tmp_path: Path) -> None:
     repo_root = _repo(tmp_path)
-    calls = {"mars_init": 0}
-
-    def _track_mars_init(_repo_root: Path, *, link: tuple[str, ...] = ()) -> None:
-        _ = link
-        calls["mars_init"] += 1
-
-    monkeypatch.setattr(config_ops, "_ensure_mars_init", _track_mars_init)
 
     ensure_runtime_state_bootstrap_sync(repo_root)
 
@@ -67,7 +55,6 @@ def test_runtime_bootstrap_does_not_create_meridian_toml(
     assert not (repo_root / "meridian.toml").exists()
     assert not (repo_root / ".mars").exists()
     assert not (repo_root / "mars.toml").exists()
-    assert calls["mars_init"] == 0
 
 
 def test_config_init_uses_env_repo_root_when_path_not_provided(
@@ -77,11 +64,6 @@ def test_config_init_uses_env_repo_root_when_path_not_provided(
     env_repo_root = _repo(tmp_path)
     cwd = tmp_path / "cwd"
     cwd.mkdir()
-
-    def _noop_mars_init(_repo_root: Path, *, link: tuple[str, ...] = ()) -> None:
-        _ = link
-
-    monkeypatch.setattr(config_ops, "_ensure_mars_init", _noop_mars_init)
     monkeypatch.setenv("MERIDIAN_REPO_ROOT", env_repo_root.as_posix())
     monkeypatch.chdir(cwd)
 
@@ -90,6 +72,7 @@ def test_config_init_uses_env_repo_root_when_path_not_provided(
     assert result.path == (env_repo_root / "meridian.toml").as_posix()
     assert (env_repo_root / "meridian.toml").is_file()
     assert not (cwd / "meridian.toml").exists()
+    assert not (env_repo_root / "mars.toml").exists()
 
 
 def test_config_set_requires_project_config_file(tmp_path: Path) -> None:
@@ -156,3 +139,24 @@ def test_config_show_and_loader_share_project_config_precedence(
     assert resolved_value.source == "env var"
     assert resolved_value.env_var == "MERIDIAN_DEFAULT_HARNESS"
     assert load_config(repo_root).default_harness == "codex"
+
+
+def test_config_show_and_get_share_default_user_config_resolution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = _repo(tmp_path)
+    user_config = tmp_path / "default-user-config.toml"
+    user_config.write_text("[defaults]\nharness = \"opencode\"\n", encoding="utf-8")
+    monkeypatch.delenv("MERIDIAN_CONFIG", raising=False)
+    monkeypatch.setattr(settings_mod, "_DEFAULT_USER_CONFIG", user_config)
+
+    shown = config_show_sync(ConfigShowInput(repo_root=repo_root.as_posix()))
+    shown_value = next(item for item in shown.values if item.key == "defaults.harness")
+    gotten = config_get_sync(ConfigGetInput(repo_root=repo_root.as_posix(), key="defaults.harness"))
+
+    assert shown_value.value == "opencode"
+    assert shown_value.source == "user-config"
+    assert gotten.value == "opencode"
+    assert gotten.source == "user-config"
+    assert load_config(repo_root).default_harness == "opencode"

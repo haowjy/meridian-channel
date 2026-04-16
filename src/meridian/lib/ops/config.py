@@ -13,10 +13,10 @@ from meridian.lib.config.project_config_state import (
     resolve_project_config_state,
 )
 from meridian.lib.config.settings import (
-    USER_CONFIG_ENV_VAR,
     MeridianConfig,
     PrimaryConfig,
     load_config,
+    resolve_user_config_path,
     resolve_project_root,
 )
 from meridian.lib.core.util import FormatContext, to_jsonable
@@ -205,7 +205,6 @@ class ConfigInitInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     repo_root: str | None = None
-    link: tuple[str, ...] = ()
 
 
 class ConfigInitOutput(BaseModel):
@@ -588,13 +587,6 @@ def _source_for_key(
     return "builtin", None
 
 
-def _user_config_path_from_env() -> Path | None:
-    raw_value = os.getenv(USER_CONFIG_ENV_VAR, "").strip()
-    if not raw_value:
-        return None
-    return Path(raw_value).expanduser()
-
-
 def _format_value_for_text(value: object) -> str:
     payload = to_jsonable(value)
     if isinstance(payload, str):
@@ -683,42 +675,6 @@ def _scaffold_template() -> str:
     return "\n".join(lines)
 
 
-def _ensure_mars_init(repo_root: Path, *, link: tuple[str, ...] = ()) -> None:
-    """Run ``mars init`` if no mars.toml exists yet, scaffolding an empty managed root.
-
-    When *link* directories are specified, ``--link`` flags are forwarded to
-    ``mars init`` so that the managed root is linked in one step.  If
-    ``mars.toml`` already exists but link dirs are requested, we run
-    ``mars link`` separately to be idempotent.
-    """
-    import contextlib
-    import subprocess
-
-    mars_toml = repo_root / "mars.toml"
-    import shutil
-
-    mars_bin = shutil.which("mars")
-    if mars_bin is None:
-        return
-
-    if not mars_toml.exists():
-        cmd: list[str] = [mars_bin, "init", "--json"]
-        for d in link:
-            cmd.extend(["--link", d])
-        with contextlib.suppress(FileNotFoundError):
-            subprocess.run(cmd, cwd=str(repo_root), check=False, capture_output=True)
-    elif link:
-        # mars.toml already exists — just link the requested dirs.
-        for d in link:
-            with contextlib.suppress(FileNotFoundError):
-                subprocess.run(
-                    [mars_bin, "link", d],
-                    cwd=str(repo_root),
-                    check=False,
-                    capture_output=True,
-                )
-
-
 def ensure_runtime_state_bootstrap_sync(repo_root: Path) -> None:
     """Ensure first-run runtime state exists without creating project-root files."""
 
@@ -738,13 +694,10 @@ def ensure_runtime_state_bootstrap_sync(repo_root: Path) -> None:
     ensure_gitignore(repo_root)
 
 
-def ensure_state_bootstrap_sync(
-    repo_root: Path, *, link: tuple[str, ...] = ()
-) -> ConfigInitOutput:
+def ensure_state_bootstrap_sync(repo_root: Path) -> ConfigInitOutput:
     """Ensure runtime state exists and scaffold project config when missing."""
 
     ensure_runtime_state_bootstrap_sync(repo_root)
-    _ensure_mars_init(repo_root, link=link)
     state = _resolve_project_config_state(repo_root)
     if state.path is not None:
         return ConfigInitOutput(path=state.path.as_posix(), created=False)
@@ -760,7 +713,7 @@ def config_init_sync(payload: ConfigInitInput) -> ConfigInitOutput:
     else:
         env_root = os.getenv("MERIDIAN_REPO_ROOT", "").strip()
         repo_root = Path(env_root).expanduser().resolve() if env_root else Path.cwd().resolve()
-    return ensure_state_bootstrap_sync(repo_root, link=payload.link)
+    return ensure_state_bootstrap_sync(repo_root)
 
 
 def config_show_sync(payload: ConfigShowInput) -> ConfigShowOutput:
@@ -768,7 +721,7 @@ def config_show_sync(payload: ConfigShowInput) -> ConfigShowOutput:
     state = _resolve_project_config_state(repo_root)
     path = state.write_path
     project_overrides = _extract_file_overrides(_read_file_payload(path))
-    user_path = _user_config_path_from_env()
+    user_path = resolve_user_config_path(None)
     user_overrides = (
         _extract_file_overrides(_read_file_payload(user_path)) if user_path is not None else {}
     )
@@ -824,7 +777,7 @@ def config_get_sync(payload: ConfigGetInput) -> ConfigGetOutput:
     spec = _resolve_key_spec(payload.key)
 
     project_overrides = _extract_file_overrides(_read_file_payload(path))
-    user_path = _user_config_path_from_env()
+    user_path = resolve_user_config_path(None)
     user_overrides = (
         _extract_file_overrides(_read_file_payload(user_path)) if user_path is not None else {}
     )
