@@ -12,15 +12,11 @@ Workspace roots matter only if they reach harness launches predictably. The laun
 
 `Enabled workspace roots that exist on disk shall apply to every harness and sandbox combination that Meridian marks as supporting workspace injection in v1, and v1 shall not define per-harness root subsets.`
 
-### CTX-1.e1 — Explicit user `--add-dir` wins over workspace defaults
+### CTX-1.u2 — Precedence ordering preserves explicit CLI intent
 
-`When the user supplies explicit --add-dir passthrough arguments, Meridian shall emit those explicit arguments before any workspace-emitted --add-dir arguments so explicit CLI intent wins under first-seen dedupe semantics.`
+`Directory arguments in harness launch commands shall follow precedence order: explicit user CLI passthrough first, then projection-managed directories from harness execution context or parent forwarding, then workspace-declared roots last. This ordering shall be preserved so first-seen dedupe semantics yield the correct winner when the same directory appears at multiple tiers.`
 
-### CTX-1.c1 — Inherited and projection-managed directories keep precedence over workspace defaults
-
-`While a harness projection already emits execution-derived directories or parent-forwarded additional directories, Meridian shall append workspace-emitted directories after those projection-managed directories rather than before them.`
-
-### CTX-1.e2 — Missing configured roots are advisory and omitted from launch
+### CTX-1.e1 — Missing configured roots are advisory and omitted from launch
 
 `When an enabled workspace root does not exist on disk, Meridian shall omit that root from the emitted launch arguments and shall treat the condition as advisory rather than fatal.`
 
@@ -36,4 +32,3 @@ Workspace roots matter only if they reach harness launches predictably. The laun
 
 - **No new harness-specific topology syntax in v1.** The same declared root set applies wherever support exists.
 - **No hidden override of explicit CLI intent.** Workspace roots are defaults, not a stronger precedence layer than user passthrough.
-- **`MERIDIAN_HARNESS_COMMAND` bypass stays a surfaced unsupported path.** Primary launches that bypass normal adapter composition are covered by `CTX-1.w2`, realized in the architecture layer as `unsupported:harness_command_bypass`.

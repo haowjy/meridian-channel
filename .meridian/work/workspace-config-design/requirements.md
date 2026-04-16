@@ -33,7 +33,7 @@ Mars remains conceptually separable from Meridian. Mars-owned state and config d
 AGENTS.md and committed config reference repos by canonical identity (`org/repo`), not personal filesystem paths.
 
 ### G5: Centralized Context-Root Injection
-A local-only workspace file lets developers declare extra roots once and have Meridian inject them into harness launches. Default behavior: all declared roots apply to all harnesses. Per-harness overrides are possible but not required.
+A local-only workspace file lets developers declare extra roots once and have Meridian inject them into harness launches. Default behavior: all declared roots apply to all harnesses.
 
 ### G6: Settings/Config Separate from Workspace/Topology
 Operational settings (model, harness, approval, etc.) and workspace topology (which repos, which roots) are distinct concerns in distinct files. The workspace file is not a junk drawer for runtime settings.
@@ -67,3 +67,5 @@ The design must not create dependencies that block future migration of work/fs a
 - Per-harness context-root subsets (declare once, all harnesses get all roots).
 - Replacing mars.local.toml (workspace config bridges to it, does not replace it).
 - Moving `fs/`, `work/`, or `work-archive/` out of `.meridian/` in the first version (acknowledged as future migration, not this version).
+- `MERIDIAN_WORKSPACE` environment variable override (biggest complexity driver — override states, advisories, discovery rules; future enhancement).
+- `workspace init --from mars.toml` variant (emits empty entries with low value; plain `workspace init` only).

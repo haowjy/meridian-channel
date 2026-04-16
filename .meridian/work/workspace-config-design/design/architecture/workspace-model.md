@@ -10,9 +10,9 @@ snapshot, and harness-owned projection.
 
 ## Realizes
 
-- `../spec/workspace-file.md` — `WS-1.u2`, `WS-1.u3`, `WS-1.s1`, `WS-1.e1`, `WS-1.e2`, `WS-1.e3`, `WS-1.e4`, `WS-1.e5`, `WS-1.c1`
-- `../spec/context-root-injection.md` — `CTX-1.u1`, `CTX-1.e2`
-- `../spec/surfacing.md` — `SURF-1.e1`, `SURF-1.e2`, `SURF-1.e6`
+- `../spec/workspace-file.md` — `WS-1.u2`, `WS-1.u3`, `WS-1.u4`, `WS-1.s1`, `WS-1.e1`, `WS-1.e2`, `WS-1.c1`
+- `../spec/context-root-injection.md` — `CTX-1.u1`, `CTX-1.e1`
+- `../spec/surfacing.md` — `SURF-1.e1`, `SURF-1.e2`
 
 ## Current State
 
@@ -65,16 +65,14 @@ round-tripping without expanding the v1 user schema.
 ### `WorkspaceSnapshot` — evaluated state
 
 ```text
-WorkspaceStatus = absent | valid | invalid
+WorkspaceStatus = absent | present | invalid
 
 WorkspaceSnapshot
   status: WorkspaceStatus
   path: Path | None
-  absent_reason: none | override_missing | override_non_absolute
   roots: tuple[ResolvedContextRoot, ...]
   unknown_keys: tuple[str, ...]
   findings: tuple[str, ...]
-  harness_support: Mapping[str, HarnessWorkspaceSupport]
 
 ResolvedContextRoot
   declared_path: str
@@ -87,19 +85,13 @@ Contract:
 
 - Single shared inspection object for `config show`, `doctor`, and launch
   preparation.
-- Built by evaluating a `WorkspaceConfig` against the filesystem and harness
-  capability table.
+- Built by evaluating a `WorkspaceConfig` against the filesystem.
 - `status=invalid` keeps the file path and findings so inspection commands can
   continue.
-- `status=absent` remains the top-level quiet state, while `absent_reason`
-  distinguishes "no workspace file declared" from broken explicit override cases
-  such as "MERIDIAN_WORKSPACE pointed at a missing file" or
-  "MERIDIAN_WORKSPACE used a non-absolute path" without forcing surfacing code
-  to re-read the environment.
+- `status=absent` is the quiet state for single-repo users (no workspace file).
+- `status=present` indicates a valid workspace file was found and parsed.
 - `roots` includes disabled and missing entries so diagnostics can report counts
   without reparsing.
-- `harness_support` uses the richer applicability states defined in
-  [harness-integration.md](harness-integration.md).
 
 ### `HarnessWorkspaceProjection` — harness-owned launch contract
 
@@ -145,27 +137,42 @@ Contract:
 
 ### Validation tiers
 
-| Condition | Status impact | Launch impact | Inspection impact |
+| Condition | Status | Launch impact | Inspection impact |
 |---|---|---|---|
-| No env override and no file next to `.meridian/` | `absent` + `absent_reason=none` | no workspace behavior | no warnings |
-| `MERIDIAN_WORKSPACE` points at a missing absolute-path file | `absent` + `absent_reason=override_missing` | no workspace behavior; no fallback to default discovery | advisory |
-| `MERIDIAN_WORKSPACE` uses a non-absolute path | `absent` + `absent_reason=override_non_absolute` | no workspace behavior; no fallback to default discovery | advisory |
+| No file next to `.meridian/` | `absent` | no workspace behavior | no warnings |
 | Parse/schema error | `invalid` | fatal for workspace-dependent commands | surfaced, non-fatal |
-| Unknown key | `valid` | non-fatal | warning |
-| Enabled root missing on disk | `valid` | root omitted before projection | warning |
+| Unknown key | `present` | non-fatal | warning |
+| Enabled root missing on disk | `present` | root omitted before projection | warning |
+
+## Init Template Shape
+
+Realizes `../spec/workspace-file.md` — `WS-1.e1`.
+
+### Default template
+
+```toml
+# Workspace topology — local-only, gitignored.
+# Uncomment and fill paths to enable workspace roots.
+
+# [[context-roots]]
+# path = "../sibling-repo"
+# enabled = true
+```
+
+Template properties:
+- Starts with a header comment explaining the file's purpose and gitignored status.
+- Emits commented `[[context-roots]]` entries rather than active ones.
+- Does not include filesystem-path heuristics (no `~/gitrepos/...` guesses).
+- Init is idempotent: if `workspace.local.toml` already exists, the command reports the file exists and does not overwrite.
 
 ## Design Notes
 
 - The user-facing schema stays minimal on purpose. The internal richness belongs
   in `ContextRoot.extra_keys`, `WorkspaceSnapshot`, and
   `HarnessWorkspaceProjection`, not in v1 TOML boilerplate.
-- `workspace init --from mars.toml` emits starter entries as comments in the
-  file; provenance is file convention, not a parsed field.
-- Broken explicit overrides remain `workspace.status = absent` rather than
-  `invalid` because Meridian can still run without workspace roots; the design
-  makes the misconfiguration visible through findings instead of blocking launch.
 - This model keeps the door open for future per-root tags or access metadata
   without having to redesign the parser around a flat list later.
+- `MERIDIAN_WORKSPACE` override support is deferred to a future version.
 
 ## Open Questions
 

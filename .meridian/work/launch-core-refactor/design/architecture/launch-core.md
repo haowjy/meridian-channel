@@ -1,4 +1,4 @@
-# A06: Launch Domain Core
+# Launch Domain Core Architecture
 
 ## Summary
 
@@ -14,28 +14,15 @@ intent and durable state-machine concerns, never composition logic.
 
 This leaf is observational. It describes the target shape and the constraints
 that implementation and review must preserve. The agenda for getting from the
-current state to this shape is `../refactors.md` R06; the rationale is
-`../decisions.md` D17 and D19. Probe-grounded feasibility verdicts are
-`feasibility.md` FV-11 and FV-12.
+current state to this shape is `../refactors.md`.
 
-## Realizes
+## Structural Role
 
-A06 is a **structural** architecture leaf. It does not introduce user-visible
-behavior of its own, but it is load-bearing for several leaves whose
-correctness depends on composition happening in one place:
+This architecture provides the single-composition-seam invariant that enables:
 
-- `../spec/context-root-injection.md` — `CTX-1.u1`, `CTX-1.e1`, `CTX-1.c1`,
-  `CTX-1.e2`, `CTX-1.w1`, `CTX-1.w2`. Workspace-root projection is a pipeline
-  stage inside the factory; A04 specifies the seam shape, A06 specifies the
-  factory that hosts it.
-- `../spec/surfacing.md` — `SURF-1.u1`, `SURF-1.e5`. `config show` and
-  `doctor` observe the same composed state the factory produces.
-- `../spec/bootstrap.md` — `BOOT-1.*` indirectly. Bypass dispatch
-  (`MERIDIAN_HARNESS_COMMAND`) becomes the factory's sole concern, so
-  bootstrap-time behavior cannot diverge between dry-run preview and runtime.
-
-R05 (workspace projection extraction) and R03 (narrowing direct `--add-dir`
-emitters) both depend on A06 having exactly one composition seam to target.
+- **Future workspace projection:** A single `build_launch_context()` factory with fixed pipeline ordering gives exactly one insertion point for any `apply_workspace_projection()` stage.
+- **Context-root injection:** Harness integration for context-root injection plugs into the seam this architecture provides.
+- **Dry-run / runtime parity:** A single bypass branch (`_build_bypass_context()`) ensures dry-run preview and runtime execute the same preflight expansion.
 
 ## Current State
 
@@ -74,7 +61,7 @@ emitters) both depend on A06 having exactly one composition seam to target.
   patterns for.
 
 The shape is half-built: the domain core's package silhouette landed, but the
-core itself did not. R06 finishes the core.
+core itself did not.
 
 ## Target State
 
@@ -93,7 +80,7 @@ core itself did not. R06 finishes the core.
                                   │  ├── build_resolved_run_inputs()
                                   │  ├── materialize_fork()                ← gated by dry_run
                                   │  ├── resolve_launch_spec_stage()
-                                  │  ├── apply_workspace_projection()      ← A04 seam
+                                  │  ├── apply_workspace_projection()      ← future seam
                                   │  ├── build_launch_argv()
                                   │  └── build_env_plan()
                                   ▼
@@ -224,7 +211,7 @@ DTOs + `CompositionWarning` auxiliary + 2 factory-internal types).
 | Run-input aggregation | `launch/run_inputs.py` (new) | `build_resolved_run_inputs` | policies, permissions, prompt, materialized `context_from` payload | `ResolvedRunInputs` |
 | Fork materialization | `launch/fork.py` | `materialize_fork(*, adapter, run_inputs, dry_run, spawn_id)` | adapter, run_inputs, dry_run, existing spawn_id | `ResolvedRunInputs` (with new session id when forked) — sole `adapter.fork_session` callsite; precondition: spawn row exists |
 | Spec resolution | `launch/command.py` | `resolve_launch_spec_stage` | adapter, run_inputs, perms | `ResolvedLaunchSpec` — sole `adapter.resolve_launch_spec` callsite |
-| Workspace projection (A04 seam) | `launch/command.py` | `apply_workspace_projection` | adapter, spec, runtime | `ResolvedLaunchSpec` (with `extra_args` extended by `projection.extra_args`) — sole `adapter.project_workspace` callsite |
+| Workspace projection (future seam) | `launch/command.py` | `apply_workspace_projection` | adapter, spec, runtime | `ResolvedLaunchSpec` (with `extra_args` extended by `projection.extra_args`) — sole `adapter.project_workspace` callsite |
 | Argv build | `launch/command.py` | `build_launch_argv` | adapter, projected spec | `tuple[str, ...]` — sole `adapter.build_command` callsite |
 | Env plan | `launch/env.py` | `build_env_plan` | adapter, run_inputs, permission_config, `runtime` overrides, base env | `Mapping[str, str]` — sole env builder; sole `build_harness_child_env` caller |
 
@@ -286,7 +273,7 @@ executor, and assembles `LaunchResult`.
   `resolve_permission_pipeline()`. Sum-type dispatch uses exhaustive
   `match` over `LaunchContext` with `assert_never` default.
 
-`cli/streaming_serve.py` driver is removed entirely under R06 — its
+`cli/streaming_serve.py` driver is removed entirely — its
 responsibilities collapse into the app streaming driver because both
 already construct identical pre-composed plans against the same
 factory boundary.
@@ -294,7 +281,7 @@ factory boundary.
 Dry-run callers (preview/`--dry-run`) call the factory with `dry_run=True`
 and consume the `LaunchContext` for printing; they do not invoke an
 executor. Bypass dry-run produces the same argv as bypass runtime because
-preflight runs inside the bypass branch (closes correctness review D11).
+preflight runs inside the bypass branch.
 
 ### Executors
 
@@ -307,8 +294,7 @@ Two executors. Each accepts `LaunchContext`, dispatches via `match` +
   streaming share. Single precondition: the spawn row must exist before
   `execute_with_streaming` is called. The fallback inside
   `execute_with_streaming` no longer creates rows on demand; callers that
-  could reach this path with no row (correctness review D6) become a
-  fail-fast error.
+  could reach this path with no row become a fail-fast error.
 
 Executors do not know about session ids, harness identities, or composition
 inputs. They consume `LaunchContext`, run a process, return `LaunchOutcome`.
@@ -327,9 +313,7 @@ The port MUST NOT contain concrete permission-flag projection logic,
 concrete env construction, concrete session-ID observation, or concrete
 command-argv assembly. All such mechanism moves into each adapter's
 own file (`env_overrides()`, `build_command()`, `observe_session_id()`,
-`project_workspace()`) as appropriate. The port stops carrying mechanism
-(closes structural review §1 "contract module also owns concrete
-permission-flag projection").
+`project_workspace()`) as appropriate. The port stops carrying mechanism.
 
 ### Session-ID adapter seam
 
@@ -372,8 +356,8 @@ update for `harness_session_id` happens with this value.
 
 ### Fork transaction ordering
 
-Fork materialization is a side effect against external Codex SQLite. R06
-enforces fork-after-row in every driver:
+Fork materialization is a side effect against external Codex SQLite.
+Fork-after-row is enforced in every driver:
 
 | Driver | Fork happens | Row exists when fork happens? |
 |---|---|---|
@@ -422,7 +406,7 @@ same way every other driver does.
 
 This is a strict simplification: the resolver was already reconstructed
 at execute time today (`execute.py:861`), so the persisted live object
-was never load-bearing across the boundary (FV-11).
+was never load-bearing across the boundary.
 
 `spawn show --plan` operates against the persisted `SpawnRequest` rather
 than a pre-composed plan. Operators inspecting the artifact see the
@@ -432,8 +416,7 @@ latter is recomputed deterministically on `execute`.
 ## Cross-Cutting Constraints
 
 These constraints are what the type system, behavioral tests, and the
-CI architectural drift gate must enforce together. None can be enforced
-by `rg`-count alone (structural review §7 enumerated 14 evasion patterns).
+CI architectural drift gate must enforce together.
 
 ### Single-owner table
 
@@ -516,111 +499,46 @@ If a driver needs any of these, it constructs `SpawnRequest` +
 
 `scripts/check-launch-invariants.sh` is deleted. The
 `check-launch-invariants` step is removed from
-`.github/workflows/meridian-ci.yml`. Verification is three layers,
-chosen because the structural review §7 enumerated 14 concrete
-`rg`-evasion patterns the script could not catch:
+`.github/workflows/meridian-ci.yml`. Verification is three layers:
 
 **1. Behavioral factory tests.** `tests/launch/test_launch_factory.py`
 pins load-bearing invariants directly. Required tests are enumerated in
-`../refactors.md` R06 verification section. They assert input→output
-properties of `build_launch_context()` against fake adapters and fake
-spawn stores. Convergence-2 expanded the set with five additional
-deterministic checks that pin specific regressions the prior verification
-posture could not catch:
-
-- `test_child_cwd_not_created_before_spawn_row` — locks D7 ordering by
-  asserting that `child_cwd` materialization is impossible when no spawn
-  row exists.
-- `test_composition_warnings_propagate_to_launch_context` — asserts that
-  pipeline-stage warnings reach `LaunchContext.warnings` and survive to
-  driving-adapter consumption.
-- `test_workspace_projection_seam_reachable` — asserts
-  `apply_workspace_projection` runs between spec resolution and argv
-  build, and that `projection.extra_args` is observable on the final
-  argv.
-- `test_unsafe_no_permissions_dispatches_through_factory` — asserts
-  `LaunchRuntime.unsafe_no_permissions=True` produces an
-  `UnsafeNoOpPermissionResolver` from inside
-  `resolve_permission_pipeline()`, with no driver-side construction.
-- `test_session_request_carries_all_eight_continuation_fields` — pins
-  the schema completeness of `SessionRequest` against the eight prior
-  `SessionContinuation` fields.
-
-These tests cannot be passed by renaming, shimming, or adding dead
-`match` blocks — they exercise the actual composition.
+`../refactors.md` verification section.
 
 **2. CI architectural drift gate.** A `meridian spawn -a reviewer` step
 runs only on PRs that touch `src/meridian/lib/(launch|harness|ops/spawn|app)/`
 or `src/meridian/cli/streaming_serve.py`. The reviewer reads the diff
 against `.meridian/invariants/launch-composition-invariant.md`
-(a version-controlled declared-intent prose file; the convergence-ready
-draft lives at `design/launch-composition-invariant.md` and is copied
-verbatim during R06 implementation). It returns `pass | fail` with
-file:line violations and CI blocks merge on `fail`. The invariant
-prompt enumerates 10 numbered invariants (composition centralization,
-driving-adapter prohibition list, single-owner table, observation path,
-DTO discipline, stage modules own real logic, driven port keeps shape
-only, executors stay mechanism-only, workspace-projection seam reachable,
-fork-after-row ordering) plus an explicit "what does NOT count as a
-violation" carve-out and a structured JSON output format.
-
-Reviewer model selection follows `agent-staffing` guidance: cheap
-mini/flash variant for routine drift detection; escalate to default
-reviewer or fan-out on PRs that materially restructure the protected
-surface. Per FV-12, this is the established pattern for surfaces where
-invariants are too semantic for grep checks.
+(a version-controlled declared-intent prose file). It returns `pass | fail`
+with file:line violations and CI blocks merge on `fail`.
 
 **3. pyright + ruff + pytest** remain the correctness gate. The drift gate
 sits beside them, not in place of them.
 
-This triad is mutually reinforcing: behavioral tests pin the highest-leverage
-invariants deterministically; the reviewer catches novel violations of
-declared intent that tests do not pin specifically; type-checking and
-linting catch syntactic and structural regressions immediately.
-
 ## Resolved Behaviors
 
-- **R05 / A04 insertion point reachable.** Workspace projection is its
+- **Workspace projection insertion point reachable.** Workspace projection is its
   own pipeline stage — `apply_workspace_projection()` — sitting between
-  `resolve_launch_spec_stage()` (which calls
-  `harness.resolve_launch_spec`) and `build_launch_argv()` (which calls
-  `harness.build_command`). The stage receives the resolved spec, calls
-  `adapter.project_workspace()` once, and returns the spec with
-  `extra_args` extended by `projection.extra_args`. Argv is built only
-  after this extension. The launch core does not branch on Claude vs
-  Codex vs OpenCode; the adapter does. Splitting spec-resolution from
-  argv-build is what makes the A04 seam reachable inside the A06 stage
-  ordering.
-
+  `resolve_launch_spec_stage()` and `build_launch_argv()`.
 - **Dry-run / runtime parity.** Bypass dry-run argv equals bypass runtime
   argv because both walk `_build_bypass_context()` with the same preflight
-  call. Normal-path dry-run argv equals normal-path runtime argv because
-  both call the same `resolve_launch_spec_stage()` →
-  `apply_workspace_projection()` → `build_launch_argv()` chain; only the
-  executor is skipped.
-
+  call.
 - **Persisted-artifact serializability.** The worker `prepare → execute`
   artifact is plain JSON — no `arbitrary_types_allowed`, no live objects.
-  Operators can `cat` the persisted blob and read it.
-
 - **Background worker `disallowed_tools` correctness.** The current bug
   where workers serialize `allowed_tools` but drop `disallowed_tools`
   becomes structurally fixable as soon as the worker persists `SpawnRequest`,
-  because `SpawnRequest.disallowed_tools` is a first-class field. The fix
-  itself lands as a separate commit with its own test (R06 scope is
-  composition, not permission-pipeline correctness).
-
+  because `SpawnRequest.disallowed_tools` is a first-class field.
 - **Popen-fallback session-ID observability.** Preserved as a known
-  limitation under issue #34. R06 lands the `observe_session_id()` seam;
-  the mechanism swap to filesystem polling is a separate change that does
-  not touch the factory.
+  limitation under issue #34. This refactor lands the `observe_session_id()` seam;
+  the mechanism swap to filesystem polling is a separate change.
 
 ## What This Leaf Does Not Cover
 
-- Per-harness workspace projection mechanics — see A04.
-- Workspace topology model and validation — see A03.
-- Project-root file boundary (`ProjectPaths` vs `StatePaths`) — see A01.
-- Config loader state machine — see A02.
-- `config show`, `doctor`, and launch-diagnostic shapes — see A05.
+- Per-harness workspace projection mechanics.
+- Workspace topology model and validation.
+- Project-root file boundary (`ProjectPaths` vs `StatePaths`).
+- Config loader state machine.
+- `config show`, `doctor`, and launch-diagnostic shapes.
 - Removing dead legacy subprocess-runner code and clarifying misleading
   `_subprocess` filenames — issue #32.

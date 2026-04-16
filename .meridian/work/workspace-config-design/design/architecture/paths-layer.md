@@ -9,7 +9,7 @@ Terminology: **project root** names the parent directory of the active `.meridia
 ## Realizes
 
 - `../spec/config-location.md` — `CFG-1.u1`, `CFG-1.u3`
-- `../spec/workspace-file.md` — `WS-1.u1`, `WS-1.u2`, `WS-1.e5`
+- `../spec/workspace-file.md` — `WS-1.u1`, `WS-1.u2`
 - `../spec/bootstrap.md` — `BOOT-1.u1`, `BOOT-1.e2`
 
 ## Current State
@@ -24,7 +24,6 @@ Introduce a separate project-root file abstraction, referred to here as `Project
 
 - locating `meridian.toml`
 - locating `workspace.local.toml`
-- resolving `MERIDIAN_WORKSPACE`
 - exposing project-local ignore policy for `workspace.local.toml`
 
 `StatePaths` remains responsible only for `.meridian/` runtime and cache files.
@@ -36,7 +35,6 @@ ProjectPaths
   project_root
   meridian_toml
   workspace_local_toml
-  workspace_override_env
   workspace_ignore_target
 
 StatePaths
@@ -52,9 +50,8 @@ StatePaths
 ### Discovery rules
 
 - **Project config**: canonical path is `<project-root>/meridian.toml`. If absent, no project config is in effect.
-- **Workspace file**: if `MERIDIAN_WORKSPACE` is unset, Meridian checks `<project-root>/workspace.local.toml`; if `MERIDIAN_WORKSPACE` is set to an absolute path, Meridian consults that path exclusively; if it is set to a non-absolute path, Meridian surfaces an advisory and treats workspace topology as absent for that invocation.
-- **`MERIDIAN_WORKSPACE` path semantics (v1)**: absolute paths only. Broken explicit overrides do not fall through to default discovery because doing so would make workspace topology depend on an unusable override plus an unrelated default file.
-- **Paths inside `workspace.local.toml`**: resolved relative to the file itself (VS Code `.code-workspace` convention), so the file remains portable across moves. This remains true even when `MERIDIAN_WORKSPACE` points at a file outside the project root.
+- **Workspace file**: Meridian checks `<project-root>/workspace.local.toml`. If absent, workspace topology is absent.
+- **Paths inside `workspace.local.toml`**: resolved relative to the file itself (VS Code `.code-workspace` convention), so the file remains portable across moves.
 
 ### Ownership boundary
 
@@ -70,10 +67,10 @@ New modules introduced by this design:
 
 | Module | Ownership |
 |---|---|
-| `src/meridian/lib/config/project_paths.py` | Project-root Meridian file policy. Defines `ProjectPaths` and resolves the file locations for `meridian.toml`, `workspace.local.toml`, and `MERIDIAN_WORKSPACE` without touching state-root concerns. |
+| `src/meridian/lib/config/project_paths.py` | Project-root Meridian file policy. Defines `ProjectPaths` and resolves the file locations for `meridian.toml` and `workspace.local.toml` without touching state-root concerns. |
 | `src/meridian/lib/config/project_config_state.py` | Canonical project-config state machine (`absent | present`). Shared by loader and mutation commands so read/write behavior cannot diverge. |
 | `src/meridian/lib/config/workspace.py` | `workspace.local.toml` loading, parsing, schema validation, unknown-key preservation, and `WorkspaceConfig` document model after `ProjectPaths` chooses which file to consult. |
-| `src/meridian/lib/config/workspace_snapshot.py` | Filesystem evaluation and diagnostic shaping: missing roots, enabled counts, invalid-file findings, and per-harness applicability matrix. Produces `WorkspaceSnapshot`. |
+| `src/meridian/lib/config/workspace_snapshot.py` | Filesystem evaluation and diagnostic shaping: missing roots, enabled counts, invalid-file findings. Produces `WorkspaceSnapshot`. |
 | `src/meridian/lib/launch/context_roots.py` | Shared launch-time ordered-root planner. Chooses which enabled existing roots participate in a launch and in what order; harness adapters translate that plan into tokens or overlays. |
 | `src/meridian/lib/ops/workspace.py` | New `meridian workspace` command family, starting with `workspace init`. File creation for `workspace.local.toml` lives here, not in generic bootstrap. |
 | `src/meridian/lib/ops/config_surface.py` | Shared builder for `config show` and `doctor` workspace/config surfacing payloads so both commands report the same state vocabulary. |

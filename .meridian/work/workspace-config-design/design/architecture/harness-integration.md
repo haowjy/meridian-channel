@@ -11,8 +11,12 @@ mechanics.
 
 ## Realizes
 
-- `../spec/context-root-injection.md` — `CTX-1.u1`, `CTX-1.e1`, `CTX-1.c1`, `CTX-1.e2`, `CTX-1.w1`, `CTX-1.w2`
-- `../spec/surfacing.md` — `SURF-1.u1`, `SURF-1.e5`
+- `../spec/context-root-injection.md` — `CTX-1.u1`, `CTX-1.u2`, `CTX-1.e1`, `CTX-1.w1`, `CTX-1.w2`
+- `../spec/surfacing.md` — `SURF-1.u1`, `SURF-1.e4`
+
+## External Dependencies
+
+This architecture leaf depends on the **launch-core-refactor** work item. The workspace projection is a pipeline stage (`apply_workspace_projection()`) that plugs into the launch domain core's factory. Without the single-composition-seam invariant, workspace projection would need independent wiring into each driving adapter.
 
 ## Current State
 
@@ -162,21 +166,16 @@ Why this shape:
   missing-session-id. GitHub issue #34 tracks moving to filesystem polling,
   which removes the Popen-path degradation without touching executors.
 
-R06 lands the adapter seam. The mechanism swap to filesystem polling is
-GitHub issue #34 — out of scope for workspace-config-design.
+The mechanism swap to filesystem polling is GitHub issue #34 — out of scope for workspace-config-design.
 
-### Launch composition (hexagonal core — 3 driving adapters through one factory)
+### Launch composition
 
-Post-R06, Meridian launch uses a hexagonal (ports and adapters) architecture
+Post-launch-core-refactor, Meridian launch uses a hexagonal (ports and adapters) architecture
 with 3 driving adapters, 1 factory, and 3 driven adapters (harness
-implementations). The domain core lives in `src/meridian/lib/launch/context.py`
-(or successor); `build_launch_context()` is the factory that orchestrates a
-pipeline of composition stages and returns a complete
-`LaunchContext = NormalLaunchContext | BypassLaunchContext`. Several stages
-read bounded configuration from disk (profiles, skills, session state,
-`.claude/settings*.json`); `materialize_fork()` is the sole stage that
-performs state-mutating I/O (Codex session API). The factory's invariant is
-**centralization** — composition happens only in this pipeline — not purity.
+implementations). The domain core lives in `src/meridian/lib/launch/context.py`;
+`build_launch_context()` is the factory that orchestrates a pipeline of
+composition stages and returns a complete
+`LaunchContext = NormalLaunchContext | BypassLaunchContext`.
 
 ```
 Primary launch ─┐
@@ -188,43 +187,6 @@ App streaming  ─┘
 Dry-run        ─┘ (preview only)
 ```
 
-- **3 driving adapters**, each with a named architectural reason:
-  1. **Primary launch** (`launch/plan.py` → `launch/process.py`) — foreground
-     process under meridian's control until exit. Two capture modes:
-     **PTY capture** (intended, `pty.fork()` + `os.execvpe()` when stdin/stdout
-     are TTYs and output log path is configured) and **direct Popen** (degraded
-     fallback, `subprocess.Popen().wait()` when TTYs unavailable). PTY enables
-     session-ID scraping; Popen loses session-ID observability today (GitHub
-     issue #34 tracks filesystem-polling fix). Both paths consume the same
-     `LaunchContext` and return the same `LaunchResult` contract.
-  2. **Background worker** (`ops/spawn/prepare.py:build_create_payload` →
-     `ops/spawn/execute.py`) — detached one-shot subprocess per spawn.
-     `meridian spawn` forks a detached `python -m
-     meridian.lib.ops.spawn.execute` per spawn id; that process composes once,
-     executes, writes its report, and exits. The architectural reason is
-     **detached lifecycle** — the meridian parent can exit or crash without
-     orphaning the spawn.
-  3. **App streaming HTTP** (`app/server.py`) — in-process `SpawnManager`
-     control channel. The REST/WS interface is structured around a manager
-     held by the HTTP handler; `/inject` and `/interrupt` route through the
-     same in-memory connection. The architectural reason is **current API
-     shape**. Meridian's separate `control.sock` + `spawn_inject` mechanism
-     demonstrates out-of-process control is possible; moving to queued exec
-     + remote control is a separate refactor.
-  Each constructs a `SpawnRequest` (user-facing args only), calls the factory,
-  and hands the resulting `LaunchContext` to the appropriate executor.
-  Dry-run callers call the factory for preview output without executing.
-- **Driven adapters** accept `NormalLaunchContext` (not the sum) and produce
-  harness-specific output. R05's `project_workspace()` is the adapter's
-  workspace translation step, implemented once per harness.
-  `observe_session_id()` is the adapter's post-execution session-ID
-  observation method — see "Session-ID observation" below.
-- **2 executors** — primary foreground (PTY/Popen capture-mode branch,
-  primary only) and async subprocess_exec (worker + app streaming share).
-  Both accept `LaunchContext` and dispatch via `match` + `assert_never` on
-  the sum type. Executors return `LaunchOutcome` (raw); driving adapters
-  call `observe_session_id()` and assemble `LaunchResult`.
-
 Workspace projection is its own pipeline stage inside the
 `build_launch_context()` factory — `apply_workspace_projection()` —
 sitting between `resolve_launch_spec_stage()` (which calls
@@ -232,10 +194,7 @@ sitting between `resolve_launch_spec_stage()` (which calls
 `harness.build_command`). The stage receives the resolved spec, calls
 `adapter.project_workspace()` once, returns the spec with `extra_args`
 extended by `projection.extra_args`, and `build_launch_argv` then assembles
-the final argv. With all 3 driving adapters routed through the factory and
-spec-resolution split from argv-build, R05 has exactly one reachable seam
-to target. R06 delivers the domain core that makes this possible (see
-`decisions.md` D17, D19, D20 and `design/refactors.md` R06 invariants).
+the final argv.
 
 Composition contract:
 
@@ -363,17 +322,11 @@ Alternative rejected:
 | `active:add_dir` | Workspace roots are projected as repeated `--add-dir` args. | Claude, Codex |
 | `active:permission_allowlist` | Workspace roots are projected through a config overlay that grants file-tool access. | OpenCode |
 | `ignored:read_only_sandbox` | Harness selected a mode where workspace projection is inert for this launch. | Codex read-only sandbox |
-| `unsupported:harness_command_bypass` | Primary launch used `MERIDIAN_HARNESS_COMMAND`, so meridian bypassed normal harness composition and did not project workspace roots. | primary launch only |
 | `unsupported:<reason>` | Harness has no workspace-root mechanism yet. | future harnesses only |
 
 `unsupported:*` remains forward-looking even though day-1 support now covers the
 three in-scope harnesses. Future harness additions should not need a spec
 rewrite to surface their unsupported state honestly.
-
-When `MERIDIAN_HARNESS_COMMAND` is set on a primary launch, applicability is
-`unsupported:harness_command_bypass`. The surfacing layer already treats
-`unsupported:*` generically; this adds one concrete reason code for the
-primary-path bypass case without creating a special surfacing mechanism.
 
 ## Diagnostics
 
