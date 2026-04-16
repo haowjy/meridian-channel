@@ -149,8 +149,12 @@ Why this shape:
   (`src/meridian/lib/harness/connections/codex_ws.py:190,270`); OpenCode
   streaming reads `connection.session_id` set during session creation
   (`src/meridian/lib/harness/connections/opencode_http.py:137,166`).
-  `observe_session_id()` is a getter over adapter-held state, not a parser
-  of `launch_outcome`. Executors return raw `LaunchOutcome`; the driving
+  `observe_session_id()` reads per-launch inputs only — either parsed from
+  `launch_outcome.captured_stdout` (for harnesses whose executor's PTY mode
+  populated it) or read from per-launch state reachable via
+  `launch_context` (e.g. connection objects for HTTP/WS-driven harnesses).
+  The adapter MUST NOT hold session state on the adapter-class instance
+  shared across launches. Executors return raw `LaunchOutcome`; the driving
   adapter calls `observe_session_id()` and assembles `LaunchResult`.
   Executors stay mechanism-agnostic.
 - When observability fails (e.g., Popen fallback with today's scrape-only
@@ -221,12 +225,17 @@ Dry-run        ─┘ (preview only)
   the sum type. Executors return `LaunchOutcome` (raw); driving adapters
   call `observe_session_id()` and assemble `LaunchResult`.
 
-Workspace projection is a pipeline stage inserted by R05 inside the
-`build_launch_context()` factory: after `spec = harness.resolve_launch_spec(...)`
-and before env construction. With all 3 driving adapters routed through the
-factory, R05 has exactly one insertion point to target. R06 delivers the
-domain core that makes this possible (see `decisions.md` D17 and
-`design/refactors.md` R06 invariants).
+Workspace projection is its own pipeline stage inside the
+`build_launch_context()` factory — `apply_workspace_projection()` —
+sitting between `resolve_launch_spec_stage()` (which calls
+`harness.resolve_launch_spec`) and `build_launch_argv()` (which calls
+`harness.build_command`). The stage receives the resolved spec, calls
+`adapter.project_workspace()` once, returns the spec with `extra_args`
+extended by `projection.extra_args`, and `build_launch_argv` then assembles
+the final argv. With all 3 driving adapters routed through the factory and
+spec-resolution split from argv-build, R05 has exactly one reachable seam
+to target. R06 delivers the domain core that makes this possible (see
+`decisions.md` D17, D19, D20 and `design/refactors.md` R06 invariants).
 
 Composition contract:
 

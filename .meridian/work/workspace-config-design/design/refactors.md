@@ -134,402 +134,589 @@ Includes former R04 scope.
   - OpenCode day-1 support is delivered through native file-tool access, not an
     MCP side channel.
 
-## R06 — Consolidate launch composition into a hexagonal core (3 driving adapters through one factory)
+## R06 — Consolidate launch composition into a typed pipeline (3 driving adapters → factory → 2 executors)
+
+This R06 supersedes the prior hexagonal-shell version. The architecture frame
+(3 driving adapters, 1 factory, 2 executors, 3 driven adapters) is unchanged
+— what changes is the *inside* of the factory: a typed pipeline driven by a
+raw `SpawnRequest` input, instead of a `PreparedSpawnPlan` containing
+already-resolved policy/permission/command outputs. See `decisions.md` D19
+for the redesign rationale, `design/architecture/launch-core.md` for the
+observational architecture, and `reviews/r06-retry-*.md` for the four
+convergent reviews that drove the redesign.
 
 - **Type:** prep refactor (blocks R05)
 
-- **Why:** Meridian launch composition today has multiple call sites that
-  independently resolve policies, build permissions, construct env, and call
-  `adapter.resolve_launch_spec()`. A feasibility probe (`p1893`) established
-  that the honest architecture is **3 driving adapters** — not 1 and not 9.
-  Not 1 because primary launch is a foreground process under meridian's
-  control (PTY capture or direct Popen depending on environment), the
-  background worker must be a detached one-shot subprocess that outlives the
-  parent, and app-streaming keeps the manager in-process for the current
-  REST/WS API shape — these are incompatible driver semantics. Not 9 because the previous enumeration mixed call locations
-  inside the same adapter (e.g. `plan.py` + `process.py` + `command.py` are
-  all internal to the primary launch driver) and counted two dead parallel
-  implementations that R06 deletes:
+- **Why:** The first R06 implementation produced a hexagonal *shell* —
+  `build_launch_context()` exists; `LaunchContext` is a sum type — but the
+  *core* did not land. The factory accepts `PreparedSpawnPlan` whose
+  `ExecutionPolicy` already carries resolved `PermissionConfig` and live
+  `PermissionResolver` (`src/meridian/lib/ops/spawn/plan.py:9-21`). Every
+  driving adapter must therefore call `resolve_policies` and
+  `resolve_permission_pipeline` *before* it can construct factory input,
+  which means composition still lives in drivers
+  (`src/meridian/lib/launch/plan.py:234-334`,
+  `src/meridian/lib/ops/spawn/prepare.py:202-328`,
+  `src/meridian/lib/app/server.py:286-351`,
+  `src/meridian/cli/streaming_serve.py:65`). The CI `rg`-count guards pass
+  while the centralization invariant they were meant to protect is
+  structurally false. The correctness review enumerated 14 concrete
+  evasion patterns the script cannot catch
+  (`reviews/r06-retry-correctness.md §7`).
 
-  1. `launch/streaming_runner.py:389` (`run_streaming_spawn`) — a parallel
-     implementation beside `execute_with_streaming` at line 742. It
-     independently gets an adapter, calls `resolve_launch_spec()`, and runs
-     its own `SpawnManager` lifecycle. Called only from
-     `cli/streaming_serve.py:98`.
-  2. `streaming/spawn_manager.py:180` (`SpawnManager.start_spawn`) — has an
-     unsafe-resolver fallback that calls `resolve_launch_spec(SpawnParams(prompt=...),
-     UnsafeNoOpPermissionResolver())` when callers omit `spec`. Post-R06 all
-     callers hand in a resolved `LaunchContext`, making the fallback dead.
-
-  Additionally, `SpawnParams` is not a user-input DTO — it carries resolved
-  state (skills, session ids, appended system prompts, report paths). R06
-  splits it into a user-facing `SpawnRequest` and a resolved `SpawnParams`
-  (or successor) that only exists inside/after the factory.
-
-  The user directive is to make drift structurally difficult. R06 establishes
-  a hexagonal domain core with one factory so R05 has exactly one insertion
-  point and future launch-touching features cannot compound the drift.
-  Drift protection is enforced by heuristic CI guardrails (`rg`-based
-  checks + Pyright exhaustiveness), not by mechanically impossible
-  constraints — see exit criteria for known evasion modes.
+  R06 is rewritten so the factory accepts raw `SpawnRequest` and runs an
+  explicit named pipeline that owns every composition stage. Verification
+  swaps from heuristic `rg` counts to a CI-spawned `@reviewer` architectural
+  drift gate plus deterministic behavioral factory tests. The structural
+  patterns (one builder per concern, driven port without mechanism leak,
+  one fork owner, one bypass owner, one observation path) become honest
+  through the type system and behavior, not through grep.
 
 - **Architecture:**
 
   ```
   Primary launch ─┐
                    │
-  Worker         ─┼──▶ build_launch_context() ──▶ LaunchContext ──▶ executor ──▶ harness adapter ──▶ process
-                   │    (driving port / factory)                     (PTY or async)  (driven port)
-  App streaming  ─┘
-                   │
-  Dry-run        ─┘ (no executor; preview output)
+  Worker         ─┼──▶ build_launch_context(SpawnRequest, runtime, *, dry_run)
+                   │             │
+  App streaming  ─┘             │  pipeline:
+                                 │  ├── (bypass branch — sole owner)
+  Dry-run preview ───────────────┤  ├── resolve_policies()
+                                 │  ├── resolve_permission_pipeline()
+                                 │  ├── compose_prompt()
+                                 │  ├── build_resolved_run_inputs()
+                                 │  ├── materialize_fork()                ← gated by dry_run
+                                 │  ├── resolve_launch_spec_stage()
+                                 │  ├── apply_workspace_projection()      ← A04 seam
+                                 │  ├── build_launch_argv()
+                                 │  └── build_env_plan(env_additions=...)
+                                 ▼
+                           LaunchContext
+                          (Normal | Bypass)
+                                 │
+                                 ▼
+                     ┌── Primary executor (PTY/Popen)
+                     └── Async subprocess executor
+                                 │
+                                 ▼
+                          LaunchOutcome
+                                 │
+                                 ▼
+                  driving adapter: harness.observe_session_id(...)
+                                 │
+                                 ▼
+                          LaunchResult
   ```
 
-  - **Domain core** — pipeline of composition stages. Contains the canonical
-    `LaunchContext` sum type (`NormalLaunchContext | BypassLaunchContext`) plus
-    exactly one builder per composition concern. The builders form a pipeline;
-    `build_launch_context()` is the factory that runs the pipeline and returns
-    a complete `LaunchContext`. Several stages read bounded configuration from
-    disk as part of composition: `resolve_policies()` loads agent profiles and
-    skills (`src/meridian/lib/launch/resolve.py:20,83`); env construction reads
-    session state (`src/meridian/lib/launch/env.py:75`); Claude workspace
-    projection reads `.claude/settings*.json`
-    (`src/meridian/lib/harness/claude_preflight.py:78`). One stage —
-    `materialize_fork()` — performs state-mutating I/O against the Codex
-    session API and is marked explicitly. The factory's invariant is
-    **centralization**, not purity: composition happens only in this pipeline.
-  - **3 driving adapters** — each with a named architectural reason to exist:
-    1. **Primary launch** (`launch/plan.py` → `launch/process.py`) — foreground
-       process under meridian's control until exit. Has two capture modes:
-       **PTY capture** (intended, when stdin/stdout are TTYs and output log
-       path is configured): `pty.fork()` + `os.execvpe()`, harness sees a
-       terminal, session-ID observability via adapter-owned scraping.
-       **Direct Popen** (degraded fallback, when runtime lacks TTYs meridian
-       can proxy): `subprocess.Popen().wait()`, session-ID observability lost
-       on this path today. GitHub issue #34 tracks moving session-ID
-       observation to filesystem polling, removing this degradation.
-       Both paths consume the same `LaunchContext` and return the same
-       `LaunchResult` contract.
-    2. **Background worker** (`ops/spawn/prepare.py:build_create_payload` →
-       `ops/spawn/execute.py`) — detached one-shot subprocess per spawn.
-       `meridian spawn` forks a detached `python -m
-       meridian.lib.ops.spawn.execute` process per spawn id; that process
-       composes once, executes, writes its report, and exits. The
-       architectural reason is **detached lifecycle** — the meridian parent
-       can exit or crash without orphaning the spawn.
-    3. **App streaming HTTP** (`app/server.py:268-365`) — in-process
-       `SpawnManager` control channel. The REST/WS interface is structured
-       around a manager held by the HTTP handler; `/inject` and `/interrupt`
-       route through the same in-memory connection. The architectural reason
-       is **current API shape**: composition happens at request time to keep
-       the manager local. Meridian's separate `control.sock` +
-       `spawn_inject` mechanism demonstrates out-of-process control is
-       possible; moving app-streaming to queued exec + remote control is a
-       separate refactor (out of scope for workspace-config-design).
-  - **Driven adapters** — harness adapters (`harness/claude`, `harness/codex`,
-    `harness/opencode`). Receive `NormalLaunchContext` and produce
-    harness-specific output via `resolve_launch_spec()`,
-    `observe_session_id()`, `project_workspace()`, `build_command()`, etc.
+  - **Domain core (`launch/context.py`)** — the factory orchestrates the
+    pipeline above. Bypass branch lives inside the factory as the sole owner
+    (`_build_bypass_context()`); the previous duplication between
+    `launch/__init__.py` and `launch/context.py` collapses. Stages are
+    composed in a fixed order; each stage has one named function in one
+    owned file. The factory accepts `dry_run: bool` to gate the
+    side-effect stage (`materialize_fork`). All other stages are
+    side-effect-free except for bounded reads of profile/skill/session
+    state already documented in the prior R06.
+
+  - **3 driving adapters — same names, different responsibility:**
+    1. **Primary launch** (`launch/plan.py` → `launch/process.py`) —
+       constructs `SpawnRequest` and calls `build_launch_context()`. Does not
+       call `resolve_policies`, `resolve_permission_pipeline`,
+       `adapter.resolve_launch_spec`, `adapter.build_command`, or
+       `adapter.fork_session` directly. Two capture modes (PTY / Popen)
+       remain on the executor side; both consume `LaunchContext` and produce
+       `LaunchOutcome`.
+    2. **Background worker** (`ops/spawn/prepare.py` → `ops/spawn/execute.py`)
+       — `prepare.py` constructs `SpawnRequest` and persists it; the
+       persisted artifact replaces today's `PreparedSpawnPlan`. `execute.py`
+       reads the persisted `SpawnRequest`, creates the spawn row, then calls
+       `build_launch_context(..., dry_run=False)`. **Fork materialization
+       happens after the spawn row exists, in every driver.** Dry-run
+       preview goes through `build_launch_context(..., dry_run=True)`.
+    3. **App streaming HTTP** (`app/server.py`) — constructs `SpawnRequest`,
+       creates the spawn row, then calls `build_launch_context(..., dry_run=False)`.
+       `TieredPermissionResolver` is no longer constructed here.
+
+  - **Driven adapters** — `harness/claude.py`, `harness/codex.py`,
+    `harness/opencode.py`. Receive `NormalLaunchContext`. Implement
+    `observe_session_id()` (currently dead protocol slot). Permission-flag
+    projection logic moves out of `harness/adapter.py` (port contract module)
+    into each adapter (closes the structural review's "port leaks
+    mechanism" finding).
+
   - **2 executors** — primary foreground (PTY/Popen capture-mode branch,
     primary launch only) and async subprocess_exec (worker + app streaming
-    share).
-  - **1 preview caller** — dry-run (`spawn create --dry-run` and primary
-    `--dry-run`) calls the factory for `composed_prompt` + `cli_command`
-    preview output without executing.
+    share). Executors return `LaunchOutcome` (raw exit_code, child_pid,
+    captured PTY stdout); the driving adapter then calls
+    `harness.observe_session_id(launch_context=..., launch_outcome=...)`
+    once and assembles `LaunchResult`. The old
+    `extract_latest_session_id()` path in
+    `src/meridian/lib/launch/session_ids.py` is deleted.
 
-- **Scope:**
+- **DTO reshape (load-bearing):**
 
-  **1. Domain core (create/consolidate):**
-  - `src/meridian/lib/launch/context.py` — becomes the home of
-    `build_launch_context()`, the factory that orchestrates the pipeline and
-    returns a `LaunchContext`. Contains the `NormalLaunchContext | BypassLaunchContext`
-    sum type as frozen dataclasses with required fields at the type level.
-  - One builder per pipeline stage, one file per stage:
-    - `resolve_policies()` — in `launch/policies.py` (or successor from current
-      `launch/resolve.py:230` policy resolution)
-    - `resolve_permission_pipeline()` — in `launch/permissions.py` (or successor
-      from current `safety/permissions.py:292` plus independent call at
-      `ops/spawn/execute.py:861`)
-    - `materialize_fork()` — in `launch/fork.py` (consolidating the two
-      identical fork-materialization sites at `launch/process.py:68-105` and
-      `ops/spawn/prepare.py:296-311`). Runs post-spec-resolution, pre-env.
-      See "Fork continuation" under Preserved divergences.
-    - `build_env_plan()` — in `launch/env.py` (consolidating current
-      `build_launch_env()` at `launch/command.py:16` and
-      `build_harness_child_env()` at `launch/env.py:185`)
-    - `resolve_launch_spec()` — adapter-owned (already harness-implemented;
-      called once from the factory)
-  - `MERIDIAN_HARNESS_COMMAND` bypass: `build_launch_context()` runs policy +
-    session resolution, then branches and returns `BypassLaunchContext` with
-    concrete fields (`argv`, `env`, `cwd`). Bypass does not call spec
-    resolution, workspace projection, or `build_harness_child_env`; it calls
-    `inherit_child_env` instead. Current bypass split across
-    `launch/plan.py:259-268` and `launch/command.py:53-57` collapses into the
-    factory.
-  - `src/meridian/lib/launch/context.py:42` and `src/meridian/lib/core/context.py:13`
-    — the two `RuntimeContext` types unify into one. Load-bearing lever: two
-    types cannot silently fork behavior.
+  Four user-visible types after R06 (one added in convergence-2 to carry
+  runtime-injected context that is not user-input):
 
-  **2. Three driving adapters (route through factory):**
+  - **`SpawnRequest`** (currently dead at `src/meridian/lib/harness/adapter.py:150`)
+    — frozen pydantic model, fully serializable, no `arbitrary_types_allowed`.
+    All `Path` values are stored as `str` to keep round-trip JSON-safe
+    without custom encoders. Carries:
+    - **prompt** (str), **model** (model ref str), **harness** (harness id),
+      **agent** (agent ref str | None), **skills** (tuple of refs).
+    - **extra_args** (tuple[str, ...]), **mcp_tools** (tuple[str, ...]).
+    - **sandbox** (sandbox tier), **approval** (approval mode),
+      **allowed_tools** (tuple[str, ...]), **disallowed_tools**
+      (tuple[str, ...]), **autocompact** (bool).
+    - **effort** (str | None) — model reasoning-effort override (Codex
+      `-c model_reasoning_effort=...`).
+    - **retry** (`RetryPolicy` nested, frozen) carrying
+      `max_retries: int`, `retry_delay_secs: float`,
+      `retryable_classes: tuple[str, ...]`. Execution-budget fields
+      (`timeout_secs`, `kill_grace_secs`) live on a sibling
+      `ExecutionBudget` nested model — both nested under `SpawnRequest.budget`
+      to keep `RetryPolicy` faithful to its name.
+    - **session** (`SessionRequest` nested, frozen) carrying
+      `continue_chat_id: str | None`,
+      `requested_harness_session_id: str | None`,
+      `continue_fork: bool`,
+      `source_execution_cwd: str | None`,
+      `forked_from_chat_id: str | None`,
+      **`continue_harness: str | None`** (parent harness id when continuing
+      across harnesses),
+      **`continue_source_tracked: bool`** (whether parent session was tracked
+      by meridian),
+      **`continue_source_ref: str | None`** (parent spawn-id or session ref
+      for diagnostics). All eight fields preserve current behavior.
+    - **context_from** (tuple[str, ...]) — raw context source refs (parent
+      spawn ids, chat ids); resolution to file paths happens inside the
+      factory and lives on `ResolvedRunInputs.context_from_resolved`.
+    - **reference_files** (tuple[str, ...] of str paths),
+      **template_vars** (dict[str, str], JSON-safe),
+      **agent_metadata** (dict[str, str], JSON-safe),
+      **work_id_hint** (str | None).
 
-  Each driving adapter today composes independently. After R06, each
-  constructs a `SpawnRequest` (user-facing args only), calls
-  `build_launch_context()`, and hands the resulting `LaunchContext` to the
-  appropriate executor:
+    **Constructed by every driving adapter and only by them.**
 
-  - **Primary launch:** `src/meridian/lib/launch/plan.py` +
-    `src/meridian/lib/launch/process.py` + `src/meridian/lib/launch/command.py`
-    — `resolve_primary_launch_plan()` delegates composition to
-    `build_launch_context()` instead of duplicating it; the
-    `MERIDIAN_HARNESS_COMMAND` short-circuit moves into the factory (returns
-    `BypassLaunchContext`). `build_launch_env()` and `MERIDIAN_HARNESS_COMMAND`
-    branch in `command.py` collapse into the domain-core pipeline.
-    `run_harness_process()` consumes `LaunchContext` and stops rebuilding
-    `run_params`/command after planning. Primary dry-run calls the factory
-    and returns preview without executing.
-  - **Background worker:** `src/meridian/lib/ops/spawn/prepare.py:169`
-    (`build_create_payload`) + `src/meridian/lib/ops/spawn/execute.py` —
-    `build_create_payload` becomes a thin caller that constructs
-    `SpawnRequest` and calls `build_launch_context()`. The independent
-    `resolve_permission_pipeline()` call at `execute.py:861` moves into the
-    factory. Worker dry-run (`spawn create --dry-run`) calls the factory for
-    preview.
-  - **App streaming HTTP:** `src/meridian/lib/app/server.py:268-365` —
-    currently builds `SpawnParams` and calls `adapter.resolve_launch_spec()`
-    directly at line 338, constructs `TieredPermissionResolver` at line 316.
-    After R06, constructs `SpawnRequest` (allowed) and calls
-    `build_launch_context()` (required); hands `LaunchContext` to
-    `SpawnManager` which uses async subprocess executor. `/inject` and
-    `/interrupt` reach the same manager; composition does not happen there.
+  - **`LaunchRuntime`** (new, runtime-injected context) — frozen
+    pydantic model. Carries values that are not user-input but are needed by
+    the factory to compose correctly:
+    - `launch_mode: Literal["primary", "background"]` — discriminator
+      consumed by driven adapters today via `SpawnParams.interactive`.
+      Set by the driving adapter at construction time; primary launch sets
+      `"primary"`, worker and app-streaming set `"background"`.
+    - `unsafe_no_permissions: bool` — set true when the operator passed
+      `--allow-unsafe-no-permissions`. Routes
+      `resolve_permission_pipeline()` to use
+      `UnsafeNoOpPermissionResolver`. Removes the previous app-streaming
+      driver-side override (`app/server.py:~300`).
+    - `debug: bool` — debug-mode flag used by background-worker telemetry
+      paths (`BackgroundWorkerParams.debug` today).
+    - `harness_command_override: str | None` — value of
+      `MERIDIAN_HARNESS_COMMAND` if set; consumed only by
+      `_build_bypass_context()`.
+    - `report_output_path: Path` — observation channel for the spawn's
+      `report.md`.
+    - `state_paths: StatePaths`, `project_paths: ProjectPaths` — read
+      models for stage logic that needs filesystem locations.
+    `LaunchRuntime` is constructed by every driving adapter and only by
+    them. It is **not persisted** by the worker; `execute.py` reconstructs
+    it locally from the spawn row + environment.
 
-  **3. Driven adapters (no composition leakage):**
-  - `src/meridian/lib/harness/claude.py`, `src/meridian/lib/harness/codex.py`,
-    `src/meridian/lib/harness/opencode.py` — keep harness-specific translation
-    only. Any composition logic currently inside harness modules (policy
-    resolution, env building) moves to the domain core. Adapters accept
-    `NormalLaunchContext`, not the sum.
-  - Domain core imports from `harness/adapter.py` (abstract contract module)
-    only. It does not import from `harness/claude`, `harness/codex`,
-    `harness/opencode`, or `harness/projections`.
+  - **`LaunchContext = NormalLaunchContext | BypassLaunchContext`** (kept
+    from current design, frozen, all-required) — executor input.
+    - `NormalLaunchContext`: argv, env, child_cwd, spec, run_inputs
+      (renamed from `run_params`), perms (live `PermissionResolver`),
+      report_output_path, harness_adapter ref, **`warnings:
+      tuple[CompositionWarning, ...]`** (composition-stage findings;
+      replaces today's `PreparedSpawnPlan.warning` channel).
+    - `BypassLaunchContext`: argv, env, child_cwd, **`warnings:
+      tuple[CompositionWarning, ...]`**.
+    `CompositionWarning` is a frozen pydantic model with `code: str`,
+    `message: str`, optional `detail: dict[str, str]`. Pipeline stages
+    append to a builder-local list; the factory freezes the tuple at
+    return time. Drivers surface `warnings` to `SpawnActionOutput.warning`
+    and to `meridian config show`/`doctor` diagnostics where applicable.
 
-  **4. Deletions (dead parallel code):**
-  - `src/meridian/lib/launch/streaming_runner.py:389` — delete
-    `run_streaming_spawn()` and its export at line 1256. This function
-    independently gets an adapter (line 419), calls
-    `adapter.resolve_launch_spec(params, perms)` (line 420), runs its own
-    `SpawnManager` lifecycle, and duplicates the `execute_with_streaming`
-    path at line 742 which already uses `prepare_launch_context`.
-  - `src/meridian/cli/streaming_serve.py:12,98` — fold streaming serve CLI
-    into the shared `execute_with_streaming` path. The CLI constructs a
-    `SpawnRequest` and calls `build_launch_context()` instead of calling
-    `run_streaming_spawn`.
-  - `src/meridian/lib/streaming/spawn_manager.py:180`
-    (`SpawnManager.start_spawn`) — delete the unsafe-resolver fallback at
-    lines 196-199 that calls `resolve_launch_spec(SpawnParams(prompt=...),
-    UnsafeNoOpPermissionResolver())` when callers omit `spec`. Post-R06 all
-    callers hand in a resolved `LaunchContext`; the `spec: ... | None = None`
-    parameter becomes required.
-  - `src/meridian/lib/app/server.py:316` — the direct
-    `TieredPermissionResolver(config=permission_config)` construction moves
-    inside the factory; the HTTP handler passes policy inputs, not a
-    pre-resolved resolver.
-  - `src/meridian/cli/streaming_serve.py:85` — the hardcoded
-    `TieredPermissionResolver(config=PermissionConfig())` construction is
-    deleted when this CLI is routed through the factory.
+  - **`LaunchResult`** — exit_code, child_pid, session_id (populated by
+    `observe_session_id()`).
 
-  **5. Type splits:**
-  - `SpawnParams` (currently at `harness/adapter.py:147`) carries resolved
-    execution state today (skills, session ids, appended system prompts,
-    report paths). Split into:
-    - `SpawnRequest` — user-facing args only (prompt, harness, model,
-      approval, skills refs, workspace refs). Constructed by CLI/HTTP/app
-      layers (the driving adapters).
-    - `SpawnParams` (or renamed successor like `ResolvedLaunchInputs`) —
-      resolved execution inputs, constructed only inside/after the factory.
-      Carries skills-resolved-to-paths, continuation ids, appended prompts,
-      report paths.
-  - `RuntimeContext` unified to one type across the codebase.
+  Two factory-internal types:
 
-- **Exit criteria:**
+  - **`ResolvedRunInputs`** — renamed from `SpawnParams`. Constructed only
+    inside `build_launch_context()` by `build_resolved_run_inputs()`.
+    Carries skills-resolved-to-paths, **context_from_resolved** (file
+    paths), continuation ids, appended prompts, report paths, prompt
+    composition outputs. Driving adapters never see or construct this
+    type. `NormalLaunchContext` exposes it as `run_inputs` for executor
+    use only — it is readable but not reconstructable by drivers.
+  - **`LaunchOutcome`** — executor → driving-adapter handoff. Raw exit_code,
+    child_pid, optional captured PTY stdout. Replaces the implicit return
+    contract of today's executors. **Drivers MUST NOT inspect
+    `captured_stdout` directly** — session-ID parsing is the adapter's
+    job inside `observe_session_id()`.
 
-  Each invariant has an exact `rg` command and expected result. All `rg`
-  checks are **heuristic guardrails** — they detect named-call-pattern drift
-  but are evadable by aliasing, indirect dispatch, or reimplementation under
-  different names. These checks are wired into CI via
-  `scripts/check-launch-invariants.sh` (see scope addition §6 below).
-  Reviewers must verify that builder calls use their canonical names in
-  driving-adapter modules. A future AST-based enforcement upgrade is tracked
-  separately.
+  **Deleted types:** `PreparedSpawnPlan`, `ExecutionPolicy`,
+  `SessionContinuation` (top-level — folded into `SpawnRequest.session`
+  with all eight fields preserved), `ResolvedPrimaryLaunchPlan`,
+  `SpawnParams` (the user-facing form; renamed to factory-internal
+  `ResolvedRunInputs`). The previously sketched `RuntimeContext`
+  unification stays in scope: one `RuntimeContext` in `core/context.py`;
+  `launch/context.py` imports it.
 
-  **Pipeline — one builder per concern (definition + sole-caller checks):**
+  Type ladder count: **7 named types with one-sentence purposes (4
+  user-visible DTOs + `CompositionWarning` auxiliary + 2
+  factory-internal types)**. The count grew by one over the
+  convergence-1 sketch because hiding runtime-injected context inside
+  `SpawnRequest` would have made `SpawnRequest` not honestly user-input.
 
-  `resolve_policies`:
-  - `rg "^def resolve_policies\(" src/` → exactly 1 match, in
-    `src/meridian/lib/launch/policies.py`.
-  - `rg "resolve_policies\(" src/ --type py` → matches only in
-    `launch/policies.py` (definition) and `launch/context.py` (sole caller
-    in factory). Zero matches in driving adapters.
-  - **Heuristic limitations.** Evadable by: aliasing on import (`from
-    policies import resolve_policies as rp`), indirect dispatch (`fn =
-    resolve_policies; fn(...)`), or reimplementation under a different name.
+- **Pipeline stages — owners, signatures, single-callsite invariant:**
 
-  `resolve_permission_pipeline`:
-  - `rg "^def resolve_permission_pipeline\(" src/` → 1 match, in
-    `launch/permissions.py`.
-  - `rg "resolve_permission_pipeline\(" src/ --type py` → matches only in
-    `launch/permissions.py` (definition) and `launch/context.py` (sole
-    caller in factory). Zero matches in driving adapters.
-  - **Heuristic limitations.** Same aliasing/indirection evasion modes as
-    `resolve_policies`. Additionally, `TieredPermissionResolver` construction
-    could be duplicated under a different variable name.
+  Each stage has one named function in one owned file. **No re-export
+  shells.** The factory is the sole caller of every stage.
 
-  `materialize_fork`:
-  - `rg "^def materialize_fork\(" src/` → 1 match, in `launch/fork.py`.
-  - `rg "materialize_fork\(" src/ --type py` → matches only in
-    `launch/fork.py` (definition) and `launch/context.py` (sole caller
-    in factory). Zero matches in driving adapters.
-  - **Heuristic limitations.** Same aliasing/indirection modes. Fork logic
-    could also be reimplemented by directly calling `adapter.fork_session()`
-    outside the pipeline.
+  - `launch/policies.py` — owns `resolve_policies(request, project_paths) ->
+    ResolvedPolicies`. Stage logic moves here from `launch/resolve.py:230-329`;
+    `resolve.py` keeps lower-level config/profile/skill/model resolution
+    helpers that `policies.py` calls.
+  - `launch/permissions.py` — owns `resolve_permission_pipeline(*, sandbox,
+    allowed_tools, disallowed_tools, approval) -> tuple[PermissionConfig,
+    PermissionResolver]`. Stage logic moves here from
+    `safety/permissions.py:292`; `safety/permissions.py` keeps the
+    resolver class and lower-level helpers.
+  - `launch/prompt.py` — already exists with composition logic
+    (`launch/prompt.py:63-318`). Becomes the sole composer of
+    `compose_prompt(request, policies, harness) -> ComposedPrompt`. No
+    duplication in drivers.
+  - `launch/run_inputs.py` (new) — owns `build_resolved_run_inputs(...)
+    -> ResolvedRunInputs`. Aggregates outputs of policies + permissions +
+    composed prompt into the factory-internal type.
+  - `launch/fork.py` — owns `materialize_fork(*, adapter, run_inputs,
+    dry_run) -> ResolvedRunInputs` (already exists at
+    `src/meridian/lib/launch/fork.py`; single-owner enforced by deleting
+    the inline copy at `ops/spawn/prepare.py:296-311`).
+  - `launch/command.py` — repurposed and split into two stages so the A04
+    workspace-projection seam is reachable between them:
+    - `resolve_launch_spec_stage(adapter, run_inputs, perms) ->
+      ResolvedLaunchSpec` — **sole** call site for
+      `adapter.resolve_launch_spec`.
+    - `apply_workspace_projection(adapter, spec, run_inputs, runtime) ->
+      tuple[ResolvedLaunchSpec, HarnessWorkspaceProjection]` — **sole**
+      call site for `adapter.project_workspace`. Returns the (possibly
+      extended) spec plus the projection object whose `env_additions`
+      and `diagnostics` flow downstream.
+    - `build_launch_argv(adapter, spec, run_inputs) -> tuple[str, ...]`
+      — **sole** call site for `adapter.build_command`. Consumes the
+      projection-extended spec.
+    The legacy `build_launch_env` wrapper is deleted (subsumed by
+    `build_env_plan`). The `MERIDIAN_HARNESS_COMMAND` parsing moves
+    entirely into `launch/context.py:_build_bypass_context()`.
+  - `launch/env.py` — owns `build_env_plan(*, adapter, run_inputs,
+    permission_config, runtime_overrides, base_env, projection_env_additions)
+    -> Mapping[str, str]`. Sole owner of child env construction;
+    `build_harness_child_env` becomes an internal helper or is folded in.
+    `projection_env_additions` is the channel A04's OpenCode
+    `OPENCODE_CONFIG_CONTENT` flows through.
 
-  `build_env_plan`:
-  - `rg "^def build_env_plan\(" src/` → 1 match, in `launch/env.py`.
-  - `rg "build_env_plan\(" src/ --type py` → matches only in
-    `launch/env.py` (definition) and `launch/context.py` (sole caller in
-    factory). Zero matches in driving adapters.
-  - **Heuristic limitations.** Same aliasing/indirection modes.
+  **Placeholder module decisions:**
 
-  `build_harness_child_env`:
-  - `rg "^def build_harness_child_env\(" src/` → 1 match, in
-    `launch/env.py`, called only from `build_env_plan()`.
-  - `rg "build_harness_child_env\(" src/ --type py` → matches only in
-    `launch/env.py` (definition + sole internal caller). Zero matches
-    outside `launch/env.py`.
-  - **Heuristic limitations.** Same aliasing/indirection modes. Env
-    construction could be reimplemented by calling `inherit_child_env`
-    or `os.environ` manipulation directly.
+  | Module | Today | New owner |
+  |---|---|---|
+  | `launch/policies.py` | re-export shell | OWN: `resolve_policies` definition |
+  | `launch/permissions.py` | re-export shell | OWN: `resolve_permission_pipeline` definition |
+  | `launch/runner.py` | empty placeholder | DELETE |
+  | `launch/command.py` | dead `build_launch_env` + bypass parsing | OWN: `resolve_launch_spec_stage`, `apply_workspace_projection`, `build_launch_argv` (split so A04's projection seam fits between spec resolution and argv build); `build_launch_env` deleted; bypass moved to `context.py` |
+  | `launch/fork.py` | correct, single function | KEEP; enforce single-owner by deleting `prepare.py:296-311` inline copy |
+  | `launch/session_ids.py` | old extractor still in use | DELETE; observation moves into adapter `observe_session_id()` |
 
-  **Plan Object — one sum type:**
-  - `rg "^class NormalLaunchContext\b" src/` → 1 match.
-  - `rg "^class BypassLaunchContext\b" src/` → 1 match.
-  - Pyright enforces union exhaustiveness at executor dispatch via `match` +
-    `assert_never`:
-    - `rg "match\s+.*launch_context" src/meridian/lib/launch/process.py
-      src/meridian/lib/launch/streaming_runner.py` → matches a `match`
-      statement per executor.
-    - `rg "assert_never\(" src/meridian/lib/launch/` → at least one per
-      executor dispatch site.
-    - `rg "pyright:\s*ignore" src/meridian/lib/launch/
-      src/meridian/lib/ops/spawn/` → 0 matches. Enforced by the CI
-      invariants script. (`pyright: ignore` is used elsewhere in-tree —
-      e.g. `src/meridian/lib/harness/bundle.py:35`,
-      `src/meridian/lib/app/server.py:342` — but banned in executor and
-      spawn modules to prevent suppression of exhaustiveness checks.)
-    - `rg "cast\(Any," src/meridian/lib/launch/
-      src/meridian/lib/ops/spawn/` → 0 matches. `cast(Any, ctx)` evades
-      match checking and must not appear in executor dispatch code.
-  - `rg "^class RuntimeContext\b" src/` → exactly 1 match (unified).
-  - Post-launch session-id extraction is **not** on `LaunchContext` — it is
-    on `LaunchResult`, returned post-execution via adapter-owned
-    `observe_session_id()`. `LaunchContext` is frozen and immutable. See
-    §7 below.
+- **Driven port cleanup:**
 
-  **Adapter boundary — no domain→concrete-harness imports:**
-  - `rg "from meridian\.lib\.harness\.(claude|codex|opencode|projections)" src/meridian/lib/launch/`
-    → 0 matches.
-  - Domain core may import from `meridian.lib.harness.adapter` (abstract
-    contract module) only. The current `claude_preflight` imports at
-    `launch/process.py:29` and `launch/streaming_runner.py:28` move behind
-    the adapter contract.
+  Move concrete permission-flag projection logic out of
+  `src/meridian/lib/harness/adapter.py:41-121` (port contract module) into
+  each driven adapter. `adapter.py` keeps protocol declarations only
+  (`HarnessCapabilities`, `RunPromptPolicy`, `SpawnRequest`,
+  `HarnessAdapter`, `SubprocessHarness`, etc.). Each adapter
+  (`harness/claude.py`, `harness/codex.py`, `harness/opencode.py`)
+  implements its own permission-flag projection inside `env_overrides()` /
+  `build_command()` as appropriate.
 
-  **Driving-adapter invariant — exactly 3 factory callers (+1 preview):**
-  - `rg "build_launch_context\(" src/ --type py` → exactly 4 call sites:
-    - `launch/plan.py` or `launch/__init__.py` — primary launch (includes
-      primary dry-run preview)
-    - `ops/spawn/prepare.py` — background worker (includes spawn dry-run)
-    - `app/server.py` — app streaming HTTP
-    - One of the above serves dry-run preview; no additional file.
-  - No other file calls the factory.
+- **Single-owner constraints (named in invariants prompt):**
 
-  **No composition outside core:**
-  - `rg "TieredPermissionResolver\(" src/ --type py` → only inside the
-    permission builder in `launch/permissions.py` (plus tests). Zero matches
-    in `app/server.py`, `cli/streaming_serve.py`, or any driving adapter.
-    **Heuristic limitations.** Evadable by aliasing (`from ...permissions
-    import TieredPermissionResolver as TPR; TPR(...)`) or constructing an
-    equivalent resolver under a different class name.
-  - `rg "MERIDIAN_HARNESS_COMMAND" src/ --type py` → only inside
-    `build_launch_context()` bypass branch in `launch/context.py` (plus
-    tests). Zero matches in `launch/plan.py` or `launch/command.py`.
-    **Heuristic limitations.** Evadable by string construction
-    (`os.getenv("MERIDIAN_" + "HARNESS_COMMAND")`).
-  - `rg "resolve_launch_spec\(" src/ --type py` → only inside
-    `build_launch_context()` in `launch/context.py` and inside harness
-    adapter implementations (`harness/claude.py`, `harness/codex.py`,
-    `harness/opencode.py`). Zero matches in driving adapters, `app/server.py`,
-    `spawn_manager.py`, or `streaming_runner.py`.
-    **Heuristic limitations.** Evadable by method indirection
-    (`r = adapter.resolve_launch_spec; r(params, perms)`).
+  | Concern | Today (split) | Sole owner after R06 |
+  |---|---|---|
+  | Bypass dispatch | `launch/__init__.py:65-77` (dry-run preview) + `launch/context.py:153-173` (runtime) | `launch/context.py:_build_bypass_context()` — preflight runs inside this branch so dry-run argv = runtime argv (closes correctness review D11) |
+  | Fork materialization | `launch/fork.py:7-34` + inline `ops/spawn/prepare.py:296-311` | `launch/fork.py:materialize_fork` only |
+  | `MERIDIAN_HARNESS_COMMAND` resolution | `context.py:153` + `launch/__init__.py` + `command.py:53` | `launch/context.py:_build_bypass_context()` |
+  | Adapter `resolve_launch_spec` callsite | factory + `app/server.py:338` + drivers | `launch/command.py:resolve_launch_spec_stage()` |
+  | Adapter `project_workspace` callsite | not yet wired (R05 target) | `launch/command.py:apply_workspace_projection()` |
+  | Adapter `build_command` callsite | factory follow-up + `process.py:351` + multiple drivers | `launch/command.py:build_launch_argv()` |
+  | Adapter `seed_session` and `filter_launch_content` callsites | scattered driver calls (`launch/plan.py:178-213`) | inside `compose_prompt()` / `build_resolved_run_inputs()`; never called by drivers |
+  | `UnsafeNoOpPermissionResolver` dispatch | `app/server.py:~300` (driver) | `launch/permissions.py:resolve_permission_pipeline()` branches on `runtime.unsafe_no_permissions` |
+  | Adapter `fork_session` callsite | `launch/fork.py` + `prepare.py:305` | `launch/fork.py:materialize_fork()` |
+  | `TieredPermissionResolver` construction | `app/server.py:316`, `cli/streaming_serve.py:85`, drivers | `launch/permissions.py:resolve_permission_pipeline()` |
+  | Session-ID observation | declared on protocol but no impls; `extract_latest_session_id` still in executors | per-adapter `observe_session_id()` (claude/codex/opencode); driving adapter calls once post-execution; `launch/session_ids.py` deleted |
+  | `RuntimeContext` type | two types in `launch/context.py:42` and `core/context.py:13` | one type in `core/context.py` |
+  | Child cwd creation | helper called from multiple sites including pre-row contexts | inside the factory after spawn row exists |
 
-  **Deletions completed:**
-  - `rg "run_streaming_spawn" src/ --type py` → 0 matches (function and all
-    imports/references deleted).
-  - `rg "spec: ResolvedLaunchSpec \| None = None" src/meridian/lib/streaming/`
-    → 0 matches (the optional-spec fallback in `SpawnManager.start_spawn` is
-    removed; `spec` is required or replaced by `LaunchContext`).
-  - `rg "UnsafeNoOpPermissionResolver" src/meridian/lib/streaming/` → 0
-    matches (the fallback that used it is deleted).
+- **Fork transaction ordering (closes correctness review D4–D7):**
 
-  **Type split completed:**
-  - `rg "^class SpawnRequest\b" src/` → 1 match (new user-facing DTO).
-  - `rg "^class SpawnParams\b" src/` → 1 match (resolved execution inputs,
-    possibly renamed). `SpawnParams` is not constructed outside the factory
-    or `build_create_payload`.
+  The fork is a side effect against external Codex SQLite state. R06
+  enforces fork-after-row in every driver:
 
-- **Preserved divergences (not flattened by R06):**
-  - Primary executor has two capture modes (PTY capture + direct Popen)
-    driven by runtime environment. Both consume `LaunchContext`, return
-    `LaunchResult`. The PTY path enables session-ID scraping; the Popen
-    fallback loses session-ID observability today. GitHub issue #34 tracks
-    moving to filesystem polling, which removes this asymmetry.
-  - Claude-in-Claude sub-worktree cwd stays as a `child_cwd` field on
-    `NormalLaunchContext`, populated by the pipeline.
-  - `ensure_claude_session_accessible` import currently leaks from
-    `harness/claude_preflight` into `launch/process.py:29` and
-    `launch/streaming_runner.py:28`. R06 moves this behind the adapter
-    contract so the domain core does not import concrete harness modules.
+  1. **Worker prepare phase** (`ops/spawn/prepare.py`) persists `SpawnRequest`
+     only. **Does not call `materialize_fork`.** The persisted artifact is
+     a `SpawnRequest` JSON blob, not a `PreparedSpawnPlan`.
+  2. **Worker execute phase** (`ops/spawn/execute.py`) reads the persisted
+     `SpawnRequest`, creates the spawn row (already in current code), then
+     calls `build_launch_context(..., dry_run=False)` which materializes
+     the fork. Spawn row exists before fork.
+  3. **Primary path** (`launch/process.py`) creates the spawn row at line
+     306 before calling `build_launch_context()` at line 328 (already
+     correct in current code). Behavioral test asserts ordering.
+  4. **App streaming path** (`app/server.py`) creates the spawn row before
+     calling `build_launch_context()`. Behavioral test asserts ordering.
+  5. **Streaming-runner fallback** (`launch/streaming_runner.py`) currently
+     builds context before fallback `start_spawn` when row is missing
+     (correctness review D6). R06 changes `execute_with_streaming` to
+     **require** a precondition: the spawn row must exist. The fallback
+     creates the row first, then calls the factory. If the row cannot be
+     created, the call fails fast before any factory work.
+  6. **Child cwd creation** (correctness review D7): `resolve_child_execution_cwd`
+     + `mkdir` happens inside the factory, after the spawn row exists, not
+     in helper code that any driver could call preemptively. The
+     `launch/cwd.py` helper signature changes so callers cannot create the
+     cwd without supplying the spawn id of an existing row.
 
-- **Fork continuation — absorbed into domain core (Option A, I/O-performing stage):**
-  Fork materialization is pre-execution composition: both sites
-  (`launch/process.py:68-105` and `ops/spawn/prepare.py:296-311`) call
-  `adapter.fork_session()`, mutate `SpawnParams` via `model_copy`, and
-  rebuild the command — all before any executor runs. The operation is
-  identical in both drivers, gated by the same conditions (Codex adapter,
-  has continuation session ID, not dry-run). R06 adds `materialize_fork()`
-  as a pipeline stage in the domain core, running post-spec-resolution and
-  pre-env-construction. This eliminates the duplication and prevents
-  fork materialization from happening outside the factory.
+  **Failure semantics:** if `materialize_fork` raises after the spawn row
+  exists, the driving adapter marks the spawn row `failed` with reason
+  `fork_materialization_error` and re-raises. The Codex SQLite copy is not
+  rolled back (codex rollouts are append-only with content-addressed
+  naming; orphan rollouts on the codex side are tolerated). The
+  orphan-fork window is reduced to "spawn row marked failed with
+  identifiable reason" — operators can find and clean up via the
+  documented reason code.
 
-  `materialize_fork()` performs state-mutating I/O: `fork_session()` opens
-  SQLite (`~/.codex/state_5.sqlite`), reads thread rows, copies rollout files,
-  and writes a new session id (`src/meridian/lib/harness/codex.py:425`).
-  Several other stages read bounded configuration from disk during
-  composition (profiles, skills, session state, `.claude/settings*.json`).
-  `materialize_fork()` is distinguished as the only stage that **writes**.
-  The factory's invariant is **centralization** — composition happens only
-  in this pipeline — not purity.
+- **Session-ID adapter seam (`observe_session_id()`) — actually wired:**
 
-  The session state dependency difference between the two sites is superficial:
-  primary uses `plan.seed_harness_session_id`, worker uses
-  `resolved_continue_harness_session_id` — both are "the resolved continuation
-  session ID" available in the pipeline after spec resolution.
+  - Per-adapter `observe_session_id(*, launch_context, launch_outcome) ->
+    str | None` implementations land in `harness/claude.py`,
+    `harness/codex.py`, `harness/opencode.py`. Existing observation
+    mechanisms move into these methods. The contract is uniform across
+    adapters: `observe_session_id` is the adapter's per-launch
+    observation method, which **may inspect either** `launch_outcome`
+    fields **or** per-launch state owned by objects reachable from
+    `launch_context` (e.g., the `connection` held by an HTTP/WS adapter
+    for the lifetime of this launch). It MUST NOT read or write
+    adapter-instance singleton state shared across launches. The mechanism
+    differs by adapter, but the contract is one:
+    - **Claude** reads `launch_outcome.captured_stdout` (PTY-captured
+      bytes) and parses the latest session id. PTY mode populates this
+      field; Popen mode leaves it `None` and `observe_session_id` returns
+      `None` (issue #34 covers the filesystem-polling fix).
+    - **Codex** reads `connection.session_id` set during WebSocket
+      bootstrap (`connections/codex_ws.py:190,270`). The `connection`
+      is owned by this launch and reachable through `launch_context`;
+      `launch_outcome` is unused.
+    - **OpenCode** reads `connection.session_id` set during session
+      creation (`connections/opencode_http.py:137,166`). Same pattern as
+      Codex.
+    The prior review's "not a parser" framing is superseded — parsing is
+    legitimate when the source is `launch_outcome` (a per-launch value)
+    rather than adapter-instance state. The closed concern was shared
+    mutable state on the adapter; that remains forbidden.
+  - Each executor returns `LaunchOutcome` only.
+  - The driving adapter calls `harness.observe_session_id(...)` exactly
+    once after the executor returns, then assembles `LaunchResult`. The
+    spawn-row update for `harness_session_id` happens with this value
+    (closes correctness review D10 — observation before terminal finalize).
+  - `launch/session_ids.py:16-54` (`extract_latest_session_id`) and any
+    inline executor scrape paths in `launch/process.py:451-476` and
+    `launch/streaming_runner.py:859-883` are deleted.
+
+  **Known limitation preserved:** Popen-fallback session-ID observability
+  remains absent until GitHub issue #34 swaps mechanism to filesystem
+  polling. R06 lands the seam; the implementation swap is separate.
+
+- **Verification approach (replaces `rg`-count CI guards):**
+
+  `scripts/check-launch-invariants.sh` is **deleted** in this refactor. The
+  `check-launch-invariants` step is removed from
+  `.github/workflows/meridian-ci.yml`. Verification is three layers:
+
+  **1. Behavioral factory tests** (`tests/launch/test_launch_factory.py`,
+  new) — pin the load-bearing invariants directly. Required tests:
+
+  - `test_factory_resolves_permissions_from_raw_inputs` — given a
+    `SpawnRequest` with sandbox/approval/allowed/disallowed_tools, the
+    returned `NormalLaunchContext.perms` reflects the policy. **Asserts a
+    driver does not need to construct any `PermissionResolver` to call the
+    factory.**
+  - `test_factory_dry_run_argv_matches_runtime_argv` — for the same
+    `SpawnRequest`, `dry_run=True` and `dry_run=False` produce identical
+    argv (preflight runs in both paths). Closes correctness review D11.
+  - `test_factory_dry_run_skips_fork_materialization` — given a request
+    that would normally fork, `dry_run=True` returns context with original
+    session id and no `fork_session()` call (mock the adapter and assert).
+  - `test_factory_bypass_dispatch_single_owner` — when
+    `MERIDIAN_HARNESS_COMMAND` is set in `runtime`, the factory returns
+    `BypassLaunchContext` with preflight-expanded passthrough args
+    included in `argv`.
+  - `test_factory_returns_normal_context_with_required_fields` —
+    `NormalLaunchContext` fields are all required at construction
+    (frozen, no `None` defaults on load-bearing fields).
+  - `test_observe_session_id_dispatched_through_adapter` — given a fake
+    adapter that records `observe_session_id` calls, assert it is called
+    exactly once after the executor returns `LaunchOutcome`, and the
+    returned `LaunchResult.session_id` equals what the adapter returned.
+  - `test_fork_after_spawn_row_in_worker` — wire a fake spawn-store +
+    fake adapter; assert `start_spawn` returns before `fork_session` is
+    invoked when worker `execute.py` calls the factory.
+  - `test_streaming_runner_requires_spawn_row_precondition` — calling
+    `execute_with_streaming` without a created spawn row raises a
+    precondition error before any factory work runs.
+  - `test_persisted_spawn_request_round_trips` — `SpawnRequest` →
+    `model_dump_json` → `model_validate_json` produces an equal value
+    with no live-object fields.
+  - `test_no_pre_resolved_permission_resolver_in_persisted_artifact` —
+    inspect the JSON form of a persisted `SpawnRequest`; assert no field
+    name carries a serialized resolver/config blob.
+  - `test_child_cwd_not_created_before_spawn_row` (closes correctness
+    review D7) — wire a fake spawn-store and a temp-dir fake `child_cwd`
+    helper; assert `start_spawn` returns before `mkdir`/`resolve_child_execution_cwd`
+    is invoked when any driver path reaches the factory. Includes the
+    streaming-runner fallback path.
+  - `test_composition_warnings_propagate_to_launch_context` — register a
+    pipeline stage that appends a `CompositionWarning`; assert the
+    returned `NormalLaunchContext.warnings` contains it in order, and
+    that the driver-side `SpawnActionOutput.warning` channel observes
+    the same content. Replaces the deleted `PreparedSpawnPlan.warning`
+    channel.
+  - `test_workspace_projection_seam_reachable` (also exercises A04) —
+    register a fake adapter whose `project_workspace()` returns a
+    sentinel `extra_args` value; assert the resulting argv contains the
+    sentinel after `build_launch_argv()`, proving the
+    `apply_workspace_projection` stage runs between spec resolution and
+    argv build.
+  - `test_unsafe_no_permissions_dispatches_through_factory` — set
+    `runtime.unsafe_no_permissions = True`; assert
+    `NormalLaunchContext.perms` is an `UnsafeNoOpPermissionResolver`
+    instance and the driving adapter never called the resolver
+    constructor itself.
+  - `test_session_request_carries_all_eight_continuation_fields` —
+    given a `SessionRequest` with all eight fields populated,
+    round-trip through `SpawnRequest.model_dump_json` /
+    `model_validate_json`; assert no field is lost.
+
+  **2. CI-spawned `@reviewer` as architectural drift gate.** A new file
+  `.meridian/invariants/launch-composition-invariant.md` declares the
+  semantic invariants in prose. A new step in
+  `.github/workflows/meridian-ci.yml` runs only on PRs that touch files
+  under `src/meridian/lib/(launch|harness|ops/spawn|app)/`:
+
+  ```bash
+  meridian spawn -a reviewer \
+    --prompt-file .meridian/invariants/launch-composition-invariant.md \
+    -f $(git diff --name-only origin/main HEAD | grep -E '^src/meridian/lib/(launch|harness|ops/spawn|app)/') \
+    -m <cheap-mini-or-flash-variant-from-meridian-models-list>
+  ```
+
+  The reviewer reads the diff against the invariant prompt, returns
+  `pass | fail` with file:line violations, and the CI step blocks merge on
+  `fail`. The full prompt is drafted in
+  `design/launch-composition-invariant.md` for review under this design
+  package; implementation copies it to
+  `.meridian/invariants/launch-composition-invariant.md`. Summary of
+  invariants asserted (full text in the design-package draft):
+
+  - **Composition centralization** — composition lives only inside
+    `build_launch_context()` and its named pipeline stages.
+  - **Driving-adapter prohibition list** — no driving-adapter file
+    (`launch/plan.py`, `launch/process.py`, `ops/spawn/prepare.py`,
+    `ops/spawn/execute.py`, `app/server.py`, `cli/streaming_serve.py`)
+    calls `resolve_permission_pipeline`, `TieredPermissionResolver`,
+    `UnsafeNoOpPermissionResolver`, `adapter.resolve_launch_spec`,
+    `adapter.project_workspace`, `adapter.build_command`,
+    `adapter.fork_session`, `adapter.seed_session`,
+    `adapter.filter_launch_content`, or `build_harness_child_env`
+    directly.
+  - **Single owners** — bypass dispatch only in `_build_bypass_context()`;
+    fork materialization only in `materialize_fork()`; child cwd
+    creation only inside the factory after the spawn row exists.
+  - **Observation path** — `observe_session_id` is called by exactly one
+    path (driving adapter after executor returns `LaunchOutcome`); no
+    adapter-instance singleton state holds session ids.
+  - **DTO discipline** — no `PreparedSpawnPlan`-style pre-composed DTO is
+    reintroduced under a different name; persisted artifact is plain
+    `SpawnRequest` JSON without `arbitrary_types_allowed`; warnings flow
+    through `LaunchContext.warnings`, not through DTO sidechannels.
+  - **Stage modules own real logic** — `launch/policies.py`,
+    `launch/permissions.py`, `launch/fork.py`, `launch/env.py`,
+    `launch/command.py`, `launch/run_inputs.py` are not re-export shells.
+  - **Driven port keeps shape only** — `harness/adapter.py` declares
+    contracts only; no concrete permission-flag projection logic.
+  - **Workspace projection seam reachable** — `apply_workspace_projection`
+    runs between `resolve_launch_spec_stage` and `build_launch_argv`
+    inside the factory; A04's `project_workspace()` adapter method is
+    called from this stage and only this stage.
+
+  Reviewer model selection follows `agent-staffing` guidance: cheap
+  `mini`/`flash` variant for routine drift detection, escalate to default
+  reviewer on PRs that materially restructure the protected surface. The
+  invariant prompt is version-controlled and updated as part of any
+  legitimate change to the declared invariants.
+
+  **3. pyright + ruff + pytest** remain the correctness gate. The
+  drift-gate reviewer sits beside them, not in place of them. The
+  behavioral tests are normal pytest tests run by the existing pytest CI
+  step.
+
+- **Scope (file list — not a how-to plan):**
+
+  *Domain core:*
+  - `src/meridian/lib/launch/context.py` — rewrite factory body to consume
+    `SpawnRequest`; bypass branch becomes sole owner; remove pre-resolved
+    `PreparedSpawnPlan` parameter.
+  - `src/meridian/lib/launch/policies.py` — own `resolve_policies` definition.
+  - `src/meridian/lib/launch/permissions.py` — own `resolve_permission_pipeline`.
+  - `src/meridian/lib/launch/fork.py` — keep; single-owner enforced.
+  - `src/meridian/lib/launch/env.py` — own `build_env_plan` as the sole env builder.
+  - `src/meridian/lib/launch/command.py` — own `project_launch_command`; delete `build_launch_env`; remove bypass parsing.
+  - `src/meridian/lib/launch/run_inputs.py` — new; owns `build_resolved_run_inputs`.
+  - `src/meridian/lib/launch/runner.py` — delete.
+  - `src/meridian/lib/launch/session_ids.py` — delete.
+  - `src/meridian/lib/launch/__init__.py` — collapse dry-run preview duplication into the factory; primary entry calls factory.
+
+  *Driving adapters:*
+  - `src/meridian/lib/launch/plan.py` — `resolve_primary_launch_plan` delegates composition to the factory; `ResolvedPrimaryLaunchPlan` is deleted.
+  - `src/meridian/lib/launch/process.py` — consumes `LaunchContext`; stops calling `adapter.build_command` post-factory; no rebuild of `run_params` after planning.
+  - `src/meridian/lib/ops/spawn/prepare.py` — `build_create_payload` constructs and persists `SpawnRequest`; no permission resolution; no fork materialization; no preview command construction outside the factory.
+  - `src/meridian/lib/ops/spawn/execute.py` — reads persisted `SpawnRequest`, creates spawn row, calls factory; the independent `resolve_permission_pipeline()` call at line 861 is removed.
+  - `src/meridian/lib/app/server.py` — constructs `SpawnRequest`, creates row, calls factory; no `TieredPermissionResolver` construction; no `adapter.resolve_launch_spec` direct call; uses exhaustive `match` over `LaunchContext`.
+  - `src/meridian/cli/streaming_serve.py` — folds into shared `execute_with_streaming` path; constructs `SpawnRequest`; no hardcoded `TieredPermissionResolver(config=PermissionConfig())`.
+
+  *Driven adapters:*
+  - `src/meridian/lib/harness/adapter.py` — keep protocol contracts only; remove permission-flag projection logic; restore `SpawnRequest` to load-bearing.
+  - `src/meridian/lib/harness/claude.py`, `harness/codex.py`, `harness/opencode.py` — each implements `observe_session_id()` (relocate existing scrape/connection logic). Permission-flag projection logic moves in from `adapter.py`.
+
+  *Deletions:*
+  - `src/meridian/lib/ops/spawn/plan.py` — `PreparedSpawnPlan`, `ExecutionPolicy`, `SessionContinuation` deleted; replaced by `SpawnRequest` + factory composition.
+  - `src/meridian/lib/launch/streaming_runner.py:389` — `run_streaming_spawn` and its export deleted (already in original R06; preserved here).
+  - `src/meridian/lib/streaming/spawn_manager.py:180` — `SpawnManager.start_spawn` unsafe-resolver fallback deleted; `spec` parameter becomes required `LaunchContext`.
+  - `scripts/check-launch-invariants.sh` — deleted.
+  - `.github/workflows/meridian-ci.yml` — `check-launch-invariants` step removed; `architectural-drift-gate` step added.
+
+  *New artifacts:*
+  - `.meridian/invariants/launch-composition-invariant.md` — invariant prompt for the drift-gate reviewer.
+  - `tests/launch/test_launch_factory.py` — behavioral factory tests.
 
 - **Test blast radius** (enumerate before refactoring):
   ```
   rg -l "RuntimeContext|prepare_launch_context|LaunchContext|build_launch_context\
   |build_launch_env|build_harness_child_env|PreparedSpawnPlan|resolve_policies\
   |resolve_permission_pipeline|SpawnParams|merge_env_overrides\
-  |resolve_launch_spec|run_streaming_spawn|SpawnRequest|materialize_fork" tests/
+  |resolve_launch_spec|run_streaming_spawn|SpawnRequest|materialize_fork\
+  |ExecutionPolicy|SessionContinuation|ResolvedPrimaryLaunchPlan\
+  |observe_session_id|extract_latest_session_id" tests/
   ```
   Known impacted test files include at minimum:
   - `tests/exec/test_streaming_runner.py`
@@ -540,146 +727,76 @@ Includes former R04 scope.
   - `tests/ops/test_spawn_prepare_fork.py`
   - `tests/harness/test_codex_fork_session.py`
 
-  Additional tests needed for new R06 deliverables:
-  - `SpawnRequest` ↔ `SpawnParams` split boundary (construction, validation)
-  - `materialize_fork()` pipeline stage (success, no-op when not Codex,
-    empty session ID error)
-  - Deletion verification (no test imports `run_streaming_spawn`)
+  Tests added by R06:
+  - `tests/launch/test_launch_factory.py` (the verification-layer 1 suite enumerated above)
+  - `tests/launch/test_session_request_round_trip.py` — `SpawnRequest` JSON round-trip without `arbitrary_types_allowed`
+  - `tests/harness/test_observe_session_id.py` — per-adapter observation contract
+  - `tests/ops/spawn/test_fork_after_row.py` — worker ordering
+  - `tests/cli/test_invariants_drift_gate.py` (optional, lightweight) — sanity check that the invariant prompt and CI step exist
 
   All identified tests must be updated in the same change set as the source
   refactor, not left as follow-up drift.
 
-- **Suggested internal phasing:** R06 naturally decomposes into: (1)
-  `SpawnRequest`/`SpawnParams` split (standalone DTO change); (2)
-  `RuntimeContext` unification (standalone); (3) domain-core pipeline +
-  `LaunchContext` sum type + `materialize_fork()` stage; (4) rewire primary
-  launch to call factory; (5) rewire worker to call factory; (6) rewire
-  app-streaming to call factory; (7) delete `run_streaming_spawn` + fold
-  streaming serve CLI + remove `SpawnManager.start_spawn` fallback; (8)
-  absorb `MERIDIAN_HARNESS_COMMAND` bypass into factory. Steps (1), (2), (3),
-  and (7) can proceed independently; (4)–(6) land one driver at a time; (8)
-  after (3). Each intermediate state satisfies a subset of the exit criteria.
+- **Suggested internal phasing** (the planner can rearrange; this is one
+  honest sequencing):
 
-  **6. CI enforcement script:**
+  1. Make `SpawnRequest` load-bearing: define the full schema (currently
+     dead at `harness/adapter.py:150`); add JSON round-trip test. No
+     callers yet.
+  2. Pipeline stage extraction: move `resolve_policies` into
+     `launch/policies.py`, `resolve_permission_pipeline` into
+     `launch/permissions.py`, `project_launch_command` into
+     `launch/command.py`. Add behavioral factory test scaffolding.
+  3. `build_resolved_run_inputs` aggregator + factory-internal
+     `ResolvedRunInputs` rename.
+  4. `build_launch_context` accepts `SpawnRequest` + `LaunchRuntime`;
+     bypass branch becomes sole owner; preflight runs inside bypass for
+     dry-run parity.
+  5. `materialize_fork` single-owner enforcement (delete `prepare.py`
+     inline copy); fork-after-row ordering tests.
+  6. `observe_session_id` per-adapter implementations + executor
+     `LaunchOutcome` return + driving-adapter assembly of `LaunchResult`.
+     Delete `launch/session_ids.py`.
+  7. Rewire each driving adapter: primary, then worker, then app streaming.
+     Each transition a separate commit; behavioral tests gate.
+  8. Delete `PreparedSpawnPlan`, `ExecutionPolicy`, `SessionContinuation`
+     (top-level), `ResolvedPrimaryLaunchPlan`. Type ladder collapses.
+  9. Delete `scripts/check-launch-invariants.sh`; add invariant prompt at
+     `.meridian/invariants/launch-composition-invariant.md`; rewire CI.
+  10. Driven port cleanup: move permission-flag projection out of
+      `harness/adapter.py` into adapters.
+  11. `RuntimeContext` unification (one type in `core/context.py`).
 
-  A CI step runs the `rg` suite above as a required status check. Without
-  this, "CI-checkable via `rg`" is false — the current CI workflow
-  (`.github/workflows/meridian-ci.yml:34-44`) runs only ruff/pyright/pytest/build.
+  Steps 1–3 land independently. Step 4 unblocks 5/6. Steps 7 land per
+  driver and are gated by behavioral tests. Step 8 closes the type
+  collapse. Steps 9–11 are cleanup that can land in parallel with each
+  other but after the rewires complete.
 
-  - `scripts/check-launch-invariants.sh` — shell script that executes each
-    exit-criterion `rg` command, compares against expected results, and exits
-    nonzero on drift.
-  - `.github/workflows/meridian-ci.yml` — add a `check-launch-invariants`
-    step that runs the script. Required status check.
-  - Exit criterion: CI job `check-launch-invariants` passes on the R06
-    branch before merge.
+- **Preserved divergences (not flattened by R06):**
+  - Primary executor has two capture modes (PTY capture + direct Popen)
+    driven by runtime environment. Both consume `LaunchContext`, produce
+    `LaunchOutcome`. PTY enables session-ID scraping; Popen loses
+    session-ID observability today. GitHub issue #34 tracks moving to
+    filesystem polling.
+  - Claude-in-Claude sub-worktree cwd stays as a `child_cwd` field on
+    `NormalLaunchContext`, populated by the pipeline.
+  - `ensure_claude_session_accessible` import behavior moves behind the
+    adapter contract so the domain core does not import concrete harness
+    modules.
 
-  **7. Session-ID adapter seam (`observe_session_id()`):**
+- **Red flag (out of scope, filed separately):** Background workers
+  serialize `allowed_tools` but drop `disallowed_tools`, then re-resolve
+  permissions without the denylist (`ops/spawn/execute.py:82-103`,
+  `execute.py:861-865`, `prepare.py:323-328`). This is a correctness bug
+  in the permission pipeline, not an R06 composition concern. R06's
+  `SpawnRequest` schema *includes* `disallowed_tools` so the bug becomes
+  fixable as soon as the persistence path uses `SpawnRequest`; the
+  follow-up fix lands as its own commit with its own test.
 
-  Session-ID observation moves off `LaunchContext` onto a post-execution
-  `LaunchResult`. This closes the "all required, frozen" `LaunchContext`
-  contradiction: session-ID is not a launch *input* — it is a post-launch
-  *observable*.
-
-  New types:
-
-  ```python
-  @dataclass(frozen=True)
-  class LaunchOutcome:
-      """Raw executor output before adapter post-processing."""
-      exit_code: int
-      child_pid: int | None
-      captured_stdout: bytes | None  # PTY-captured output, if any
-
-  @dataclass(frozen=True)
-  class LaunchResult:
-      """Post-processed launch result returned to driving adapters."""
-      exit_code: int
-      child_pid: int | None
-      session_id: str | None  # populated by adapter.observe_session_id()
-  ```
-
-  New adapter method on the harness adapter protocol in
-  `src/meridian/lib/harness/adapter.py`:
-
-  ```python
-  def observe_session_id(
-      self,
-      *,
-      launch_context: NormalLaunchContext,
-      launch_outcome: LaunchOutcome,
-  ) -> str | None:
-      """Return the session ID observed during this launch.
-
-      Adapters observe session-ID via harness-native mechanisms during the
-      normal course of launch. The method returns whatever the adapter
-      observed; it is a getter over adapter-held state, not a parser of
-      `launch_outcome`.
-      """
-  ```
-
-  Executor contract:
-  - Executor runs the process, returns a `LaunchOutcome` (raw: exit code,
-    pid, any captured PTY output).
-  - The driving adapter calls `harness_adapter.observe_session_id(...)`
-    post-exec and assembles a `LaunchResult`.
-  - `LaunchOutcome.captured_stdout` is populated only on the PTY capture
-    path; streaming adapters observe session-ID via connection-bootstrap
-    state they track internally, not from `captured_stdout`.
-  - If observability fails (e.g., Popen fallback with today's scrape-only
-    Claude impl), `session_id = None`. The surfacing layer already handles
-    missing-session-id.
-
-  Scope:
-  1. Add `LaunchResult` and `LaunchOutcome` frozen dataclasses to
-     `src/meridian/lib/launch/context.py` (or a new `launch/result.py`).
-  2. Add `observe_session_id()` to the harness adapter protocol in
-     `src/meridian/lib/harness/adapter.py`.
-  3. Implement `observe_session_id()` in each harness adapter by
-     **relocating existing session-ID code from executors** (Claude:
-     scraper logic from `launch/process.py` or `streaming_runner.py`;
-     Codex/OpenCode: stream-parse logic from streaming runner).
-  4. Executors return `LaunchOutcome`; driving adapters call
-     `observe_session_id()` and assemble `LaunchResult`.
-  5. Remove `session_id` / `launch_session_id` fields from `LaunchContext`.
-     `NormalLaunchContext` becomes genuinely all-required, frozen.
-  6. Update executors' `match` + `assert_never` dispatch to the new types.
-
-  Exit criteria:
-  - `rg "^class LaunchResult\b" src/` → 1 match.
-  - `rg "^class LaunchOutcome\b" src/` → 1 match.
-  - `rg "observe_session_id\(" src/meridian/lib/harness/adapter.py` → 1
-    match (protocol definition).
-  - `rg "observe_session_id\(" src/meridian/lib/harness/ --type py` →
-    matches in `adapter.py` (protocol) + `claude.py` + `codex.py` +
-    `opencode.py` (implementations). Zero matches in `launch/` or
-    `ops/spawn/`.
-  - `rg "session_id" src/meridian/lib/launch/context.py` → 0 matches
-    (session-ID is not a launch input).
-  - **Heuristic limitations.** Same aliasing/indirection modes as other
-    builder checks.
-
-  Known limitation: R06 lands the adapter seam. Between R06 and the
-  GitHub issue #34 mechanism swap to filesystem polling, the
-  Popen-fallback-loses-session-ID bug persists for primary launch. The
-  seam exists; implementations change later without touching executors.
-
-  Existing observation mechanisms are preserved, not changed:
-  - **Claude (PTY primary)**: scrapes terminal output during PTY capture;
-    returns the scraped ID.
-  - **Codex (streaming)**: reads `connection.session_id` set during WebSocket
-    thread bootstrap (`src/meridian/lib/harness/connections/codex_ws.py:190,270`)
-    and surfaced by `StreamingExtractor`
-    (`src/meridian/lib/harness/extractor.py:43`).
-  - **OpenCode (streaming)**: reads `connection.session_id` set during session
-    creation
-    (`src/meridian/lib/harness/connections/opencode_http.py:137,166`).
-
-  The refactor **moves that logic behind the adapter method**. The
-  mechanism swap to filesystem polling is GitHub issue #34.
-
-- **Red flag (out of scope):** Background workers serialize `allowed_tools`
-  but drop `disallowed_tools`, then re-resolve permissions without the
-  denylist (`ops/spawn/execute.py:82-103`, `execute.py:861-865`,
-  `prepare.py:323-328`). This is a correctness bug in the permission
-  pipeline, not an R06 composition concern. Filed separately.
+- **Out of scope (separate work items):**
+  - GitHub issue #34 — Popen-fallback session-ID observability via
+    filesystem polling. R06 lands the `observe_session_id()` adapter seam;
+    the mechanism swap to filesystem polling is a separate change.
+  - Claude session-accessibility symlinking (`p1878` Q5).
+  - Removing dead legacy subprocess-runner code and clarifying misleading
+    `_subprocess` filenames on shared projection utilities (issue #32).

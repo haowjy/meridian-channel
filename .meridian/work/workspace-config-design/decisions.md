@@ -648,15 +648,353 @@ unrelated commands.
 default discovery. Rejected because it silently changes which workspace file is
 active for the invocation.
 
+### D19 — R06 redesign: typed pipeline with raw `SpawnRequest` input + reviewer-as-drift-gate verification
+
+**Directive (2026-04-16):** The first R06 implementation produced a hexagonal
+*shell* — a `build_launch_context()` factory and a `LaunchContext` sum type —
+but the *core* of R06 (composition centralization) did not land. Four
+independent reviews (`reviews/r06-retry-design-alignment.md`,
+`reviews/r06-retry-correctness.md`, `reviews/r06-retry-structural.md`,
+`reviews/r06-retry-library-research.md`) converge on the same diagnosis: the
+factory takes a pre-composed `PreparedSpawnPlan` whose `ExecutionPolicy`
+already carries resolved `PermissionConfig` and live `PermissionResolver`. The
+factory is downstream of composition, so policy/permission/command resolution
+still lives in every driving adapter. CI `rg`-count guards pass while the
+invariant they were meant to protect is structurally false.
+
+R06 is rewritten as a *typed pipeline with raw `SpawnRequest` input*, with
+verification moving from `rg`-count gaming surface to a CI-spawned `@reviewer`
+architectural drift gate plus deterministic behavioral factory tests. Library
+research (`reviews/r06-retry-library-research.md`) verdict
+`roll-your-own-with-pattern` confirmed no DI container or framework solves the
+underlying problem; the fix is composition-root pattern with raw-input DTO.
+
+**Committed redesign — five load-bearing changes:**
+
+1. **Type ladder collapses from 6 partial DTOs to 3 user-visible + 2
+   factory-internal.** User-visible: `SpawnRequest` (pre-composition raw
+   input), `LaunchContext = NormalLaunchContext | BypassLaunchContext`
+   (post-composition executor input), `LaunchResult` (post-execution).
+   Factory-internal: `ResolvedRunInputs` (renamed from `SpawnParams`,
+   constructed only inside the factory), `LaunchOutcome` (executor → driving
+   adapter handoff before `observe_session_id` runs). `PreparedSpawnPlan`,
+   `ExecutionPolicy`, `SessionContinuation` (top-level), and
+   `ResolvedPrimaryLaunchPlan` are deleted.
+
+2. **Pipeline stages own real logic, not re-export shells.** `launch/policies.py`,
+   `launch/permissions.py`, and `launch/fork.py` each house one stage function
+   with implementation + behavioral tests. `launch/runner.py` is deleted.
+   `launch/command.py` is repurposed to host the sole adapter
+   `resolve_launch_spec` + `build_command` callsite (`project_launch_command`);
+   the legacy `build_launch_env` wrapper is deleted.
+
+3. **Driven port loses mechanism.** `harness/adapter.py` keeps protocol
+   contracts only; permission-flag projection logic moves into each driven
+   adapter (`harness/claude.py`, `harness/codex.py`, `harness/opencode.py`).
+
+4. **Fork transaction ordering closes the orphan window.** `prepare.py`
+   persists `SpawnRequest` only; it does not call `materialize_fork`. The
+   worker's `execute.py` creates the spawn row, then calls
+   `build_launch_context(..., dry_run=False)`, which materializes the fork.
+   Fork happens only after the spawn row exists, in every driver. On fork
+   failure, the spawn row is marked `failed` with reason
+   `fork_materialization_error`. Streaming-runner fallback path requires a
+   precondition: spawn row must exist before `execute_with_streaming` calls
+   the factory.
+
+5. **Verification swaps from `rg`-count CI to reviewer drift gate +
+   behavioral tests.** `scripts/check-launch-invariants.sh` is deleted in
+   this refactor. Replacement is three layers: behavioral factory tests
+   (`tests/launch/test_launch_factory.py`) pin load-bearing invariants
+   directly; a CI-spawned `@reviewer` reads diffs against
+   `.meridian/invariants/launch-composition-invariant.md` and blocks merge on
+   `fail`; pyright/ruff/pytest remain the correctness gate.
+
+**Why typed pipeline, not richer DI/effect framework:** library research
+shortlist (`dishka`, `dependency-injector`, `inject`, `punq`, `returns`) all
+solve object-graph wiring at app boundary. R06 is one composition root, not
+deep graph wiring. Adding container DSL pushes the problem sideways: meridian
+still owns the stage pipeline. Pydantic discriminated unions (already in tree)
+cover raw-input normalization; `singledispatch` (stdlib) covers per-adapter
+observation strategy if ever needed. Lowest total complexity wins.
+
+**Why raw `SpawnRequest`, not split `Unresolved/Resolved` plan pair:** the
+worker's prepare/execute boundary needs a serializable artifact between the
+two phases. The reviewer-recommended `(ii)` (`UnresolvedPreparedPlan` +
+`ResolvedPreparedPlan` split) and the `(i)` (single raw DTO at factory input)
+options collapse to the same shape once `PermissionResolver` is removed from
+the persisted artifact: prepare persists raw inputs, execute reconstructs.
+We name that artifact `SpawnRequest` because the user-facing DTO already exists
+on the harness adapter protocol (`harness/adapter.py:150`) — currently dead.
+Making `SpawnRequest` load-bearing closes the dead-abstraction signal flagged
+by the structural review and removes the extra `Unresolved/Resolved` rename
+churn.
+
+**Why reviewer drift gate, not stricter `rg` checks:** the correctness review
+enumerated 14 concrete `rg`-evasion patterns the current invariants script
+cannot catch (aliasing imports, indirect dispatch, string-form `cast`, dead
+parallel classes under different names, etc.). Adding more `rg` rules
+expands the gaming surface without raising the bar. Semantic verification
+catches shim patterns; deterministic factory tests pin the specific
+invariants that must not drift; together they cover the failure modes
+heuristic checks cannot.
+
+**Rejected alternative — keep current `PreparedSpawnPlan` and just rename
+fields to `unresolved_*`/`resolved_*`:** drift-symptom rename. The persisted
+DTO would still carry `PermissionResolver` indirectly (via every consumer
+needing to reconstruct from fields), and drivers would still need to compose
+to produce it. Boundary stays in the wrong place.
+
+**Rejected alternative — adopt `dishka` or `dependency-injector` for the
+factory:** see library-research verdict. Adds container scope DSL, decorator
+wiring, typing friction with strict pyright. Does not solve the input-shape
+boundary. Real cost ≫ real benefit.
+
+**Rejected alternative — keep `scripts/check-launch-invariants.sh` and
+upgrade to AST checks:** same gaming surface in a more expensive
+implementation. AST-based static checks for "no driver constructs a
+permission resolver" still pattern-match on names (any field that holds the
+resolver) and do not enforce the *behavioral* invariant (that the driver
+never has the inputs needed to construct one). Behavioral factory tests +
+reviewer drift gate enforce the behavior directly.
+
+**Out of scope (filed separately):** GitHub issue #34 — Popen-fallback
+session-ID observability via filesystem polling. R06 lands the
+`observe_session_id()` adapter seam; the mechanism swap to filesystem polling
+is a separate change.
+
+**Spec/architecture touchpoints requiring sweep:**
+
+- `design/refactors.md` R06 — rewritten in full (this redesign)
+- `design/architecture/launch-core.md` — new architecture leaf (A06) for the
+  launch domain core
+- `design/architecture/overview.md` — TOC updated to include A06
+- `design/feasibility.md` — add `FV-11` for DTO reshape feasibility
+- Spec leaves unchanged: R06 is structural; it does not change user-facing
+  EARS contracts
+
+## D20 — R06 convergence-2 sweep (DTO completeness, A04↔A06 seam, invariant prompt as design artifact)
+
+After D19's redesign, two convergence reviewers ran in parallel against the
+redesigned R06:
+
+- `reviews/r06-redesign-alignment.md` — opus design-alignment review.
+  Verdict: `block` (1 blocker, 3 majors).
+- `reviews/r06-redesign-dto-shape.md` — opus DTO-shape review.
+  Verdict: `shape-change-needed` (1 blocker, 6 majors, 8 minors).
+
+Both verdicts agreed the redesign's central call (raw `SpawnRequest` at the
+factory boundary, six DTOs collapsed to a small named set,
+`arbitrary_types_allowed=True` removed) was right. They independently surfaced
+the same class of gap: schemas and seams enumerated at design altitude but
+not specified in enough detail for implementation to proceed without
+re-deciding mid-flight.
+
+**Decisions made in convergence-2 (the four design changes that close every
+blocker and major):**
+
+### D20.1 — Workspace-projection seam reachable via stage split
+
+The original D19 packed `resolve_launch_spec` + workspace projection +
+`build_command` into a single `project_launch_command()` stage, leaving no
+coherent place inside the factory for A04 to insert its
+`adapter.project_workspace()` call. Resolution: split that stage into
+three with sole-callsite invariants:
+
+| Stage | Owns single callsite to |
+|---|---|
+| `resolve_launch_spec_stage()` | `adapter.resolve_launch_spec` |
+| `apply_workspace_projection()` | `adapter.project_workspace` (A04 seam) |
+| `build_launch_argv()` | `adapter.build_command` |
+
+`apply_workspace_projection` extends `spec.extra_args` with
+`projection.extra_args`; `build_launch_argv` then assembles the final argv
+once. A04 and A06 can now both be true: the seam is reachable inside the
+A06 stage ordering. This is the load-bearing change for the alignment
+blocker.
+
+### D20.2 — `LaunchRuntime` introduced as 4th user-visible DTO
+
+The DTO reviewer found that `interactive`, `effort`, `unsafe_no_permissions`,
+`debug`, `harness_command_override`, `report_output_path`, `state_paths`,
+and `project_paths` are all runtime-injected (the driving adapter knows
+them; an external caller does not provide them). They have no honest home
+on `SpawnRequest`. Resolution: introduce `LaunchRuntime` as the second
+factory input (`build_launch_context(SpawnRequest, LaunchRuntime, *,
+dry_run)`).
+
+`LaunchRuntime.unsafe_no_permissions` is the seam for the app-streaming
+driver's `--allow-unsafe-no-permissions` override; dispatch to
+`UnsafeNoOpPermissionResolver` happens inside
+`resolve_permission_pipeline()`, never at the driver. This closes DTO
+finding 6 (UnsafeNoOpPermissionResolver had no driver-side construction
+path under the prohibition list).
+
+`launch_mode: Literal["primary", "background"]` on `LaunchRuntime` closes
+DTO finding 1 (`interactive: bool` had no slot). It drives every driven
+adapter's interactive projection from the factory, not the driver.
+
+**Rejected alternative — put runtime fields on `SpawnRequest`:** breaks
+the model that `SpawnRequest` carries only what an external caller can
+express. Persisting `unsafe_no_permissions` on the worker prepare artifact
+would also let operators alter the security mode by editing a JSON blob.
+
+### D20.3 — `LaunchContext.warnings` channel for composition warnings
+
+The DTO reviewer's blocker (Finding 4): deleting `PreparedSpawnPlan`
+removed the `warning` channel that flowed to `SpawnActionOutput.warning`,
+with no replacement on the new types. Resolution: add
+`warnings: tuple[CompositionWarning, ...]` to both `NormalLaunchContext`
+and `BypassLaunchContext`, populated by pipeline stages. Introduce a
+`CompositionWarning` frozen pydantic model (`code`, `message`, optional
+`detail` dict). Driving adapters surface them through
+`SpawnActionOutput.warning`. Single sidechannel; no other path permitted.
+
+### D20.4 — Invariant prompt drafted as design artifact, not implied future detail
+
+The alignment reviewer's major: D19 promised
+`.meridian/invariants/launch-composition-invariant.md` as part of the
+verification triad but did not draft it. A version-controlled prose
+artifact that no one has written cannot be reviewed for ambiguity.
+Resolution: draft the full invariant prompt now, in the design package, at
+`design/launch-composition-invariant.md`. Implementation copies it
+verbatim to the production location during R06 implementation, and both
+files stay in sync as legitimate architecture changes land.
+
+The drafted prompt enumerates 10 numbered invariants (I-1 composition
+centralization, I-2 driving-adapter prohibition list, I-3 single owners
+table, I-4 observation path, I-5 DTO discipline, I-6 stage modules own
+real logic, I-7 driven port keeps shape only, I-8 executors stay
+mechanism-only, I-9 workspace-projection seam reachable, I-10
+fork-after-row ordering), the protected file lists, an explicit "what does
+NOT count as a violation" carve-out, and a structured JSON output format
+with file:line violations.
+
+### Schema completeness (closing the six DTO-completeness majors)
+
+Beyond the four substantive changes above, convergence-2 enumerated every
+field today's drivers carry, with the new home named explicitly:
+
+- `interactive: bool` → `LaunchRuntime.launch_mode` (D20.2).
+- `effort: str | None` → `SpawnRequest.effort` (caller-overridable).
+- 3 dropped `SessionContinuation` fields (`continue_harness`,
+  `continue_source_tracked`, `continue_source_ref`) →
+  `SpawnRequest.session: SessionRequest` carries all 8 prior fields.
+- `context_from_resolved` channel → mirrors the skills pattern (raw
+  `context_from` on `SpawnRequest`; resolved counterpart inside
+  `ResolvedRunInputs`).
+- `UnsafeNoOpPermissionResolver` seam → `LaunchRuntime.unsafe_no_permissions`
+  (D20.2).
+- Worker prepare→execute re-resolution semantics → explicitly declared:
+  `execute.py` re-reads filesystem state and re-composes via the factory;
+  no persisted `cli_command` preview is cached. `spawn show --plan` shows
+  the persisted `SpawnRequest`, not a pre-composed plan. Behavior-preserving
+  (today's worker also reconstructs the resolver at execute time per
+  FV-11).
+- `RetryPolicy` split from `ExecutionBudget`: `RetryPolicy` carries
+  `max_attempts` and `backoff_secs`; `ExecutionBudget` carries
+  `timeout_secs` and `kill_grace_secs`. Names stay faithful to scope.
+- `agent_metadata: dict[str, str]` typed explicitly (matches
+  `template_vars`).
+- `debug: bool` → `LaunchRuntime.debug` (D20.2).
+- All `Path`-shaped fields stored as `str` for `model_dump_json` round-trip
+  without custom encoders.
+
+### Observe-session-ID contract clarification
+
+The alignment reviewer's major found A04/D17 ("getter not parser") and the
+prior R06 ("Claude scrapes from `launch_outcome.captured_stdout`") in
+contradiction. Resolution: unify the contract. `observe_session_id()` is
+purely a function of its per-launch inputs (`launch_context`,
+`launch_outcome`). It may parse `launch_outcome.captured_stdout` (legitimate
+for Claude's PTY mode) or read per-launch state reachable via
+`launch_context` (e.g. `connection.session_id` for codex/opencode). What
+remains forbidden is any field on the adapter class instance that holds a
+session id, chat id, or last-launch state shared across launches.
+
+Driving adapters MUST NOT inspect `LaunchOutcome.captured_stdout` directly
+to scrape session ids — that observation is exclusively the driven
+adapter's job via `observe_session_id()`. Added to the driving-adapter
+prohibition list.
+
+### Behavioral test additions (closing the D7 verification gap)
+
+Five new deterministic behavioral tests added to the verification triad:
+
+- `test_child_cwd_not_created_before_spawn_row` — pins D7 ordering directly
+  (closes the alignment reviewer's major).
+- `test_composition_warnings_propagate_to_launch_context` — pins D20.3.
+- `test_workspace_projection_seam_reachable` — pins D20.1.
+- `test_unsafe_no_permissions_dispatches_through_factory` — pins D20.2.
+- `test_session_request_carries_all_eight_continuation_fields` — pins
+  schema completeness for the SessionRequest expansion.
+
+The invariant prompt's I-3 single-owner table also names "child cwd
+creation (`mkdir`) inside the factory after spawn row exists" so the
+drift gate carries the same constraint as the behavioral test.
+
+### Findings explicitly preserved (not adopted)
+
+- The structural review's `LaunchInputs`/`LaunchAttempt` decomposition
+  remains rejected per D19. The DTO reviewer's "Comparative honesty"
+  section confirmed `SpawnRequest` at the boundary wins on two grounds:
+  (1) closes the dead-abstraction signal on the existing protocol, and
+  (2) makes `model_dump_json` / `model_validate_json` the single
+  persistence mechanism for the worker artifact.
+- Background-worker `disallowed_tools` correctness fix remains out-of-R06
+  scope (separate commit with own test). `SpawnRequest.disallowed_tools`
+  makes it structurally fixable.
+
+### Out-of-scope (preserved from D19)
+
+- GitHub issue #34 — Popen-fallback session-ID observability via
+  filesystem polling. R06 lands the `observe_session_id()` adapter seam;
+  the mechanism swap is a separate change.
+- GitHub issue #32 — dead legacy subprocess-runner code; misleading
+  `_subprocess` filenames. Tracked in feasibility.md open question 7.
+
+**Spec/architecture touchpoints updated by convergence-2:**
+
+- `design/refactors.md` R06 — pipeline diagram (stage split), pipeline
+  stages section (3 stages now), single-owner constraints table (6 rows
+  added/changed), DTO reshape (4 user-visible types including
+  `LaunchRuntime`, `LaunchContext.warnings` field, expanded fields,
+  expanded `SessionRequest`, `RetryPolicy`+`ExecutionBudget` split,
+  `Path` stored as `str`), `observe_session_id` contract clarification,
+  6 new behavioral tests, invariant-prompt section now references the
+  design-package draft.
+- `design/architecture/launch-core.md` (A06) — same convergence-2 changes
+  mirrored: pipeline stages, type ladder, single-owner table, prohibition
+  list, observation contract, persisted-artifact section,
+  shape constraints, verification section.
+- `design/architecture/harness-integration.md` (A04) — workspace
+  projection composition contract now references the new stage names
+  (`resolve_launch_spec_stage` / `apply_workspace_projection` /
+  `build_launch_argv`).
+- `design/launch-composition-invariant.md` — new design artifact carrying
+  the full CI drift-gate reviewer prompt for production at
+  `.meridian/invariants/launch-composition-invariant.md`.
+- Spec leaves unchanged: convergence-2 is still structural and DTO-shape;
+  no user-facing EARS contract changes.
+
 ## How this file is used
 
 - Reviewers: validate that every F1–F19 response is actually encoded in the
   spec/architecture leaves named under "Encoded in" for each row. If a response
   points at a spec/architecture leaf but the leaf does not make the claim, that
   is a convergence gap to flag.
-- Planner: use D1–D18 as constraints that survive into the plan. D2, D3, D17,
-  and D18 in particular govern phase sequencing, the R06 hexagonal-core
-  invariants (3 driving adapters through one factory), and workspace-loading
-  behavior.
+- Planner: use D1–D20 as constraints that survive into the plan. D2, D3, D17,
+  D18, D19, and D20 in particular govern phase sequencing, the R06 typed-pipeline
+  invariants (3 driving adapters through one factory, raw `SpawnRequest` +
+  `LaunchRuntime` at the boundary, split spec/projection/argv stages, fork
+  after spawn row, `LaunchContext.warnings` as the only composition-warning
+  sidechannel, reviewer drift gate verification with the drafted invariant
+  prompt), and workspace-loading behavior. **D19 supersedes parts of D17
+  that named "hexagonal" as the load-bearing pattern**; the framing inside
+  the shell is a typed pipeline. **D20 supersedes parts of D19 that named
+  `project_launch_command` as a single stage**; the spec/projection/argv
+  split is what makes the A04 seam reachable inside the A06 ordering.
+  Hexagonal labels can stay as outer naming, but composition centralization
+  is what makes R06 honest.
 - Future rounds: when a new prior-round feedback file gets produced, append a
   new section here rather than rewriting these rows.
