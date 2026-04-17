@@ -14,8 +14,15 @@ src/meridian/
     state/        JSONL event stores (spawns, sessions), mutable JSON (work items)
     catalog/      Model resolution, agent/skill loading, default agent policy
     launch/       Spawn lifecycle: prepare → resolve → process → finalize
-    config/       Settings model, precedence chain, TOML read/write
-    core/         Shared utilities (overrides, signals, codec, logging)
+    config/       Settings model, precedence chain, TOML read/write, workspace.local.toml
+    core/         Shared primitives: type aliases, JSONL codec, signal handling, output sink
+    app/          REST server exposing spawn management as HTTP API (SPEC_ONLY launch path)
+    streaming/    Connection abstractions for harness subprocess output; streaming runner
+    observability/ Structured logging context, debug tracing, spawn-scoped log binding
+    safety/       Env sanitization, security constraints (undocumented in fs/)
+    sync/         Idempotent sync operations, mars sync integration (undocumented in fs/)
+    adapters/     Harness adapter registration (undocumented in fs/; see harness/)
+    utils/        Additional utilities beyond core/ (undocumented in fs/)
   dev/            Token-efficient pytest wrapper
 ```
 
@@ -65,6 +72,8 @@ Composition is centralized in `lib/launch/context.py:build_launch_context()`. Ev
 **Manifest as single source of truth:** `ops/manifest.py` declares every operation once with name, description, input/output types, async+sync handlers, and surface membership (CLI and/or MCP). Both the CLI registration layer and the MCP server consume the manifest — no duplicated operation definitions.
 
 **Config precedence:** CLI flags > ENV vars > agent profile > project config > user config > harness defaults. Each field resolves independently — a CLI model override forces harness re-derivation from the overridden model, not from the profile's harness.
+
+**Workspace config:** `workspace.local.toml` at `state_root.parent` declares sibling-repo roots projected to harness launches (`--add-dir` for Claude, `OPENCODE_CONFIG_CONTENT` env for OpenCode). Local-only; gitignored by default. Invalid workspace blocks any spawn before harness contact. See `fs/config/overview.md` and `fs/launch/overview.md`.
 
 ## State Root Layout
 
