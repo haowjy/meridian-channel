@@ -54,6 +54,7 @@ Common `spawn` flags:
 | Command | Description |
 | ------- | ----------- |
 | `meridian init [--link DIR]` | Initialize project (creates `.meridian/`) |
+| `meridian workspace init` | Create local workspace topology file |
 | `meridian config show` | Show resolved configuration |
 | `meridian config set KEY VALUE` | Set a config value |
 | `meridian config get KEY` | Read a config value |

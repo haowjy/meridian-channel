@@ -97,6 +97,34 @@ meridian config show
 
 A CLI `-m MODEL` override must also drive harness selection — a profile-level harness default cannot win over a CLI model override.
 
+## Workspace issues
+
+`meridian doctor` surfaces workspace findings as distinct codes. Fix them by editing `workspace.local.toml` (run `meridian workspace init` to create it if missing).
+
+### `workspace_invalid`
+
+The workspace file exists but cannot be parsed. Causes: TOML syntax error, wrong type for `path` (must be a non-empty string), wrong type for `enabled` (must be a boolean), or the path points to a directory rather than a file.
+
+Fix the TOML error in `workspace.local.toml`, then rerun `meridian doctor`.
+
+**An invalid workspace blocks spawns.** Launches fail before contacting any harness until the file is fixed or removed.
+
+### `workspace_unknown_key`
+
+The file contains keys Meridian doesn't recognize. Forward-compatibility warning only — does not block launches. Safe to ignore if the key is intentional (written by a newer Meridian version). Otherwise, remove or rename the key.
+
+### `workspace_missing_root`
+
+An enabled root (`enabled = true` or omitted) points to a path that doesn't exist on disk. The root is skipped at launch time — missing roots don't block spawns, but they produce no projection.
+
+Check the path in `workspace.local.toml`. Paths are resolved relative to the workspace file's location. Use absolute paths when the relative form is ambiguous.
+
+### `workspace_unsupported_harness`
+
+Workspace roots cannot be projected to the Codex harness yet — Codex projection requires config generation that is not yet implemented. The spawn proceeds but Codex won't see the declared roots.
+
+If multi-repo context is required, use Claude Code or OpenCode harnesses instead.
+
 ## Spawn artifacts
 
 Each spawn writes to `.meridian/spawns/<spawn_id>/`:

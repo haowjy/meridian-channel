@@ -55,6 +55,23 @@ meridian models list   # confirm available models
 meridian doctor        # check harness connectivity
 ```
 
+## Multi-Repo Workspace (optional)
+
+If you work across multiple repos and want agents to see sibling directories, set up a local workspace file:
+
+```bash
+meridian workspace init   # creates workspace.local.toml, adds .git/info/exclude coverage
+```
+
+Edit `workspace.local.toml` to declare which repos to include:
+
+```toml
+[[context-roots]]
+path = "../sibling-repo"
+```
+
+Each enabled, existing root is projected to harness launches automatically — `--add-dir` for Claude Code, `OPENCODE_CONFIG_CONTENT` for OpenCode. See [configuration.md](configuration.md#workspace) for full schema and per-harness details.
+
 ## Next Steps
 
 - [commands.md](commands.md) — full CLI reference

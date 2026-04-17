@@ -25,6 +25,7 @@ meridian models config show
   .agents/
     agents/
     skills/
+  workspace.local.toml       # local-only, gitignored via .git/info/exclude
   .meridian/
     config.toml
     models.toml
@@ -85,6 +86,66 @@ verbosity = "verbose"
 [primary]
 autocompact_pct = 70
 ```
+
+## Workspace
+
+`workspace.local.toml` injects sibling-repo context into harness launches. Local-only — `workspace init` covers it with `.git/info/exclude` rather than committing a `.gitignore` entry.
+
+### File Location
+
+`<state-root-parent>/workspace.local.toml` — defaults to the repo root. Follows `MERIDIAN_STATE_ROOT` if overridden.
+
+### Schema
+
+Only `[[context-roots]]` entries are recognized.
+
+| Key | Type | Required | Default | Purpose |
+|---|---|---|---|---|
+| `path` | str | yes | — | Path to sibling repo; absolute or relative to the workspace file |
+| `enabled` | bool | no | `true` | Set to `false` to disable without removing the entry |
+
+Unknown keys at any level produce `workspace_unknown_key` doctor findings but do not block launches.
+
+### Example
+
+```toml
+[[context-roots]]
+path = "../sibling-api"
+
+[[context-roots]]
+path = "/absolute/path/to/another-repo"
+enabled = false   # disabled — not projected
+```
+
+### Projection per Harness
+
+Each enabled, existing root is projected at launch time. Roots that don't exist on disk are skipped (reported by `doctor`):
+
+| Harness | Mechanism |
+|---|---|
+| Claude Code | `--add-dir <path>` flag per root |
+| OpenCode | `OPENCODE_CONFIG_CONTENT` env with `permission.external_directory` |
+| Codex | Not supported (requires config generation — deferred) |
+
+### `config show` Workspace Output
+
+```
+workspace:
+  status: present
+  path: /your/repo/workspace.local.toml
+  roots: 2 (1 enabled, 0 missing)
+  findings: []
+```
+
+Status values: `none` (no file), `present` (parsed OK), `invalid` (parse or schema error).
+
+### Setup
+
+```bash
+meridian workspace init   # creates workspace.local.toml, adds .git/info/exclude coverage
+```
+
+Idempotent — safe to rerun on an existing file.
 
 ## Model Catalog Overrides
 
