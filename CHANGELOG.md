@@ -4,6 +4,21 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.0.31] - 2026-04-17
+
+### Added
+- `workspace.local.toml` support for multi-repo context injection. Declare `[[context-roots]]` entries pointing at sibling repos; meridian projects them to harness launches. Local-only file, gitignored by default.
+- `workspace init` command creates template file with commented examples, adds local gitignore coverage via `.git/info/exclude`.
+- `config show` workspace surface: status, root counts, per-harness applicability. JSON: `workspace = {status, path?, roots:{count,enabled,missing}, applicability:{claude,codex,opencode}}`.
+- `doctor` workspace findings: `workspace_invalid`, `workspace_unknown_key`, `workspace_missing_root`, `workspace_unsupported_harness`.
+- Launch projection: Claude (`--add-dir`), OpenCode (`permission.external_directory` env). Codex deferred to `harness-permission-abstraction` (requires CODEX_HOME config generation).
+- Invalid workspace pre-launch gate blocks spawn before harness contact.
+- Shared `ConfigSurface` builder unifies `config show` and `doctor` workspace state.
+
+### Changed
+- Bundled `mars-agents` 0.1.2 → 0.1.3.
+- Workspace file location follows `MERIDIAN_STATE_ROOT` — lives at `state_root.parent / workspace.local.toml`.
+
 ## [0.0.30] - 2026-04-16
 
 ### Added
