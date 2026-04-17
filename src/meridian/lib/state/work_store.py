@@ -93,6 +93,23 @@ def _read_work_item(path: Path) -> WorkItem | None:
         return None
 
 
+def _reconcile_interrupted_archives_locked(paths: StateRootPaths) -> None:
+    """Repair archive operations interrupted after moving scratch but before metadata write."""
+
+    if not paths.work_items_dir.is_dir():
+        return
+    for item_path in paths.work_items_dir.glob("*.json"):
+        item = _read_work_item(item_path)
+        if item is None or item.status == "done":
+            continue
+        active_dir = _work_scratch_dir(paths, item.name)
+        archived_dir = _archived_work_scratch_dir(paths, item.name)
+        if active_dir.exists() or not archived_dir.exists():
+            continue
+        repaired = item.model_copy(update={"status": "done"})
+        atomic_write_text(item_path, _serialize_work_item(repaired))
+
+
 def _ensure_work_item_metadata_locked(
     *,
     paths: StateRootPaths,
@@ -121,45 +138,41 @@ def reconcile_work_store(state_root: Path) -> None:
 
     paths = StateRootPaths.from_root_dir(state_root)
     intent_path = paths.work_items_rename_intent
-    if not intent_path.is_file():
-        return
+    if intent_path.is_file():
+        try:
+            intent = WorkRenameIntent.model_validate_json(intent_path.read_text(encoding="utf-8"))
+        except (OSError, ValidationError, json.JSONDecodeError):
+            intent_path.unlink(missing_ok=True)
+        else:
+            old_item_path = paths.work_items_dir / f"{intent.old_work_id}.json"
+            new_item_path = paths.work_items_dir / f"{intent.new_work_id}.json"
+            old_scratch_dir = _work_scratch_dir(paths, intent.old_work_id)
+            new_scratch_dir = _work_scratch_dir(paths, intent.new_work_id)
+            old_archived_dir = _archived_work_scratch_dir(paths, intent.old_work_id)
+            new_archived_dir = _archived_work_scratch_dir(paths, intent.new_work_id)
 
-    try:
-        intent = WorkRenameIntent.model_validate_json(intent_path.read_text(encoding="utf-8"))
-    except (OSError, ValidationError, json.JSONDecodeError):
-        intent_path.unlink(missing_ok=True)
-        return
+            if old_item_path.exists() and not new_item_path.exists():
+                new_item_path.parent.mkdir(parents=True, exist_ok=True)
+                old_item_path.rename(new_item_path)
 
-    old_item_path = paths.work_items_dir / f"{intent.old_work_id}.json"
-    new_item_path = paths.work_items_dir / f"{intent.new_work_id}.json"
-    old_scratch_dir = _work_scratch_dir(paths, intent.old_work_id)
-    new_scratch_dir = _work_scratch_dir(paths, intent.new_work_id)
-    old_archived_dir = _archived_work_scratch_dir(paths, intent.old_work_id)
-    new_archived_dir = _archived_work_scratch_dir(paths, intent.new_work_id)
+            if new_item_path.exists():
+                # Repair metadata if a crash happened after renaming the file but before
+                # rewriting the payload with the new slug.
+                item = _read_work_item(new_item_path)
+                if item is not None and item.name != intent.new_work_id:
+                    updated = item.model_copy(update={"name": intent.new_work_id})
+                    atomic_write_text(new_item_path, _serialize_work_item(updated))
 
-    if old_item_path.exists() and not new_item_path.exists():
-        new_item_path.parent.mkdir(parents=True, exist_ok=True)
-        old_item_path.rename(new_item_path)
+                if old_scratch_dir.exists() and not new_scratch_dir.exists():
+                    new_scratch_dir.parent.mkdir(parents=True, exist_ok=True)
+                    old_scratch_dir.rename(new_scratch_dir)
+                if old_archived_dir.exists() and not new_archived_dir.exists():
+                    new_archived_dir.parent.mkdir(parents=True, exist_ok=True)
+                    old_archived_dir.rename(new_archived_dir)
 
-    if new_item_path.exists():
-        # Repair metadata if a crash happened after renaming the file but before
-        # rewriting the payload with the new slug.
-        item = _read_work_item(new_item_path)
-        if item is not None and item.name != intent.new_work_id:
-            updated = item.model_copy(update={"name": intent.new_work_id})
-            atomic_write_text(new_item_path, _serialize_work_item(updated))
+            intent_path.unlink(missing_ok=True)
 
-        if old_scratch_dir.exists() and not new_scratch_dir.exists():
-            new_scratch_dir.parent.mkdir(parents=True, exist_ok=True)
-            old_scratch_dir.rename(new_scratch_dir)
-        if old_archived_dir.exists() and not new_archived_dir.exists():
-            new_archived_dir.parent.mkdir(parents=True, exist_ok=True)
-            old_archived_dir.rename(new_archived_dir)
-
-        intent_path.unlink(missing_ok=True)
-        return
-
-    intent_path.unlink(missing_ok=True)
+    _reconcile_interrupted_archives_locked(paths)
 
 
 def create_work_item(state_root: Path, label: str, description: str = "") -> WorkItem:
