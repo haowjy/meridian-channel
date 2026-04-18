@@ -4,7 +4,7 @@
 import json
 import shutil
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 # Import from meridian for user paths resolution
@@ -87,7 +87,7 @@ def _update_tracking(tracking_file: Path, migration_id: str) -> None:
         tracking["applied"].append(migration_id)
         tracking["history"].append({
             "id": migration_id,
-            "applied_at": datetime.now(timezone.utc).isoformat(),
+            "applied_at": datetime.now(datetime.UTC).isoformat(),
             "result": "ok"
         })
         tracking_file.parent.mkdir(parents=True, exist_ok=True)

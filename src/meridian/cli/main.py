@@ -1416,17 +1416,10 @@ def _should_startup_bootstrap(argv: Sequence[str]) -> bool:
         return False
     if top_level == "work" and subcommand in {None, "list", "show", "sessions", "current"}:
         return False
-    if top_level == "spawn" and subcommand in {
-        "list",
-        "show",
-        "stats",
-        "wait",
-        "files",
-        "log",
-        "report",
-    }:
-        return False
-    return True
+    return not (
+        top_level == "spawn"
+        and subcommand in {"list", "show", "stats", "wait", "files", "log", "report"}
+    )
 
 
 def _print_agent_root_help() -> None:
