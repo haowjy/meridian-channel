@@ -20,7 +20,6 @@ from meridian.lib.state.paths import (
 )
 from meridian.lib.state.user_paths import (
     get_or_create_project_uuid,
-    get_project_state_root,
 )
 
 P = ParamSpec("P")
@@ -124,7 +123,7 @@ def build_runtime(
 def resolve_state_root(repo_root: Path) -> Path:
     """Resolve runtime state root for write paths."""
 
-    return resolve_user_state_root(repo_root)
+    return resolve_runtime_state_root_for_write(repo_root)
 
 
 def resolve_state_root_or_none(repo_root: Path) -> Path | None:
@@ -164,13 +163,6 @@ def get_project_uuid(repo_root: Path) -> str:
     """Get/create project UUID, returns UUID string."""
 
     return get_or_create_project_uuid(resolve_repo_state_paths(repo_root).root_dir)
-
-
-def resolve_user_state_root(repo_root: Path) -> Path:
-    """Resolve user-level state root for a project."""
-
-    repo_state_root = resolve_repo_state_paths(repo_root).root_dir
-    return get_project_state_root(get_or_create_project_uuid(repo_state_root))
 
 
 def resolve_roots(repo_root: str | None) -> ResolvedRoots:

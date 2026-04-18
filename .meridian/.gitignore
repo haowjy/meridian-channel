@@ -4,6 +4,9 @@
 # Track .gitignore itself
 !.gitignore
 
+# Ignore the project UUID
+id
+
 # Track project config
 !models.toml
 

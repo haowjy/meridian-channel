@@ -15,6 +15,7 @@ from meridian.lib.core.overrides import (
     KNOWN_APPROVAL_VALUES,
     KNOWN_EFFORT_VALUES,
 )
+from meridian.lib.state.user_paths import get_user_state_root
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,7 @@ _OUTPUT_VERBOSITY_PRESETS = frozenset({"quiet", "normal", "verbose", "debug"})
 _PRIMARY_AUTOCOMPACT_PCT_MIN = 1
 _PRIMARY_AUTOCOMPACT_PCT_MAX = 100
 USER_CONFIG_ENV_VAR = "MERIDIAN_CONFIG"
-_DEFAULT_USER_CONFIG = Path("~/.meridian/config.toml").expanduser()
+_DEFAULT_USER_CONFIG = get_user_state_root() / "config.toml"
 
 
 class _SettingsLoadContext(BaseModel):

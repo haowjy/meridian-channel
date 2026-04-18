@@ -24,6 +24,8 @@ No real users, no real user data. No backwards compatibility needed — complete
 3. **Coordination, Not Control**: Meridian provides structure (spawns, sessions, skills, sync) but never dictates how agents do their work.
 4. **Observable by Default, Intrusive Only Where Observation Requires It**: Meridian reads harness state rather than driving harness behavior. Where observation needs a mechanism the harness doesn't provide — like capturing output from a TUI that only emits to a TTY — meridian reaches into the boundary with the minimum machinery needed (PTY capture for primary-launch session-ID extraction is the canonical example). Observability requirement, not control lever. Code that looks intrusive should be justified against a specific unobservable-otherwise constraint, and that constraint named in the commit or comment.
 5. **Idempotent Operations**: `meridian sync` twice = same result. Re-running after a crash converges to correct state, never doubles side effects.
+6. **Windows Is First-Class**: Windows support is a product requirement, not cleanup work. Do not ship path logic, process behavior, filesystem assumptions, or tests that only work on POSIX unless the limitation is explicitly accepted and documented. Design root discovery, env handling, locking, signals, shell invocation, and smoke-test coverage with Windows semantics in mind from the start.
+7. **Prefer Cross-Platform Abstractions**: In Rust, default to `std` and mature cross-platform crates over handwritten OS-specific branches. Use direct platform-specific APIs only behind narrow adapter boundaries and only when a cross-platform abstraction is insufficient. A dependency that deletes platform-specific code and test matrix burden is a simplification, not bloat.
 
 ### Architecture
 
@@ -88,7 +90,8 @@ This applies to **every resolved field independently** — model, harness, appro
 
 **Prefer smoke tests over unit tests.** Too many unit tests is bad when you're constantly refactoring.
 
-- **Smoke tests** (`tests/smoke/`): Organized markdown guides for manually testing CLI behavior. See the `_meridian-dev-smoke-test` skill for methodology. Run `uv run meridian` to test the CLI in its current state.
+- **Platform coverage is required**: When a change touches paths, process launching, signals, shells, filesystem semantics, locking, or config discovery, explicitly consider Windows behavior up front. Prefer cross-platform libraries and crates over platform-specific implementations. Add or update tests so the intended behavior is clear on Windows, not merely inferred from POSIX-only coverage.
+- **Smoke tests** (`tests/smoke/`): Organized markdown guides for manually testing CLI behavior. Prefer the project-specific scenarios in `tests/smoke/` as the source of truth for what to verify. Run `uv run meridian` to test the CLI in its current state.
 - **Unit tests** (focused): Only for logic that's hard to smoke test — signals, concurrency, security/env sanitization, sync engine algorithms, parsing edge cases. Run with `uv run pytest-llm`.
 - **Linting**: `uv run ruff check .`
 - **Type checking**: `uv run pyright` (must be 0 errors)

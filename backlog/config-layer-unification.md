@@ -13,7 +13,7 @@ CLI > ENV > YAML profile > Project Config > User Config > harness default
 - **CLI** — you explicitly typed it, highest intent
 - **ENV** — `MERIDIAN_*` vars, personal/CI override without editing files
 - **YAML profile** — this agent's baked-in defaults
-- **Project Config** — this repo's team settings (`.meridian/config.toml`)
+- **Project Config** — this repo's team settings (`meridian.toml`)
 - **User Config** — global personal preferences (`~/.meridian/config.toml`)
 - **Harness default** — what the harness does on its own
 

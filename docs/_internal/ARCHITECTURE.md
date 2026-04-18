@@ -242,7 +242,8 @@ All state lives in files. No database. Append-only JSONL for event streams and p
 
 ```mermaid
 graph TD
-    Root[".meridian/"] --> Config["config.toml"]
+    Repo["<repo-root>/"] --> Config["meridian.toml"]
+    Repo --> Root[".meridian/"]
     Root --> Models["models.toml"]
     Root --> Cache["cache/"]
     Root --> FS["fs/ (shared workspace)"]
@@ -348,7 +349,7 @@ Surfaces consume the manifest via `get_operations_for_surface("cli"|"mcp")`. Som
 Configuration uses pydantic-settings `BaseSettings` with layered precedence:
 
 ```
-Defaults -> Project TOML (.meridian/config.toml) -> User TOML (~/.meridian/config.toml) -> Env Vars (MERIDIAN_*) -> CLI Flags
+Defaults -> Project TOML (meridian.toml) -> User TOML (~/.meridian/config.toml) -> Env Vars (MERIDIAN_*) -> CLI Flags
 ```
 
 Key env vars:
