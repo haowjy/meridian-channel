@@ -213,6 +213,7 @@ async def test_execute_with_streaming_succeeds_after_report_watchdog_cleanup(
     assert row is not None
     assert row.status == "succeeded"
     assert row.exit_code == 0
+    assert row.error is None
     assert fake_heartbeat.touches
     report = (state_root / "spawns" / str(run.spawn_id) / "report.md").read_text(
         encoding="utf-8"

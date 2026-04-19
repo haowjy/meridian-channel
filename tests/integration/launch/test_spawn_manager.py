@@ -150,11 +150,13 @@ async def test_wait_for_completion_survives_cleanup_without_private_hooks(
 
     try:
         await asyncio.wait_for(cleanup_started.wait(), timeout=1.0)
-        completion = await asyncio.wait_for(manager.wait_for_completion(spawn_id), timeout=1.0)
-        assert completion is not None
-        assert completion.status == "failed"
-        assert completion.exit_code == 1
-        assert completion.error == "connection_closed_without_terminal_event"
+        completion_before_cleanup_release = await asyncio.wait_for(
+            manager.wait_for_completion(spawn_id), timeout=1.0
+        )
+        assert completion_before_cleanup_release is not None
+        assert completion_before_cleanup_release.status == "failed"
+        assert completion_before_cleanup_release.exit_code == 1
+        assert completion_before_cleanup_release.error == "connection_closed_without_terminal_event"
 
         # Session cleanup removes live connection before cleanup fully drains.
         assert manager.get_connection(spawn_id) is None
@@ -165,6 +167,13 @@ async def test_wait_for_completion_survives_cleanup_without_private_hooks(
             error=f"Spawn {spawn_id} is not active",
         )
         assert "item.completed" in _read_output_event_types(state_root, spawn_id)
+
+        release_cleanup.set()
+        await asyncio.sleep(0)
+        completion_after_cleanup_release = await asyncio.wait_for(
+            manager.wait_for_completion(spawn_id), timeout=1.0
+        )
+        assert completion_after_cleanup_release == completion_before_cleanup_release
     finally:
         release_cleanup.set()
         await asyncio.sleep(0)
