@@ -71,7 +71,10 @@ def project_workspace_roots(
     if not roots:
         return ProjectionResult(applicability="ignored:no_roots")
 
-    if harness_id == HarnessId.CLAUDE:
+    # Claude and Codex both support --add-dir. Note: Codex --add-dir only grants
+    # write access; in read-only sandbox modes the flag is ignored. We project
+    # it anyway for write scenarios and document this as semi-supported.
+    if harness_id in (HarnessId.CLAUDE, HarnessId.CODEX):
         return ProjectionResult(
             applicability="active",
             args=_project_claude_workspace_args(roots),

@@ -6,7 +6,7 @@ import sys
 from collections.abc import Sequence
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, cast
 
 from cyclopts import Parameter
 from pydantic import BaseModel, ConfigDict
@@ -54,7 +54,7 @@ from meridian.cli.config_cmd import register_config_commands
 from meridian.cli.doctor_cmd import register_doctor_command
 from meridian.cli.misc_commands import register_misc_commands
 from meridian.cli.models_cmd import register_models_commands
-from meridian.cli.output import OutputConfig, create_sink, flush_sink, normalize_output_format
+from meridian.cli.output import OutputConfig, OutputFormat, create_sink, flush_sink, normalize_output_format
 from meridian.cli.output import emit as emit_output
 from meridian.cli.report_cmd import register_report_commands
 from meridian.cli.session_cmd import register_session_commands
@@ -137,7 +137,7 @@ def _extract_global_options(argv: Sequence[str]) -> tuple[list[str], GlobalOptio
         ),
     )
     return cleaned, GlobalOptions(
-        output=OutputConfig(format=parsed.output_format),
+        output=OutputConfig(format=cast("OutputFormat", parsed.output_format)),
         config_file=parsed.config_file,
         harness=parsed.harness,
         yes=parsed.yes,

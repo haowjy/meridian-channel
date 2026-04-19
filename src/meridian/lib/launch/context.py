@@ -588,7 +588,7 @@ def build_launch_context(
 
     workspace_projection = project_workspace_roots(
         harness_id=harness.id,
-        roots=workspace_roots,
+        roots=(*workspace_roots, state_root),
         parent_opencode_config_content=os.getenv(OPENCODE_CONFIG_CONTENT_ENV),
     )
     projected_extra_args = (

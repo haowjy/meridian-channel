@@ -83,9 +83,11 @@ class SubprocessProcessLauncher(ProcessLauncher):
                         chunk = stdout_stream.read(4096)
                         if not chunk:
                             break
-                        output_handle.write(chunk)
+                        # text=False above guarantees bytes, but pyright sees Popen[str] | Popen[bytes]
+                        chunk_bytes = chunk if isinstance(chunk, bytes) else chunk.encode()
+                        output_handle.write(chunk_bytes)
                         output_handle.flush()
-                        _write_chunk_to_stdout(chunk)
+                        _write_chunk_to_stdout(chunk_bytes)
             return LaunchedProcess(exit_code=_wait_for_process(process), pid=process.pid)
         finally:
             with suppress(Exception):
