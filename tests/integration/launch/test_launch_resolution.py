@@ -18,7 +18,7 @@ from meridian.lib.launch.types import LaunchRequest
 from meridian.lib.ops.runtime import build_runtime_from_root_and_config
 from meridian.lib.ops.spawn.models import SpawnCreateInput
 from meridian.lib.ops.spawn.prepare import build_create_payload
-from tests.helpers.fixtures import write_agent, write_skill
+from tests.support.fixtures import write_agent, write_skill
 
 
 def _write_minimal_mars_config(repo_root: Path) -> None:
