@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import signal
-from typing import Any, get_args, get_origin
+from typing import get_args, get_origin
 
 import pytest
 

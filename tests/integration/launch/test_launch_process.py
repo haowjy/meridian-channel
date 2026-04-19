@@ -20,6 +20,7 @@ from meridian.lib.harness.registry import get_default_harness_registry
 from meridian.lib.launch import process
 from meridian.lib.launch.constants import DEFAULT_INFRA_EXIT_CODE
 from meridian.lib.launch.context import build_launch_context
+from meridian.lib.launch.process.subprocess_launcher import SubprocessProcessLauncher
 from meridian.lib.launch.request import (
     LaunchArgvIntent,
     LaunchCompositionSurface,
@@ -28,7 +29,6 @@ from meridian.lib.launch.request import (
     SpawnRequest,
 )
 from meridian.lib.launch.types import SessionMode
-from meridian.lib.launch.process.subprocess_launcher import SubprocessProcessLauncher
 
 
 def test_sync_pty_winsize_copies_source_size(monkeypatch: pytest.MonkeyPatch) -> None:

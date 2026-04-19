@@ -10,9 +10,9 @@ IS_WINDOWS = sys.platform == "win32"
 IS_POSIX = not IS_WINDOWS
 
 __all__ = [
-    "DeferredUnixModule",
     "IS_POSIX",
     "IS_WINDOWS",
+    "DeferredUnixModule",
     "fcntl",
     "pty",
     "select",

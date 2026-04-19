@@ -1,7 +1,7 @@
 """Shared time abstraction for dependency injection."""
 
-from datetime import UTC, datetime
 import time
+from datetime import UTC, datetime
 from typing import Protocol
 
 

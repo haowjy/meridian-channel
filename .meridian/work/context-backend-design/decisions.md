@@ -92,3 +92,35 @@
 **Alternatives rejected**:
 - Extend `paths.py`: Would conflate path resolution with git sync
 - Inline in config loading: Would duplicate resolution logic
+
+---
+
+## DEC-CTX-007: Source Field Separates Backend from Path
+
+**Decision**: Use `source = "local" | "git"` to specify backend type, separate from `path`.
+
+**Reasoning**:
+- Clean separation of "where" (path) from "how it syncs" (source)
+- Git-specific options only valid when `source = "git"`
+- Extensible to future backends (`gdrive`, `s3`, etc.)
+- No magic keywords in path field — paths are just paths
+
+**Alternatives rejected**:
+- `path = "local"` magic keyword: Conflates location with backend type
+- Nested `[context.work.git]`: More verbose, git options scattered
+
+---
+
+## DEC-CTX-008: Arbitrary Context Types Supported
+
+**Decision**: Allow `[context.<name>]` for any name, not just `work` and `fs`.
+
+**Reasoning**:
+- Users may want `docs`, `research`, `shared` contexts
+- Same config shape works for all — source + path + optional git options
+- Custom contexts export as `MERIDIAN_CONTEXT_<NAME>_DIR`
+- `work` and `fs` keep special env var names for compatibility
+
+**Alternatives rejected**:
+- Fixed set of `work` and `fs` only: Not extensible, forces workarounds
+- Separate config file for custom contexts: Unnecessary complexity

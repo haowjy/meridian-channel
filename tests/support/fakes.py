@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 
+
 class FakeClock:
     def __init__(self, start: float = 0.0):
         self._now = start

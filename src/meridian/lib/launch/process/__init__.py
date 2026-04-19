@@ -19,12 +19,18 @@ from meridian.lib.state.session_store import (
 from .ports import ChildStartedHook, LaunchedProcess, ProcessLauncher
 from .pty_launcher import (
     _invoke_previous_sigwinch_handler,
-    _sync_pty_winsize as _sync_pty_winsize_impl,
     can_use_pty,
+)
+from .pty_launcher import (
+    _sync_pty_winsize as _sync_pty_winsize_impl,
 )
 from .runner import (
     ProcessOutcome,
+)
+from .runner import (
     run_harness_process as _run_harness_process_impl,
+)
+from .runner import (
     run_primary_process_with_capture as _run_primary_process_with_capture_impl,
 )
 
@@ -68,18 +74,29 @@ def _run_primary_process_with_capture(
     )
 
 
+def _compat_run_primary(
+    command: tuple[str, ...],
+    cwd: Path,
+    env: dict[str, str],
+    output_log_path: Path | None,
+    on_child_started: ChildStartedHook | None = None,
+) -> tuple[int, int | None]:
+    """Positional-args wrapper for test compatibility."""
+    return _run_primary_process_with_capture(
+        command=command,
+        cwd=cwd,
+        env=env,
+        output_log_path=output_log_path,
+        on_child_started=on_child_started,
+    )
+
+
 def run_harness_process(launch_context: Any, harness_registry: Any) -> Any:
     # Preserve monkeypatch seams currently exercised in tests.
     return _run_harness_process_impl(
         launch_context,
         harness_registry,
-        run_primary_process_with_capture_fn=lambda command, cwd, env, output_log_path, on_child_started=None: _run_primary_process_with_capture(
-            command=command,
-            cwd=cwd,
-            env=env,
-            output_log_path=output_log_path,
-            on_child_started=on_child_started,
-        ),
+        run_primary_process_with_capture_fn=_compat_run_primary,
         start_session_fn=start_session,
         stop_session_fn=stop_session,
         update_session_harness_id_fn=update_session_harness_id,
@@ -94,5 +111,8 @@ __all__ = [
     "ProcessLauncher",
     "ProcessOutcome",
     "can_use_pty",
+    "fcntl",
     "run_harness_process",
+    "struct",
+    "termios",
 ]

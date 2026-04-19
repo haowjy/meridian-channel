@@ -107,7 +107,9 @@ def run_harness_process(
     launch_context: LaunchContext,
     harness_registry: HarnessRegistry,
     *,
-    run_primary_process_with_capture_fn: RunPrimaryProcessWithCapture = run_primary_process_with_capture,
+    run_primary_process_with_capture_fn: RunPrimaryProcessWithCapture = (
+        run_primary_process_with_capture
+    ),
     start_session_fn: Callable[..., str] = start_session,
     stop_session_fn: Callable[..., None] = stop_session,
     update_session_harness_id_fn: Callable[..., None] = update_session_harness_id,

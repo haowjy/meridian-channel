@@ -9,11 +9,12 @@ on:
 
 jobs:
   meridian:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: read
     strategy:
       matrix:
+        os: [ubuntu-latest, windows-latest]
         python-version: ["3.12", "3.14"]
 
     steps:

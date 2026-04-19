@@ -8,7 +8,6 @@ from pathlib import Path
 
 from meridian.lib.core.clock import Clock, RealClock
 
-
 type HeartbeatTouch = Callable[[], None]
 
 
