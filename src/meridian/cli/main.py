@@ -16,6 +16,13 @@ from cyclopts import App, Parameter
 from pydantic import BaseModel, ConfigDict
 
 from meridian import __version__
+from meridian.cli.bootstrap import (
+    is_root_help_request as _bootstrap_is_root_help_request,
+    maybe_bootstrap_runtime_state,
+    should_startup_bootstrap as _bootstrap_should_startup_bootstrap,
+    temporary_config_env,
+    validate_top_level_command as _bootstrap_validate_top_level_command,
+)
 from meridian.cli.config_cmd import register_config_commands
 from meridian.cli.doctor_cmd import register_doctor_command
 from meridian.cli.models_cmd import register_models_commands
@@ -1381,21 +1388,17 @@ def _top_level_command_names() -> set[str]:
 
 
 def _validate_top_level_command(argv: Sequence[str], *, global_harness: str | None = None) -> None:
-    candidate = _first_positional_token(argv)
-    if candidate is None:
+    if _first_positional_token(argv) is None:
         return
-    if candidate in _top_level_command_names():
-        return
-    if global_harness is not None:
-        return
-    print(f"error: Unknown command: {candidate}", file=sys.stderr)
-    raise SystemExit(1)
+    _bootstrap_validate_top_level_command(
+        argv,
+        known_commands=_top_level_command_names(),
+        global_harness=global_harness,
+    )
 
 
 def _is_root_help_request(argv: Sequence[str]) -> bool:
-    if not any(token in {"--help", "-h"} for token in argv):
-        return False
-    return _first_positional_token(argv) is None
+    return _bootstrap_is_root_help_request(argv)
 
 
 def _first_subcommand_token(argv: Sequence[str]) -> str | None:
@@ -1413,24 +1416,7 @@ def _first_subcommand_token(argv: Sequence[str]) -> str | None:
 
 
 def _should_startup_bootstrap(argv: Sequence[str]) -> bool:
-    if any(token in {"--help", "-h", "--version"} for token in argv):
-        return False
-    top_level = _first_positional_token(argv)
-    if top_level is None:
-        return True
-    if top_level in {"context", "session", "completion", "doctor"}:
-        return False
-    subcommand = _first_subcommand_token(argv)
-    if top_level == "models" and subcommand in {None, "list", "show"}:
-        return False
-    if top_level == "config" and subcommand in {"show", "get"}:
-        return False
-    if top_level == "work" and subcommand in {None, "list", "show", "sessions", "current"}:
-        return False
-    return not (
-        top_level == "spawn"
-        and subcommand in {"list", "show", "stats", "wait", "files", "log", "report"}
-    )
+    return _bootstrap_should_startup_bootstrap(argv)
 
 
 def _print_agent_root_help() -> None:
@@ -1474,15 +1460,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     _validate_top_level_command(cleaned_args, global_harness=options.harness)
 
-    if not agent_mode_enabled() and _should_startup_bootstrap(cleaned_args):
-        try:
-            from meridian.lib.config.settings import resolve_project_root
-            from meridian.lib.ops.config import ensure_runtime_state_bootstrap_sync
-
-            repo_root = resolve_project_root()
-            ensure_runtime_state_bootstrap_sync(repo_root)
-        except Exception:
-            pass
+    maybe_bootstrap_runtime_state(cleaned_args, agent_mode=agent_mode_enabled())
 
     active_sink = create_sink(
         options.output,
@@ -1490,26 +1468,19 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     options = options.model_copy(update={"sink": active_sink})
     token = _GLOBAL_OPTIONS.set(options)
-    prior_user_config = os.environ.get("MERIDIAN_CONFIG")
-    if options.config_file is not None:
-        os.environ["MERIDIAN_CONFIG"] = options.config_file
     try:
-        try:
-            app(cleaned_args)
-        except SystemExit:
-            raise
-        except TimeoutError as exc:
-            _emit_error(_operation_error_message(exc), exit_code=124)
-        except (KeyError, ValueError, FileNotFoundError, OSError) as exc:
-            _emit_error(_operation_error_message(exc))
+        with temporary_config_env(options.config_file):
+            try:
+                app(cleaned_args)
+            except SystemExit:
+                raise
+            except TimeoutError as exc:
+                _emit_error(_operation_error_message(exc), exit_code=124)
+            except (KeyError, ValueError, FileNotFoundError, OSError) as exc:
+                _emit_error(_operation_error_message(exc))
     finally:
         flush_sink(active_sink)
         _GLOBAL_OPTIONS.reset(token)
-        if options.config_file is not None:
-            if prior_user_config is None:
-                os.environ.pop("MERIDIAN_CONFIG", None)
-            else:
-                os.environ["MERIDIAN_CONFIG"] = prior_user_config
 
 
 _register_group_commands()
