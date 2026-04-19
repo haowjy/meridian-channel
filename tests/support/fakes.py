@@ -1,6 +1,6 @@
 """Test doubles for deterministic behavior in unit and integration tests."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from meridian.lib.core.types import SpawnId
 
@@ -16,7 +16,12 @@ class FakeClock:
         return self._now
 
     def utc_now_iso(self) -> str:
-        return datetime.fromtimestamp(self._now, tz=timezone.utc).isoformat()
+        return (
+            datetime.fromtimestamp(self._now, tz=UTC)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
 
     def advance(self, seconds: float) -> None:
         self._now += seconds

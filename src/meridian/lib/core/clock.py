@@ -1,6 +1,6 @@
 """Shared time abstraction for dependency injection."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 import time
 from typing import Protocol
 
@@ -19,4 +19,4 @@ class RealClock:
         return time.time()
 
     def utc_now_iso(self) -> str:
-        return datetime.now(timezone.utc).isoformat()
+        return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
