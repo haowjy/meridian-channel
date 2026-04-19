@@ -2,6 +2,19 @@
 
 Where to put tests, what they should look like, and when to write which kind.
 
+## Research Foundation
+
+This guide draws from:
+
+| Source | Key Contribution |
+|--------|------------------|
+| **Kent Beck** — [Test Desiderata](https://testdesiderata.com/) | Properties of good tests |
+| **Gary Bernhardt** — [Boundaries](https://www.destroyallsoftware.com/talks/boundaries) | Functional core / imperative shell |
+| **J.B. Rainsberger** — [Integrated Tests Are A Scam](https://www.infoq.com/presentations/integration-tests-scam/) | Why integration tests lie |
+| **Martin Fowler** — [Mocks Aren't Stubs](https://martinfowler.com/articles/mocksArentStubs.html) | Classicist vs mockist testing |
+| **Michael Feathers** — Seams | Finding test injection points |
+| **DHH** — [Test-Induced Design Damage](https://dhh.dk/2014/test-induced-design-damage.html) | When testing abstractions go too far |
+
 ## Test Desiderata (Kent Beck)
 
 All good tests share these properties:
@@ -15,6 +28,87 @@ All good tests share these properties:
 | **Readable** | Clear what's being tested and why |
 | **Behavioral** | Test what code does, not how it does it |
 | **Structure-insensitive** | Refactoring internals shouldn't break tests |
+| **Predictive** | Test failure means production failure |
+
+Tests that pin internal implementation details (exact call counts, private method names, internal data structures) fail **behavioral** and **structure-insensitive** — they become maintenance burdens that break on harmless refactors.
+
+## Core Principles
+
+### 1. Functional Core, Imperative Shell (Bernhardt)
+
+Structure code so pure logic is separable from I/O:
+
+```python
+# BAD: Logic mixed with I/O - hard to unit test
+def process_config(path: Path) -> Config:
+    data = path.read_text()           # I/O (shell)
+    parsed = json.loads(data)         # Pure (core)
+    validated = validate(parsed)       # Pure (core)
+    return Config(**validated)         # Pure (core)
+
+# GOOD: Separate concerns
+def parse_and_validate(data: str) -> Config:  # Pure core - unit test this
+    parsed = json.loads(data)
+    validated = validate(parsed)
+    return Config(**validated)
+
+def load_config(path: Path) -> Config:  # Thin shell - integration test this
+    return parse_and_validate(path.read_text())
+```
+
+**The core** contains all branching logic, is pure, and is trivially unit-testable.
+**The shell** does I/O and composition, has minimal branching, and gets integration-tested.
+
+### 2. Classicist Baseline, Mockist at Boundaries (Fowler)
+
+- Use **real collaborators** when they're cheap and deterministic
+- Use **mocks/fakes** only at architectural seams (filesystem, network, time, external services)
+- Never mock the thing you're testing
+
+```python
+# GOOD: Real collaborator (it's just a data class)
+def test_format_output():
+    record = SpawnRecord(id="p1", status="running")  # Real object
+    assert format_record(record) == "p1: running"
+
+# GOOD: Fake at boundary (time is non-deterministic)
+def test_heartbeat_expires():
+    clock = FakeClock(now=1000)
+    heartbeat = Heartbeat(clock=clock)
+    clock.advance(seconds=60)
+    assert heartbeat.is_expired()
+
+# BAD: Mocking internal collaborators
+def test_foo():
+    mock_helper = Mock()
+    foo(helper=mock_helper)  # Now testing wiring, not behavior
+```
+
+### 3. No Test-Induced Design Damage (DHH)
+
+Every abstraction must justify **runtime/business value**, not just testability.
+
+```python
+# BAD: Abstraction only exists for testing
+class IStringFormatter(Protocol):  # Overkill for one implementation
+    def format(self, s: str) -> str: ...
+
+# GOOD: Abstraction has runtime value
+class Clock(Protocol):  # Multiple real uses: RealClock, FakeClock for tests,
+    def now(self) -> float: ...   # future: MockableClock for debugging
+```
+
+If you're adding an interface just to make something testable, reconsider. Maybe the code needs restructuring (extract pure logic), not more abstraction.
+
+### 4. Integrated Tests Are A Scam (Rainsberger)
+
+Integration tests that cross too many boundaries:
+- Are slow
+- Have combinatorial explosion of paths
+- Give false confidence (pass but production fails)
+- Give false failures (fail but production works)
+
+**Solution:** Test each boundary once, in isolation. Then have a few true end-to-end tests for critical paths.
 
 ## The Two Rules
 
@@ -36,39 +130,9 @@ assert parse(input) == expected_output
 
 Each test should verify ONE behavioral invariant. If a test name has "and" in it, consider splitting.
 
-## Functional Core, Imperative Shell
+## Test Tiers
 
-Structure code so pure logic is separable from I/O:
-
-```python
-# BAD: Logic mixed with I/O - hard to unit test
-def process_config(path: Path) -> Config:
-    data = path.read_text()           # I/O
-    parsed = json.loads(data)         # Pure
-    validated = validate(parsed)       # Pure
-    return Config(**validated)         # Pure
-
-# GOOD: Pure core, thin I/O shell
-def parse_and_validate(data: str) -> Config:  # Pure - unit test this
-    parsed = json.loads(data)
-    validated = validate(parsed)
-    return Config(**validated)
-
-def load_config(path: Path) -> Config:  # Shell - integration test this
-    return parse_and_validate(path.read_text())
-```
-
-## The Core Question: What Boundary Are You Testing?
-
-| If you're testing... | Put it in... | Example |
-|---------------------|--------------|---------|
-| Pure logic (no I/O) | `unit/` | Parsers, validators, state machines, formatters |
-| Real I/O boundaries | `integration/` | Filesystem, subprocess, cross-module wiring |
-| API contracts that must not break | `contract/` | Type shapes, field inventories, protocol parity |
-| Platform-specific behavior | `platform/` | Locking, signals, process termination |
-| End-to-end user flows | `e2e/` (manual) | Full CLI scenarios with real harnesses |
-
-## Decision Tree
+### Decision Tree
 
 ```
 Does it touch filesystem, network, subprocess, or real external systems?
@@ -82,8 +146,6 @@ Does it touch filesystem, network, subprocess, or real external systems?
                  └─ NO → integration/
 ```
 
-## Test Tiers
-
 ### Unit Tests (`tests/unit/`)
 
 **What:** Pure logic with no real I/O. Millisecond-fast.
@@ -95,7 +157,7 @@ def test_parse_extracts_version():
     assert result == Version(1, 2, 3)
 ```
 
-**Injectable seams:** When pure separation isn't possible, use dependency injection:
+**Injectable seams (Feathers):** When pure separation isn't possible, inject dependencies:
 ```python
 def check_status(spawn_id: str, *, clock: Clock = real_clock) -> Status:
     ...
@@ -109,7 +171,7 @@ def test_check_status_expired():
 Available fakes in `tests/support/fakes.py`: `FakeClock`, `FakeHeartbeat`, `FakeSpawnRepository`
 
 **Red flags that it's not a unit test:**
-- `monkeypatch.setattr(module.subprocess, "run", ...)` 
+- `monkeypatch.setattr(module.subprocess, "run", ...)`
 - `monkeypatch.setattr(module, "_private_thing", ...)`
 - Test takes >100ms
 
@@ -143,7 +205,7 @@ Use sparingly. Only for things that would break downstream consumers.
 @pytest.mark.posix_only
 def test_flock_blocks_concurrent_access(): ...
 
-@pytest.mark.windows_only  
+@pytest.mark.windows_only
 def test_msvcrt_locking(): ...
 ```
 
@@ -180,18 +242,28 @@ def test_rejects_invalid(bad_input): ...
 ### 4. Redundant Coverage
 If unit and integration test the same path, keep the unit test.
 
+### 5. Testing Framework Behavior
+```python
+# BAD: Testing that pytest/pydantic/fastapi works
+def test_pydantic_validates_fields(): ...  # Pydantic already tests this
+```
+
 ## Running Tests
 
 ```bash
 uv run pytest tests/unit/ -v          # Fast, run often
 uv run pytest tests/integration/ -v   # Before commit
 uv run pytest tests/ -v               # Full suite before push
+uv run pytest tests/ -k "spawn"       # Pattern match
 ```
 
 ## Test Quality Checklist
+
+Before adding a test, ask:
 
 - [ ] Tests behavior, not implementation?
 - [ ] Survives internal refactoring?
 - [ ] Right tier (unit/integration/contract)?
 - [ ] No redundant coverage?
 - [ ] Deterministic and isolated?
+- [ ] Justifies its existence? (Not testing framework/library behavior)
