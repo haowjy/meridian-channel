@@ -10,7 +10,6 @@ import time
 from collections.abc import Callable
 from contextlib import suppress
 from datetime import datetime
-from importlib import import_module
 from pathlib import Path
 from typing import Any, cast
 
@@ -23,7 +22,7 @@ from meridian.lib.core.spawn_lifecycle import (
 from meridian.lib.core.types import HarnessId, SpawnId
 from meridian.lib.harness.claude_preflight import ensure_claude_session_accessible
 from meridian.lib.harness.registry import HarnessRegistry
-from meridian.lib.platform import IS_WINDOWS
+from meridian.lib.platform import IS_WINDOWS, fcntl, termios
 from meridian.lib.state import spawn_store
 from meridian.lib.state.artifact_store import LocalStore, make_artifact_key
 from meridian.lib.state.paths import resolve_spawn_log_dir
@@ -44,26 +43,6 @@ from .types import PrimarySessionMetadata, SessionMode
 
 logger = logging.getLogger(__name__)
 _PRIMARY_OUTPUT_FILENAME = "output.jsonl"
-
-
-class _DeferredUnixModule:
-    """Lazy module proxy so Unix-only modules load only on demand."""
-
-    def __init__(self, module_name: str) -> None:
-        self._module_name = module_name
-        self._module: Any | None = None
-
-    def _resolve(self) -> Any:
-        if self._module is None:
-            self._module = import_module(self._module_name)
-        return self._module
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._resolve(), name)
-
-
-fcntl = _DeferredUnixModule("fcntl")
-termios = _DeferredUnixModule("termios")
 
 
 class ProcessOutcome(BaseModel):
