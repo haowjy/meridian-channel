@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import signal
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -8,7 +7,6 @@ import pytest
 
 from meridian.lib.core.types import HarnessId
 from meridian.lib.harness.registry import get_default_harness_registry
-from meridian.lib.launch import process
 from meridian.lib.launch.context import build_launch_context
 from meridian.lib.launch.request import LaunchArgvIntent, LaunchRuntime, SpawnRequest
 
@@ -42,43 +40,6 @@ def _build_launch_runtime(
         project_paths_repo_root=tmp_path.as_posix(),
         project_paths_execution_cwd=tmp_path.as_posix(),
     )
-
-
-def test_install_winsize_forwarding_syncs_immediately_and_restores(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    sync_calls: list[tuple[int, int]] = []
-    installed_handlers: list[tuple[int, object]] = []
-    previous_handler = signal.SIG_IGN
-
-    def fake_sync_pty_winsize(*, source_fd: int, target_fd: int) -> None:
-        sync_calls.append((source_fd, target_fd))
-
-    def fake_getsignal(signum: int) -> object:
-        _ = signum
-        return previous_handler
-
-    def fake_signal(signum: int, handler: object) -> None:
-        installed_handlers.append((signum, handler))
-
-    monkeypatch.setattr(process, "_sync_pty_winsize", fake_sync_pty_winsize)
-    monkeypatch.setattr(process.signal, "getsignal", fake_getsignal)
-    monkeypatch.setattr(process.signal, "signal", fake_signal)
-
-    restore = process._install_winsize_forwarding(source_fd=20, target_fd=21)
-
-    assert sync_calls == [(20, 21)]
-    assert installed_handlers[0][0] == signal.SIGWINCH
-
-    handler = installed_handlers[0][1]
-    assert callable(handler)
-    handler(signal.SIGWINCH, None)
-
-    assert sync_calls == [(20, 21), (20, 21)]
-
-    restore()
-
-    assert installed_handlers[-1] == (signal.SIGWINCH, previous_handler)
 
 
 @pytest.mark.parametrize(

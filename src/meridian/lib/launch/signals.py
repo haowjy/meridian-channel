@@ -47,6 +47,28 @@ def signal_process_group(
         return
 
 
+def force_kill_process(process: asyncio.subprocess.Process) -> None:
+    """Force-kill a process immediately, handling platform differences.
+
+    On Windows, signal.SIGKILL does not exist, so we use process.kill()
+    which calls TerminateProcess(). On POSIX, we send SIGKILL to the
+    process group to ensure all child processes are terminated.
+    """
+
+    if process.returncode is not None:
+        return
+
+    try:
+        if sys.platform == "win32":
+            process.kill()
+            return
+        # On POSIX, send SIGKILL to the process group
+        pgid = os.getpgid(process.pid)
+        os.killpg(pgid, signal.SIGKILL)
+    except (ProcessLookupError, OSError):
+        return
+
+
 # ---------------------------------------------------------------------------
 # Signal forwarding
 # ---------------------------------------------------------------------------
@@ -119,7 +141,7 @@ class SignalForwarder:
 
         if self._seen_signal_count >= 2 and self._process.returncode is None:
             # Second termination signal means "force stop now".
-            signal_process_group(self._process, signal.SIGKILL)
+            force_kill_process(self._process)
 
 
 class SignalCoordinator:

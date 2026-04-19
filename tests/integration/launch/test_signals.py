@@ -160,23 +160,29 @@ def test_signal_forwarder_forwards_sigint_and_sigterm(monkeypatch: pytest.Monkey
             self.returncode: int | None = None
 
     sent_signals: list[signal.Signals] = []
+    force_kill_called: list[bool] = []
 
     def fake_signal_process_group(
         process: asyncio.subprocess.Process,
         signum: signal.Signals,
     ) -> None:
         sent_signals.append(signum)
-        if signum == signal.SIGKILL:
-            process.returncode = -9
+
+    def fake_force_kill_process(process: asyncio.subprocess.Process) -> None:
+        force_kill_called.append(True)
+        process.returncode = -9
 
     monkeypatch.setattr(signals_module, "signal_process_group", fake_signal_process_group)
+    monkeypatch.setattr(signals_module, "force_kill_process", fake_force_kill_process)
 
     fake = FakeProcess()
     forwarder = SignalForwarder(cast("asyncio.subprocess.Process", fake))
     forwarder.forward_signal(signal.SIGINT)
     forwarder.forward_signal(signal.SIGTERM)
 
-    assert sent_signals == [signal.SIGINT, signal.SIGTERM, signal.SIGKILL]
+    # Two signals sent via signal_process_group, then force_kill_process called on second signal
+    assert sent_signals == [signal.SIGINT, signal.SIGTERM]
+    assert force_kill_called == [True]
     assert forwarder.received_signal == signal.SIGTERM
     assert signal_to_exit_code(signal.SIGINT) == 130
     assert signal_to_exit_code(signal.SIGTERM) == 143
@@ -211,12 +217,14 @@ def test_signal_coordinator_dispatches_signal_to_all_active_forwarders(
         signum: signal.Signals,
     ) -> None:
         sent_signals.append(signum)
-        if signum == signal.SIGKILL:
-            process.returncode = -9
+
+    def fake_force_kill_process(process: asyncio.subprocess.Process) -> None:
+        process.returncode = -9
 
     monkeypatch.setattr(signals_module.signal, "getsignal", fake_getsignal)
     monkeypatch.setattr(signals_module.signal, "signal", fake_signal)
     monkeypatch.setattr(signals_module, "signal_process_group", fake_signal_process_group)
+    monkeypatch.setattr(signals_module, "force_kill_process", fake_force_kill_process)
 
     coordinator = SignalCoordinator()
     monkeypatch.setattr(signals_module, "signal_coordinator", lambda: coordinator)

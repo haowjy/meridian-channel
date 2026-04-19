@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import signal
 import struct
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from meridian.lib.platform import fcntl, termios
 from meridian.lib.state.session_store import (
@@ -18,11 +17,7 @@ from meridian.lib.state.session_store import (
 
 from .ports import ChildStartedHook, LaunchedProcess, ProcessLauncher
 from .pty_launcher import (
-    _invoke_previous_sigwinch_handler,
     can_use_pty,
-)
-from .pty_launcher import (
-    _sync_pty_winsize as _sync_pty_winsize_impl,
 )
 from .runner import (
     ProcessOutcome,
@@ -33,28 +28,6 @@ from .runner import (
 from .runner import (
     run_primary_process_with_capture as _run_primary_process_with_capture_impl,
 )
-
-
-def _sync_pty_winsize(*, source_fd: int, target_fd: int) -> None:
-    _sync_pty_winsize_impl(source_fd=source_fd, target_fd=target_fd)
-
-
-def _install_winsize_forwarding(*, source_fd: int, target_fd: int) -> Any:
-    """Sync PTY size now and on future terminal resize signals."""
-
-    _sync_pty_winsize(source_fd=source_fd, target_fd=target_fd)
-    previous = cast("signal.Handlers", signal.getsignal(signal.SIGWINCH))
-
-    def _handle_resize(signum: int, frame: Any) -> None:
-        _sync_pty_winsize(source_fd=source_fd, target_fd=target_fd)
-        _invoke_previous_sigwinch_handler(previous, signum=signum, frame=frame)
-
-    signal.signal(signal.SIGWINCH, _handle_resize)
-
-    def _restore() -> None:
-        signal.signal(signal.SIGWINCH, previous)
-
-    return _restore
 
 
 def _run_primary_process_with_capture(
