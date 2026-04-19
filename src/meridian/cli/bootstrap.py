@@ -8,6 +8,8 @@ from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 
+# Keep these startup parse tables in sync with `@app.default root(...)` in
+# `main.py` plus startup-only flags parsed before cyclopts (`--verbose` / `-v`).
 _TOP_LEVEL_VALUE_FLAGS = frozenset(
     {
         "--format",

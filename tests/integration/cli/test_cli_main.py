@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 cli_main = importlib.import_module("meridian.cli.main")
+bootstrap = importlib.import_module("meridian.cli.bootstrap")
 
 
 def test_extract_global_options_stops_parsing_after_double_dash() -> None:
@@ -28,6 +29,46 @@ def test_validate_top_level_command_allows_passthrough_with_harness() -> None:
     assert options.harness == "codex"
     assert cleaned == ["exec"]
     cli_main._validate_top_level_command(cleaned, global_harness=options.harness)
+
+
+def test_extract_global_options_handles_verbose_flags_before_command() -> None:
+    cleaned_short, _ = cli_main._extract_global_options(["-v", "spawn", "list"])
+    cleaned_long, _ = cli_main._extract_global_options(["--verbose", "spawn", "list"])
+
+    assert cleaned_short == ["spawn", "list"]
+    assert cleaned_long == ["spawn", "list"]
+
+
+def test_bootstrap_flag_tables_cover_root_default_flags() -> None:
+    expected_value_flags = {
+        "--format",
+        "--config",
+        "--continue",
+        "--fork",
+        "--model",
+        "-m",
+        "--harness",
+        "--agent",
+        "-a",
+        "--work",
+        "--autocompact",
+        "--effort",
+        "--sandbox",
+        "--approval",
+        "--timeout",
+    }
+    expected_bool_flags = {
+        "--json",
+        "--yes",
+        "--no-input",
+        "--yolo",
+        "--dry-run",
+        "--verbose",
+        "-v",
+    }
+
+    assert expected_value_flags.issubset(bootstrap._TOP_LEVEL_VALUE_FLAGS)
+    assert expected_bool_flags.issubset(bootstrap._TOP_LEVEL_BOOL_FLAGS)
 
 
 def test_extract_global_options_strips_prefix_verbose_flags() -> None:
