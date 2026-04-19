@@ -155,7 +155,8 @@ def test_i2_streaming_executor_does_not_call_composition_functions() -> None:
 # ---------------------------------------------------------------------------
 
 _EXECUTORS = [
-    _LAUNCH_DIR / "process.py",
+    _LAUNCH_DIR / "process" / "__init__.py",
+    _LAUNCH_DIR / "process" / "runner.py",
     _LAUNCH_DIR / "streaming_runner.py",
 ]
 
