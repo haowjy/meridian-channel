@@ -1,14 +1,12 @@
 """Cyclopts CLI entry point for meridian."""
 
 import asyncio
-import json
 import os
 import shlex
 import subprocess
 import sys
 from collections.abc import Sequence
 from contextvars import ContextVar
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Literal, cast
 
@@ -25,6 +23,7 @@ from meridian.cli.bootstrap import (
 )
 from meridian.cli.config_cmd import register_config_commands
 from meridian.cli.doctor_cmd import register_doctor_command
+import meridian.cli.mars_passthrough as mars_passthrough
 from meridian.cli.models_cmd import register_models_commands
 from meridian.cli.output import (
     OutputConfig,
@@ -47,7 +46,6 @@ from meridian.lib.ops.mars import (
     UpgradeAvailability,
     check_upgrade_availability,
     format_upgrade_availability,
-    resolve_mars_executable,
 )
 from meridian.lib.ops.reference import resolve_session_reference
 from meridian.lib.ops.spawn.api import SpawnActionOutput
@@ -561,160 +559,19 @@ def app_command(
     )
 
 
-def _resolve_mars_executable() -> str | None:
-    """Prefer the mars binary from the current install environment over PATH."""
-
-    return resolve_mars_executable()
-
-
-def _mars_requested_json(args: Sequence[str]) -> bool:
-    return any(token == "--json" for token in args)
-
-
-def _mars_requested_root(args: Sequence[str]) -> Path | None:
-    index = 0
-    while index < len(args):
-        token = args[index]
-        if token == "--root":
-            next_value = args[index + 1].strip() if index + 1 < len(args) else ""
-            if next_value:
-                return Path(next_value)
-            index += 2
-            continue
-        if token.startswith("--root="):
-            candidate = token.partition("=")[2].strip()
-            if candidate:
-                return Path(candidate)
-        index += 1
-    return None
-
-
-def _mars_subcommand(args: Sequence[str]) -> str | None:
-    index = 0
-    while index < len(args):
-        token = args[index]
-        if token == "--":
-            return None
-        if token == "--root":
-            index += 2
-            continue
-        if token.startswith("--root="):
-            index += 1
-            continue
-        if token.startswith("-"):
-            index += 1
-            continue
-        return token
-    return None
-
-
-def _inject_upgrade_hint_into_sync_json(
-    raw_stdout: str,
-    *,
-    within_constraint: tuple[str, ...],
-    beyond_constraint: tuple[str, ...],
-) -> str:
-    stripped = raw_stdout.strip()
-    if not stripped:
-        return raw_stdout
-    try:
-        parsed = json.loads(stripped)
-    except (json.JSONDecodeError, ValueError):
-        return raw_stdout
-    if not isinstance(parsed, dict):
-        return raw_stdout
-    parsed["upgrade_hint"] = {
-        "within_constraint": list(within_constraint),
-        "beyond_constraint": list(beyond_constraint),
-    }
-    rendered = json.dumps(parsed)
-    if raw_stdout.endswith("\n"):
-        rendered += "\n"
-    return rendered
-
-
-def _decode_json_values(raw_stdout: str) -> list[object] | None:
-    decoder = json.JSONDecoder()
-    parsed_values: list[object] = []
-    index = 0
-    while index < len(raw_stdout):
-        while index < len(raw_stdout) and raw_stdout[index].isspace():
-            index += 1
-        if index >= len(raw_stdout):
-            return parsed_values
-        try:
-            parsed, index = decoder.raw_decode(raw_stdout, index)
-        except json.JSONDecodeError:
-            return None
-        parsed_values.append(parsed)
-    return parsed_values
-
-
-@dataclass(frozen=True)
-class _MarsPassthroughRequest:
-    command: tuple[str, ...]
-    mars_args: tuple[str, ...]
-    is_sync: bool
-    wants_json: bool
-    root_override: Path | None
-
-
-@dataclass(frozen=True)
-class _MarsPassthroughResult:
-    request: _MarsPassthroughRequest
-    returncode: int
-    stdout_text: str = ""
-    stderr_text: str = ""
-
-
-def _parse_mars_passthrough(
-    args: Sequence[str],
-    *,
-    output_format: str | None = None,
-    executable: str,
-) -> _MarsPassthroughRequest:
-    """Build an executable Mars passthrough request without side effects."""
-
-    mars_args = list(args)
-    is_sync = _mars_subcommand(mars_args) == "sync"
-    wants_json = _mars_requested_json(mars_args) or output_format == "json"
-    if wants_json and not _mars_requested_json(mars_args):
-        mars_args = ["--json", *mars_args]
-    return _MarsPassthroughRequest(
-        command=(executable, *mars_args),
-        mars_args=tuple(mars_args),
-        is_sync=is_sync,
-        wants_json=wants_json,
-        root_override=_mars_requested_root(mars_args),
-    )
+_MarsPassthroughRequest = mars_passthrough.MarsPassthroughRequest
+_MarsPassthroughResult = mars_passthrough.MarsPassthroughResult
+_resolve_mars_executable = mars_passthrough.resolve_mars_executable
+_mars_requested_json = mars_passthrough.mars_requested_json
+_mars_requested_root = mars_passthrough.mars_requested_root
+_mars_subcommand = mars_passthrough.mars_subcommand
+_inject_upgrade_hint_into_sync_json = mars_passthrough.inject_upgrade_hint_into_sync_json
+_decode_json_values = mars_passthrough.decode_json_values
+_parse_mars_passthrough = mars_passthrough.parse_mars_passthrough
 
 
 def _execute_mars_passthrough(request: _MarsPassthroughRequest) -> _MarsPassthroughResult:
-    """Execute a prepared Mars passthrough request."""
-
-    try:
-        if request.wants_json:
-            result = subprocess.run(
-                list(request.command),
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            return _MarsPassthroughResult(
-                request=request,
-                returncode=result.returncode,
-                stdout_text=result.stdout or "",
-                stderr_text=result.stderr or "",
-            )
-
-        result = subprocess.run(list(request.command), check=False)
-        return _MarsPassthroughResult(request=request, returncode=result.returncode)
-    except FileNotFoundError:
-        print(
-            "error: Failed to execute 'mars'. Install meridian with dependencies and retry.",
-            file=sys.stderr,
-        )
-        raise SystemExit(1) from None
+    return mars_passthrough.execute_mars_passthrough(request, run=subprocess.run, stderr=sys.stderr)
 
 
 def _augment_sync_result(
@@ -722,33 +579,14 @@ def _augment_sync_result(
     *,
     output_format: str | None = None,
 ) -> None:
-    """Add sync-specific upgrade availability output to passthrough results."""
-
-    _ = output_format
-    if not result.request.is_sync:
-        return
-
-    upgrades: UpgradeAvailability | None = None
-    if result.returncode in {0, 1}:
-        upgrades = check_upgrade_availability(result.request.root_override)
-
-    if result.request.wants_json:
-        stdout_text = result.stdout_text
-        if upgrades is not None and upgrades.count > 0 and stdout_text.strip():
-            stdout_text = _inject_upgrade_hint_into_sync_json(
-                stdout_text,
-                within_constraint=upgrades.within_constraint,
-                beyond_constraint=upgrades.beyond_constraint,
-            )
-        if stdout_text:
-            sys.stdout.write(stdout_text)
-        if result.stderr_text:
-            sys.stderr.write(result.stderr_text)
-        return
-
-    if upgrades is not None and upgrades.count > 0:
-        for line in format_upgrade_availability(upgrades, style="hint"):
-            print(line)
+    return mars_passthrough.augment_sync_result(
+        result,
+        output_format=output_format,
+        check_upgrades=check_upgrade_availability,
+        format_upgrades=lambda upgrades: format_upgrade_availability(upgrades, style="hint"),
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+    )
 
 
 def _run_mars_passthrough(
@@ -756,30 +594,16 @@ def _run_mars_passthrough(
     *,
     output_format: str | None = None,
 ) -> None:
-    executable = _resolve_mars_executable()
-    if executable is None:
-        print(
-            "error: Failed to execute 'mars'. Install meridian with dependencies and retry.",
-            file=sys.stderr,
-        )
-        raise SystemExit(1)
-
-    request = _parse_mars_passthrough(
+    return mars_passthrough.run_mars_passthrough(
         args,
         output_format=output_format,
-        executable=executable,
+        resolve_executable=_resolve_mars_executable,
+        parse_request=_parse_mars_passthrough,
+        execute_request=_execute_mars_passthrough,
+        augment_result=lambda result: _augment_sync_result(result, output_format=output_format),
+        stdout=sys.stdout,
+        stderr=sys.stderr,
     )
-    result = _execute_mars_passthrough(request)
-    if not request.is_sync:
-        if request.wants_json:
-            if result.stdout_text:
-                sys.stdout.write(result.stdout_text)
-            if result.stderr_text:
-                sys.stderr.write(result.stderr_text)
-        raise SystemExit(result.returncode)
-
-    _augment_sync_result(result, output_format=output_format)
-    raise SystemExit(result.returncode)
 
 
 @app.command(name="mars")
@@ -1169,20 +993,8 @@ def _resolve_session_target(
     )
 
 
-def _resolve_init_repo_root(path: str | None) -> Path:
-    if path:
-        return Path(path).expanduser().resolve()
-    env_root = os.getenv("MERIDIAN_REPO_ROOT", "").strip()
-    return Path(env_root).expanduser().resolve() if env_root else Path.cwd().resolve()
-
-
-def _resolve_init_link_mars_command(
-    repo_root: Path, link: str
-) -> tuple[str, list[str]]:
-    root_arg = repo_root.as_posix()
-    if (repo_root / "mars.toml").is_file():
-        return "link", ["--root", root_arg, "link", link]
-    return "init", ["--root", root_arg, "init", "--link", link]
+_resolve_init_repo_root = mars_passthrough.resolve_init_repo_root
+_resolve_init_link_mars_command = mars_passthrough.resolve_init_link_mars_command
 
 
 def _run_init_link_flow_json(
@@ -1193,33 +1005,17 @@ def _run_init_link_flow_json(
     link: str,
     config_result: BaseModel,
 ) -> None:
-    request = _parse_mars_passthrough(mars_args, output_format="json", executable=executable)
-    result = _execute_mars_passthrough(request)
-    parsed_events = _decode_json_values(result.stdout_text)
-    if parsed_events is None:
-        mars_output: object = result.stdout_text
-    elif len(parsed_events) == 1:
-        mars_output = parsed_events[0]
-    else:
-        mars_output = parsed_events
-
-    mars_payload: dict[str, object] = {
-        "mode": mars_mode,
-        "target": link,
-        "exit_code": result.returncode,
-        "output": mars_output,
-    }
-    if result.stderr_text:
-        mars_payload["stderr"] = result.stderr_text
-    emit(
-        {
-            "ok": result.returncode == 0,
-            "config": config_result.model_dump(),
-            "mars": mars_payload,
-        }
+    return mars_passthrough.run_init_link_flow_json(
+        executable=executable,
+        mars_mode=mars_mode,
+        mars_args=mars_args,
+        link=link,
+        config_result=config_result,
+        emit=emit,
+        parse_request=_parse_mars_passthrough,
+        execute_request=_execute_mars_passthrough,
+        decode_values=_decode_json_values,
     )
-    if result.returncode != 0:
-        raise SystemExit(result.returncode)
 
 
 @app.command(name="init")
