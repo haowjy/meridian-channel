@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 
 # pyright: reportPrivateUsage=false
 import re
 import signal
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -26,6 +28,7 @@ from meridian.lib.launch.request import (
     SpawnRequest,
 )
 from meridian.lib.launch.types import SessionMode
+from meridian.lib.launch.process.subprocess_launcher import SubprocessProcessLauncher
 
 
 def test_sync_pty_winsize_copies_source_size(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -87,6 +90,29 @@ def test_install_winsize_forwarding_syncs_immediately_and_restores(
     restore()
 
     assert installed_handlers[-1] == (signal.SIGWINCH, previous_handler)
+
+
+def test_subprocess_launcher_captures_output_log(tmp_path: Path) -> None:
+    output_log_path = tmp_path / "output.jsonl"
+    launched = SubprocessProcessLauncher().launch(
+        command=(
+            sys.executable,
+            "-c",
+            (
+                "import sys;"
+                "sys.stdout.write('line-1\\n');"
+                "sys.stdout.flush();"
+                "sys.stderr.write('line-2\\n');"
+                "sys.stderr.flush()"
+            ),
+        ),
+        cwd=tmp_path,
+        env=dict(os.environ),
+        output_log_path=output_log_path,
+    )
+
+    assert launched.exit_code == 0
+    assert output_log_path.read_text(encoding="utf-8").splitlines() == ["line-1", "line-2"]
 
 
 def test_run_harness_process_fork_uses_new_chat_and_materialized_session(
