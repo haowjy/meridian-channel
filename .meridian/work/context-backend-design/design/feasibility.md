@@ -23,7 +23,7 @@ The requirements mentioned `.meridian/config.local.toml` but this doesn't exist 
 
 ### Path Resolution Current State
 
-**Probe**: How do fs_dir and work_dir currently resolve?
+**Probe**: How do kb_dir and work_dir currently resolve?
 
 **Finding**: 
 - `StatePaths.from_root_dir()` hardcodes `fs_dir = root_dir / "fs"` and `work_dir = root_dir / "work"`
@@ -31,6 +31,8 @@ The requirements mentioned `.meridian/config.local.toml` but this doesn't exist 
 - Environment variable override via `MERIDIAN_STATE_ROOT` shifts the entire state root, not individual paths
 
 **Verdict**: Design is compatible — the resolver layer sits on top of `resolve_repo_state_paths()` and overrides specific paths when config is present.
+
+**Note**: `fs_dir` will be renamed to `kb_dir` as part of this feature.
 
 ---
 
@@ -43,7 +45,7 @@ The requirements mentioned `.meridian/config.local.toml` but this doesn't exist 
 - `_normalize_meridian_work_dir()` in `env.py` reads from env or falls back to work scratch dir resolution
 - Explicit env var wins over any computed value
 
-**Verdict**: Design integrates at the right point — modify the fallback resolution to use context config, not just state paths.
+**Verdict**: Design integrates at the right point — modify the fallback resolution to use context config, not just state paths. `MERIDIAN_FS_DIR` becomes `MERIDIAN_KB_DIR` with `MERIDIAN_FS_DIR` as a deprecated alias.
 
 ---
 
@@ -110,9 +112,10 @@ The requirements mentioned `.meridian/config.local.toml` but this doesn't exist 
 ## Validated Constraints
 
 1. **No breaking changes**: Zero config = current behavior — verified by path fallback design
-2. **Env var precedence preserved**: Explicit `MERIDIAN_WORK_DIR` wins — verified in env.py logic
+2. **Env var precedence preserved**: Explicit `MERIDIAN_WORK_DIR` / `MERIDIAN_KB_DIR` wins — verified in env.py logic
 3. **Config precedence standard**: local > project > user — follows existing workspace.local.toml pattern
 4. **Git sync non-blocking**: All git operations have error handling that continues session
+5. **Rename migration**: `fs` → `kb` with `MERIDIAN_FS_DIR` as deprecated alias
 
 ---
 
@@ -124,3 +127,4 @@ The requirements mentioned `.meridian/config.local.toml` but this doesn't exist 
 | Git sync blocks session | Medium | Medium | Timeout + continue on error |
 | Migration data loss | Low | High | Copy-verify-delete, dry-run mode |
 | Path resolution confusion | Medium | Low | Clear `meridian context` output |
+| fs→kb rename breaks agents | Medium | Medium | `MERIDIAN_FS_DIR` as deprecated alias |
