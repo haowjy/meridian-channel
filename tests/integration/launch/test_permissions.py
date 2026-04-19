@@ -33,7 +33,7 @@ from meridian.lib.safety.permissions import (
     resolve_permission_pipeline,
 )
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 _PYRIGHT_BIN = _REPO_ROOT / ".venv" / "bin" / "pyright"
 _MERIDIAN_RUNTIME_KEYS = (
     "MERIDIAN_REPO_ROOT",
