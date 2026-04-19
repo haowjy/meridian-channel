@@ -55,6 +55,11 @@ def _resolve_repository(
     return FileSpawnRepository(paths, clock=clock)
 
 
+def _next_spawn_id_from_events(events: list[SpawnEvent]) -> SpawnId:
+    starts = sum(1 for event in events if event.event == "start")
+    return SpawnId(f"p{starts + 1}")
+
+
 def next_spawn_id(
     state_root: Path,
     *,
@@ -64,7 +69,8 @@ def next_spawn_id(
 
     paths = StateRootPaths.from_root_dir(state_root)
     resolved_repository = _resolve_repository(paths, repository=repository)
-    return resolved_repository.next_id()
+    with lock_file(paths.spawns_flock):
+        return _next_spawn_id_from_events(resolved_repository.read_events())
 
 
 LaunchMode = Literal["background", "foreground", "app"]
@@ -280,7 +286,7 @@ def start_spawn(
         resolved_spawn_id = (
             SpawnId(str(spawn_id))
             if spawn_id is not None
-            else resolved_repository.next_id()
+            else _next_spawn_id_from_events(resolved_repository.read_events())
         )
         event = SpawnStartEvent(
             id=str(resolved_spawn_id),

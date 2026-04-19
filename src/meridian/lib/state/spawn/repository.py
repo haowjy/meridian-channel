@@ -1,4 +1,8 @@
-"""Spawn event persistence with injectable backends."""
+"""Spawn event persistence for spawn_store internals.
+
+This protocol is an internal test seam for spawn_store event IO. Meridian has a
+single filesystem backend; this module is not a runtime backend abstraction.
+"""
 
 from __future__ import annotations
 
@@ -16,13 +20,11 @@ if TYPE_CHECKING:
 
 
 class SpawnRepository(Protocol):
-    """Protocol for spawn event persistence."""
+    """Internal seam for spawn_store event persistence tests."""
 
     def append_event(self, event: SpawnEvent) -> None: ...
 
     def read_events(self) -> list[SpawnEvent]: ...
-
-    def next_id(self) -> SpawnId: ...
 
 
 class FileSpawnRepository:
@@ -42,10 +44,5 @@ class FileSpawnRepository:
 
     def read_events(self) -> list[SpawnEvent]:
         return _read_events(self._paths.spawns_jsonl, spawn_store._parse_event)
-
-    def next_id(self) -> SpawnId:
-        starts = sum(1 for event in self.read_events() if event.event == "start")
-        return SpawnId(f"p{starts + 1}")
-
 
 __all__ = ["FileSpawnRepository", "SpawnRepository"]
