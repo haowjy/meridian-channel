@@ -1,0 +1,1 @@
+"""Launch contract tests."""

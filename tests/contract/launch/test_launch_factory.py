@@ -14,8 +14,8 @@ import re
 from pathlib import Path
 
 # Source root for all meridian lib code.
-_SOURCE_ROOT = Path(__file__).resolve().parents[2] / "src"
-_TESTS_ROOT = Path(__file__).resolve().parents[2] / "tests"
+_SOURCE_ROOT = Path(__file__).resolve().parents[3] / "src"
+_TESTS_ROOT = Path(__file__).resolve().parents[3] / "tests"
 _LAUNCH_DIR = _SOURCE_ROOT / "meridian/lib/launch"
 _OPS_SPAWN_DIR = _SOURCE_ROOT / "meridian/lib/ops/spawn"
 

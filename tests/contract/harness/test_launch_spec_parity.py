@@ -251,7 +251,7 @@ def _values_for_codex_config_setting(command: list[str], key: str) -> list[str]:
 
 
 def _projection_files_with_projected_fields() -> set[str]:
-    projection_root = Path(__file__).resolve().parents[2] / "src/meridian/lib/harness/projections"
+    projection_root = Path(__file__).resolve().parents[3] / "src/meridian/lib/harness/projections"
     matches: set[str] = set()
     for path in projection_root.glob("project_*.py"):
         text = path.read_text(encoding="utf-8")
@@ -298,7 +298,7 @@ import meridian.lib.harness.projections.project_claude
 """
     result = subprocess.run(
         [sys.executable, "-c", code],
-        cwd=Path(__file__).resolve().parents[2],
+        cwd=Path(__file__).resolve().parents[3],
         capture_output=True,
         text=True,
         check=False,
@@ -352,7 +352,7 @@ import meridian.lib.harness.projections.project_codex_subprocess
 """
     result = subprocess.run(
         [sys.executable, "-c", code],
-        cwd=Path(__file__).resolve().parents[2],
+        cwd=Path(__file__).resolve().parents[3],
         capture_output=True,
         text=True,
         check=False,
@@ -376,7 +376,7 @@ import meridian.lib.harness.projections.project_codex_streaming
 """
     result = subprocess.run(
         [sys.executable, "-c", code],
-        cwd=Path(__file__).resolve().parents[2],
+        cwd=Path(__file__).resolve().parents[3],
         capture_output=True,
         text=True,
         check=False,
@@ -428,7 +428,7 @@ import meridian.lib.harness.projections.project_opencode_subprocess
 """
     result = subprocess.run(
         [sys.executable, "-c", code],
-        cwd=Path(__file__).resolve().parents[2],
+        cwd=Path(__file__).resolve().parents[3],
         capture_output=True,
         text=True,
         check=False,
@@ -452,7 +452,7 @@ import meridian.lib.harness.projections.project_opencode_streaming
 """
     result = subprocess.run(
         [sys.executable, "-c", code],
-        cwd=Path(__file__).resolve().parents[2],
+        cwd=Path(__file__).resolve().parents[3],
         capture_output=True,
         text=True,
         check=False,
@@ -641,7 +641,7 @@ print(len(get_bundle_registry()))
 """
     result = subprocess.run(
         [sys.executable, "-c", code],
-        cwd=Path(__file__).resolve().parents[2],
+        cwd=Path(__file__).resolve().parents[3],
         capture_output=True,
         text=True,
         check=False,
@@ -1593,7 +1593,7 @@ def test_mcp_tools_is_accounted_for_by_all_projections_and_adapters() -> None:
 
 
 def test_projection_package_contains_no_reserved_passthrough_stripping_helpers() -> None:
-    projection_root = Path(__file__).resolve().parents[2] / "src/meridian/lib/harness/projections"
+    projection_root = Path(__file__).resolve().parents[3] / "src/meridian/lib/harness/projections"
     combined = "\n".join(
         path.read_text(encoding="utf-8")
         for path in sorted(projection_root.glob("project_*.py"))

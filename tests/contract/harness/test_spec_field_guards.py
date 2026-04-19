@@ -16,7 +16,7 @@ from meridian.lib.harness.adapter import SpawnParams
 from meridian.lib.harness.ids import HarnessId
 from meridian.lib.harness.launch_spec import _enforce_spawn_params_accounting
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _scan_files_for_pattern(

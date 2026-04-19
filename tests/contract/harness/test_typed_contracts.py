@@ -28,7 +28,7 @@ _REQUIRED_ABSTRACT_MEMBERS = {
     "resolve_launch_spec",
 }
 _EXPECTED_PROTOCOL_HELPERS = {"handled_fields", "preflight"}
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 _SRC_ROOT = _REPO_ROOT / "src" / "meridian"
 
 
