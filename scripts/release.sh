@@ -42,9 +42,32 @@ die() {
 }
 
 require_clean_tree() {
-  if [[ -n "$(git -C "$ROOT_DIR" status --short --ignore-submodules)" ]]; then
-    die "working tree is not clean; commit or stash changes first"
+  local dirty_files
+  dirty_files="$(git -C "$ROOT_DIR" status --short --ignore-submodules)"
+  
+  if [[ -z "$dirty_files" ]]; then
+    return 0
   fi
+
+  # Patterns that block release (actual code/config)
+  local blocking_patterns="^.. src/|^.. tests/|^.. pyproject.toml|^.. scripts/"
+  
+  # Check if any dirty files match blocking patterns
+  local blocking_files
+  blocking_files="$(echo "$dirty_files" | grep -E "$blocking_patterns" || true)"
+  
+  if [[ -n "$blocking_files" ]]; then
+    printf 'Uncommitted changes in release-critical paths:
+%s
+' "$blocking_files" >&2
+    die "commit or stash these changes first"
+  fi
+  
+  # Non-blocking dirty files (work artifacts, lock files, docs) — warn only
+  printf 'Warning: uncommitted changes in non-critical paths (continuing):
+%s
+
+' "$dirty_files" >&2
 }
 
 require_branch() {
