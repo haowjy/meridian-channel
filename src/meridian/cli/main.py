@@ -54,7 +54,13 @@ from meridian.cli.config_cmd import register_config_commands
 from meridian.cli.doctor_cmd import register_doctor_command
 from meridian.cli.misc_commands import register_misc_commands
 from meridian.cli.models_cmd import register_models_commands
-from meridian.cli.output import OutputConfig, OutputFormat, create_sink, flush_sink, normalize_output_format
+from meridian.cli.output import (
+    OutputConfig,
+    OutputFormat,
+    create_sink,
+    flush_sink,
+    normalize_output_format,
+)
 from meridian.cli.output import emit as emit_output
 from meridian.cli.report_cmd import register_report_commands
 from meridian.cli.session_cmd import register_session_commands

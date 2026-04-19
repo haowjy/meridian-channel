@@ -83,7 +83,7 @@ class SubprocessProcessLauncher(ProcessLauncher):
                         chunk = stdout_stream.read(4096)
                         if not chunk:
                             break
-                        # text=False above guarantees bytes, but pyright sees Popen[str] | Popen[bytes]
+                        # text=False guarantees bytes; pyright sees union
                         chunk_bytes = chunk if isinstance(chunk, bytes) else chunk.encode()
                         output_handle.write(chunk_bytes)
                         output_handle.flush()
