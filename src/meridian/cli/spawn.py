@@ -219,7 +219,7 @@ def _spawn_create(
     background: Annotated[
         bool,
         Parameter(
-            name="--background",
+            name=["--background", "--bg"],
             help="Run in background and return immediately with spawn ID.",
         ),
     ] = False,
