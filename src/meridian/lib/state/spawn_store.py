@@ -10,6 +10,7 @@ from typing import Any, Literal, cast
 import structlog
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from meridian.lib.core.clock import Clock, RealClock
 from meridian.lib.core.domain import SpawnStatus
 from meridian.lib.core.spawn_lifecycle import (
     ACTIVE_SPAWN_STATUSES as _ACTIVE_SPAWN_STATUSES,
@@ -24,7 +25,7 @@ from meridian.lib.core.spawn_lifecycle import (
     validate_transition as _validate_transition,
 )
 from meridian.lib.core.types import SpawnId
-from meridian.lib.state.event_store import append_event, lock_file, read_events, utc_now_iso
+from meridian.lib.state.event_store import append_event, lock_file, read_events
 from meridian.lib.state.paths import StateRootPaths
 from meridian.lib.state.spawn.events import reduce_events
 
@@ -247,11 +248,13 @@ def start_spawn(
     runner_pid: int | None = None,
     status: SpawnStatus = "running",
     started_at: str | None = None,
+    clock: Clock | None = None,
 ) -> SpawnId:
     """Append a spawn start event under `spawns.jsonl.flock` and return the spawn ID."""
 
+    resolved_clock = clock or RealClock()
     paths = StateRootPaths.from_root_dir(state_root)
-    started = started_at or utc_now_iso()
+    started = started_at or resolved_clock.utc_now_iso()
 
     with lock_file(paths.spawns_flock):
         resolved_spawn_id = (
@@ -329,14 +332,16 @@ def record_spawn_exited(
     *,
     exit_code: int,
     exited_at: str | None = None,
+    clock: Clock | None = None,
 ) -> None:
     """Append an exited event — the harness process has exited."""
 
+    resolved_clock = clock or RealClock()
     paths = StateRootPaths.from_root_dir(state_root)
     event = SpawnExitedEvent(
         id=str(spawn_id),
         exit_code=exit_code,
-        exited_at=exited_at or utc_now_iso(),
+        exited_at=exited_at or resolved_clock.utc_now_iso(),
     )
     append_event(
         paths.spawns_jsonl,
@@ -359,6 +364,7 @@ def finalize_spawn(
     output_tokens: int | None = None,
     finished_at: str | None = None,
     error: str | None = None,
+    clock: Clock | None = None,
 ) -> bool:
     """Append a finalize event and return whether this writer set the terminal status.
 
@@ -369,6 +375,7 @@ def finalize_spawn(
     terminal state. Returns False when the spawn was already terminal
     or does not exist.
     """
+    resolved_clock = clock or RealClock()
     paths = StateRootPaths.from_root_dir(state_root)
     with lock_file(paths.spawns_flock):
         records = reduce_events(read_events(paths.spawns_jsonl, _parse_event))
@@ -395,7 +402,7 @@ def finalize_spawn(
             id=str(spawn_id),
             status=status,
             exit_code=exit_code,
-            finished_at=finished_at or utc_now_iso(),
+            finished_at=finished_at or resolved_clock.utc_now_iso(),
             duration_secs=duration_secs,
             total_cost_usd=total_cost_usd,
             input_tokens=input_tokens,
