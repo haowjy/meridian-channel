@@ -313,7 +313,7 @@ def test_build_launch_context_spec_only_tolerates_argv_build_failure(
 
 
 def test_shared_runner_constants_defined_once() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = Path(__file__).resolve().parents[3]
     source_root = repo_root / "src"
     constants_path = source_root / "meridian/lib/launch/constants.py"
 
