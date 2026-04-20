@@ -18,6 +18,7 @@ from meridian.lib.core.domain import SpawnStatus
 from meridian.lib.core.spawn_lifecycle import TERMINAL_SPAWN_STATUSES
 from meridian.lib.core.types import SpawnId
 from meridian.lib.platform import IS_WINDOWS
+from meridian.lib.core.lifecycle import SpawnLifecycleService
 from meridian.lib.state import spawn_store
 from meridian.lib.state.liveness import is_process_alive
 from meridian.lib.state.spawn_store import APP_LAUNCH_MODE, SpawnOrigin
@@ -83,13 +84,8 @@ class SignalCanceller:
     ) -> CancelOutcome:
         runner_pid = self._resolve_runner_pid(record)
         if runner_pid is None:
-            finalized = spawn_store.finalize_spawn(
-                self._state_root,
-                spawn_id,
-                status="cancelled",
-                exit_code=130,
-                origin="cancel",
-                error="cancelled",
+            finalized = SpawnLifecycleService(self._state_root).cancel(
+                spawn_id, 130, error="cancelled"
             )
             latest = spawn_store.get_spawn(self._state_root, spawn_id)
             if latest is not None and _is_terminal(latest.status):
