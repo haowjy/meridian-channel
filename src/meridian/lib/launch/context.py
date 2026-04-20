@@ -13,8 +13,9 @@ from typing import TYPE_CHECKING
 from meridian.lib.config.project_paths import ProjectPaths
 from meridian.lib.config.settings import MeridianConfig, load_config
 from meridian.lib.config.workspace import get_projectable_roots
-from meridian.lib.core.child_env import ALLOWED_CHILD_ENV_KEYS, build_child_env_overrides
+from meridian.lib.core.child_env import build_child_env_overrides, validate_child_env_keys
 from meridian.lib.core.overrides import RuntimeOverrides
+from meridian.lib.core.resolved_context import ResolvedContext
 from meridian.lib.core.types import HarnessId, ModelId
 from meridian.lib.harness.adapter import SubprocessHarness
 from meridian.lib.harness.workspace_projection import (
@@ -29,8 +30,11 @@ from meridian.lib.launch.launch_types import (
     summarize_composition_warnings,
 )
 from meridian.lib.state.paths import (
+    resolve_repo_state_paths,
     resolve_spawn_log_dir,
+    resolve_work_scratch_dir,
 )
+from meridian.lib.state.session_store import get_session_active_work_id
 
 from .command import (
     build_launch_argv,
@@ -76,6 +80,9 @@ class ChildEnvContext:
     state_root: Path
     parent_chat_id: str | None
     parent_depth: int
+    work_id: str | None = None
+    work_dir: Path | None = None
+    fs_dir: Path | None = None
 
     @classmethod
     def from_environment(
@@ -84,21 +91,37 @@ class ChildEnvContext:
         project_paths: ProjectPaths,
         state_root: Path,
     ) -> ChildEnvContext:
-        parent_chat_id = os.getenv("MERIDIAN_CHAT_ID", "").strip() or None
-        parent_depth_raw = os.getenv("MERIDIAN_DEPTH", "0").strip()
-        parent_depth = 0
-        try:
-            parent_depth = max(0, int(parent_depth_raw))
-        except (TypeError, ValueError):
-            parent_depth = 0
+        parent_ctx = ResolvedContext.from_environment()
+        parent_chat_id = parent_ctx.chat_id.strip() or None
+        parent_depth = parent_ctx.depth
+
+        work_id = (os.getenv("MERIDIAN_WORK_ID", "").strip() or None)
+        resolved_state_root = state_root.resolve()
+        if work_id is None and parent_chat_id:
+            # Keep launch semantics: runtime state_root decides active work lookup.
+            try:
+                work_id = get_session_active_work_id(resolved_state_root, parent_chat_id)
+            except Exception:
+                work_id = None
+
+        resolved_repo_root = project_paths.execution_cwd.resolve()
+        repo_state_paths = resolve_repo_state_paths(resolved_repo_root)
+        repo_state_root = repo_state_paths.root_dir
+        work_dir = (
+            resolve_work_scratch_dir(repo_state_root, work_id) if work_id is not None else None
+        )
+        fs_dir = repo_state_paths.fs_dir
 
         return cls(
             # Keep launch semantics unchanged: runtime repo_root follows the
             # execution cwd used by the child process.
-            repo_root=project_paths.execution_cwd.resolve(),
-            state_root=state_root.resolve(),
+            repo_root=resolved_repo_root,
+            state_root=resolved_state_root,
             parent_chat_id=parent_chat_id,
             parent_depth=parent_depth,
+            work_id=work_id,
+            work_dir=work_dir,
+            fs_dir=fs_dir,
         )
 
     def child_context(self) -> dict[str, str]:
@@ -107,15 +130,11 @@ class ChildEnvContext:
             state_root=self.state_root,
             parent_chat_id=self.parent_chat_id,
             parent_depth=self.parent_depth,
-            work_id=None,
-            work_dir=None,
-            fs_dir=None,
+            work_id=self.work_id,
+            work_dir=self.work_dir,
+            fs_dir=self.fs_dir,
         )
-        # Guard against future drift: all produced keys must remain in the
-        # shared allowed set.
-        if not set(overrides).issubset(ALLOWED_CHILD_ENV_KEYS):
-            drifted = sorted(set(overrides) - ALLOWED_CHILD_ENV_KEYS)
-            raise RuntimeError(f"ChildEnvContext.child_context drifted keys: {drifted}")
+        validate_child_env_keys(overrides)
         return overrides
 
 

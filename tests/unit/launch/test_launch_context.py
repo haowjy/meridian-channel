@@ -139,3 +139,37 @@ def test_build_launch_context_behaviors(
 
     if patch_argv_failure:
         assert runtime_ctx.spec is not None
+
+
+def test_build_launch_context_projects_runtime_child_env_paths(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("MERIDIAN_HARNESS_COMMAND", raising=False)
+    monkeypatch.setenv("MERIDIAN_CHAT_ID", "c-parent")
+    monkeypatch.setenv("MERIDIAN_DEPTH", "2")
+    monkeypatch.setenv("MERIDIAN_WORK_ID", "work-alpha")
+    request = _build_spawn_request()
+    runtime = _build_launch_runtime(tmp_path=tmp_path)
+
+    runtime_ctx = build_launch_context(
+        spawn_id="p-child-env",
+        request=request,
+        runtime=runtime,
+        harness_registry=get_default_harness_registry(),
+        dry_run=True,
+    )
+
+    assert runtime_ctx.env_overrides["MERIDIAN_DEPTH"] == "3"
+    assert runtime_ctx.env_overrides["MERIDIAN_CHAT_ID"] == "c-parent"
+    assert runtime_ctx.env_overrides["MERIDIAN_REPO_ROOT"] == tmp_path.as_posix()
+    assert runtime_ctx.env_overrides["MERIDIAN_STATE_ROOT"] == (
+        tmp_path / ".meridian"
+    ).as_posix()
+    assert runtime_ctx.env_overrides["MERIDIAN_WORK_ID"] == "work-alpha"
+    assert runtime_ctx.env_overrides["MERIDIAN_WORK_DIR"] == (
+        tmp_path / ".meridian" / "work" / "work-alpha"
+    ).as_posix()
+    assert runtime_ctx.env_overrides["MERIDIAN_FS_DIR"] == (
+        tmp_path / ".meridian" / "fs"
+    ).as_posix()

@@ -1,14 +1,11 @@
 """Child-process environment helpers shared by launch and spawn paths."""
 
 from collections.abc import Callable, Collection, Mapping
-from pathlib import Path
 from typing import cast
 
 from meridian.lib.core.child_env import ALLOWED_CHILD_ENV_KEYS
 from meridian.lib.harness.adapter import SpawnParams, SubprocessHarness
 from meridian.lib.safety.permissions import PermissionConfig
-from meridian.lib.state.paths import resolve_repo_state_paths, resolve_work_scratch_dir
-from meridian.lib.state.session_store import get_session_active_work_id
 
 from .constants import BLOCKED_CHILD_ENV_VARS
 from .run_inputs import ResolvedRunInputs, to_spawn_params
@@ -42,71 +39,20 @@ def _looks_like_secret_env_var(key: str) -> bool:
     return any(normalized.endswith(suffix) for suffix in _CHILD_ENV_SECRET_SUFFIXES)
 
 
-def _normalize_meridian_fs_dir(env: dict[str, str]) -> None:
-    explicit_fs = env.get("MERIDIAN_FS_DIR", "").strip()
-    if explicit_fs:
-        env["MERIDIAN_FS_DIR"] = explicit_fs
-        return
-
-    repo_root = env.get("MERIDIAN_REPO_ROOT", "").strip()
-    if repo_root:
-        repo_state = resolve_repo_state_paths(Path(repo_root).expanduser())
-        env["MERIDIAN_FS_DIR"] = repo_state.fs_dir.as_posix()
-
-
-def _resolve_repo_state_root(env: Mapping[str, str]) -> Path | None:
-    repo_root = env.get("MERIDIAN_REPO_ROOT", "").strip()
-    if not repo_root:
-        return None
-    return resolve_repo_state_paths(Path(repo_root).expanduser()).root_dir
-
-
-def _normalize_meridian_work_dir(env: dict[str, str]) -> None:
-    explicit_work = env.get("MERIDIAN_WORK_DIR", "").strip()
-    if explicit_work:
-        env["MERIDIAN_WORK_DIR"] = explicit_work
-        return
-
-    state_root_raw = env.get("MERIDIAN_STATE_ROOT", "").strip()
-    work_id = env.get("MERIDIAN_WORK_ID", "").strip()
-    repo_state_root = _resolve_repo_state_root(env)
-    if work_id:
-        target_root = repo_state_root
-        if target_root is None and state_root_raw:
-            target_root = Path(state_root_raw).expanduser()
-        if target_root is None:
-            return
-        try:
-            env["MERIDIAN_WORK_DIR"] = resolve_work_scratch_dir(
-                target_root, work_id
-            ).as_posix()
-            return
-        except Exception:
-            return
-
-    chat_id = env.get("MERIDIAN_CHAT_ID", "").strip()
-    if not state_root_raw or not chat_id:
-        return
-
-    try:
-        state_root = Path(state_root_raw).expanduser()
-        active_work_id = get_session_active_work_id(state_root, chat_id)
-        if not active_work_id:
-            return
-        normalized_work_id = active_work_id.strip()
-        if not normalized_work_id:
-            return
-        target_root = repo_state_root if repo_state_root is not None else state_root
-        env["MERIDIAN_WORK_DIR"] = resolve_work_scratch_dir(
-            target_root, normalized_work_id
-        ).as_posix()
-    except Exception:
-        return
-
-
 def _normalize_meridian_env(env: dict[str, str]) -> None:
-    _normalize_meridian_fs_dir(env)
-    _normalize_meridian_work_dir(env)
+    """Normalize only already-resolved MERIDIAN path overrides.
+
+    Path derivation now lives in ChildEnvContext/ResolvedContext. This helper
+    only trims explicit values and drops blank placeholders.
+    """
+    for key in ("MERIDIAN_WORK_DIR", "MERIDIAN_FS_DIR"):
+        if key not in env:
+            continue
+        normalized = env[key].strip()
+        if normalized:
+            env[key] = normalized
+            continue
+        env.pop(key, None)
 
 
 def sanitize_child_env(
