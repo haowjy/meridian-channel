@@ -12,11 +12,28 @@ from meridian.lib.ops.runtime import (
     resolve_runtime_root_and_config,
     resolve_state_root,
 )
+from meridian.lib.platform import IS_WINDOWS
 
 
 def _fail(message: str) -> None:
     print(f"Error: {message}", file=sys.stderr)
     raise SystemExit(1)
+
+
+async def _connect_windows(
+    port_file_path: str,
+) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+    """Read port file and connect via TCP on Windows."""
+    from pathlib import Path
+
+    port_file = Path(port_file_path)
+    try:
+        port_str = port_file.read_text(encoding="utf-8").strip()
+        port = int(port_str)
+    except (OSError, ValueError) as exc:
+        _fail(f"failed to read control port: {exc}")
+        raise  # unreachable but satisfies type checker
+    return await asyncio.open_connection("127.0.0.1", port)
 
 
 async def inject_message(
@@ -25,7 +42,10 @@ async def inject_message(
     *,
     interrupt: bool = False,
 ) -> None:
-    """Send a control message to a running bidirectional spawn via Unix socket."""
+    """Send a control message to a running bidirectional spawn.
+
+    Uses Unix sockets on POSIX and TCP via a port file on Windows.
+    """
 
     normalized_spawn_id = spawn_id.strip()
     if not normalized_spawn_id:
@@ -35,21 +55,24 @@ async def inject_message(
     state_root = resolve_state_root(repo_root)
     spawn_dir = state_root / "spawns" / normalized_spawn_id
     socket_path = spawn_dir / "control.sock"
+    port_file = spawn_dir / "control.port"
 
     if not spawn_dir.exists():
         _fail(f"spawn not found: {normalized_spawn_id}")
 
-    # The control socket may not be visible immediately after spawn start.
+    # The control socket/port may not be visible immediately after spawn start.
     # Retry briefly to tolerate the startup race.
     _SOCKET_WAIT_ATTEMPTS = 3
     _SOCKET_WAIT_INTERVAL = 1.0
+
+    discovery_path = port_file if IS_WINDOWS else socket_path
     for _attempt in range(_SOCKET_WAIT_ATTEMPTS):
-        if socket_path.exists():
+        if discovery_path.exists():
             break
         if _attempt < _SOCKET_WAIT_ATTEMPTS - 1:
             await asyncio.sleep(_SOCKET_WAIT_INTERVAL)
     else:
-        _fail(f"spawn not running: {normalized_spawn_id} has no control socket")
+        _fail(f"spawn not running: {normalized_spawn_id} has no control endpoint")
 
     normalized_message = message.strip() if message is not None else ""
     action_count = int(interrupt) + int(bool(normalized_message))
@@ -67,7 +90,10 @@ async def inject_message(
     writer: asyncio.StreamWriter | None = None
     response_data = b""
     try:
-        reader, writer = await asyncio.open_unix_connection(str(socket_path))
+        if IS_WINDOWS:
+            reader, writer = await _connect_windows(str(port_file))
+        else:
+            reader, writer = await asyncio.open_unix_connection(str(socket_path))
         writer.write((json.dumps(request, separators=(",", ":")) + "\n").encode("utf-8"))
         await writer.drain()
         response_data = await asyncio.wait_for(reader.readline(), timeout=10.0)
