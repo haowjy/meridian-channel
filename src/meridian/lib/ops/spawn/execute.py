@@ -19,6 +19,7 @@ from meridian.lib.config.project_paths import ProjectPaths, resolve_project_path
 from meridian.lib.core.child_env import build_child_env_overrides
 from meridian.lib.core.context import RuntimeContext
 from meridian.lib.core.domain import Spawn, SpawnStatus
+from meridian.lib.core.lifecycle import SpawnLifecycleService
 from meridian.lib.core.sink import OutputSink
 from meridian.lib.core.types import HarnessId, ModelId, SpawnId
 from meridian.lib.launch.context import build_launch_context
@@ -258,8 +259,8 @@ def _init_spawn(
         resolved_work_id = cast("str", resolved_work_id)
         resolved_work_id = ensure_explicit_work_item(repo_state_root, resolved_work_id)
     resolved_desc = (desc if desc is not None else payload.desc).strip() or None
-    spawn_id = spawn_store.start_spawn(
-        state_root,
+    service = SpawnLifecycleService(state_root)
+    spawn_id = service.start(
         chat_id=resolve_chat_id(ctx=resolved_context, fallback="c0"),
         parent_id=str(resolved_context.spawn_id) if resolved_context.spawn_id else None,
         model=request.model or "",
@@ -688,9 +689,8 @@ def execute_spawn_background(
             ),
         )
     except Exception as exc:
-        spawn_store.finalize_spawn(
-            context.state_root,
-            context.spawn.spawn_id,
+        SpawnLifecycleService(context.state_root).finalize(
+            str(context.spawn.spawn_id),
             status="failed",
             exit_code=1,
             origin="launch_failure",
@@ -747,9 +747,8 @@ def execute_spawn_background(
                 **_build_detached_popen_kwargs(),
             )
     except OSError as exc:
-        spawn_store.finalize_spawn(
-            context.state_root,
-            context.spawn.spawn_id,
+        SpawnLifecycleService(context.state_root).finalize(
+            str(context.spawn.spawn_id),
             status="failed",
             exit_code=1,
             origin="launch_failure",
@@ -1013,9 +1012,8 @@ def _background_worker_main(
             launch_request = _load_bg_worker_request(log_dir)
         except Exception as exc:
             error = f"Failed to load background worker request: {exc}"
-            spawn_store.finalize_spawn(
-                state_root,
-                spawn_id,
+            SpawnLifecycleService(state_root).finalize(
+                str(spawn_id),
                 status="failed",
                 exit_code=1,
                 origin="launch_failure",
