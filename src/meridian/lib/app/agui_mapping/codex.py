@@ -66,6 +66,8 @@ class CodexAGUIMapper:
                 return [self.make_run_error(message)]
             if event.event_type == "item/agentMessage":
                 return self._translate_agent_message(event.payload)
+            if event.event_type == "item/agentMessage/delta":
+                return self._translate_agent_message_delta(event.payload)
             if event.event_type == "item/commandExecution":
                 return self._translate_tool_lifecycle(
                     event.payload,
@@ -79,6 +81,10 @@ class CodexAGUIMapper:
                 return self._translate_tool_lifecycle(event.payload, default_name="WebSearch")
             if event.event_type == "item/mcpToolCall":
                 return self._translate_mcp_tool_call(event.payload)
+            if event.event_type == "item/started":
+                return self._translate_item_started(event.payload)
+            if event.event_type == "item/completed":
+                return self._translate_item_completed(event.payload)
             if event.event_type == "turn/completed":
                 events: list[BaseEvent] = []
                 if self._active_text_message_id is not None:
@@ -106,6 +112,33 @@ class CodexAGUIMapper:
             )
         events.append(TextMessageContentEvent(message_id=self._active_text_message_id, delta=text))
         return events
+
+    def _translate_agent_message_delta(self, payload: dict[str, object]) -> list[BaseEvent]:
+        delta = _coerce_str(payload.get("delta"))
+        if delta is None:
+            logger.warning("Codex item/agentMessage/delta missing delta payload")
+            return []
+
+        events: list[BaseEvent] = []
+        if self._active_text_message_id is None:
+            self._active_text_message_id = _new_message_id()
+            events.append(
+                TextMessageStartEvent(message_id=self._active_text_message_id, role="assistant")
+            )
+        events.append(TextMessageContentEvent(message_id=self._active_text_message_id, delta=delta))
+        return events
+
+    def _translate_item_started(self, payload: dict[str, object]) -> list[BaseEvent]:
+        _ = payload
+        return []
+
+    def _translate_item_completed(self, payload: dict[str, object]) -> list[BaseEvent]:
+        _ = payload
+        if self._active_text_message_id is None:
+            return []
+        message_id = self._active_text_message_id
+        self._active_text_message_id = None
+        return [TextMessageEndEvent(message_id=message_id)]
 
     def _translate_reasoning(self, payload: dict[str, object]) -> list[BaseEvent]:
         text = _extract_text(payload)

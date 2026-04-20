@@ -37,6 +37,7 @@ class OpenCodeAGUIMapper:
         self._current_run_id: str | None = None
 
         self._text_message_id: str | None = None
+        self._assistant_text_by_key: dict[str, str] = {}
         self._reasoning_message_id: str | None = None
         self._last_tool_call_id: str | None = None
 
@@ -44,6 +45,7 @@ class OpenCodeAGUIMapper:
         self._run_counter += 1
         self._current_run_id = f"{spawn_id}-run-{self._run_counter}"
         self._text_message_id = None
+        self._assistant_text_by_key = {}
         self._reasoning_message_id = None
         self._last_tool_call_id = None
         return RunStartedEvent(thread_id=spawn_id, run_id=self._current_run_id)
@@ -56,6 +58,7 @@ class OpenCodeAGUIMapper:
             run_id = f"{spawn_id}-run-{self._run_counter}"
         self._current_run_id = None
         self._text_message_id = None
+        self._assistant_text_by_key = {}
         self._reasoning_message_id = None
         return RunFinishedEvent(thread_id=spawn_id, run_id=run_id)
 
@@ -71,6 +74,8 @@ class OpenCodeAGUIMapper:
                 return self._close_reasoning_message() + self._translate_agent_message_chunk(
                     event.payload
                 )
+            if event.event_type == "message.updated":
+                return self._translate_message_updated(event.payload)
             if event.event_type == "agent_thought_chunk":
                 return self._close_text_message() + self._translate_agent_thought_chunk(
                     event.payload
@@ -79,12 +84,67 @@ class OpenCodeAGUIMapper:
                 return self._close_open_messages() + self._translate_tool_call(event.payload)
             if event.event_type == "tool_call_update":
                 return self._close_open_messages() + self._translate_tool_call_update(event.payload)
+            if event.event_type == "session.updated":
+                return self._translate_session_updated(event.payload)
+            if event.event_type in {
+                "server.heartbeat",
+                "server.connected",
+                "sync",
+                "session.diff",
+            }:
+                return []
             if event.event_type in {"user_message_chunk", "session_info_update"}:
                 return self._close_open_messages()
             return self._close_open_messages()
         except Exception:
             logger.warning("Failed translating OpenCode event", exc_info=True)
             return []
+
+    def _translate_message_updated(self, payload: dict[str, object]) -> list[BaseEvent]:
+        info = _extract_opencode_info(payload)
+        if info is None:
+            return []
+
+        role = _coerce_str(info.get("role"))
+        if role != "assistant":
+            return self._close_open_messages()
+
+        text, is_delta = _extract_opencode_message_text(info)
+        if text is None:
+            return []
+
+        message_key = _extract_opencode_message_key(info)
+        previous_text = self._assistant_text_by_key.get(message_key, "")
+        delta: str | None
+        if is_delta:
+            delta = text
+            self._assistant_text_by_key[message_key] = previous_text + text
+        elif not previous_text:
+            delta = text
+            self._assistant_text_by_key[message_key] = text
+        elif text.startswith(previous_text):
+            delta = text[len(previous_text) :]
+            self._assistant_text_by_key[message_key] = text
+        elif text == previous_text:
+            delta = None
+        else:
+            delta = text
+            self._assistant_text_by_key[message_key] = text
+
+        if not delta:
+            return []
+
+        events: list[BaseEvent] = []
+        if self._text_message_id is None:
+            self._text_message_id = _new_message_id()
+            events.append(TextMessageStartEvent(message_id=self._text_message_id, role="assistant"))
+        events.append(TextMessageContentEvent(message_id=self._text_message_id, delta=delta))
+        return events
+
+    def _translate_session_updated(self, payload: dict[str, object]) -> list[BaseEvent]:
+        # Session metadata updates (title, summary, etc.) are not AG-UI content events.
+        _ = payload
+        return []
 
     def _translate_agent_message_chunk(self, payload: dict[str, object]) -> list[BaseEvent]:
         text = _extract_text(payload)
@@ -241,6 +301,70 @@ def _extract_args_delta(payload: dict[str, object]) -> str:
             continue
         return _stringify(value)
     return _stringify(payload)
+
+
+def _extract_opencode_info(payload: dict[str, object]) -> dict[str, object] | None:
+    properties = payload.get("properties")
+    if not isinstance(properties, dict):
+        return None
+    info = cast("dict[str, object]", properties).get("info")
+    if not isinstance(info, dict):
+        return None
+    return cast("dict[str, object]", info)
+
+
+def _extract_opencode_message_key(info: dict[str, object]) -> str:
+    for key in ("id", "messageID", "messageId", "uuid"):
+        value = _coerce_str(info.get(key))
+        if value is not None:
+            return value
+    return "__assistant__"
+
+
+def _extract_opencode_message_text(info: dict[str, object]) -> tuple[str | None, bool]:
+    delta = _coerce_str(info.get("delta"))
+    if delta is not None:
+        return delta, True
+
+    text = _coerce_str(info.get("text"))
+    if text is not None:
+        return text, False
+
+    content_value = info.get("content")
+    content_text = _extract_opencode_content_text(content_value)
+    if content_text is not None:
+        return content_text, False
+
+    message_text = _coerce_str(info.get("message"))
+    if message_text is not None:
+        return message_text, False
+
+    return None, False
+
+
+def _extract_opencode_content_text(value: object) -> str | None:
+    if isinstance(value, str):
+        return value
+
+    if isinstance(value, dict):
+        payload = cast("dict[str, object]", value)
+        for key in ("text", "delta", "content", "value"):
+            nested = _extract_opencode_content_text(payload.get(key))
+            if nested is not None:
+                return nested
+        return None
+
+    if isinstance(value, list):
+        parts: list[str] = []
+        for item in cast("list[object]", value):
+            piece = _extract_opencode_content_text(item)
+            if piece is not None:
+                parts.append(piece)
+        if parts:
+            return "".join(parts)
+        return None
+
+    return None
 
 
 __all__ = ["OpenCodeAGUIMapper"]

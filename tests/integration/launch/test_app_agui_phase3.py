@@ -43,6 +43,109 @@ def test_mappers_translate_error_events_to_run_error(
     assert events[0].message == "boom"
 
 
+def test_opencode_message_updated_translates_assistant_snapshot_to_text_delta() -> None:
+    mapper = mapping_module.get_agui_mapper(HarnessId.OPENCODE)
+
+    initial = mapper.translate(
+        HarnessEvent(
+            event_type="message.updated",
+            payload={
+                "properties": {
+                    "info": {"id": "msg-1", "role": "assistant", "content": "Hel"},
+                }
+            },
+            harness_id=HarnessId.OPENCODE.value,
+        )
+    )
+    assert _event_types(initial) == ["TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT"]
+    assert initial[1].delta == "Hel"
+
+    snapshot = mapper.translate(
+        HarnessEvent(
+            event_type="message.updated",
+            payload={
+                "properties": {
+                    "info": {"id": "msg-1", "role": "assistant", "content": "Hello"},
+                }
+            },
+            harness_id=HarnessId.OPENCODE.value,
+        )
+    )
+    assert _event_types(snapshot) == ["TEXT_MESSAGE_CONTENT"]
+    assert snapshot[0].delta == "lo"
+
+
+def test_opencode_message_updated_closes_assistant_message_for_user_role() -> None:
+    mapper = mapping_module.get_agui_mapper(HarnessId.OPENCODE)
+
+    _ = mapper.translate(
+        HarnessEvent(
+            event_type="message.updated",
+            payload={
+                "properties": {
+                    "info": {"id": "msg-1", "role": "assistant", "content": "hello"},
+                }
+            },
+            harness_id=HarnessId.OPENCODE.value,
+        )
+    )
+
+    user_update = mapper.translate(
+        HarnessEvent(
+            event_type="message.updated",
+            payload={
+                "properties": {"info": {"id": "msg-2", "role": "user", "content": "hi"}},
+            },
+            harness_id=HarnessId.OPENCODE.value,
+        )
+    )
+    assert _event_types(user_update) == ["TEXT_MESSAGE_END"]
+
+
+@pytest.mark.parametrize(
+    "event_type",
+    ["server.heartbeat", "server.connected", "sync", "session.diff", "session.updated"],
+)
+def test_opencode_keepalive_events_do_not_close_active_assistant_message(event_type: str) -> None:
+    mapper = mapping_module.get_agui_mapper(HarnessId.OPENCODE)
+
+    first = mapper.translate(
+        HarnessEvent(
+            event_type="message.updated",
+            payload={
+                "properties": {
+                    "info": {"id": "msg-1", "role": "assistant", "content": "Hello"},
+                }
+            },
+            harness_id=HarnessId.OPENCODE.value,
+        )
+    )
+    assert _event_types(first) == ["TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT"]
+
+    keepalive = mapper.translate(
+        HarnessEvent(
+            event_type=event_type,
+            payload={"properties": {"info": {"title": "ignored"}}},
+            harness_id=HarnessId.OPENCODE.value,
+        )
+    )
+    assert keepalive == []
+
+    follow_up = mapper.translate(
+        HarnessEvent(
+            event_type="message.updated",
+            payload={
+                "properties": {
+                    "info": {"id": "msg-1", "role": "assistant", "content": "Hello world"},
+                }
+            },
+            harness_id=HarnessId.OPENCODE.value,
+        )
+    )
+    assert _event_types(follow_up) == ["TEXT_MESSAGE_CONTENT"]
+    assert follow_up[0].delta == " world"
+
+
 @pytest.mark.asyncio
 async def test_outbound_loop_skips_run_finished_after_run_error() -> None:
     class FakeMapper:
