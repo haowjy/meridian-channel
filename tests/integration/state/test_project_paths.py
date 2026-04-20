@@ -53,6 +53,7 @@ def test_project_paths_exposes_root_file_policy(tmp_path: Path) -> None:
     paths = resolve_project_paths(repo_root=repo_root)
 
     assert paths.meridian_toml == repo_root.resolve() / "meridian.toml"
+    assert paths.meridian_local_toml == repo_root.resolve() / "meridian.local.toml"
     assert paths.workspace_local_toml == repo_root.resolve() / "workspace.local.toml"
     assert paths.workspace_ignore_targets == PROJECT_ROOT_IGNORE_TARGETS
 

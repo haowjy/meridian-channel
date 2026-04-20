@@ -6,7 +6,10 @@ from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.state.paths import resolve_state_paths
 
-PROJECT_ROOT_IGNORE_TARGETS: tuple[str, ...] = ("workspace.local.toml",)
+PROJECT_ROOT_IGNORE_TARGETS: tuple[str, ...] = (
+    "workspace.local.toml",
+    "meridian.local.toml",
+)
 
 
 class ProjectPaths(BaseModel):
@@ -28,6 +31,12 @@ class ProjectPaths(BaseModel):
         """Return local workspace topology path `<state-root-parent>/workspace.local.toml`."""
 
         return resolve_state_paths(self.repo_root).root_dir.parent / "workspace.local.toml"
+
+    @property
+    def meridian_local_toml(self) -> Path:
+        """Return local override path `<project-root>/meridian.local.toml`."""
+
+        return self.repo_root / "meridian.local.toml"
 
     @property
     def workspace_ignore_targets(self) -> tuple[str, ...]:

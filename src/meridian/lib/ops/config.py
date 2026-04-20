@@ -37,6 +37,7 @@ from meridian.lib.state.paths import (
 _SECTION_ORDER: tuple[str, ...] = ("defaults", "timeouts", "harness", "primary", "output")
 _OUTPUT_VERBOSITY_PRESETS = frozenset({"quiet", "normal", "verbose", "debug"})
 _MISSING_PROJECT_CONFIG_MESSAGE = "no project config; run `meridian config init`"
+_LOCAL_CONFIG_FILENAME = "meridian.local.toml"
 
 
 class _ConfigKeySpec(BaseModel):
@@ -625,6 +626,10 @@ def _build_config_inspection_state(repo_root: Path) -> _ConfigInspectionState:
     project_overrides = _extract_file_overrides(
         _read_file_payload(surface.project_config.write_path)
     )
+    local_config_path = repo_root / _LOCAL_CONFIG_FILENAME
+    if local_config_path.is_file():
+        local_overrides = _extract_file_overrides(_read_file_payload(local_config_path))
+        project_overrides = {**project_overrides, **local_overrides}
     user_overrides = (
         _extract_file_overrides(_read_file_payload(surface.user_config_path))
         if surface.user_config_path is not None

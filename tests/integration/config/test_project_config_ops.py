@@ -198,3 +198,25 @@ def test_config_show_and_get_resolve_env_selected_user_config_like_loader(
     assert gotten.value == "opencode"
     assert gotten.source == "user-config"
     assert load_config(repo_root).default_harness == "opencode"
+
+
+def test_config_show_and_loader_share_local_over_project_precedence(tmp_path: Path) -> None:
+    repo_root = _repo(tmp_path)
+    (repo_root / "meridian.toml").write_text(
+        "[defaults]\nharness = \"claude\"\n",
+        encoding="utf-8",
+    )
+    (repo_root / "meridian.local.toml").write_text(
+        "[defaults]\nharness = \"opencode\"\n",
+        encoding="utf-8",
+    )
+
+    shown = config_show_sync(ConfigShowInput(repo_root=repo_root.as_posix()))
+    shown_value = next(item for item in shown.values if item.key == "defaults.harness")
+    gotten = config_get_sync(ConfigGetInput(repo_root=repo_root.as_posix(), key="defaults.harness"))
+
+    assert shown_value.value == "opencode"
+    assert shown_value.source == "file"
+    assert gotten.value == "opencode"
+    assert gotten.source == "file"
+    assert load_config(repo_root).default_harness == "opencode"

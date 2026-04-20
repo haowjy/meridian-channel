@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from meridian.lib.catalog import models as catalog_models
+from meridian.lib.config.settings import load_config
 from meridian.lib.core.util import to_jsonable
 from meridian.lib.ops.config import (
     ConfigGetInput,
@@ -145,3 +146,17 @@ def test_config_inspection_skips_model_resolution_for_defaults_model(
     else:
         assert shown_value.env_var is None
         assert gotten.env_var is None
+
+
+def test_load_config_prefers_meridian_local_toml_over_meridian_toml(tmp_path: Path) -> None:
+    repo_root = _repo(tmp_path)
+    (repo_root / "meridian.toml").write_text(
+        "[defaults]\nharness = \"claude\"\n",
+        encoding="utf-8",
+    )
+    (repo_root / "meridian.local.toml").write_text(
+        "[defaults]\nharness = \"opencode\"\n",
+        encoding="utf-8",
+    )
+
+    assert load_config(repo_root).default_harness == "opencode"

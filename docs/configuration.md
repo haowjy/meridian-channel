@@ -1,7 +1,10 @@
 # Configuration
 
-Meridian works without config files, but you can override defaults in project
-`meridian.toml` and user `~/.meridian/config.toml`.
+Meridian works without config files, but you can override defaults in:
+
+- `~/.meridian/config.toml` (user defaults)
+- `meridian.toml` (project defaults)
+- `meridian.local.toml` (local personal overrides, not committed)
 
 By default Meridian discovers agents and skills from repo-local `.agents/` only.
 Harness-specific compatibility paths such as `.claude/` are runtime concerns, not
@@ -28,6 +31,7 @@ Meridian splits state across two roots: repo-tracked files that belong in versio
 ```text
 <repo-root>/
   meridian.toml              # project config
+  meridian.local.toml        # local personal overrides (gitignored)
   .agents/
     agents/
     skills/
@@ -93,6 +97,16 @@ Agent profiles are opt-in. When `--agent/-a` is omitted and `primary.agent` is u
 Scaffolded but not exposed via `config set` shorthand keys:
 
 - `[primary] autocompact_pct`
+
+## Config Precedence
+
+For config-file resolution, Meridian layers sources in this order:
+
+1. `~/.meridian/config.toml` (lowest)
+2. `meridian.toml`
+3. `meridian.local.toml` (highest file precedence)
+
+Environment variables still override all file values.
 
 ## Example
 

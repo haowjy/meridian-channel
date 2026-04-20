@@ -37,6 +37,8 @@ def test_workspace_init_creates_template_and_local_gitignore_entry(tmp_path: Pat
     assert "Workspace topology — local-only, gitignored." in content
     assert "workspace.local.toml" in exclude_lines
     assert exclude_lines.count("workspace.local.toml") == 1
+    assert "meridian.local.toml" in exclude_lines
+    assert exclude_lines.count("meridian.local.toml") == 1
 
 
 def test_workspace_init_resolves_worktree_gitdir_pointer(tmp_path: Path) -> None:
@@ -50,6 +52,9 @@ def test_workspace_init_resolves_worktree_gitdir_pointer(tmp_path: Path) -> None
     assert result.local_gitignore_path == (git_dir / "info" / "exclude").as_posix()
     assert (git_dir / "info" / "exclude").read_text(encoding="utf-8").count(
         "workspace.local.toml"
+    ) == 1
+    assert (git_dir / "info" / "exclude").read_text(encoding="utf-8").count(
+        "meridian.local.toml"
     ) == 1
 
 

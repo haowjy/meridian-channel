@@ -24,6 +24,7 @@ _PRIMARY_AUTOCOMPACT_PCT_MIN = 1
 _PRIMARY_AUTOCOMPACT_PCT_MAX = 100
 USER_CONFIG_ENV_VAR = "MERIDIAN_CONFIG"
 _DEFAULT_USER_CONFIG = get_user_state_root() / "config.toml"
+_LOCAL_CONFIG_FILENAME = "meridian.local.toml"
 
 
 class _SettingsLoadContext(BaseModel):
@@ -210,6 +211,13 @@ def _read_toml(path: Path) -> dict[str, object]:
 
 def _resolve_project_toml(repo_root: Path) -> Path | None:
     return resolve_project_config_state(repo_root).path
+
+
+def _resolve_local_toml(repo_root: Path) -> Path | None:
+    local_config = repo_root / _LOCAL_CONFIG_FILENAME
+    if not local_config.is_file():
+        return None
+    return local_config
 
 
 def resolve_user_config_path(user_config: Path | None) -> Path | None:
@@ -888,6 +896,20 @@ class MeridianConfig(BaseSettings):
                 repo_root=context.repo_root,
             )
 
+        def local_toml_source() -> dict[str, object]:
+            context = _SETTINGS_CONTEXT.get()
+            if context is None:
+                return {}
+            local_config = _resolve_local_toml(context.repo_root)
+            if local_config is None:
+                return {}
+            payload = _read_toml(local_config)
+            return _normalize_toml_payload(
+                payload=payload,
+                path=local_config,
+                repo_root=context.repo_root,
+            )
+
         def user_toml_source() -> dict[str, object]:
             context = _SETTINGS_CONTEXT.get()
             if context is None or context.user_config is None:
@@ -909,6 +931,7 @@ class MeridianConfig(BaseSettings):
         return (
             init_settings,
             cast("PydanticBaseSettingsSource", layered_env_source),
+            cast("PydanticBaseSettingsSource", local_toml_source),
             cast("PydanticBaseSettingsSource", project_toml_source),
             cast("PydanticBaseSettingsSource", user_toml_source),
         )
@@ -920,7 +943,7 @@ def load_config(
     user_config: Path | None = None,
     resolve_models: bool = True,
 ) -> MeridianConfig:
-    """Load config with precedence: defaults < user < project < environment.
+    """Load config with precedence: defaults < user < project < local < environment.
 
     RuntimeOverrides fields (model, harness, effort, etc.) are NOT loaded
     from ENV here — they are read separately via RuntimeOverrides.from_env().
