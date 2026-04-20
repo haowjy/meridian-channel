@@ -16,8 +16,8 @@ commit = "bf445b5477bff5d3c31ce9ee4965561d770e1c60"
 
 [dependencies.meridian-dev-workflow]
 url = "https://github.com/meridian-flow/meridian-dev-workflow"
-version = "v0.0.32"
-commit = "659f4be6a8fb65aab341fae777e222048bf8c9aa"
+version = "v0.0.35"
+commit = "f9c257d84344a90338b83a7cfb3965c47aff2fdf"
 
 [dependencies.meridian-prompter]
 url = "https://github.com/meridian-flow/meridian-prompter"
@@ -107,9 +107,9 @@ dest_path = "agents/frontend-designer.md"
 [items."agents/impl-orchestrator.md"]
 source = "meridian-dev-workflow"
 kind = "agent"
-version = "v0.0.31"
-source_checksum = "sha256:03c7a9f393a89f0257f8816e4e2f1052c59d74700dd58a12566657055ffaba21"
-installed_checksum = "sha256:03c7a9f393a89f0257f8816e4e2f1052c59d74700dd58a12566657055ffaba21"
+version = "v0.0.35"
+source_checksum = "sha256:2bf0ae75a4d1f6a518d391acc3a329cebdd0040364be37cde13d663edf55fd71"
+installed_checksum = "sha256:2bf0ae75a4d1f6a518d391acc3a329cebdd0040364be37cde13d663edf55fd71"
 dest_path = "agents/impl-orchestrator.md"
 
 [items."agents/integration-tester.md"]
@@ -495,9 +495,9 @@ dest_path = "skills/skill-creator"
 [items."skills/smoke-test"]
 source = "meridian-dev-workflow"
 kind = "skill"
-version = "v0.0.32"
-source_checksum = "sha256:13e5f9a9df9bbb89dce490083ca3d6610c46dc3bf5e706ff8267902d685bd76a"
-installed_checksum = "sha256:13e5f9a9df9bbb89dce490083ca3d6610c46dc3bf5e706ff8267902d685bd76a"
+version = "v0.0.34"
+source_checksum = "sha256:47f33ec547d09440f8cad2999bf96a9bac2e099f63a36e8c8a1dc6e026b56675"
+installed_checksum = "sha256:47f33ec547d09440f8cad2999bf96a9bac2e099f63a36e8c8a1dc6e026b56675"
 dest_path = "skills/smoke-test"
 
 [items."skills/tech-docs"]
@@ -511,9 +511,9 @@ dest_path = "skills/tech-docs"
 [items."skills/testing-principles"]
 source = "meridian-dev-workflow"
 kind = "skill"
-version = "v0.0.31"
-source_checksum = "sha256:c7db3fc0c668e8aa8fbede6a89b7089564f04b1578e4cbd609ffca6d88f04681"
-installed_checksum = "sha256:c7db3fc0c668e8aa8fbede6a89b7089564f04b1578e4cbd609ffca6d88f04681"
+version = "v0.0.34"
+source_checksum = "sha256:39331885e7a03912457c7af5dc89d7655d00d10addcddb20d01b5921dbe4e721"
+installed_checksum = "sha256:39331885e7a03912457c7af5dc89d7655d00d10addcddb20d01b5921dbe4e721"
 dest_path = "skills/testing-principles"
 
 [items."skills/unit-test"]
