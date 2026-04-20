@@ -75,10 +75,60 @@ class SSEEvent(BaseModel):
     data: dict[str, object]
 
 
+class AgentSummary(BaseModel):
+    """Summary projection of an agent profile for the launch UI."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    description: str = ""
+    model: str | None = None
+    harness: str | None = None
+    skills: list[str] = []
+    path: str = ""
+
+
+class EventRecord(BaseModel):
+    """Raw event record from the persisted output artifact."""
+
+    model_config = ConfigDict(frozen=True)
+
+    event_id: str
+    spawn_id: str
+    line_index: int
+    payload: dict[str, object]
+
+
+class ToolCallRecord(BaseModel):
+    """Tool call record extracted from a persisted output artifact."""
+
+    model_config = ConfigDict(frozen=True)
+
+    call_id: str
+    spawn_id: str
+    line_index: int
+    payload: dict[str, object]
+
+
+class TokenUsageResponse(BaseModel):
+    """Token usage summary for a thread/spawn."""
+
+    model_config = ConfigDict(frozen=True)
+
+    spawn_id: str
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_cost_usd: float | None = None
+
+
 __all__ = [
+    "AgentSummary",
     "CursorEnvelope",
+    "EventRecord",
     "SSEEvent",
     "SpawnProjection",
     "SpawnStatsProjection",
+    "TokenUsageResponse",
+    "ToolCallRecord",
     "WorkProjection",
 ]

@@ -218,6 +218,25 @@ def create_app(
         http_exception=http_exception,
     )
 
+    # Register catalog routes (models + agents)
+    from meridian.lib.app.catalog_routes import register_catalog_routes
+
+    register_catalog_routes(
+        app_obj,
+        repo_root=project_paths.repo_root,
+        http_exception=http_exception,
+    )
+
+    # Register thread inspector routes
+    from meridian.lib.app.thread_routes import register_thread_routes
+
+    register_thread_routes(
+        app_obj,
+        state_root=state_root,
+        artifact_root=state_root / "artifacts",
+        http_exception=http_exception,
+    )
+
     # Register WebSocket routes
     def _validate_spawn_id_wrapper(raw: str) -> SpawnId:
         return validate_spawn_id(raw, http_exception)
