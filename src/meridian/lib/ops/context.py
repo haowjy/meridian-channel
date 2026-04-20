@@ -4,16 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from meridian.lib.config.settings import resolve_project_root
 from meridian.lib.config.workspace import get_projectable_roots, resolve_workspace_snapshot
+from meridian.lib.core.resolved_context import ResolvedContext
 from meridian.lib.core.util import FormatContext
 from meridian.lib.ops.runtime import resolve_state_root_for_read
-from meridian.lib.state.paths import resolve_fs_dir, resolve_work_scratch_dir
-from meridian.lib.state.session_store import get_session_active_work_id
+from meridian.lib.state.paths import resolve_fs_dir
 
 
 class ContextInput(BaseModel):
@@ -65,12 +67,37 @@ class WorkCurrentOutput(BaseModel):
         return self.work_dir or ""
 
 
-def _resolve_work_id_from_chat_id(state_root: Path, chat_id: str) -> str | None:
-    """Look up active work_id from MERIDIAN_CHAT_ID in session store."""
+@contextmanager
+def _resolved_context_env_defaults(repo_root: Path, state_root: Path) -> Iterator[None]:
+    """Provide repo/state env defaults so `ResolvedContext` can resolve fully."""
 
-    if not chat_id:
-        return None
-    return get_session_active_work_id(state_root, chat_id)
+    original_repo_root = os.environ.get("MERIDIAN_REPO_ROOT")
+    original_state_root = os.environ.get("MERIDIAN_STATE_ROOT")
+
+    if not (original_repo_root or "").strip():
+        os.environ["MERIDIAN_REPO_ROOT"] = repo_root.as_posix()
+    if not (original_state_root or "").strip():
+        os.environ["MERIDIAN_STATE_ROOT"] = state_root.as_posix()
+
+    try:
+        yield
+    finally:
+        if original_repo_root is None:
+            os.environ.pop("MERIDIAN_REPO_ROOT", None)
+        else:
+            os.environ["MERIDIAN_REPO_ROOT"] = original_repo_root
+
+        if original_state_root is None:
+            os.environ.pop("MERIDIAN_STATE_ROOT", None)
+        else:
+            os.environ["MERIDIAN_STATE_ROOT"] = original_state_root
+
+
+def _resolve_runtime_context(repo_root: Path, state_root: Path) -> ResolvedContext:
+    """Resolve context from environment with repo/state defaults applied."""
+
+    with _resolved_context_env_defaults(repo_root, state_root):
+        return ResolvedContext.from_environment()
 
 
 def context_sync(input: ContextInput) -> ContextOutput:
@@ -79,28 +106,16 @@ def context_sync(input: ContextInput) -> ContextOutput:
     _ = input
     repo_root = resolve_project_root()
     state_root = resolve_state_root_for_read(repo_root)
-    depth_raw = os.getenv("MERIDIAN_DEPTH", "0").strip()
-    chat_id = os.getenv("MERIDIAN_CHAT_ID", "").strip()
-
-    depth = 0
-    try:
-        depth = max(0, int(depth_raw))
-    except (ValueError, TypeError):
-        depth = 0
-
-    work_id = _resolve_work_id_from_chat_id(state_root, chat_id)
-    work_dir = (
-        resolve_work_scratch_dir(state_root, work_id).as_posix() if work_id is not None else None
-    )
+    resolved = _resolve_runtime_context(repo_root, state_root)
     workspace_snapshot = resolve_workspace_snapshot(repo_root)
     context_roots = [root.as_posix() for root in get_projectable_roots(workspace_snapshot)]
 
     return ContextOutput(
-        work_dir=work_dir,
+        work_dir=resolved.work_dir.as_posix() if resolved.work_dir is not None else None,
         fs_dir=resolve_fs_dir(repo_root).as_posix(),
         repo_root=repo_root.as_posix(),
         state_root=state_root.as_posix(),
-        depth=depth,
+        depth=resolved.depth,
         context_roots=context_roots,
     )
 
@@ -117,14 +132,11 @@ def work_current_sync(input: WorkCurrentInput) -> WorkCurrentOutput:
     _ = input
     repo_root = resolve_project_root()
     state_root = resolve_state_root_for_read(repo_root)
-    chat_id = os.getenv("MERIDIAN_CHAT_ID", "").strip()
+    resolved = _resolve_runtime_context(repo_root, state_root)
 
-    work_id = _resolve_work_id_from_chat_id(state_root, chat_id)
-    work_dir = (
-        resolve_work_scratch_dir(state_root, work_id).as_posix() if work_id is not None else None
+    return WorkCurrentOutput(
+        work_dir=resolved.work_dir.as_posix() if resolved.work_dir is not None else None
     )
-
-    return WorkCurrentOutput(work_dir=work_dir)
 
 
 async def work_current(input: WorkCurrentInput) -> WorkCurrentOutput:
