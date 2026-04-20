@@ -156,6 +156,8 @@ def create_app(
     spawn_id_lock = asyncio.Lock()
 
     # Import route registration functions
+    from meridian.lib.app.file_routes import register_file_routes
+    from meridian.lib.app.file_service import FileService
     from meridian.lib.app.spawn_routes import (
         HTTPExceptionCallable,
         register_spawn_query_routes,
@@ -198,13 +200,21 @@ def create_app(
         http_exception=http_exception,
     )
 
-    # Register work routes (stub for now)
+    # Register work routes
     register_work_routes(
         app_obj,
         state_root=state_root,
         repo_state_root=repo_state_root,
         repo_root=project_paths.repo_root,
         event_broadcaster=event_broadcaster,
+        http_exception=http_exception,
+    )
+
+    # Register file routes
+    file_service = FileService(project_paths.repo_root)
+    register_file_routes(
+        app_obj,
+        file_service,
         http_exception=http_exception,
     )
 

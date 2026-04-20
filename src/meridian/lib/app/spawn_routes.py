@@ -27,6 +27,8 @@ from meridian.lib.harness.registry import get_default_harness_registry
 from meridian.lib.launch.context import build_launch_context
 from meridian.lib.launch.request import LaunchArgvIntent, LaunchRuntime, SpawnRequest
 from meridian.lib.state import spawn_store
+from meridian.lib.state.atomic import atomic_write_text
+from meridian.lib.state.event_store import lock_file
 from meridian.lib.streaming.signal_canceller import SignalCanceller
 from meridian.lib.streaming.spawn_manager import SpawnManager
 
@@ -87,6 +89,75 @@ class InjectRequest(BaseModel):
         if not text_set and not self.interrupt:
             raise ValueError("provide text or interrupt: true")
         return self
+
+
+class ForkRequest(BaseModel):
+    """REST payload for forking a spawn."""
+
+    from_message_id: str | None = None
+
+
+# ---- Archive State Helpers ----
+
+
+def _archived_spawns_path(state_root: Path) -> Path:
+    """Path to the archived spawns JSON file."""
+    return state_root / "app" / "archived_spawns.json"
+
+
+def _archived_spawns_lock_path(state_root: Path) -> Path:
+    """Lock path for archived spawns file."""
+    return state_root / "app" / "archived_spawns.flock"
+
+
+def _read_archived_spawns(state_root: Path) -> set[str]:
+    """Read the set of archived spawn IDs."""
+    path = _archived_spawns_path(state_root)
+    lock_path = _archived_spawns_lock_path(state_root)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    with lock_file(lock_path):
+        if not path.exists():
+            return set()
+        try:
+            data = json_module.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                return set(data)
+            return set()
+        except (json_module.JSONDecodeError, OSError):
+            return set()
+
+
+def _write_archived_spawns(state_root: Path, archived: set[str]) -> None:
+    """Write the set of archived spawn IDs atomically."""
+    path = _archived_spawns_path(state_root)
+    lock_path = _archived_spawns_lock_path(state_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    
+    with lock_file(lock_path):
+        atomic_write_text(path, json_module.dumps(sorted(archived), indent=2) + "\n")
+
+
+def _archive_spawn(state_root: Path, spawn_id: str) -> None:
+    """Add a spawn ID to the archived set."""
+    archived = _read_archived_spawns(state_root)
+    archived.add(spawn_id)
+    _write_archived_spawns(state_root, archived)
+
+
+def _unarchive_spawn(state_root: Path, spawn_id: str) -> None:
+    """Remove a spawn ID from the archived set."""
+    archived = _read_archived_spawns(state_root)
+    archived.discard(spawn_id)
+    _write_archived_spawns(state_root, archived)
+
+
+def _is_spawn_archived(state_root: Path, spawn_id: str) -> bool:
+    """Check if a spawn is archived."""
+    return spawn_id in _read_archived_spawns(state_root)
+
+
+# ---- Validation Helpers ----
 
 
 def validate_spawn_id(raw: str, http_exception: HTTPExceptionCallable) -> SpawnId:
@@ -434,11 +505,75 @@ def register_spawn_routes(
             "origin": outcome.origin,
         }
 
+    async def archive_spawn(spawn_id: str) -> dict[str, object]:
+        """Archive a terminal spawn (soft-hide from default list views)."""
+        typed_spawn_id = _validate_spawn_id(spawn_id)
+        record = _require_spawn(typed_spawn_id)
+        
+        # Only allow archiving terminal spawns
+        if not spawn_is_terminal(record.status):
+            raise http_exception(
+                status_code=409,
+                detail=f"Cannot archive non-terminal spawn (status: {record.status}). "
+                       "Wait for spawn to complete or cancel it first.",
+            )
+        
+        # Check if already archived
+        if _is_spawn_archived(state_root, str(typed_spawn_id)):
+            return {
+                "ok": True,
+                "spawn_id": str(typed_spawn_id),
+                "archived": True,
+                "noop": True,
+            }
+        
+        _archive_spawn(state_root, str(typed_spawn_id))
+        _broadcast(
+            "spawn.archived",
+            {
+                "spawn_id": str(typed_spawn_id),
+                "archived": True,
+            },
+        )
+        
+        return {
+            "ok": True,
+            "spawn_id": str(typed_spawn_id),
+            "archived": True,
+        }
+
+    async def fork_spawn(spawn_id: str, body: ForkRequest) -> dict[str, object]:
+        """Fork a spawn to create a new session branching from this point.
+        
+        Currently returns 501 Not Implemented as fork requires harness adapter
+        integration which is outside the scope of the initial app backend.
+        """
+        _ = body  # Unused for now
+        typed_spawn_id = _validate_spawn_id(spawn_id)
+        record = _require_spawn(typed_spawn_id)
+        
+        # Check that spawn has a harness session ID (required for fork)
+        if not record.harness_session_id:
+            raise http_exception(
+                status_code=400,
+                detail="Spawn has no harness session — cannot fork.",
+            )
+        
+        # Fork requires harness adapter integration which is complex
+        # Return 501 for now with a clear message
+        raise http_exception(
+            status_code=501,
+            detail="Spawn fork via REST API is not yet implemented. "
+                   "Use `meridian spawn --fork` from CLI instead.",
+        )
+
     typed_app.post("/api/spawns")(create_spawn)
     typed_app.get("/api/spawns")(list_spawns)
     typed_app.get("/api/spawns/{spawn_id}")(get_spawn)
     typed_app.post("/api/spawns/{spawn_id}/inject")(inject_message)
     typed_app.post("/api/spawns/{spawn_id}/cancel")(cancel_spawn)
+    typed_app.post("/api/spawns/{spawn_id}/archive")(archive_spawn)
+    typed_app.post("/api/spawns/{spawn_id}/fork")(fork_spawn)
 
 
 # ---- Cursor Helpers ----
@@ -458,7 +593,7 @@ def _decode_cursor(cursor: str) -> tuple[str, str] | None:
         return None
 
 
-def _spawn_to_projection(record: SpawnRecord) -> SpawnProjection:
+def _spawn_to_projection(record: SpawnRecord, *, archived: bool = False) -> SpawnProjection:
     """Convert spawn record to API projection."""
     sort_ts = record.started_at or ""
     return SpawnProjection(
@@ -498,6 +633,7 @@ def register_spawn_query_routes(
         status: str | None = Query(default=None, description="Filter by status"),
         agent: str | None = Query(default=None, description="Filter by agent"),
         harness: str | None = Query(default=None, description="Filter by harness"),
+        include_archived: bool = Query(default=False, description="Include archived spawns"),
         limit: int = Query(default=20, ge=1, le=100, description="Page size"),
         cursor: str | None = Query(default=None, description="Pagination cursor"),
     ) -> CursorEnvelope[SpawnProjection]:
@@ -520,6 +656,11 @@ def register_spawn_query_routes(
             state_root,
             spawn_store.list_spawns(state_root, filters=filters if filters else None),
         )
+
+        # Filter out archived spawns unless explicitly requested
+        if not include_archived:
+            archived_ids = _read_archived_spawns(state_root)
+            spawns = [s for s in spawns if s.id not in archived_ids]
 
         # Sort by started_at desc, id desc for stable pagination
         def sort_key(s: SpawnRecord) -> tuple[str, str]:
@@ -556,6 +697,7 @@ def register_spawn_query_routes(
 
     async def get_spawn_stats(
         work_id: str | None = Query(default=None, description="Filter by work item"),
+        include_archived: bool = Query(default=False, description="Include archived spawns"),
     ) -> SpawnStatsProjection:
         """Get aggregated spawn statistics."""
         from meridian.lib.state.reaper import reconcile_spawns
@@ -565,6 +707,11 @@ def register_spawn_query_routes(
             state_root,
             spawn_store.list_spawns(state_root, filters=filters),
         )
+
+        # Filter out archived spawns unless explicitly requested
+        if not include_archived:
+            archived_ids = _read_archived_spawns(state_root)
+            spawns = [s for s in spawns if s.id not in archived_ids]
 
         running = 0
         queued = 0
@@ -645,6 +792,7 @@ def register_spawn_query_routes(
 
 
 __all__ = [
+    "ForkRequest",
     "HTTPExceptionCallable",
     "InjectRequest",
     "PermissionRequest",
