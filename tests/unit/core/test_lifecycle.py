@@ -39,6 +39,29 @@ class FailingHook:
         raise RuntimeError("deliberate hook failure")
 
 
+class StoreSnapshotHook:
+    """Reads store state inside hook to prove dispatch happens post-write."""
+
+    def __init__(self, state_root: Path, repository: FakeSpawnRepository) -> None:
+        self._state_root = state_root
+        self._repository = repository
+        self.snapshots: list[tuple[str, str | None, str | None]] = []
+
+    def on_event(self, event: LifecycleEvent) -> None:
+        record = spawn_store.get_spawn(
+            self._state_root,
+            event.spawn_id,
+            repository=self._repository,
+        )
+        self.snapshots.append(
+            (
+                event.event_type,
+                record.status if record is not None else None,
+                record.terminal_origin if record is not None else None,
+            )
+        )
+
+
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
@@ -732,3 +755,109 @@ def test_mark_running_on_cancelled_spawn_raises_value_error(tmp_path: Path) -> N
 
     with pytest.raises(ValueError, match="Illegal spawn transition"):
         svc.mark_running(spawn_id)
+
+
+# ---------------------------------------------------------------------------
+# 16. Required lifecycle-path coverage (Phase 5.1)
+# ---------------------------------------------------------------------------
+
+
+def test_required_path_start_and_running_dispatches_post_write(tmp_path: Path) -> None:
+    repo = FakeSpawnRepository()
+    recording = RecordingHook()
+    snapshot = StoreSnapshotHook(tmp_path, repo)
+    svc = _make_service(tmp_path, hooks=[recording, snapshot], repository=repo)
+
+    spawn_id = _start_spawn(svc, status="queued")
+    svc.mark_running(spawn_id)
+
+    assert [event.event_type for event in recording.events] == ["spawn.created", "spawn.running"]
+    assert snapshot.snapshots == [
+        ("spawn.created", "queued", None),
+        ("spawn.running", "running", None),
+    ]
+
+
+def test_required_path_mark_finalizing_then_finalize(tmp_path: Path) -> None:
+    repo = FakeSpawnRepository()
+    recording = RecordingHook()
+    snapshot = StoreSnapshotHook(tmp_path, repo)
+    svc = _make_service(tmp_path, hooks=[recording, snapshot], repository=repo)
+    spawn_id = _start_spawn(svc, status="running")
+
+    marked = svc.mark_finalizing(spawn_id)
+    finalized = svc.finalize(spawn_id, "succeeded", 0, origin="runner")
+
+    assert marked is True
+    assert finalized is True
+    assert [event.event_type for event in recording.events] == ["spawn.created", "spawn.finalized"]
+    finalized_event = recording.events[-1]
+    assert finalized_event.status == "succeeded"
+    assert finalized_event.origin == "runner"
+    assert snapshot.snapshots[-1] == ("spawn.finalized", "succeeded", "runner")
+
+
+def test_required_path_launch_failure_finalize_origin(tmp_path: Path) -> None:
+    repo = FakeSpawnRepository()
+    recording = RecordingHook()
+    snapshot = StoreSnapshotHook(tmp_path, repo)
+    svc = _make_service(tmp_path, hooks=[recording, snapshot], repository=repo)
+    spawn_id = _start_spawn(svc, status="running")
+
+    transitioned = svc.finalize(
+        spawn_id,
+        "failed",
+        1,
+        origin="launch_failure",
+        error="launcher OSError",
+    )
+
+    assert transitioned is True
+    finalized_event = next(
+        event for event in recording.events if event.event_type == "spawn.finalized"
+    )
+    assert finalized_event.status == "failed"
+    assert finalized_event.origin == "launch_failure"
+    assert snapshot.snapshots[-1] == ("spawn.finalized", "failed", "launch_failure")
+
+
+def test_required_path_cancel_origin_and_post_write_hook(tmp_path: Path) -> None:
+    repo = FakeSpawnRepository()
+    recording = RecordingHook()
+    snapshot = StoreSnapshotHook(tmp_path, repo)
+    svc = _make_service(tmp_path, hooks=[recording, snapshot], repository=repo)
+    spawn_id = _start_spawn(svc, status="running")
+
+    transitioned = svc.cancel(spawn_id)
+
+    assert transitioned is True
+    finalized_event = next(
+        event for event in recording.events if event.event_type == "spawn.finalized"
+    )
+    assert finalized_event.status == "cancelled"
+    assert finalized_event.origin == "cancel"
+    assert snapshot.snapshots[-1] == ("spawn.finalized", "cancelled", "cancel")
+
+
+def test_required_path_reconciler_finalize_origin(tmp_path: Path) -> None:
+    repo = FakeSpawnRepository()
+    recording = RecordingHook()
+    snapshot = StoreSnapshotHook(tmp_path, repo)
+    svc = _make_service(tmp_path, hooks=[recording, snapshot], repository=repo)
+    spawn_id = _start_spawn(svc, status="running")
+
+    transitioned = svc.finalize(
+        spawn_id,
+        "failed",
+        1,
+        origin="reconciler",
+        error="orphan_run",
+    )
+
+    assert transitioned is True
+    finalized_event = next(
+        event for event in recording.events if event.event_type == "spawn.finalized"
+    )
+    assert finalized_event.status == "failed"
+    assert finalized_event.origin == "reconciler"
+    assert snapshot.snapshots[-1] == ("spawn.finalized", "failed", "reconciler")
