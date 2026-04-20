@@ -6,14 +6,14 @@ import time
 from uuid import uuid4
 
 from meridian.lib.core.domain import SpawnStatus
-from meridian.lib.core.types import HarnessId
+from meridian.lib.core.lifecycle import SpawnLifecycleService
+from meridian.lib.core.types import HarnessId, SpawnId
 from meridian.lib.harness.connections.base import ConnectionConfig
 from meridian.lib.harness.registry import get_default_harness_registry
 from meridian.lib.launch.context import build_launch_context
 from meridian.lib.launch.request import LaunchArgvIntent, LaunchRuntime, SpawnRequest
 from meridian.lib.launch.streaming_runner import run_streaming_spawn, signal_coordinator
 from meridian.lib.ops.runtime import resolve_runtime_root_and_config, resolve_state_root
-from meridian.lib.state import spawn_store
 
 
 async def streaming_serve(
@@ -45,16 +45,18 @@ async def streaming_serve(
     repo_root, _ = resolve_runtime_root_and_config(None)
     state_root = resolve_state_root(repo_root)
     start_monotonic = time.monotonic()
-    spawn_id = spawn_store.start_spawn(
-        state_root,
-        chat_id=str(uuid4()),
-        model=normalized_model or "unknown",
-        agent=normalized_agent or "unknown",
-        harness=harness_id.value,
-        kind="streaming",
-        prompt=prompt,
-        launch_mode="foreground",
-        status="running",
+    lifecycle = SpawnLifecycleService(state_root)
+    spawn_id = SpawnId(
+        lifecycle.start(
+            chat_id=str(uuid4()),
+            model=normalized_model or "unknown",
+            agent=normalized_agent or "unknown",
+            harness=harness_id.value,
+            kind="streaming",
+            prompt=prompt,
+            launch_mode="foreground",
+            status="running",
+        )
     )
 
     tracer = None
@@ -125,9 +127,8 @@ async def streaming_serve(
         raise
     finally:
         with signal_coordinator().mask_sigterm():
-            spawn_store.finalize_spawn(
-                state_root,
-                spawn_id,
+            lifecycle.finalize(
+                str(spawn_id),
                 status=outcome_status,
                 exit_code=outcome_exit_code,
                 origin="launcher",
