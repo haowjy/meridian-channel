@@ -377,8 +377,8 @@ class FileService:
 
                     rel_path = f"{rel_prefix}/{name}" if rel_prefix else name
 
-                    # Skip symlinks during recursion — resolving them here
-                    # could escape the project root and cause cycles.
+                    # Skip symlinks to avoid cycles (symlink to parent dir)
+                    # and infinite recursion.
                     if item.is_symlink():
                         continue
 

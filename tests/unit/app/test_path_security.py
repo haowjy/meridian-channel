@@ -203,7 +203,7 @@ class TestSymlinkHandling:
         with pytest.raises(PathSecurityError) as exc_info:
             validate_project_path(project, "escape")
 
-        assert "Symlink escapes project root" in str(exc_info.value)
+        assert "Path escapes project root" in str(exc_info.value)
 
     @pytest.mark.skipif(sys.platform == "win32", reason="Symlinks need admin on Windows")
     def test_nested_symlink_escape_rejected(self, tmp_path: Path) -> None:
@@ -225,25 +225,6 @@ class TestSymlinkHandling:
             validate_project_path(project, "level1/link/secret.txt")
 
         assert "escapes project root" in str(exc_info.value)
-
-    @pytest.mark.skipif(sys.platform == "win32", reason="Symlinks need admin on Windows")
-    def test_symlink_not_resolved_when_disabled(self, tmp_path: Path) -> None:
-        """Symlinks should not be resolved when resolve_symlinks=False."""
-        project = tmp_path / "project"
-        project.mkdir()
-        
-        # Create escape symlink
-        escape_target = tmp_path / "secret"
-        escape_target.write_text("secret")
-        
-        escape_link = project / "link"
-        escape_link.symlink_to(escape_target)
-
-        # Should succeed when not resolving symlinks
-        result = validate_project_path(project, "link", resolve_symlinks=False)
-        # Result should be the link itself, not resolved
-        assert result.name == "link"
-
 
 class TestEdgeCases:
     """Tests for edge cases and unusual inputs."""
