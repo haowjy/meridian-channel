@@ -1,14 +1,15 @@
 # File Explorer Component
 
-## Multi-Root Architecture
+## Single-Root Architecture
 
-The file explorer supports multiple roots, similar to VS Code's multi-root workspaces. Roots are added via CLI and browsed in the UI.
+The file explorer is rooted at exactly one project directory: the directory where `meridian app` was started.
+This is the Jupyter model: one server, one root, all paths relative to that root.
 
 ```
 ┌─────────────────────────────────────┐
-│ EXPLORER                    [+ ···] │
+│ EXPLORER                        ··· │
 ├─────────────────────────────────────┤
-│ ▼ meridian-cli                      │
+│ ▼ meridian-cli (project root)       │
 │   ▼ src                             │
 │     ▼ meridian                      │
 │       ▶ lib                         │
@@ -16,68 +17,38 @@ The file explorer supports multiple roots, similar to VS Code's multi-root works
 │         __init__.py                 │
 │   ▶ frontend                        │
 │   ▶ tests                           │
-│ ▼ another-project                   │
-│   ▶ src                             │
-│   ▶ docs                            │
 └─────────────────────────────────────┘
 ```
 
-## Root Management
+## Root Model (No Add/Remove)
 
-### Adding Roots
-
-Roots are added via CLI:
-
-```bash
-meridian app root add /path/to/project
-meridian app root add .  # Current directory
-```
-
-This registers the root with the app server. The server maintains a list of roots in `~/.meridian/app/roots.jsonl`.
-
-### Root Registry
-
-```json
-{"path": "/home/user/meridian-cli", "added_at": "2026-04-19T10:00:00Z"}
-{"path": "/home/user/another-project", "added_at": "2026-04-19T10:05:00Z"}
-```
-
-The explorer reads from this registry on load and watches for changes.
-
-### Removing Roots
-
-```bash
-meridian app root remove /path/to/project
-meridian app root remove --all
-```
-
-Or via UI context menu on the root node.
+- There is no root registry.
+- There are no additive roots.
+- There is no UI or CLI action for adding/removing roots.
+- If you want a different root, start `meridian app` in a different directory.
 
 ## API Endpoints
 
-### List Roots
+### Get Project Root
 
-`GET /api/explorer/roots`
+`GET /api/files/root`
 
 ```json
 {
-  "roots": [
-    {
-      "path": "/home/user/meridian-cli",
-      "name": "meridian-cli",
-      "added_at": "2026-04-19T10:00:00Z"
-    }
-  ]
+  "project_root": "/home/user/meridian-cli",
+  "name": "meridian-cli"
 }
 ```
 
 ### List Directory
 
-`GET /api/explorer/list?path=/home/user/meridian-cli/src`
+`GET /api/files/tree?path=src`
+
+`path` is optional and project-root-relative. Empty path means root listing.
 
 ```json
 {
-  "path": "/home/user/meridian-cli/src",
+  "path": "src",
   "entries": [
     {"name": "meridian", "type": "directory"},
     {"name": "__init__.py", "type": "file", "size": 0},
@@ -90,11 +61,11 @@ Entries are sorted: directories first (alphabetical), then files (alphabetical).
 
 ### Read File
 
-`GET /api/explorer/read?path=/home/user/meridian-cli/src/cli.py`
+`GET /api/files/read?path=src/cli.py`
 
 ```json
 {
-  "path": "/home/user/meridian-cli/src/cli.py",
+  "path": "src/cli.py",
   "content": "...",
   "encoding": "utf-8",
   "size": 4523
@@ -103,29 +74,17 @@ Entries are sorted: directories first (alphabetical), then files (alphabetical).
 
 For large files (> 100KB), content is truncated with a `truncated: true` flag.
 
-### Add Root (from UI)
-
-`POST /api/explorer/roots`
-
-```json
-{"path": "/home/user/new-project"}
-```
-
-### Remove Root
-
-`DELETE /api/explorer/roots?path=/home/user/old-project`
-
 ## Component Structure
 
 ```
 FileExplorer/
 ├── FileExplorer.tsx      ← Main container
-├── RootNode.tsx          ← Top-level project root
+├── ProjectRootNode.tsx   ← Fixed top-level root node
 ├── TreeNode.tsx          ← Directory or file node
 ├── FileIcon.tsx          ← Icon based on file type
-├── ExplorerHeader.tsx    ← Title bar with actions
+├── ExplorerHeader.tsx    ← Title bar with root + actions
 └── hooks/
-    ├── useExplorerRoots.ts
+    ├── useProjectRoot.ts
     ├── useDirectoryListing.ts
     └── useFilePreview.ts
 ```
@@ -139,26 +98,23 @@ interface FileExplorerProps {
 }
 
 function FileExplorer({ onFileSelect, onFileOpen }: FileExplorerProps) {
-  const { roots, addRoot, removeRoot } = useExplorerRoots()
-  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
+  const { projectRoot } = useProjectRoot()
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set([""]))
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
 
   return (
     <div className="flex flex-col h-full">
-      <ExplorerHeader onAddRoot={handleAddRoot} />
+      <ExplorerHeader projectRoot={projectRoot} />
       <ScrollArea className="flex-1">
-        {roots.map(root => (
-          <RootNode
-            key={root.path}
-            root={root}
-            expanded={expandedPaths}
-            selected={selectedPath}
-            onToggle={handleToggle}
-            onSelect={handleSelect}
-            onOpen={onFileOpen}
-            onRemove={() => removeRoot(root.path)}
-          />
-        ))}
+        <ProjectRootNode
+          rootPath=""
+          rootName={projectRoot.name}
+          expanded={expandedPaths}
+          selected={selectedPath}
+          onToggle={handleToggle}
+          onSelect={handleSelect}
+          onOpen={onFileOpen}
+        />
       </ScrollArea>
     </div>
   )
@@ -180,7 +136,7 @@ interface TreeNodeProps {
 
 function TreeNode({ entry, depth, expanded, selected, onToggle, onSelect, onOpen }: TreeNodeProps) {
   const isDirectory = entry.type === 'directory'
-  
+
   return (
     <div
       className={cn(
@@ -222,14 +178,9 @@ Right-click on any node:
 
 | Entry Type | Actions |
 |------------|---------|
-| Root | Remove root, Collapse all, Refresh |
+| Project root | Refresh, Collapse all |
 | Directory | New file, New folder, Copy path, Collapse |
 | File | Open, Copy path, Attach to session |
-
-### Drag and Drop (Future)
-
-- Reorder roots
-- Drag file to composer to attach
 
 ## File Icons
 
@@ -269,7 +220,7 @@ Files can be attached to the composer for reference:
 
 Attachments are sent as file references in the session creation request.
 
-### Open in Session Context
+### Session Context Signals
 
 When viewing a session, the explorer can:
 - Show files modified by the session (from tool calls)
@@ -279,7 +230,7 @@ When viewing a session, the explorer can:
 
 ### Expansion State
 
-Expansion state is stored in localStorage keyed by root path:
+Expansion state is stored in localStorage keyed by project root path:
 
 ```typescript
 interface ExplorerState {
@@ -287,7 +238,7 @@ interface ExplorerState {
   selectedPath: string | null
 }
 
-const storageKey = `explorer:${rootPath}`
+const storageKey = `explorer:${projectRootPath}`
 ```
 
 ### Lazy Loading
@@ -298,22 +249,22 @@ Directories are loaded on expand, not upfront. Large directories (> 500 entries)
 
 - Manual refresh via header button or context menu
 - Auto-refresh on window focus (debounced)
-- WebSocket file watch events (future)
+- File watch push events (future)
 
 ## Security Considerations
 
 ### Path Validation
 
 All paths must:
-1. Be absolute paths
-2. Fall under a registered root
-3. Not contain `..` traversal after normalization
+1. Be project-root-relative
+2. Resolve under the bound project root after normalization
+3. Not contain traversal that escapes root
 
 The server validates paths before any file operations.
 
 ### Symlink Handling
 
-Symlinks are followed but display with a special indicator. Links pointing outside registered roots return an error.
+Symlinks are followed but display with a special indicator. Links pointing outside the bound project root return an error.
 
 ### Binary Files
 
@@ -321,7 +272,7 @@ Binary files show metadata only, no content preview:
 
 ```json
 {
-  "path": "/home/user/project/image.png",
+  "path": "assets/image.png",
   "binary": true,
   "size": 123456,
   "mime_type": "image/png"

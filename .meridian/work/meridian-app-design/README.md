@@ -1,39 +1,51 @@
 # Meridian App Design
 
-Consolidated design for the Meridian web UI — a dev-tool-first interface for AI-assisted work.
+This directory is the implementation index for Meridian App UI and API design work.
 
-## Design Philosophy
+## Authoritative Specs (implement from these)
 
-- **Work items are first-class** — sessions grouped by work context, not by repo or recency
-- **Dev tool aesthetic** — VS Code/Cursor/Linear visual language
-- **Simple by default** — effort toggle, advanced settings hidden
-- **Local-first, cloud-ready** — abstractions in place for future cloud backend
+These docs are the source of truth for build decisions and acceptance checks:
 
-## Design Documents
+| Document | Scope |
+|---|---|
+| `ui-spec.md` | UI layout, modes, components, interactions, keyboard/a11y behavior |
+| `backend-gaps.md` | Required backend API surface for the frontend redesign |
+| `component-plan.md` | Component ownership: what to reuse vs what to build |
+| `mobile-spec.md` | Responsive and mobile behavior by breakpoint |
 
-| Document | Purpose |
-|----------|---------|
-| `design/overview.md` | Master design document — start here |
-| `design/visual-direction.md` | Color, typography, spacing, interaction patterns |
-| `design/dashboard-layout.md` | Work-item-centric dashboard design |
-| `design/sidebar.md` | Sidebar with work-grouped sessions |
-| `design/session-cards.md` | Session and work item card components |
-| `design/file-explorer.md` | Multi-root file explorer |
-| `design/frontend-routing.md` | Routes and component structure |
-| `design/session-registry.md` | Session storage and API |
-| `design/server-abstraction.md` | Future cloud swappability |
-| `design/HARNESS-CONTROL-MATRIX.md` | Per-harness control capabilities |
-| `design/server-lifecycle.md` | Server start/stop, lockfile |
-| `design/project-key.md` | Project identity, multi-repo support |
+## Requirements & Features
 
-## Implementation Phases
+| Document | Scope |
+|---|---|
+| `requirements.md` | Functional and non-functional requirements |
+| `features.md` | User-facing feature set and priorities (P0/P1/P2) |
 
-1. **MVP**: Dashboard, session view, sidebar, file explorer, basic controls
-2. **Mid-session controls**: Model switching, compact, skills, spawn tree
-3. **Polish**: Event replay, remote access, cloud abstraction
+## Design Decisions
 
-## Superseded
+| Document | Scope |
+|---|---|
+| `decisions.md` | Decision log with rationale and rejected alternatives |
 
-These work items are superseded by this consolidated design:
+## Supporting Design Docs (`design/`)
+
+These are supporting references. Status indicates whether each doc remains canonical or has been superseded by top-level specs.
+
+| Document | Status | Notes |
+|---|---|---|
+| `design/visual-direction.md` | Canonical | Design tokens and visual system details referenced by `ui-spec.md` |
+| `design/HARNESS-CONTROL-MATRIX.md` | Canonical | Per-harness control behavior and capability constraints |
+| `design/session-registry.md` | Canonical | Session identity and storage model details |
+| `design/server-abstraction.md` | Canonical | Local-first vs cloud abstraction boundary |
+| `design/server-lifecycle.md` | Canonical | Single-server lifecycle and lockfile behavior |
+| `design/project-key.md` | Canonical | Project identity model (`project_key`) |
+| `design/overview.md` | Superseded | Replaced by `ui-spec.md`, `backend-gaps.md`, and `component-plan.md` |
+| `design/dashboard-layout.md` | Superseded | Replaced by Sessions-mode layout in `ui-spec.md` |
+| `design/sidebar.md` | Superseded | Replaced by mode shell + list definitions in `ui-spec.md` and `component-plan.md` |
+| `design/session-cards.md` | Superseded | Replaced by `SessionRow` and related component definitions in `component-plan.md` |
+| `design/file-explorer.md` | Superseded | Replaced by Files-mode behavior in `ui-spec.md` and API needs in `backend-gaps.md` |
+| `design/frontend-routing.md` | Superseded | Replaced by current mode-based routing in `ui-spec.md` |
+
+## Superseded Source Work Items
+
 - `app-session-architecture/` (absorbed)
 - `harness-policy-ui-design/` (absorbed)

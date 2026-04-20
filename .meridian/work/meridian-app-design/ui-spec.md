@@ -39,7 +39,7 @@ The app is a single-page, three-mode workspace. Mode is a first-class piece of n
 
 ### Color & type rails
 
-See `visual-direction.md` for the full token set. Highlights:
+See `design/visual-direction.md` for the full token set. Highlights:
 - Body: mono UI font (JetBrains Mono / Berkeley Mono / Commit Mono) at 13 px.
 - Display: a sharp neo-grotesque (e.g. Söhne, Basis Grotesk) for headings and empty states.
 - Dominant neutral surface with a single, high-chroma accent (pick: electric cyan #4cffd7 **or** signal amber #ffb347 — not both). Accent is used for active mode, running-status pulse, and primary actions only.
@@ -151,20 +151,20 @@ User can split the thread pane into 2–4 columns, each bound to a different ses
 
 ---
 
-## 4. Mode: Files (📁) — the artifact & context surface
+## 4. Mode: Files (📁) — the project file explorer
 
-**Purpose:** browse files surfaced by the context backend (work item files, spawn artifacts, repo files within the configured context roots) and diff them. Read-first; edits are out-of-scope for v1 (open in editor is fine).
+**Purpose:** browse files under the current project root (the directory where `meridian app` started) and diff them. Read-first; edits are out-of-scope for v1 (open in editor is fine).
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │ Files                                                           [I]     │
 ├──────────────┬──────────────────────────────────────────────────────────┤
 │ Tree (280px) │ ┌─ Breadcrumb ─────────────────────────────────────────┐│
-│              │ │ work:auth-refactor › design › overview.md            ││
-│ scope: ▾     │ └──────────────────────────────────────────────────────┘│
-│  • Work item │                                                          │
-│  • Spawn art │   ┌─ FileView ─────────────────────────────────────┐    │
-│  • Repo      │   │  markdown rendered   |   raw   |   diff        │    │
+│              │ │ meridian-cli › .meridian › work › ... › overview.md ││
+│              │ └──────────────────────────────────────────────────────┘│
+│              │                                                          │
+│ Project root │   ┌─ FileView ─────────────────────────────────────┐    │
+│   /repo      │   │  markdown rendered   |   raw   |   diff        │    │
 │              │   │                                                 │    │
 │ ▾ design/    │   │  # Meridian App — Overview                      │    │
 │   overview.md│   │                                                 │    │
@@ -178,11 +178,11 @@ User can split the thread pane into 2–4 columns, each bound to a different ses
 
 ### Components
 
-- **ScopeSwitcher** — top of tree; toggles between *Work item* (files under active work_dir), *Spawn artifact* (any selected session's outputs), *Repo* (configured `context_roots`).
-- **FileTree** — virtualized tree with sync-badge per directory (`ahead`, `behind`, `dirty`), file icons per extension.
+- **ProjectRootHeader** — top of tree; shows the bound project root and active branch/sync status.
+- **FileTree** — virtualized tree rooted at the bound project directory, with file icons per extension and optional git status badges.
 - **Breadcrumb** — clickable path segments; terminal segment is the filename with a copy button.
 - **FileView** — tabs for `rendered` (md/html/ipynb/image/json), `raw`, `diff` (against git HEAD or another ref). For large files, streams via the backend.
-- **Inspector (I)** — file metadata: size, mtime, git log (short), contributors, "referenced by" (which sessions mention this file — provided by context backend).
+- **Inspector (I)** — file metadata: size, mtime, git log (short), contributors, and "referenced by" (which sessions mention this file).
 
 ---
 
@@ -235,6 +235,6 @@ Everything that is clickable must be reachable via keyboard; every keyboard acti
 
 ## 9. What this spec deliberately leaves open
 
-- Exact token values (colors, spacing scale) — covered by `visual-direction.md`.
+- Exact token values (colors, spacing scale) — covered by `design/visual-direction.md`.
 - The drag-drop behavior between work items (reassigning a session) — v2.
 - In-browser file editing — v2; v1 offers "reveal in editor" via a local URI scheme.

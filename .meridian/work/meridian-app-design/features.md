@@ -12,7 +12,7 @@ Organized by mode. Each feature is phrased as what the user can *do*, not what t
 - **P0** Open a command palette (⌘K) that can: switch work item, open any session, open any file, launch a new session, run common agents.
 - **P0** Light & dark theme; respects OS preference; manual override in settings.
 - **P0** Git branch indicator in the top bar; click reveals commit / worktree info.
-- **P1** Workspace switcher (multiple repos open in one browser profile).
+- **P1** Open another project by launching a separate `meridian app` instance (one project per app server).
 - **P1** Desktop notifications when a watched session finishes or fails.
 - **P2** Export a work item (sessions + artifacts + reports) as a zip or shareable read-only link.
 
@@ -91,9 +91,8 @@ The "talk to it" surface.
 The "show me the artifacts" surface.
 
 ### Browse
-- **P0** Browse files in the active work item's directory.
-- **P0** Browse artifacts produced by any selected session.
-- **P0** Browse the repo within the configured `context_roots`.
+- **P0** Browse files under the current project's root as a single tree.
+- **P0** Jump to artifacts produced by a selected session within that same project tree.
 - **P0** See git status per directory and per file (modified, added, untracked).
 - **P0** Virtualized tree — handles thousands of files.
 
@@ -116,7 +115,7 @@ The "show me the artifacts" surface.
 
 - **P0** Theme, font, mode rail position (left / bottom), density (compact / comfortable).
 - **P0** Configure which work items are visible (archive toggles).
-- **P0** Configure context backend source (which folders are context roots).
+- **P0** Configure project-scoped indexing rules (include/exclude patterns under the current project root).
 - **P0** Configure default model routing per agent.
 - **P1** Per-work-item preferences (default agent, default model).
 - **P1** Keybinding customization.

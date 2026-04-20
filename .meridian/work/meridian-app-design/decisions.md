@@ -53,13 +53,13 @@ These work items are now superseded by this consolidated design:
 
 ### Decision: Jupyter-like server model
 
-**What**: Single server per machine, additive roots via CLI.
+**What**: One server per project. `meridian app` starts a server bound to the current project root.
 
 **Why**: 
-- Simpler than multi-server model
-- Users don't need to think about ports
-- Roots persist, added via `meridian app <path>` which attaches to existing server
-- Security: adding roots requires local CLI access
+- Matches Jupyter's one-process-per-project mental model
+- Removes project-key routing and multi-repo state from server internals
+- Keeps file APIs simple: one project root, project-relative paths
+- Failure and restart behavior stays isolated to the active project
 
 ### Decision: Port 7676
 
@@ -81,7 +81,7 @@ These work items are now superseded by this consolidated design:
 
 **What**: Sessions are grouped by work items as first-class entities. Repos become background metadata.
 
-**Why**: Work items represent the user's mental model ("what am I doing") better than repos ("where am I"). A user might have multiple work items in one repo, or work spanning repos. Work items are the organizing principle; repos are infrastructure.
+**Why**: Work items represent the user's mental model ("what am I doing") better than repos ("where am I"). A user might have multiple work items in one repo. Cross-repo work can still happen, but across separate `meridian app` instances. Work items are the organizing principle; repos are infrastructure.
 
 **Alternatives rejected**:
 - Repo grouping (original design): forces users to think in filesystem terms
@@ -97,15 +97,15 @@ These work items are now superseded by this consolidated design:
 - Top navigation tabs: wastes vertical space, less discoverable
 - Full-width sidebar: takes too much space from main content
 
-### Decision: Multi-root file explorer via CLI + UI
+### Decision: Single-root project file explorer
 
-**What**: Roots added via `meridian app root add <path>`, browsed in collapsible panel in UI.
+**What**: Files mode renders one project-root tree for the current `meridian app` server. No root-management UI or project-key routing.
 
-**Why**: Mirrors VS Code multi-root workspaces. CLI-driven addition fits developer workflow (add roots from terminal where you already are). UI browsing supports file discovery and attachment.
+**Why**: Keeps Files mode aligned with the server model (one server, one project). Reduces API and state complexity while preserving core file discovery and attachment flows.
 
 **Alternatives rejected**:
-- UI-only root management: requires folder picker dialog, worse UX for CLI-centric users
-- Single root: doesn't support multi-project work
+- Multi-root management in one server: requires project-key routing and larger failure surface
+- Workspace-style root switching in UI: conflicts with the per-project server contract
 
 ### Decision: Quick sessions section for unattached sessions
 
@@ -119,4 +119,54 @@ These work items are now superseded by this consolidated design:
 
 **Why**: Current design is local-first (Jupyter-like, single port). Future cloud version would need different auth, multi-tenancy, etc. Abstraction layer makes this possible without rewriting UI.
 
-**Constraint discovered**: Deep local assumptions in current design (file paths, process spawning, filesystem roots) mean cloud backend would need significant server-side work. Frontend abstraction is necessary but not sufficient. See `design/server-abstraction.md` for details.
+**Constraint discovered**: Deep local assumptions in current design (file paths, process spawning, project-root filesystem access) mean cloud backend would need significant server-side work. Frontend abstraction is necessary but not sufficient. See `backend-gaps.md` and `design/frontend-routing.md` for current canonical API shapes.
+
+---
+
+## 2026-04-20 — Desktop App & Remote Access
+
+### Decision: Chrome app mode, not Electron
+
+**What**: `meridian app` opens Chrome/Edge in `--app` mode (chromeless window), no bundled browser.
+
+**Why**:
+- Zero bundle size (uses installed browser)
+- Same native feel as Electron
+- Devs already have Chrome
+- Simpler than Tauri/Electron packaging
+
+**Fallback**: If Chrome not found, open in default browser tab.
+
+### Decision: Jupyter-like access model
+
+**What**: Three access modes — local (default), LAN (`--host 0.0.0.0`), remote (`--tunnel`).
+
+**Why**:
+- Local needs no auth (localhost trusted)
+- Token auth auto-enabled when exposing outside localhost (no opt-out by default)
+- Cloudflare Tunnel is free, no signup, auto-downloads
+- Matches Jupyter mental model devs already know
+
+**Alternatives rejected**:
+- OAuth/login system: overkill for single-user dev tool
+- Always require auth: friction for local use
+- ngrok: requires signup, less reliable
+
+### Decision: Vite build bundled in Python package
+
+**What**: `pnpm build` → `frontend/dist/` → copied to `src/meridian/app/static/` → served by FastAPI.
+
+**Why**:
+- Single `pip install meridian` includes everything
+- No Node.js required at runtime
+- Same pattern as Jupyter
+
+### Decision: QR code for network access
+
+**What**: When running with `--host 0.0.0.0` or `--tunnel`, display QR code in terminal containing URL + token.
+
+**Why**:
+- Researchers can scan with phone → instant access, no typing
+- Same UX as Jupyter Lab
+- Cookie persists after first scan, no re-auth needed
+- In-app QR also available in Settings for sharing

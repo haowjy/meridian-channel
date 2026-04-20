@@ -1,210 +1,116 @@
 # Dashboard Layout
 
-## Work-Item-Centric Organization
+## Scope
 
-The dashboard is organized around **work items as first-class entities**. Sessions are grouped under their work items, with unattached sessions in a separate section.
+This document specifies the **Sessions mode** viewport (`/sessions`) from `../ui-spec.md`.
 
-This replaces the earlier repo-grouped design. Work items are the user's mental model for "what am I doing" — repos are infrastructure.
+- Canonical global shell (ModeRail/TopBar/StatusBar) lives in `../ui-spec.md`.
+- Canonical endpoint contract lives in `../backend-gaps.md`.
 
-## Layout Structure
-
-```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│ ┌────────┬───────────────────────────────────────────────────────────────────┤
-│ │        │                                                                   │
-│ │ Activ- │  ┌─────────────────────────────────────────────────────────────┐  │
-│ │ ity    │  │ ACTIVE WORK                                                 │  │
-│ │ Bar    │  ├─────────────────────────────────────────────────────────────┤  │
-│ │        │  │ ┌─────────────────────────────────────────────────────────┐ │  │
-│ │ [🏠]   │  │ │ ● auth-middleware                              1h ago   │ │  │
-│ │ [📁]   │  │ │   Implement JWT validation for API routes               │ │  │
-│ │ [⚡]   │  │ │                                                          │ │  │
-│ │        │  │ │   ● p42 orchestrator  ● p43 coder  ✓ p44 reviewer       │ │  │
-│ │        │  │ └─────────────────────────────────────────────────────────┘ │  │
-│ │        │  │ ┌─────────────────────────────────────────────────────────┐ │  │
-│ │        │  │ │ ● spawn-tree-view                              30m ago  │ │  │
-│ │        │  │ │   Build spawn tree visualization component              │ │  │
-│ │        │  │ │                                                          │ │  │
-│ │        │  │ │   ● p51 coder                                           │ │  │
-│ │        │  │ └─────────────────────────────────────────────────────────┘ │  │
-│ │        │  └─────────────────────────────────────────────────────────────┘  │
-│ │        │                                                                   │
-│ │        │  ┌─────────────────────────────────────────────────────────────┐  │
-│ │        │  │ QUICK SESSIONS                                              │  │
-│ │        │  ├─────────────────────────────────────────────────────────────┤  │
-│ │        │  │ ┌─────────────────────┐ ┌─────────────────────┐             │  │
-│ │        │  │ │ ○ p60               │ │ ✓ p55               │             │  │
-│ │        │  │ │ Fix that one bug... │ │ What's the syntax...│             │  │
-│ │        │  │ │ claude · opus       │ │ claude · sonnet     │             │  │
-│ │        │  │ └─────────────────────┘ └─────────────────────┘             │  │
-│ │        │  └─────────────────────────────────────────────────────────────┘  │
-│ │        │                                                                   │
-│ │ ────── │  ┌─────────────────────────────────────────────────────────────┐  │
-│ │ [⚙]   │  │                                                              │  │
-│ │        │  │     What would you like to work on?                         │  │
-│ │        │  │     ┌─────────────────────────────────────────────────────┐ │  │
-│ │        │  │     │                                                     │ │  │
-│ │        │  │     │                                                     │ │  │
-│ │        │  │     └─────────────────────────────────────────────────────┘ │  │
-│ │        │  │     [Quick ○ ● Thorough]            [Advanced ▾]   [Send]  │  │
-│ │        │  └─────────────────────────────────────────────────────────────┘  │
-│ └────────┴───────────────────────────────────────────────────────────────────┤
-│                                                                 Status Bar   │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
-
-## Activity Bar
-
-Vertical icon bar on the left edge (48px wide), providing top-level navigation:
-
-| Icon | Label | Target |
-|------|-------|--------|
-| 🏠 Home | Dashboard view |
-| 📁 Explorer | File explorer panel |
-| ⚡ Sessions | All sessions list |
-| ─── | Separator |
-| ⚙ Settings | Settings panel |
-
-The activity bar is always visible. Clicking an icon either:
-1. Navigates to a view (Home, Sessions)
-2. Toggles a side panel (Explorer, Settings)
-
-## Sections
-
-### Active Work
-
-Work items with at least one non-terminal session. Ordered by most recent activity.
-
-Each work item card shows:
-- Status indicator (● running if any child is running)
-- Work item ID (slug)
-- Description (from work item metadata or first session prompt)
-- Time since last activity
-- Session chips showing child sessions with status
-
-### Quick Sessions
-
-Sessions not attached to any work item. These are exploratory, one-off, or not-yet-organized work.
-
-Displayed as smaller cards in a grid or list. Each shows:
-- Status indicator
-- Spawn ID
-- Prompt preview (first ~50 chars)
-- Harness + model badges
-
-### Composer (New Session)
-
-Always visible at the bottom of the dashboard. The primary entry point for new work.
+## Sessions Mode Structure
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                                                                 │
-│  What would you like to work on?                                │
-│                                                                 │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  [Textarea: initial prompt]                                     │
-│                                                                 │
-├─────────────────────────────────────────────────────────────────┤
-│  [Quick ○ ● Thorough]                   [Advanced ▾]    [Send]  │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Sessions                                           [+ New session]  [I] │
+├─────────────────────────────────────────────────────────────────────────┤
+│ Filters: all | running | queued | done | failed   work: ▾   agent: ▾   │
+├─────────────────────────────────────────────────────────────────────────┤
+│ ▾ auth-refactor                         6 sessions · git:ahead 1 · ↻   │
+│   ● p281  plan               claude-opus-4.7   running   2m    42%     │
+│   ● p280  frontend-coder     claude-sonnet     running   4m     —      │
+│   ✓ p274  designer           claude-opus-4.7   done     12m             │
+│                                                                         │
+│ ▸ (unattached)                          2 sessions                      │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Effort Toggle**: Quick (fast, cheaper) vs Thorough (deeper thinking). Default: Thorough.
+## Layout Rules
 
-**Advanced Panel** (collapsed by default):
-- Harness selector (claude/codex/opencode)
-- Model dropdown
-- Agent profile dropdown
-- Work item selector (attach to existing or create new)
+- Group rows by `work_id`, with a dedicated `(unattached)` group for null `work_id`.
+- Default order: groups by latest activity desc; rows within group by created_at desc.
+- `SessionRow` click switches to `/chat` and selects that spawn.
+- `+ New session` opens modal; creation does not require route change before submit.
+- StatusBar counters filter this mode when clicked.
 
-## Interactions
+## Key Components
 
-### Work Item Card
+### WorkItemGroup
 
-| Action | Behavior |
-|--------|----------|
-| Click card body | Navigate to work item detail view |
-| Click session chip | Navigate to that session |
-| Hover card | Subtle highlight, show quick actions |
-| Right-click | Context menu: archive, rename, delete |
+- Header fields: `work_id`, session count, git sync badge, last activity.
+- Header actions: expand/collapse, optional sync trigger.
 
-### Session Card (Quick Sessions)
+### SessionRow
 
-| Action | Behavior |
-|--------|----------|
-| Click | Navigate to session view |
-| Hover | Show "attach to work" action |
-| Right-click | Context menu: attach, cancel, delete |
+Fixed columns:
 
-### Composer
-
-| Action | Behavior |
-|--------|----------|
-| Enter (empty field) | No-op |
-| Enter (with text) | Submit, create session |
-| Shift+Enter | Newline |
-| Tab in Advanced | Cycle through controls |
-
-## Data Requirements
-
-### Work Items Endpoint
-
-`GET /api/work-items` (new endpoint)
-
-```json
-{
-  "items": [
-    {
-      "work_id": "auth-middleware",
-      "description": "Implement JWT validation for API routes",
-      "status": "active",
-      "repo_root": "/home/user/meridian-cli",
-      "repo_name": "meridian-cli",
-      "sessions": [
-        {
-          "session_id": "a7f3b2c1",
-          "spawn_id": "p42",
-          "status": "running",
-          "agent": "dev-orchestrator",
-          "created_at": "..."
-        }
-      ],
-      "last_activity": "2026-04-19T14:30:00Z"
-    }
-  ]
-}
+```
+[status-dot] [spawn_id] [agent] [model] [state-text] [elapsed] [progress]
 ```
 
-### Unattached Sessions
+Row actions:
 
-`GET /api/sessions?unattached=true`
+- Primary click: open in `/chat`.
+- Overflow menu: cancel, fork, archive, open logs.
 
-Returns sessions where `work_id` is null.
+### Filter Bar
+
+- Status chip set (`all/running/queued/done/failed`).
+- Work and agent selectors.
+- Filter state is URL/state-persisted for reload and deep-linking.
+
+### New Session Dialog
+
+Required fields:
+
+- `agent`
+- `prompt`
+
+Optional fields:
+
+- `model`
+- `work_id`
+- `reference_files[]`
+
+Footer shows resolved spawn payload preview.
+
+## Data Requirements (canonical)
+
+### Sessions list
+
+`GET /api/spawns?work_id=&status=&agent=&limit=&cursor=`
+
+### Sessions counters
+
+`GET /api/spawns/stats?work_id=`
+
+### Work metadata
+
+`GET /api/work`
+
+Used for work names, sync badges, and ordering hints.
+
+### Live updates
+
+`GET /api/stream` (SSE) or `WS /api/stream`
+
+Expected events used by this mode:
+
+- `spawn.created`
+- `spawn.state_changed`
+- `spawn.finalized`
+- `spawn.activity_tick`
+- `work_item.sync_changed`
+- `stats.updated`
 
 ## Empty States
 
-### No Work Items
+- No sessions: show CTA to create first session.
+- No rows after filter: show "No sessions match current filters" and clear-filter action.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                                                                 │
-│  No active work yet                                             │
-│                                                                 │
-│  Start a new session below, or create a work item               │
-│  from the CLI with `meridian work start`                        │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+## Non-canonical content removed
 
-### No Quick Sessions
+The following legacy assumptions were removed from this doc:
 
-Section simply doesn't appear.
-
-## Responsive Behavior
-
-| Width | Behavior |
-|-------|----------|
-| < 1280px | Work cards stack vertically, session chips wrap |
-| 1280-1600px | Standard layout |
-| > 1600px | Work cards can show more session chips |
+- `/api/work-items`
+- `/api/sessions?unattached=true`
+- Activity bar routes (`Home/Explorer/Sessions`) as top-level navigation model

@@ -68,8 +68,7 @@ Rule of thumb: **the chat surface is solid — reuse everything under `features/
 
 | Component | Location | Notes |
 |---|---|---|
-| `FilesPage` | `frontend/src/features/files/FilesPage.tsx` | Tree + FileView layout |
-| `ScopeSwitcher` | `…/files/ScopeSwitcher.tsx` | Work / Spawn / Repo |
+| `FilesPage` | `frontend/src/features/files/FilesPage.tsx` | Single-root project tree + FileView layout |
 | `FileTree` | `…/files/FileTree.tsx` | Virtualized; needs `@tanstack/react-virtual` or similar |
 | `FileTreeNode` | `…/files/FileTreeNode.tsx` | Row primitive |
 | `Breadcrumb` | `frontend/src/shared/Breadcrumb.tsx` | Reusable |

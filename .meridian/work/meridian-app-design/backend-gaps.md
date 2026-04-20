@@ -56,7 +56,7 @@ Work items are first-class, git-synced, and managed by the **context backend** (
 | Method | Path | Purpose | Status |
 |---|---|---|---|
 | `GET` | `/api/work` | List work items with sync state: `[{ work_id, name, work_dir, sync: { state, ahead, behind, dirty, last_synced_at }, session_counts: {...}, last_activity_at }]`. | **NEW** |
-| `GET` | `/api/work/{work_id}` | Full work item detail: paths, config, roots, recent artifacts. | **NEW** |
+| `GET` | `/api/work/{work_id}` | Full work item detail: paths, config, project root, recent artifacts. | **NEW** |
 | `POST`| `/api/work` | Create new work item (name, optional template). | **NEW** |
 | `POST`| `/api/work/{work_id}/sync` | Trigger git pull/push reconcile. Returns a sync operation id. | **NEW** |
 | `GET` | `/api/work/{work_id}/sync/{op_id}` | Poll sync op. | **NEW** |
@@ -70,17 +70,17 @@ Live updates (via `/api/stream`): `work_item.sync_changed`, `work_item.activity`
 
 ## 4. Files
 
-Backed by the context backend's index + raw fs reads within allowed roots.
+Backed by the context backend's index + raw fs reads within the current project root.
 
 | Method | Path | Purpose | Status |
 |---|---|---|---|
-| `GET` | `/api/files/tree?scope=work|spawn|repo&id=<work_id/spawn_id>&path=` | Directory tree (lazy, children-only). Returns `[{ name, kind, size, mtime, git_status }]`. | **NEW** |
-| `GET` | `/api/files/read?scope=&id=&path=&range=` | File content, range-supported for large files. | **NEW** |
-| `GET` | `/api/files/diff?scope=&id=&path=&ref_a=&ref_b=` | Unified diff between two refs (or HEAD). | **NEW** |
-| `GET` | `/api/files/meta?scope=&id=&path=` | Metadata: size, mtime, git log (short), referenced-by (sessions). | **NEW** |
-| `GET` | `/api/files/search?q=&scope=&id=` | Fuzzy filename search, used by `⌘K` and `@file` mention. | **NEW** |
+| `GET` | `/api/files/tree?path=` | Directory tree (lazy, children-only), rooted at project root. Returns `[{ name, kind, size, mtime, git_status }]`. | **NEW** |
+| `GET` | `/api/files/read?path=&range=` | File content, range-supported for large files. `path` is project-root-relative. | **NEW** |
+| `GET` | `/api/files/diff?path=&ref_a=&ref_b=` | Unified diff between two refs (or HEAD) for a project-root-relative path. | **NEW** |
+| `GET` | `/api/files/meta?path=` | Metadata: size, mtime, git log (short), referenced-by (sessions). | **NEW** |
+| `GET` | `/api/files/search?q=&path_prefix=` | Fuzzy filename search under project root, used by `⌘K` and `@file` mention. | **NEW** |
 
-Security constraints: every path is validated against the scope's allowed roots server-side; symlinks that escape are refused.
+Security constraints: every path is validated as project-root-relative server-side; symlinks that escape project root are refused.
 
 ---
 
@@ -128,3 +128,48 @@ Short list the @frontend-coder and backend owner should treat as the v1 cut:
 8. `GET /api/agents`, `GET /api/models`.
 
 Everything else is either already present or can wait for fast-follow.
+
+---
+
+## 9. Harness → AG-UI Translation Gaps (from smoke test 2026-04-20)
+
+### Current State
+
+| Harness | Raw Events Observed | Mapper Handles | Status |
+|---------|---------------------|----------------|--------|
+| Claude | `assistant`, `result`, `stream_event` | `assistant`, `stream_event`, `result` | ✅ Works |
+| Codex | `item/agentMessage/delta`, `item/started`, `item/completed`, `turn/completed` | `item/agentMessage`, `item/reasoning`, `item/commandExecution`, `item/fileChange` | ⚠️ **Delta events not mapped** |
+| OpenCode | `session.updated`, `message.updated`, `server.heartbeat`, `sync`, `session.diff` | `agent_message_chunk`, `agent_thought_chunk`, `tool_call` | ❌ **Nothing maps** |
+
+### Required Fixes
+
+**Codex mapper** (`src/meridian/lib/app/agui_mapping/codex.py`):
+- Add handler for `item/agentMessage/delta` → `TEXT_MESSAGE_CONTENT`
+- Add handler for `item/started` → `TEXT_MESSAGE_START` or `STEP_STARTED`
+- Add handler for `item/completed` → `TEXT_MESSAGE_END` or `STEP_FINISHED`
+
+**OpenCode mapper** (`src/meridian/lib/app/agui_mapping/opencode.py`):
+- Add handler for `message.updated` → extract assistant content → `TEXT_MESSAGE_*`
+- Add handler for `session.updated` → may contain title/summary
+- Handle `server.heartbeat` as keep-alive (no AG-UI event needed)
+
+### Multi-Session Streaming Gaps
+
+Current limitations in `src/meridian/lib/app/ws_endpoint.py`:
+- One WebSocket client per spawn (rejects second client)
+- No multiplexed feed for multiple spawns
+- `output.jsonl` stores raw harness events, not AG-UI events
+
+**Required for UI:**
+- Allow multiple subscribers per spawn
+- Add `/api/stream` SSE endpoint for multiplexed spawn events
+- Consider storing AG-UI events alongside raw events for replay
+
+### Concurrent Session Distinguishability
+
+✅ Works — each harness includes session identifiers:
+- Claude: `session_id`
+- Codex: `threadId`, `turnId`
+- OpenCode: `sessionID`
+
+Meridian adds `spawn_id` wrapper in `output.jsonl`.

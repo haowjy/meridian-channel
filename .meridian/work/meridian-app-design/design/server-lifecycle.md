@@ -1,60 +1,64 @@
 # Server Lifecycle
 
-## One Server Per Machine
+## One Server Per Project Root
 
-The entire machine gets at most one `meridian app` server process. The server binds to a port, serves the web UI, and manages spawn connections across all repos. Any `meridian app` invocation from any repo either starts the global server or opens the browser to the existing instance.
+`meridian app` is project-scoped.
 
-This is the Jupyter model — one dashboard at localhost:8420 showing everything.
+- Start command from a project directory.
+- Server root is that directory.
+- UI served at `http://localhost:7676`.
+- Sessions and spawns shown by that server belong to that project only.
+
+This is the Jupyter model: launch in a directory, browse that directory.
 
 ## State Files
 
-### User-Level Lockfile: `~/.meridian/app/server.json`
+### Project-Level Lockfile: `<project_root>/.meridian/app/server.json`
 
-Written atomically on server start, deleted on clean shutdown. Contains everything needed to reconnect to or validate the running server.
+Written atomically on server start, deleted on clean shutdown. Contains what is needed to reconnect or validate the running server for this project.
 
 ```json
 {
   "pid": 12345,
-  "port": 8420,
+  "port": 7676,
   "host": "127.0.0.1",
-  "started_at": "2026-04-09T14:30:00Z"
+  "project_root": "/home/user/meridian-cli",
+  "started_at": "2026-04-19T14:30:00Z"
 }
 ```
 
-This answers: "Is there already a server running on this machine, and how do I reach it?"
-
-No `repo_root` or `project_key` field — the server is machine-scoped, not project-scoped. Sessions carry project/workspace context.
-
-### No Server Registry Directory
-
-With a single-server model, `~/.meridian/app/servers/` is unnecessary. There is at most one server, tracked by one lockfile. `meridian app list` reads the single lockfile.
+No global app registry and no root add/remove state.
 
 ## Startup Flow (`meridian app`)
 
-The startup flow is serialized under `~/.meridian/app/server.flock` to prevent concurrent starts from racing. The lock is held from stale-check through bind + lockfile write, then released before the server begins serving requests.
+Startup is serialized under `<project_root>/.meridian/app/server.flock` so concurrent starts in the same project do not race.
 
 ```text
-0. Ensure ~/.meridian/app/ exists
-1. Acquire flock on ~/.meridian/app/server.flock
-2. Read ~/.meridian/app/server.json
-   - If PID alive: open existing server and exit
+0. Resolve current working directory as project_root
+1. Ensure <project_root>/.meridian/app/ exists
+2. Acquire flock on <project_root>/.meridian/app/server.flock
+3. Read <project_root>/.meridian/app/server.json
+   - If PID alive: open existing project server and exit
    - If PID dead: delete stale lockfile and continue
-3. Bind listening socket
-4. Write ~/.meridian/app/server.json
-5. Release startup flock
-6. Start uvicorn using the pre-bound socket
-7. Open browser unless --no-browser
+4. Bind listening socket (default 127.0.0.1:7676)
+5. Write <project_root>/.meridian/app/server.json
+6. Release startup flock
+7. Start uvicorn using the pre-bound socket
+8. Open browser unless --no-browser
 ```
 
-If flock acquisition times out, print an error suggesting another `meridian app` is starting and exit.
+If flock acquisition times out, print an error suggesting another `meridian app` is starting for this project and exit.
 
 ### Stale Server Detection
 
-A lockfile is stale if and only if the PID is dead (`os.kill(pid, 0)` raises `ProcessLookupError`). If the PID is alive, the server is considered running even if the health check fails — it may still be in the startup window.
+A lockfile is stale if and only if the PID is dead (`os.kill(pid, 0)` raises `ProcessLookupError`).
 
-### Port Selection — Bind and Hold
+### Port Selection
 
-To avoid a race between port probing and uvicorn binding, startup binds the socket first and hands that file descriptor to uvicorn. This removes the gap where the lockfile names a port that is not yet owned.
+Default port is `7676`. If the port is already in use by another process, startup fails with a clear message:
+
+- show conflicting address (`127.0.0.1:7676`)
+- recommend `meridian app stop` in the owning project or `--port <n>`
 
 ## Shutdown Flow
 
@@ -63,37 +67,41 @@ To avoid a race between port probing and uvicorn binding, startup binds the sock
 ```text
 1. uvicorn receives signal
 2. FastAPI lifespan shutdown begins
-3. Set draining flag — reject new POST /api/sessions
-4. Wait for in-flight session-creation requests to finish (10s safety timeout)
+3. Set draining flag — reject new POST /api/spawns
+4. Wait for in-flight spawn-creation requests to finish (10s safety timeout)
 5. SpawnManager.shutdown() stops active harness connections
-6. Delete ~/.meridian/app/server.json
+6. Delete <project_root>/.meridian/app/server.json
 7. Exit
 ```
 
 ### Crash
 
-If the process is killed, the lockfile remains. The next startup detects the dead PID, deletes the stale file, and proceeds. Recovery is startup behavior.
+If process is killed, lockfile remains. Next startup in the same project detects dead PID, deletes stale file, and proceeds.
 
 ## Server Discovery (`meridian app list`)
 
-With a single-server model, discovery is simple:
+Discovery is project-local:
 
 ```text
-1. Read ~/.meridian/app/server.json
-2. If missing: "No server running"
-3. If PID dead: delete stale file, "No server running"
-4. If PID alive: optionally probe /api/health and print status
+1. Resolve current working directory as project_root
+2. Read <project_root>/.meridian/app/server.json
+3. If missing: "No server running for this project"
+4. If PID dead: delete stale file, "No server running for this project"
+5. If PID alive: optionally probe /api/health and print status
 ```
 
 ## Server Stop (`meridian app stop`)
 
+Stops the server for the current project root.
+
 ```text
-1. Read ~/.meridian/app/server.json
-2. If missing or stale: report no server running
-3. Send SIGTERM
-4. Wait up to 5s
-5. If still alive: SIGKILL
-6. Clean up lockfile if still present
+1. Resolve current working directory as project_root
+2. Read <project_root>/.meridian/app/server.json
+3. If missing or stale: report no server running
+4. Send SIGTERM
+5. Wait up to 5s
+6. If still alive: SIGKILL
+7. Clean up lockfile if still present
 ```
 
 ## Health Endpoint
@@ -103,56 +111,245 @@ With a single-server model, discovery is simple:
 ```json
 {
   "status": "ok",
-  "port": 8420,
+  "port": 7676,
   "host": "127.0.0.1",
   "pid": 12345,
+  "project_root": "/home/user/meridian-cli",
   "active_sessions": 5,
   "active_spawns": 3,
-  "projects": ["project-alpha", "project-beta", "lib-core"],
   "uptime_secs": 123.4
 }
 ```
 
-This endpoint is unauthenticated even when future `--host` auth exists, so discovery probes can still reach it.
-
 ## Edge Cases
 
-**Two terminals run `meridian app` simultaneously.** The startup flock serializes them. The first process writes the lockfile; the second finds it and opens the existing server.
+**Two terminals run `meridian app` in the same project.**
+Startup flock serializes them. First process writes lockfile; second process opens existing server.
 
-**Server crashes while spawns are running.** Spawn state is already persisted to `~/.meridian/projects/<project_key>/spawns.jsonl` and `~/.meridian/projects/<project_key>/spawns/<spawn_id>/...`. On next start, the project-scoped spawn store shows the last recorded state. Browser WebSocket connections break and the frontend shows disconnected status.
+**User starts `meridian app` in project A and then in project B on default port.**
+Project B fails to bind `127.0.0.1:7676` and prints conflict guidance. This is expected; one port cannot host two project servers.
 
-**User deletes `~/.meridian/app/` while the server is running.** The server keeps running in memory. A later `meridian app` may start a second server because the lockfile is gone. This is user-induced state corruption and does not need special recovery logic.
+**Server crashes while spawns are running.**
+Spawn state is already persisted under `<project_root>/.meridian/`. Next startup in that project restores visibility from persisted state.
 
-**Lockfile points to the wrong port.** If the PID is still alive, the server is treated as running and the client opens the lockfile URL. This is manual corruption of state files; the recovery path is `meridian app stop` and restart.
+**User deletes `<project_root>/.meridian/app/` while server is running.**
+Server keeps running in memory. A later `meridian app` may start a second process because lockfile is gone. This is user-induced state corruption and does not need special recovery logic.
 
-**Repo is deleted while sessions reference it.** The session still resolves because session metadata and spawn state are keyed by `project_key`, not by the raw path. The server can still read status from `~/.meridian/projects/<project_key>/...`. Operations that need the workspace path should fail with a repo-unavailable error.
-
-**Two spawns from different repos have the same spawn_id.** This is expected. Spawn IDs are project-scoped, not globally unique across the machine. The active-session key is `(project_key, spawn_id)`, and session IDs remain globally unique URL aliases.
+**Project directory moved or deleted while server is running.**
+Health endpoint should flip to degraded and file APIs should return project-unavailable errors.
 
 ## File Layout
 
 ```text
-~/.meridian/
-  app/
-    server.json           # Server lockfile
-    server.flock          # Startup serialization flock
-    sessions.jsonl        # Session registry: session_id → project_key/spawn_id/repo_root
-  projects/
-    <project_key>/
-      spawns.jsonl        # Project-scoped spawn store
-      spawns.jsonl.flock  # Spawn-store lock
-      spawns/
-        <spawn_id>/
-          output.jsonl
-          inbound.jsonl
-          control.sock
-          harness.pid
-          heartbeat
-          report.md
-          home/
-          config/
+<project_root>/
+  .meridian/
+    app/
+      server.json           # Project-scoped server lockfile
+      server.flock          # Startup serialization flock
+      sessions.jsonl        # Session registry for this project
+    spawns.jsonl            # Project-scoped spawn store
+    spawns.jsonl.flock      # Spawn-store lock
+    spawns/
+      <spawn_id>/
+        output.jsonl
+        inbound.jsonl
+        control.sock
+        harness.pid
+        heartbeat
+        report.md
+        home/
+        config/
 ```
 
-The `~/.meridian/app/` directory is created on first `meridian app` invocation. Each `~/.meridian/projects/<project_key>/` directory is created on first spawn for that project.
+The `.meridian/app/` directory is created on first `meridian app` invocation in a project.
 
-Runtime directories are keyed only by `project_key` and `spawn_id`. Neither app `session_id` nor harness `chat_id` creates its own filesystem taxonomy.
+---
+
+---
+
+## Access Modes
+
+Jupyter-like access model. Default is local-only; token auth auto-enabled for any non-localhost binding.
+
+### Local (default)
+
+```bash
+meridian app
+# Binds to 127.0.0.1:7676
+# Opens chrome --app=http://localhost:7676
+# No auth required — localhost trusted
+```
+
+### LAN Access
+
+```bash
+meridian app --host 0.0.0.0
+# Binds to all interfaces
+# Token auth auto-enabled
+# Prints: http://192.168.1.x:7676?token=<generated>
+```
+
+### Remote (Tunnel)
+
+```bash
+meridian app --tunnel
+# Starts cloudflared tunnel
+# Token auth auto-enabled
+# Prints: https://abc123.trycloudflare.com?token=<generated>
+```
+
+### SSH Forward (manual)
+
+```bash
+# User handles this themselves — stays localhost, no token needed
+ssh -L 7676:localhost:7676 user@server
+```
+
+---
+
+## Security Model
+
+| Mode | Binding | Auth | HTTPS |
+|------|---------|------|-------|
+| Local | 127.0.0.1 | None | No |
+| LAN | 0.0.0.0 | **Auto-enabled** | No (optional) |
+| Tunnel | 127.0.0.1 + tunnel | **Auto-enabled** | Yes (tunnel provides) |
+
+**Rule: If `host != 127.0.0.1` or `tunnel = true`, token auth is required. No opt-out.**
+
+To explicitly disable (unsafe, not recommended):
+```bash
+meridian app --host 0.0.0.0 --no-token  # prints warning
+```
+
+### Token Auth
+
+```python
+# Generated on first run, persisted
+token = secrets.token_urlsafe(32)
+save_to("~/.meridian/app-token")
+
+# Auto-enabled when exposing outside localhost
+def requires_token(config) -> bool:
+    return config.host != "127.0.0.1" or config.tunnel
+
+# Validated on every request (when enabled)
+@app.middleware("http")
+async def check_token(request, call_next):
+    if requires_token(config):
+        if request.query_params.get("token") != stored_token:
+            if request.cookies.get("meridian-token") != stored_token:
+                return Response("Unauthorized", status_code=401)
+    return await call_next(request)
+```
+
+Token passed via:
+1. Query param: `?token=xxx` (initial access, sets cookie)
+2. Cookie: `meridian-token` (subsequent requests)
+
+### Config
+
+```toml
+# meridian.toml or ~/.meridian/config.toml
+[app]
+host = "127.0.0.1"      # "0.0.0.0" for LAN
+port = 7676
+tunnel = false          # auto-start cloudflare tunnel
+# token auth auto-enabled when host != localhost or tunnel = true
+```
+
+---
+
+## CLI
+
+```bash
+meridian app                     # Local, no auth
+meridian app --host 0.0.0.0      # LAN, token auth (automatic)
+meridian app --tunnel            # Remote, token auth (automatic)
+meridian app --port 8080         # Custom port
+meridian app --no-open           # Don't open browser
+meridian app token               # Print current token
+meridian app token --reset       # Generate new token
+```
+
+---
+
+## QR Code Access
+
+When running with network access, display a QR code for easy mobile/device access.
+
+### Terminal Output
+
+```
+$ meridian app --host 0.0.0.0
+
+  ┌────────────────────────────────────────┐
+  │  Meridian running on port 7676         │
+  │                                        │
+  │  Local:   http://localhost:7676        │
+  │  Network: http://192.168.1.42:7676     │
+  │                                        │
+  │  Scan to connect:                      │
+  │                                        │
+  │    █████████████████████████████       │
+  │    █████████████████████████████       │
+  │    ████ ▄▄▄▄▄ █ ▄██▀█ ▄▄▄▄▄ ████       │
+  │    ████ █   █ █▀█ ▀█ █   █ ████       │
+  │    ████ █▄▄▄█ █▀▄▀▄█ █▄▄▄█ ████       │
+  │    █████████████████████████████       │
+  │    █████████████████████████████       │
+  │                                        │
+  │  Token: abc123...  (copied to clipboard)│
+  └────────────────────────────────────────┘
+
+Press Ctrl+C to stop
+```
+
+### QR Code Contains
+
+Full URL with token embedded:
+```
+http://192.168.1.42:7676?token=<full-token>
+```
+
+Scanning → opens browser → cookie set automatically → no typing required.
+
+### Implementation
+
+```python
+# pip install qrcode[pil] — or use segno (pure python, no PIL)
+import qrcode
+
+def print_qr_access(host: str, port: int, token: str):
+    url = f"http://{host}:{port}?token={token}"
+    
+    qr = qrcode.QRCode(border=1)
+    qr.add_data(url)
+    qr.print_ascii(invert=True)  # Terminal-friendly
+    
+    # Also copy token to clipboard if available
+    try:
+        import pyperclip
+        pyperclip.copy(token)
+        print(f"Token copied to clipboard")
+    except ImportError:
+        print(f"Token: {token}")
+```
+
+### When to Show QR
+
+| Mode | QR Code |
+|------|---------|
+| Local (`127.0.0.1`) | No — not useful |
+| LAN (`0.0.0.0`) | **Yes** |
+| Tunnel | **Yes** — shows tunnel URL |
+
+### In-App QR
+
+Also accessible from the UI for sharing:
+
+```
+Settings → Share Access → [QR Code] [Copy Link]
+```
+
+Useful when terminal is no longer visible.
