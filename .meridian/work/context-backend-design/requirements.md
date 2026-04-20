@@ -105,25 +105,38 @@ Custom contexts export as `MERIDIAN_CONTEXT_<NAME>_DIR`.
 
 ### CLI
 
+The existing `meridian context` command is extended (not replaced) to show the context catalog alongside runtime info:
+
 ```bash
 $ meridian context
-work: /home/user/gitrepos/meridian-docs/meridian-cli/work (git)
-kb: /home/user/gitrepos/meridian-docs/meridian-cli/kb (git)
+repo_root: /home/user/gitrepos/meridian-cli
+state_root: /home/user/.meridian/projects/abc123
+depth: 0
+
+contexts:
+  work: /home/user/gitrepos/meridian-docs/meridian-cli/work (git)
+  kb: /home/user/gitrepos/meridian-docs/meridian-cli/kb (git)
 
 $ meridian context work
 /home/user/gitrepos/meridian-docs/meridian-cli/work
 
 $ meridian context --verbose
-work:
-  source: git
-  path: ~/gitrepos/meridian-docs/meridian-cli/work
-  resolved: /home/user/gitrepos/meridian-docs/meridian-cli/work
+repo_root: /home/user/gitrepos/meridian-cli
+state_root: /home/user/.meridian/projects/abc123
+depth: 0
 
-kb:
-  source: git
-  path: ~/gitrepos/meridian-docs/meridian-cli/kb
-  resolved: /home/user/gitrepos/meridian-docs/meridian-cli/kb
+contexts:
+  work:
+    source: git
+    path: ~/gitrepos/meridian-docs/meridian-cli/work
+    resolved: /home/user/gitrepos/meridian-docs/meridian-cli/work
+  kb:
+    source: git
+    path: ~/gitrepos/meridian-docs/meridian-cli/kb
+    resolved: /home/user/gitrepos/meridian-docs/meridian-cli/kb
 ```
+
+This replaces the current `work_dir` and `fs_dir` fields with a unified `contexts` section.
 
 ## Success Criteria
 
@@ -140,3 +153,27 @@ kb:
 ## Dependencies
 
 - **hook-system-design**: Git sync behavior implemented via `git-autosync` built-in hook
+
+## Implementation Notes
+
+### work-archive Handling
+
+When `context.work` is externalized, `work-archive/` follows automatically as a sibling:
+- If `context.work.path = ~/docs/proj/work`, then archive lives at `~/docs/proj/work-archive/`
+- Archive is NOT a separate context — it's an implementation detail of work lifecycle
+- `meridian work done` moves items from `work/` to `work-archive/` within the same parent
+
+### Hook Payload for git-autosync
+
+The `git-autosync` hook needs to sync ALL git-backed contexts, not just `work_dir`. Implementation:
+
+1. Extend `HookContext` with `git_context_paths: tuple[str, ...]` — all paths where `source = "git"`
+2. `git-autosync` iterates this list, runs `git add .` from each path
+3. Auto-registration happens once per git repo root (not per context) to avoid duplicate syncs
+
+### Config Loading
+
+`meridian.local.toml` support (implementation in progress):
+- Precedence: `meridian.local.toml` > `meridian.toml` > `~/.meridian/config.toml`
+- Local file is gitignored by default
+- Unknown sections like `[context]` will be parsed once config schema is extended
