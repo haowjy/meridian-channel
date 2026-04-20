@@ -66,6 +66,7 @@ class StateRootPaths(BaseModel):
     spawns_flock: Path
     sessions_jsonl: Path
     sessions_flock: Path
+    hook_state_json: Path
     session_id_counter: Path
     session_id_counter_flock: Path
     sessions_dir: Path
@@ -87,6 +88,7 @@ class StateRootPaths(BaseModel):
             spawns_flock=root_dir / "spawns.jsonl.flock",
             sessions_jsonl=root_dir / "sessions.jsonl",
             sessions_flock=root_dir / "sessions.jsonl.flock",
+            hook_state_json=root_dir / "hook-state.json",
             session_id_counter=root_dir / "session-id-counter",
             session_id_counter_flock=root_dir / "session-id-counter.flock",
             sessions_dir=root_dir / "sessions",

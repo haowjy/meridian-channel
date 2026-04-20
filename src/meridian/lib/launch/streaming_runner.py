@@ -18,7 +18,7 @@ import structlog
 from meridian.lib.config.settings import MeridianConfig
 from meridian.lib.core.clock import Clock, RealClock
 from meridian.lib.core.domain import Spawn
-from meridian.lib.core.lifecycle import SpawnLifecycleService
+from meridian.lib.core.lifecycle import create_lifecycle_service
 from meridian.lib.core.spawn_lifecycle import (
     has_durable_report_completion,
     resolve_execution_terminal_state,
@@ -363,7 +363,7 @@ async def run_streaming_spawn(
         spawn_id,
         runner_pid=os.getpid(),
     )
-    lifecycle_service = SpawnLifecycleService(state_root)
+    lifecycle_service = create_lifecycle_service(repo_root, state_root)
     try:
         await manager.start_spawn(config, run_spec)
         await manager._start_heartbeat(spawn_id)  # pyright: ignore[reportPrivateUsage]
@@ -506,7 +506,7 @@ async def _run_streaming_attempt(
     timed_out = False
     terminated_by_report_watchdog = False
     terminal_outcome: TerminalEventOutcome | None = None
-    lifecycle_service = SpawnLifecycleService(state_root)
+    lifecycle_service = create_lifecycle_service(manager.repo_root, state_root)
 
     try:
         connection = await manager.start_spawn(config, run_spec)
@@ -821,7 +821,7 @@ async def execute_with_streaming(
         heartbeat_interval_secs=heartbeat_interval_secs,
         heartbeat_touch=lambda _state_root, _spawn_id: resolved_heartbeat_touch(),
     )
-    lifecycle_service = SpawnLifecycleService(state_root)
+    lifecycle_service = create_lifecycle_service(repo_root, state_root)
     retries_attempted = 0
     started_at = resolved_clock.monotonic()
     started_at_epoch = resolved_clock.time()

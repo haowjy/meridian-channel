@@ -27,6 +27,7 @@ definition time, so the delayed import is transparent to callers.
 
 from __future__ import annotations
 
+import os
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -36,10 +37,12 @@ from uuid import UUID
 import structlog
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
 
     from meridian.lib.core.clock import Clock
     from meridian.lib.core.domain import SpawnStatus
+    from meridian.lib.hooks.dispatch import HookDispatcher
     from meridian.lib.state.spawn.repository import SpawnRepository
     from meridian.lib.state.spawn_store import LaunchMode, SpawnOrigin
 
@@ -60,15 +63,30 @@ _TERMINAL_STATUS_VALUES: frozenset[str] = frozenset({"succeeded", "failed", "can
 # ---------------------------------------------------------------------------
 
 
-def generate_event_id(spawn_id: str, event_type: str, sequence: int) -> UUID:
+def _event_scope(event_type: str) -> str:
+    """Return event namespace scope used in deterministic event IDs."""
+
+    # Keep spawn event IDs byte-for-byte stable with legacy generation.
+    if event_type.startswith("spawn."):
+        return "spawn"
+    return "event"
+
+
+def generate_lifecycle_event_id(subject_id: str, event_type: str, sequence: int) -> UUID:
     """Generate stable event ID using UUID v5.
 
-    Stability across retries: same spawn_id + event_type + sequence
+    Stability across retries: same subject_id + event_type + sequence
     always produces the same UUID.
     """
     namespace = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")  # URL namespace
-    name = f"meridian:spawn:{spawn_id}:{event_type}:{sequence}"
+    name = f"meridian:{_event_scope(event_type)}:{subject_id}:{event_type}:{sequence}"
     return uuid.uuid5(namespace, name)
+
+
+def generate_event_id(spawn_id: str, event_type: str, sequence: int) -> UUID:
+    """Backward-compatible wrapper for spawn lifecycle callers."""
+
+    return generate_lifecycle_event_id(spawn_id, event_type, sequence)
 
 
 # ---------------------------------------------------------------------------
@@ -386,6 +404,56 @@ class SpawnLifecycleService:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
         )
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle service factory seam
+# ---------------------------------------------------------------------------
+
+
+def _hooks_dispatch_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Return whether hook dispatch should run globally."""
+
+    scope = os.environ if env is None else env
+    value = scope.get("MERIDIAN_HOOKS_ENABLED")
+    if value is None:
+        return True
+    return value.strip().lower() != "false"
+
+
+def get_hook_dispatcher(repo_root: Path, state_root: Path) -> HookDispatcher | None:
+    """Build a hook dispatcher when hook dispatch is enabled."""
+
+    if not _hooks_dispatch_enabled():
+        return None
+
+    try:
+        # Imported lazily to avoid lifecycle <-> hooks circular import at module import time.
+        from meridian.lib.hooks.dispatch import HookDispatcher
+    except Exception:
+        logger.exception(
+            "Failed to import hook dispatcher; continuing without lifecycle hook dispatch."
+        )
+        return None
+
+    return HookDispatcher(repo_root, state_root)
+
+
+def create_lifecycle_service(
+    repo_root: Path,
+    state_root: Path,
+    *,
+    repository: SpawnRepository | None = None,
+) -> SpawnLifecycleService:
+    """Create a spawn lifecycle service with centralized hook wiring."""
+
+    dispatcher = get_hook_dispatcher(repo_root, state_root)
+    hooks: list[LifecycleHook] | None = [dispatcher] if dispatcher is not None else None
+    return SpawnLifecycleService(
+        state_root,
+        hooks=hooks,
+        repository=repository,
+    )
 
 
 # ---------------------------------------------------------------------------

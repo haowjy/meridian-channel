@@ -1,0 +1,183 @@
+# Hook: git-autosync
+
+Validate the built-in `git-autosync` hook in an isolated git repository with a real bare remote.
+
+## Setup
+
+```bash
+export REPO_ROOT=/abs/path/to/meridian-channel
+export E2E_REPO="$(mktemp -d /tmp/meridian-git-autosync.XXXXXX)"
+export E2E_REMOTE="$E2E_REPO/remote.git"
+export E2E_SEED="$E2E_REPO/seed"
+export E2E_WORK="$E2E_REPO/work"
+
+git init --bare "$E2E_REMOTE"
+git init "$E2E_SEED"
+git -C "$E2E_SEED" config user.email "autosync-e2e@example.com"
+git -C "$E2E_SEED" config user.name "Autosync E2E"
+printf "seed\n" > "$E2E_SEED/keep.txt"
+git -C "$E2E_SEED" add -A
+git -C "$E2E_SEED" commit -m "seed"
+git -C "$E2E_SEED" remote add origin "$E2E_REMOTE"
+git -C "$E2E_SEED" push -u origin HEAD
+git clone "$E2E_REMOTE" "$E2E_WORK"
+git -C "$E2E_WORK" config user.email "autosync-e2e@example.com"
+git -C "$E2E_WORK" config user.name "Autosync E2E"
+
+cd "$REPO_ROOT"
+test -d "$E2E_WORK/.git" && echo "PASS: autosync e2e repo ready" || echo "FAIL: autosync e2e repo setup failed"
+```
+
+### AUTOSYNC-1. Built-in metadata is registered [CRITICAL]
+
+```bash
+uv run python - <<'PY'
+from meridian.lib.hooks.builtin import BUILTIN_HOOKS
+
+hook = BUILTIN_HOOKS.get("git-autosync")
+assert hook is not None
+assert hook.default_events == ("spawn.finalized", "work.done")
+assert hook.default_interval == "10m"
+assert hook.requirements == ("git",)
+print("PASS: git-autosync metadata is registered")
+PY
+```
+
+### AUTOSYNC-2. Sync sequence commits and pushes changes [CRITICAL]
+
+```bash
+uv run python - <<'PY'
+from uuid import uuid4
+
+from meridian.lib.hooks.builtin.git_autosync import GitAutosync
+from meridian.lib.hooks.types import Hook, HookContext
+
+import os
+from pathlib import Path
+
+work = Path(os.environ["E2E_WORK"])
+(work / "keep.txt").write_text("changed by autosync\n", encoding="utf-8")
+(work / "new.txt").write_text("new file\n", encoding="utf-8")
+
+hook = Hook(
+    name="git-autosync",
+    event="work.done",
+    source="project",
+    builtin="git-autosync",
+)
+context = HookContext(
+    event_name="work.done",
+    event_id=uuid4(),
+    timestamp="2026-04-20T00:00:00+00:00",
+    repo_root=str(work),
+    state_root=str(work / ".meridian"),
+    work_id="w1",
+    work_dir=str(work),
+)
+result = GitAutosync().execute(context, hook)
+assert result.success is True
+assert result.outcome == "success"
+print("PASS: git-autosync executed successfully")
+PY
+
+git -C "$E2E_WORK" log -1 --pretty=%s | grep -q '^autosync: ' && \
+echo "PASS: autosync commit created" || echo "FAIL: autosync commit not created"
+```
+
+### AUTOSYNC-3. Exclude patterns keep files out of autosync commit [IMPORTANT]
+
+```bash
+uv run python - <<'PY'
+from uuid import uuid4
+
+from meridian.lib.hooks.builtin.git_autosync import GitAutosync
+from meridian.lib.hooks.types import Hook, HookContext
+
+import os
+from pathlib import Path
+
+work = Path(os.environ["E2E_WORK"])
+(work / "keep.txt").write_text("second include\n", encoding="utf-8")
+(work / "debug.log").write_text("should be excluded\n", encoding="utf-8")
+(work / "tmp").mkdir(exist_ok=True)
+(work / "tmp" / "cache.txt").write_text("excluded dir entry\n", encoding="utf-8")
+
+hook = Hook(
+    name="git-autosync",
+    event="work.done",
+    source="project",
+    builtin="git-autosync",
+    exclude=("*.log", "tmp/"),
+)
+context = HookContext(
+    event_name="work.done",
+    event_id=uuid4(),
+    timestamp="2026-04-20T00:00:00+00:00",
+    repo_root=str(work),
+    state_root=str(work / ".meridian"),
+    work_id="w2",
+    work_dir=str(work),
+)
+result = GitAutosync().execute(context, hook)
+assert result.success is True
+print("PASS: autosync with excludes executed")
+PY
+
+git -C "$E2E_WORK" show --pretty=format: --name-only HEAD > /tmp/meridian-autosync-last-files.txt && \
+grep -q '^keep.txt$' /tmp/meridian-autosync-last-files.txt && \
+! grep -q '^debug.log$' /tmp/meridian-autosync-last-files.txt && \
+! grep -q '^tmp/cache.txt$' /tmp/meridian-autosync-last-files.txt && \
+echo "PASS: exclude patterns respected" || echo "FAIL: excluded paths were committed"
+```
+
+### AUTOSYNC-4. Conflict path aborts rebase and skips sync [IMPORTANT]
+
+```bash
+export E2E_OTHER="$E2E_REPO/other"
+git clone "$E2E_REMOTE" "$E2E_OTHER"
+git -C "$E2E_OTHER" config user.email "autosync-e2e@example.com"
+git -C "$E2E_OTHER" config user.name "Autosync E2E"
+printf "remote change\n" > "$E2E_OTHER/keep.txt"
+git -C "$E2E_OTHER" add -A
+git -C "$E2E_OTHER" commit -m "remote conflict change"
+git -C "$E2E_OTHER" push origin HEAD
+
+printf "local conflict change\n" > "$E2E_WORK/keep.txt"
+git -C "$E2E_WORK" add -A
+git -C "$E2E_WORK" commit -m "local conflict change"
+
+uv run python - <<'PY'
+from uuid import uuid4
+
+from meridian.lib.hooks.builtin.git_autosync import GitAutosync
+from meridian.lib.hooks.types import Hook, HookContext
+
+import os
+from pathlib import Path
+
+work = Path(os.environ["E2E_WORK"])
+hook = Hook(
+    name="git-autosync",
+    event="work.done",
+    source="project",
+    builtin="git-autosync",
+)
+context = HookContext(
+    event_name="work.done",
+    event_id=uuid4(),
+    timestamp="2026-04-20T00:00:00+00:00",
+    repo_root=str(work),
+    state_root=str(work / ".meridian"),
+    work_id="w3",
+    work_dir=str(work),
+)
+result = GitAutosync().execute(context, hook)
+assert result.success is True
+assert result.skipped is True
+assert result.skip_reason == "rebase_conflict"
+print("PASS: conflict path skipped with rebase_conflict")
+PY
+
+test ! -d "$E2E_WORK/.git/rebase-merge" && test ! -d "$E2E_WORK/.git/rebase-apply" && \
+echo "PASS: rebase state aborted and cleaned" || echo "FAIL: rebase state still present"
+```

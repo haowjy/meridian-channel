@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from meridian.lib.core.domain import SpawnStatus
-from meridian.lib.core.lifecycle import SpawnLifecycleService
+from meridian.lib.core.lifecycle import create_lifecycle_service
 from meridian.lib.core.spawn_lifecycle import TERMINAL_SPAWN_STATUSES
 from meridian.lib.core.types import SpawnId
 from meridian.lib.platform import IS_WINDOWS
@@ -84,7 +84,9 @@ class SignalCanceller:
     ) -> CancelOutcome:
         runner_pid = self._resolve_runner_pid(record)
         if runner_pid is None:
-            finalized = SpawnLifecycleService(self._state_root).cancel(
+            finalized = create_lifecycle_service(
+                self._state_root.parent, self._state_root
+            ).cancel(
                 spawn_id, 130, error="cancelled"
             )
             latest = spawn_store.get_spawn(self._state_root, spawn_id)

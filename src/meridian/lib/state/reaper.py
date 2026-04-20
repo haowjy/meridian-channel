@@ -11,7 +11,7 @@ from pathlib import Path
 import structlog
 
 from meridian.lib.core.domain import SpawnStatus
-from meridian.lib.core.lifecycle import SpawnLifecycleService
+from meridian.lib.core.lifecycle import create_lifecycle_service
 from meridian.lib.core.spawn_lifecycle import (
     has_durable_report_completion,
     is_active_spawn_status,
@@ -183,7 +183,7 @@ def _finalize_and_log(
     state_root: Path, record: SpawnRecord, *, status: SpawnStatus, exit_code: int,
     error: str | None, reason: str, snapshot: ArtifactSnapshot, now: float
 ) -> SpawnRecord:
-    if not SpawnLifecycleService(state_root).finalize(
+    if not create_lifecycle_service(state_root.parent, state_root).finalize(
         record.id,
         status,
         exit_code,

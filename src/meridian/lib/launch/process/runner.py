@@ -12,7 +12,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
-from meridian.lib.core.lifecycle import SpawnLifecycleService
+from meridian.lib.core.lifecycle import create_lifecycle_service
 from meridian.lib.core.spawn_lifecycle import (
     has_durable_report_completion,
     resolve_execution_terminal_state,
@@ -139,7 +139,7 @@ def run_harness_process(
     primary_started_epoch = 0.0
     primary_started_local_iso: str | None = None
     artifacts = LocalStore(root_dir=state_root / "artifacts")
-    lifecycle_service = SpawnLifecycleService(state_root)
+    lifecycle_service = create_lifecycle_service(repo_root, state_root)
 
     resume_chat_id = (
         preview_request.session.continue_chat_id

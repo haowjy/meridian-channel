@@ -366,6 +366,145 @@ def _normalize_harness_table(
     return values
 
 
+def _normalize_hooks_array(raw_value: object, *, source: str) -> tuple[dict[str, object], ...]:
+    if not isinstance(raw_value, list):
+        raise ValueError(
+            f"Invalid value for '{source}': expected array[table], "
+            f"got {type(raw_value).__name__} ({raw_value!r})."
+        )
+
+    rows: list[dict[str, object]] = []
+    for index, item in enumerate(cast("list[object]", raw_value), start=1):
+        row_source = f"{source}[{index}]"
+        if not isinstance(item, dict):
+            raise ValueError(
+                f"Invalid value for '{row_source}': expected table, "
+                f"got {type(item).__name__} ({item!r})."
+            )
+
+        row: dict[str, object] = {}
+        for key, value in cast("dict[str, object]", item).items():
+            field_source = f"{row_source}.{key}"
+            if key in {"name", "event", "command", "builtin", "interval", "failure_policy"}:
+                if not isinstance(value, str):
+                    raise ValueError(
+                        f"Invalid value for '{field_source}': expected str, got "
+                        f"{type(value).__name__} ({value!r})."
+                    )
+                row[key] = _normalize_required_string(value, source=field_source)
+                continue
+
+            if key in {"enabled", "require_serial"}:
+                if not isinstance(value, bool):
+                    raise ValueError(
+                        f"Invalid value for '{field_source}': expected bool, got "
+                        f"{type(value).__name__} ({value!r})."
+                    )
+                row[key] = value
+                continue
+
+            if key in {"priority", "timeout_secs"}:
+                if isinstance(value, bool) or not isinstance(value, int):
+                    raise ValueError(
+                        f"Invalid value for '{field_source}': expected int, got "
+                        f"{type(value).__name__} ({value!r})."
+                    )
+                row[key] = value
+                continue
+
+            if key == "exclude":
+                row[key] = _parse_toml_list(raw_value=value, source=field_source)
+                continue
+
+            if key == "when":
+                if not isinstance(value, dict):
+                    raise ValueError(
+                        f"Invalid value for '{field_source}': expected table, got "
+                        f"{type(value).__name__} ({value!r})."
+                    )
+                when: dict[str, object] = {}
+                for when_key, when_value in cast("dict[str, object]", value).items():
+                    when_source = f"{field_source}.{when_key}"
+                    if when_key == "status":
+                        when["status"] = _parse_toml_list(raw_value=when_value, source=when_source)
+                        continue
+                    if when_key == "agent":
+                        if not isinstance(when_value, str):
+                            raise ValueError(
+                                f"Invalid value for '{when_source}': expected str, got "
+                                f"{type(when_value).__name__} ({when_value!r})."
+                            )
+                        when["agent"] = _normalize_required_string(when_value, source=when_source)
+                        continue
+                    logger.warning(
+                        "Ignoring unknown Meridian config key '%s.%s'.",
+                        field_source,
+                        when_key,
+                    )
+                row[key] = when
+                continue
+
+            logger.warning("Ignoring unknown Meridian config key '%s.%s'.", row_source, key)
+
+        rows.append(row)
+
+    return tuple(rows)
+
+
+def normalize_hooks_array(raw_value: object, *, source: str) -> tuple[dict[str, object], ...]:
+    """Normalize one hooks array with settings-style type checks."""
+
+    return _normalize_hooks_array(raw_value, source=source)
+
+
+def _normalize_work_table(raw_value: object, *, source: str) -> dict[str, object]:
+    if not isinstance(raw_value, dict):
+        raise ValueError(f"Invalid value for '{source}': expected table.")
+
+    values: dict[str, object] = {}
+    for key, value in cast("dict[str, object]", raw_value).items():
+        if key != "artifacts":
+            logger.warning("Ignoring unknown Meridian config key '%s.%s'.", source, key)
+            continue
+
+        if not isinstance(value, dict):
+            raise ValueError(
+                f"Invalid value for '{source}.artifacts': expected table, "
+                f"got {type(value).__name__} ({value!r})."
+            )
+
+        artifacts: dict[str, object] = {}
+        for artifacts_key, artifacts_value in cast("dict[str, object]", value).items():
+            artifacts_source = f"{source}.artifacts.{artifacts_key}"
+            if artifacts_key == "sync":
+                if not isinstance(artifacts_value, str):
+                    raise ValueError(
+                        f"Invalid value for '{artifacts_source}': expected str, got "
+                        f"{type(artifacts_value).__name__} ({artifacts_value!r})."
+                    )
+                artifacts["sync"] = _normalize_required_string(
+                    artifacts_value,
+                    source=artifacts_source,
+                )
+                continue
+            logger.warning(
+                "Ignoring unknown Meridian config key '%s.%s'.",
+                f"{source}.artifacts",
+                artifacts_key,
+            )
+
+        if artifacts:
+            values["artifacts"] = artifacts
+
+    return values
+
+
+def normalize_work_table(raw_value: object, *, source: str) -> dict[str, object]:
+    """Normalize one [work] table with settings-style type checks."""
+
+    return _normalize_work_table(raw_value, source=source)
+
+
 def _normalize_toml_payload(
     *,
     payload: dict[str, object],
@@ -417,6 +556,15 @@ def _normalize_toml_payload(
             normalized["harness"] = _merge_nested_dicts(
                 cast("dict[str, object]", normalized.get("harness", {})),
                 _normalize_harness_table(raw_value, source="harness", repo_root=repo_root),
+            )
+            continue
+        if key == "hooks":
+            normalized["hooks"] = _normalize_hooks_array(raw_value, source="hooks")
+            continue
+        if key == "work":
+            normalized["work"] = _merge_nested_dicts(
+                cast("dict[str, object]", normalized.get("work", {})),
+                _normalize_work_table(raw_value, source="work"),
             )
             continue
 

@@ -6,7 +6,7 @@ import time
 from uuid import uuid4
 
 from meridian.lib.core.domain import SpawnStatus
-from meridian.lib.core.lifecycle import SpawnLifecycleService
+from meridian.lib.core.lifecycle import create_lifecycle_service
 from meridian.lib.core.types import HarnessId, SpawnId
 from meridian.lib.harness.connections.base import ConnectionConfig
 from meridian.lib.harness.registry import get_default_harness_registry
@@ -45,7 +45,7 @@ async def streaming_serve(
     repo_root, _ = resolve_runtime_root_and_config(None)
     state_root = resolve_state_root(repo_root)
     start_monotonic = time.monotonic()
-    lifecycle = SpawnLifecycleService(state_root)
+    lifecycle = create_lifecycle_service(repo_root, state_root)
     spawn_id = SpawnId(
         lifecycle.start(
             chat_id=str(uuid4()),

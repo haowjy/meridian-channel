@@ -23,6 +23,7 @@ Commands:
   spawn    Create and manage subagent runs (includes report subgroup)
   session  Read and search harness session transcripts
   work     Work item dashboard and coordination
+  hooks    Hook inspection and manual execution
   models   Model catalog
   config   Repository config inspection and overrides
   workspace  Local workspace topology setup
@@ -88,6 +89,7 @@ work_app = App(
     ),
     help_formatter="plain",
 )
+hooks_app = App(name="hooks", help="Hook inspection and execution commands", help_formatter="plain")
 models_app = App(name="models", help="Model catalog commands", help_formatter="plain")
 streaming_app = App(name="streaming", help="Streaming layer commands", help_formatter="plain")
 config_app = App(
@@ -117,6 +119,7 @@ app.command(spawn_app, name="spawn")
 spawn_app.command(report_app, name="report")
 app.command(session_app, name="session")
 app.command(work_app, name="work")
+app.command(hooks_app, name="hooks")
 app.command(models_app, name="models")
 app.command(streaming_app, name="streaming")
 app.command(config_app, name="config")

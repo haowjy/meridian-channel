@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from meridian.lib.state.paths import ensure_gitignore, resolve_state_paths
+from meridian.lib.state.paths import StateRootPaths, ensure_gitignore, resolve_state_paths
 
 
 def test_ensure_gitignore_drops_legacy_config_exception(tmp_path: Path) -> None:
@@ -37,3 +37,10 @@ def test_resolve_state_paths_does_not_expose_project_config_path(tmp_path: Path)
     paths = resolve_state_paths(repo_root)
 
     assert not hasattr(paths, "config_path")
+
+
+def test_state_root_paths_resolves_hook_state_json(tmp_path: Path) -> None:
+    state_root = tmp_path / "state"
+    paths = StateRootPaths.from_root_dir(state_root)
+
+    assert paths.hook_state_json == state_root / "hook-state.json"

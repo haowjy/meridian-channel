@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
+import structlog
 from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.core.context import RuntimeContext
+from meridian.lib.core.lifecycle import generate_lifecycle_event_id, get_hook_dispatcher
 from meridian.lib.core.spawn_lifecycle import is_active_spawn_status
 from meridian.lib.core.util import FormatContext
 from meridian.lib.ops.runtime import (
@@ -23,6 +27,7 @@ _NESTED_WORK_WARNING = (
     "Work coordination is primary-owned; nested agents should usually ask the orchestrator "
     "to run this command."
 )
+logger = structlog.get_logger(__name__)
 
 
 def _require_work_item(repo_state_root: Path, work_id: str) -> work_store.WorkItem:
@@ -60,6 +65,40 @@ def _active_work_attachment_warning(state_root: Path, work_id: str) -> str | Non
     if not warnings:
         return None
     return "Work item marked done while still referenced by " + "; ".join(warnings) + "."
+
+
+def _dispatch_work_hook_event(
+    *,
+    event_name: Literal["work.started", "work.done"],
+    repo_root: Path,
+    state_root: Path,
+    repo_state_root: Path,
+    work_id: str,
+) -> None:
+    dispatcher = get_hook_dispatcher(repo_root, state_root)
+    if dispatcher is None:
+        return
+
+    try:
+        from meridian.lib.hooks.types import HookContext
+
+        dispatcher.fire(
+            HookContext(
+                event_name=event_name,
+                event_id=generate_lifecycle_event_id(work_id, event_name, 0),
+                timestamp=datetime.now(tz=UTC).isoformat(),
+                repo_root=str(repo_root),
+                state_root=str(state_root),
+                work_id=work_id,
+                work_dir=str(work_store.work_scratch_dir(repo_state_root, work_id)),
+            )
+        )
+    except Exception:
+        logger.exception(
+            "Work hook dispatch failed; work lifecycle transition continues.",
+            hook_event=event_name,
+            work_id=work_id,
+        )
 
 
 class WorkStartInput(BaseModel):
@@ -252,6 +291,13 @@ def work_start_sync(
         item = work_store.create_work_item(repo_state_root, payload.label, requested_description)
         created = True
     set_session_work_attachment(runtime_state_root, chat_id=chat_id, work_id=item.name)
+    _dispatch_work_hook_event(
+        event_name="work.started",
+        repo_root=repo_root,
+        state_root=runtime_state_root,
+        repo_state_root=repo_state_root,
+        work_id=item.name,
+    )
     return WorkStartOutput(
         name=item.name,
         status=item.status,
@@ -283,6 +329,13 @@ def work_update_sync(
                 payload.work_id,
                 description=payload.description,
             )
+        _dispatch_work_hook_event(
+            event_name="work.done",
+            repo_root=roots.repo_root,
+            state_root=runtime_state_root,
+            repo_state_root=repo_state_root,
+            work_id=item.name,
+        )
         return WorkUpdateOutput(
             name=item.name,
             status=item.status,
@@ -312,6 +365,13 @@ def work_done_sync(
     runtime_state_root = roots.state_root
     attachment_warning = _active_work_attachment_warning(runtime_state_root, payload.work_id)
     item = work_store.archive_work_item(repo_state_root, payload.work_id)
+    _dispatch_work_hook_event(
+        event_name="work.done",
+        repo_root=roots.repo_root,
+        state_root=runtime_state_root,
+        repo_state_root=repo_state_root,
+        work_id=item.name,
+    )
     return WorkUpdateOutput(
         name=item.name,
         status=item.status,

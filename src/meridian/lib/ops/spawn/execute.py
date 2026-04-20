@@ -19,7 +19,7 @@ from meridian.lib.config.project_paths import ProjectPaths, resolve_project_path
 from meridian.lib.core.child_env import build_child_env_overrides
 from meridian.lib.core.context import RuntimeContext
 from meridian.lib.core.domain import Spawn, SpawnStatus
-from meridian.lib.core.lifecycle import SpawnLifecycleService
+from meridian.lib.core.lifecycle import create_lifecycle_service
 from meridian.lib.core.sink import OutputSink
 from meridian.lib.core.types import HarnessId, ModelId, SpawnId
 from meridian.lib.launch.context import build_launch_context
@@ -259,7 +259,7 @@ def _init_spawn(
         resolved_work_id = cast("str", resolved_work_id)
         resolved_work_id = ensure_explicit_work_item(repo_state_root, resolved_work_id)
     resolved_desc = (desc if desc is not None else payload.desc).strip() or None
-    service = SpawnLifecycleService(state_root)
+    service = create_lifecycle_service(project_paths.repo_root, state_root)
     spawn_id = service.start(
         chat_id=resolve_chat_id(ctx=resolved_context, fallback="c0"),
         parent_id=str(resolved_context.spawn_id) if resolved_context.spawn_id else None,
@@ -659,6 +659,7 @@ def execute_spawn_background(
         )
     log_dir = resolve_spawn_log_dir(project_paths.repo_root, context.spawn.spawn_id)
     log_dir.mkdir(parents=True, exist_ok=True)
+    lifecycle_service = create_lifecycle_service(project_paths.repo_root, context.state_root)
     try:
         _write_params_json(
             project_paths,
@@ -689,7 +690,7 @@ def execute_spawn_background(
             ),
         )
     except Exception as exc:
-        SpawnLifecycleService(context.state_root).finalize(
+        lifecycle_service.finalize(
             str(context.spawn.spawn_id),
             status="failed",
             exit_code=1,
@@ -747,7 +748,7 @@ def execute_spawn_background(
                 **_build_detached_popen_kwargs(),
             )
     except OSError as exc:
-        SpawnLifecycleService(context.state_root).finalize(
+        lifecycle_service.finalize(
             str(context.spawn.spawn_id),
             status="failed",
             exit_code=1,
@@ -776,7 +777,7 @@ def execute_spawn_background(
             exit_code=1,
         )
 
-    SpawnLifecycleService(context.state_root).mark_running(
+    lifecycle_service.mark_running(
         context.spawn.spawn_id,
         launch_mode=BACKGROUND_LAUNCH_MODE,
         runner_pid=process.pid,
@@ -1011,7 +1012,7 @@ def _background_worker_main(
             launch_request = _load_bg_worker_request(log_dir)
         except Exception as exc:
             error = f"Failed to load background worker request: {exc}"
-            SpawnLifecycleService(state_root).finalize(
+            create_lifecycle_service(repo_root, state_root).finalize(
                 str(spawn_id),
                 status="failed",
                 exit_code=1,

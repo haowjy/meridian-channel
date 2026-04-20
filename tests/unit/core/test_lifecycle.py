@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import uuid
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -12,7 +13,10 @@ import pytest
 from meridian.lib.core.lifecycle import (
     LifecycleEvent,
     SpawnLifecycleService,
+    create_lifecycle_service,
     generate_event_id,
+    generate_lifecycle_event_id,
+    get_hook_dispatcher,
 )
 from meridian.lib.state import spawn_store
 from tests.support.fakes import FakeSpawnRepository
@@ -414,6 +418,24 @@ def test_generate_event_id_differs_by_sequence() -> None:
     seq1 = generate_event_id("p1", "spawn.running", 1)
 
     assert seq0 != seq1
+
+
+def test_generate_event_id_preserves_legacy_spawn_namespace() -> None:
+    """spawn.* IDs must keep legacy namespace for backward compatibility."""
+    expected = uuid.uuid5(
+        uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8"),
+        "meridian:spawn:p1:spawn.created:0",
+    )
+    assert generate_event_id("p1", "spawn.created", 0) == expected
+
+
+def test_generate_lifecycle_event_id_supports_non_spawn_events() -> None:
+    """Non-spawn events should use the shared event namespace."""
+    expected = uuid.uuid5(
+        uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8"),
+        "meridian:event:w1:work.started:0",
+    )
+    assert generate_lifecycle_event_id("w1", "work.started", 0) == expected
 
 
 def test_event_id_stable_in_dispatched_events(tmp_path: Path) -> None:
@@ -890,3 +912,44 @@ def test_required_path_reconciler_finalize_origin(tmp_path: Path) -> None:
     assert finalized_event.status == "failed"
     assert finalized_event.origin == "reconciler"
     assert snapshot.snapshots[-1] == ("spawn.finalized", "failed", "reconciler")
+
+
+# ---------------------------------------------------------------------------
+# 17. Lifecycle factory hook wiring
+# ---------------------------------------------------------------------------
+
+
+def test_get_hook_dispatcher_returns_none_when_disabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MERIDIAN_HOOKS_ENABLED", "false")
+
+    dispatcher = get_hook_dispatcher(tmp_path, tmp_path / ".meridian")
+
+    assert dispatcher is None
+
+
+def test_get_hook_dispatcher_returns_dispatcher_when_enabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from meridian.lib.hooks.dispatch import HookDispatcher
+
+    monkeypatch.delenv("MERIDIAN_HOOKS_ENABLED", raising=False)
+
+    dispatcher = get_hook_dispatcher(tmp_path, tmp_path / ".meridian")
+
+    assert isinstance(dispatcher, HookDispatcher)
+
+
+def test_create_lifecycle_service_centralizes_hook_enablement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MERIDIAN_HOOKS_ENABLED", "false")
+    disabled_service = create_lifecycle_service(tmp_path, tmp_path / ".meridian")
+
+    monkeypatch.setenv("MERIDIAN_HOOKS_ENABLED", "true")
+    enabled_service = create_lifecycle_service(tmp_path, tmp_path / ".meridian")
+
+    assert disabled_service._hooks == []
+    assert len(enabled_service._hooks) == 1
+    assert enabled_service._hooks[0].__class__.__name__ == "HookDispatcher"

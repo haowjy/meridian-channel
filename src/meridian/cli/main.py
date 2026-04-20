@@ -20,6 +20,7 @@ from meridian.cli.app_tree import (
     app,
     completion_app,
     config_app,
+    hooks_app,
     models_app,
     report_app,
     session_app,
@@ -52,6 +53,7 @@ from meridian.cli.bootstrap import (
 )
 from meridian.cli.config_cmd import register_config_commands
 from meridian.cli.doctor_cmd import register_doctor_command
+from meridian.cli.hooks_commands import register_hooks_commands
 from meridian.cli.misc_commands import register_misc_commands
 from meridian.cli.models_cmd import register_models_commands
 from meridian.cli.output import (
@@ -514,6 +516,7 @@ def _register_group_commands() -> None:
     register_report_commands(report_app, emit)
     register_session_commands(session_app, emit)
     register_work_commands(work_app, emit)
+    register_hooks_commands(hooks_app, emit)
     register_models_commands(models_app, emit)
     register_config_commands(config_app, emit)
     register_workspace_commands(workspace_app, emit)
