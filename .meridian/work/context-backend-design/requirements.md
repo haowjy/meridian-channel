@@ -35,15 +35,51 @@ Each context type independently configurable:
 ```toml
 [context.work]
 source = "git"
-path = "~/.meridian/context/{project}/work"
-auto_pull = true
-auto_commit = true
-auto_push = true
+path = "~/gitrepos/meridian-docs/meridian-cli/work"
 
 [context.kb]
-source = "local"
-path = ".meridian/kb"
+source = "git"
+path = "~/gitrepos/meridian-docs/meridian-cli/kb"
 ```
+
+Shared docs repo model:
+
+```text
+~/gitrepos/meridian-docs/
+├── meridian-cli/
+│   ├── work/
+│   └── kb/
+├── other-project/
+│   ├── work/
+│   └── kb/
+└── general/
+```
+
+One git repo backs multiple projects. Each project points `context.work.path` and `context.kb.path` at its own subfolders inside that shared repo.
+
+### Source Types
+
+| Source | Behavior |
+|--------|----------|
+| `local` | Just a path, no sync. User manages (Dropbox, iCloud, manual). |
+| `git` | Git-managed. Auto-registers `git-autosync` hook. Git repo root is auto-discovered by walking up from `path` to the nearest `.git/` parent. |
+
+Future sources: `s3`, `meridian` (managed sync service).
+
+### Git Source Behavior
+
+When `source = "git"`:
+
+1. **On `meridian init` / first spawn**:
+   - Ensure context path exists
+   - Discover git repo root by walking up from context path to nearest parent containing `.git/`
+   - If no repo root is found: fail with actionable error (context path must live inside an existing git repo)
+   
+2. **Auto-registers `git-autosync` hook** (see hook-system-design):
+   - Syncs all `source = "git"` contexts
+   - Default interval: 10 minutes
+   - User can override via `[[hooks]]` config
+   - Stages context changes with `git add .` using `cwd=<context-path>` so staging stays scoped to that context subtree
 
 ### Arbitrary Contexts
 
@@ -67,52 +103,26 @@ Custom contexts export as `MERIDIAN_CONTEXT_<NAME>_DIR`.
 - `work`: `source = "local"`, `path = ".meridian/work"`
 - No config = current behavior, nothing changes (except `fs` → `kb` rename)
 
-### Git Sync Layer
-
-Optional sync for git-backed context folders:
-
-```toml
-[context.work]
-source = "git"
-path = "~/.meridian/context/{project}/work"
-auto_pull = true       # pull on session start
-auto_commit = true     # commit on work item changes
-auto_push = true       # push after commit
-pull_strategy = "rebase"
-on_conflict = "commit_markers"
-```
-
-### Sync Behavior
-
-| Setting | When | Action |
-|---------|------|--------|
-| `auto_pull` | Session start, `meridian work` | `git pull --rebase` |
-| `auto_commit` | Work item written | `git add . && git commit -m "work: <item>"` |
-| `auto_push` | After commit | `git push` |
-
-### Conflict Handling
-
-On rebase conflict:
-1. File contains `<<<<<<<` conflict markers
-2. Commit anyway with markers
-3. Push
-4. User or AI resolves markers on future pass
-
-No data loss, explicit visibility, manual resolution.
-
 ### CLI
 
 ```bash
 $ meridian context
-work: /home/user/.meridian/context/project/work
-kb: /home/user/repo/.meridian/kb
+work: /home/user/gitrepos/meridian-docs/meridian-cli/work (git)
+kb: /home/user/gitrepos/meridian-docs/meridian-cli/kb (git)
 
 $ meridian context work
-/home/user/.meridian/context/project/work
+/home/user/gitrepos/meridian-docs/meridian-cli/work
 
-$ meridian context sync work        # manual pull + push
-$ meridian context sync work --pull # just pull
-$ meridian context sync work --push # just push
+$ meridian context --verbose
+work:
+  source: git
+  path: ~/gitrepos/meridian-docs/meridian-cli/work
+  resolved: /home/user/gitrepos/meridian-docs/meridian-cli/work
+
+kb:
+  source: git
+  path: ~/gitrepos/meridian-docs/meridian-cli/kb
+  resolved: /home/user/gitrepos/meridian-docs/meridian-cli/kb
 ```
 
 ## Success Criteria
@@ -120,8 +130,13 @@ $ meridian context sync work --push # just push
 1. Zero config = current behavior unchanged (with `fs` → `kb` rename)
 2. Both `work` and `kb` always present, even with zero config
 3. Single global config line externalizes work/kb for all repos
-4. Git sync is transparent — pull/commit/push happen automatically
-5. Conflicts are visible, never silent data loss
-6. `meridian context` shows resolved paths clearly
-7. `MERIDIAN_FS_DIR` works as deprecated alias for `MERIDIAN_KB_DIR`
-8. Existing `.meridian/fs/` directories work via fallback with deprecation warning
+4. `source = "git"` auto-registers `git-autosync` hook (see hook-system-design)
+5. `meridian context` shows resolved paths clearly
+6. `MERIDIAN_FS_DIR` works as deprecated alias for `MERIDIAN_KB_DIR`
+7. Existing `.meridian/fs/` directories work via fallback with deprecation warning
+8. Shared docs repo model is first-class: context paths may be subfolders of a single multi-project git repo
+9. Git source behavior discovers repo root automatically from configured context path
+
+## Dependencies
+
+- **hook-system-design**: Git sync behavior implemented via `git-autosync` built-in hook
