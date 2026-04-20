@@ -34,7 +34,7 @@ Work items deliberately use per-file mutable JSON rather than the JSONL event mo
 
 All work item metadata writes go through `atomic_write_text()` (tmp file + `os.replace()`). This means a crash mid-write leaves either the old file or the new file — never a partial JSON.
 
-Locking uses `fcntl.flock` on the work-items directory sidecar (same pattern as JSONL stores).
+Locking uses `platform.locking.lock_file()` on the work-items directory sidecar (same cross-platform pattern as the JSONL stores).
 
 ## Rename Crash Safety
 

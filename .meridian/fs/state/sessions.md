@@ -32,7 +32,7 @@ Events in `.meridian/sessions.jsonl`:
 
 Sessions hold two artifacts while active:
 
-**Lock file** (`.meridian/sessions/<chat_id>.lock`): `fcntl.flock(LOCK_EX)` held for the session's lifetime. Any new process trying to acquire the same lock will block or detect contention.
+**Lock file** (`.meridian/sessions/<chat_id>.lock`): `platform.locking.lock_file()` held for the session's lifetime (cross-platform: `fcntl.flock` on POSIX, `msvcrt.locking` on Windows). Any new process trying to acquire the same lock will block or detect contention.
 
 **Lease file** (`.meridian/sessions/<chat_id>.lease.json`): Written atomically alongside the lock. Contains:
 - `pid` — the process holding the session
@@ -45,10 +45,11 @@ The lease enables stale session detection without needing to check if the lock f
 
 ## Stale Session Cleanup
 
-`clean_stale_sessions()` (called by `doctor`):
-1. Reads all sessions that have no `stop` event (i.e., no `stopped_at`)
-2. For each, checks if the lease file PID is alive and generation matches
-3. If stale: writes a `stop` event with current timestamp, removes lock/lease files
+`cleanup_stale_sessions()` (called by `doctor`):
+1. Collect stale candidates by attempting a non-blocking lock on each `<chat_id>.lock` — sessions whose process is alive will already hold the lock and cannot be acquired.
+2. Under the sessions flock, emit `SessionStopEvent`s for sessions with no `stopped_at` and decide which IDs to clean.
+3. **Release all lock handles first** (separate pass before any file deletion) — Windows forbids deleting a file while an open handle to it exists.
+4. Unlink `*.lock` and `*.lease.json` files for cleaned IDs.
 
 `doctor --repair-orphans` also triggers orphan spawn repair at depth=0.
 
