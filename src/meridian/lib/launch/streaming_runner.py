@@ -83,7 +83,6 @@ from meridian.lib.state.paths import resolve_spawn_log_dir
 from meridian.lib.state.spawn_store import (
     BACKGROUND_LAUNCH_MODE,
     FOREGROUND_LAUNCH_MODE,
-    mark_spawn_running,
 )
 from meridian.lib.streaming.spawn_manager import DrainOutcome, SpawnManager
 
@@ -512,8 +511,7 @@ async def _run_streaming_attempt(
     try:
         connection = await manager.start_spawn(config, run_spec)
         await manager._start_heartbeat(run.spawn_id)  # pyright: ignore[reportPrivateUsage]
-        mark_spawn_running(
-            state_root,
+        lifecycle_service.mark_running(
             run.spawn_id,
             launch_mode=launch_mode,
             worker_pid=connection.subprocess_pid,

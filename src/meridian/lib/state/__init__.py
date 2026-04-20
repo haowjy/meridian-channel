@@ -27,6 +27,8 @@ from meridian.lib.state.spawn_store import (
     start_spawn,
 )
 
+# Lifecycle writers are intentionally still exported while R13b privatization is
+# deferred. Executor-facing code should call SpawnLifecycleService instead.
 __all__ = [
     "ArtifactStore",
     "InMemoryStore",

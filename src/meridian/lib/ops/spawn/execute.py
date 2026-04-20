@@ -47,7 +47,6 @@ from meridian.lib.state.spawn_store import (
     BACKGROUND_LAUNCH_MODE,
     FOREGROUND_LAUNCH_MODE,
     LaunchMode,
-    mark_spawn_running,
 )
 
 from ..runtime import (
@@ -776,8 +775,7 @@ def execute_spawn_background(
             exit_code=1,
         )
 
-    mark_spawn_running(
-        context.state_root,
+    SpawnLifecycleService(context.state_root).mark_running(
         context.spawn.spawn_id,
         launch_mode=BACKGROUND_LAUNCH_MODE,
         runner_pid=process.pid,
