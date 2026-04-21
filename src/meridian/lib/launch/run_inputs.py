@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.core.types import ModelId
 from meridian.lib.harness.adapter import SpawnParams
+from meridian.lib.launch.reference import ReferenceItem
 
 
 class ResolvedRunInputs(BaseModel):
@@ -28,6 +29,7 @@ class ResolvedRunInputs(BaseModel):
     appended_system_prompt: str | None = None
     report_output_path: str | None = None
     context_from_payload: tuple[str, ...] = ()
+    reference_items: tuple[ReferenceItem, ...] = ()
 
 
 def coerce_resolved_run_inputs(run_inputs: ResolvedRunInputs | SpawnParams) -> ResolvedRunInputs:
@@ -43,7 +45,7 @@ def to_spawn_params(run_inputs: ResolvedRunInputs | SpawnParams) -> SpawnParams:
 
     if isinstance(run_inputs, SpawnParams):
         return run_inputs
-    payload = run_inputs.model_dump(exclude={"context_from_payload"})
+    payload = run_inputs.model_dump(exclude={"context_from_payload", "reference_items"})
     return SpawnParams(**payload)
 
 

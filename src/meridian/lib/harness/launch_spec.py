@@ -17,6 +17,7 @@ class ClaudeLaunchSpec(ResolvedLaunchSpec):
     agent_name: str | None = None
     agents_payload: str | None = None
     appended_system_prompt: str | None = None
+    prompt_file_path: str | None = None
 
 
 class CodexLaunchSpec(ResolvedLaunchSpec):
@@ -30,6 +31,9 @@ class OpenCodeLaunchSpec(ResolvedLaunchSpec):
 
     agent_name: str | None = None
     skills: tuple[str, ...] = ()
+    # Using Any for reference_items to avoid circular import with ReferenceItem.
+    # The actual type is tuple[ReferenceItem, ...] but we use Any at runtime.
+    reference_items: tuple[Any, ...] = ()
 
 
 def _enforce_spawn_params_accounting(

@@ -30,6 +30,7 @@ _PROJECTED_FIELDS: frozenset[str] = frozenset(
         "model",
         "permission_resolver",
         "prompt",
+        "prompt_file_path",
     }
 )
 
@@ -170,7 +171,12 @@ def project_claude_spec_to_cli_args(
     command.extend(_project_mcp_tools(spec.mcp_tools))
 
     if spec.appended_system_prompt:
-        command.extend(("--append-system-prompt", spec.appended_system_prompt))
+        if spec.prompt_file_path:
+            # Use file-based delivery to avoid ARG_MAX limits
+            command.extend(("--append-system-prompt-file", spec.prompt_file_path))
+        else:
+            # Fallback to inline delivery
+            command.extend(("--append-system-prompt", spec.appended_system_prompt))
     if spec.agents_payload:
         command.extend(("--agents", spec.agents_payload))
 

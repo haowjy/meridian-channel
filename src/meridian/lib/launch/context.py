@@ -52,7 +52,7 @@ from .prompt import (
     compose_skill_injections,
     dedupe_skill_names,
 )
-from .reference import load_reference_items
+from .reference import ReferenceItem, load_reference_items
 from .request import (
     LaunchArgvIntent,
     LaunchCompositionSurface,
@@ -295,7 +295,13 @@ def _resolve_surface_request(
     project_paths: ProjectPaths,
     harness_registry: HarnessRegistry,
     dry_run: bool,
-) -> tuple[SpawnRequest, SubprocessHarness, str | None, tuple[CompositionWarning, ...]]:
+) -> tuple[
+    SpawnRequest,
+    SubprocessHarness,
+    str | None,
+    tuple[CompositionWarning, ...],
+    tuple[ReferenceItem, ...],
+]:
     config = (
         MeridianConfig.model_validate(runtime.config_snapshot)
         if runtime.config_snapshot
@@ -336,6 +342,7 @@ def _resolve_surface_request(
     prompt_policy = harness.run_prompt_policy()
     resolved_context_from = request.context_from
     prompt = request.prompt
+    loaded_references: tuple[ReferenceItem, ...] = ()
     if (
         runtime.composition_surface == LaunchCompositionSurface.SPAWN_PREPARE
         and not request.prompt_is_composed
@@ -525,7 +532,13 @@ def _resolve_surface_request(
             "skill_paths": resolve_skill_paths(resolved_skills.loaded_skills),
         }
     )
-    return resolved_request, harness, seed_harness_session_id, composition_warnings
+    return (
+        resolved_request,
+        harness,
+        seed_harness_session_id,
+        composition_warnings,
+        loaded_references,
+    )
 
 
 def build_launch_context(
@@ -558,6 +571,7 @@ def build_launch_context(
             harness,
             seed_harness_session_id,
             composition_warnings,
+            loaded_references,
         ) = _resolve_surface_request(
             request=request,
             runtime=runtime,
@@ -575,6 +589,7 @@ def build_launch_context(
             missing_skills_warning=None,
             continuation_warning=None,
         )
+        loaded_references = ()
 
     report_output_path = _resolve_report_output_path(
         runtime=runtime,
@@ -648,6 +663,7 @@ def build_launch_context(
         report_output_path=report_output_path.as_posix(),
         appended_system_prompt=appended_system_prompt,
         context_from_payload=resolved_request.context_from,
+        reference_items=loaded_references,
     )
 
     permission_config, perms = resolve_permission_pipeline(
