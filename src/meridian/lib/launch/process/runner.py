@@ -46,6 +46,7 @@ from .session import (
     resolve_primary_session_mode,
 )
 from .subprocess_launcher import SubprocessProcessLauncher
+from .windows_launcher import WindowsConsoleLauncher, can_use_windows_console_launcher
 
 logger = logging.getLogger(__name__)
 _PRIMARY_OUTPUT_FILENAME = "output.jsonl"
@@ -75,6 +76,8 @@ RunPrimaryProcessWithCapture = Callable[
 def select_process_launcher(output_log_path: Path | None) -> ProcessLauncher:
     """Choose the launch backend for one primary process invocation."""
 
+    if can_use_windows_console_launcher():
+        return WindowsConsoleLauncher()
     if can_use_pty(output_log_path=output_log_path):
         return PtyProcessLauncher()
     return SubprocessProcessLauncher()
