@@ -347,7 +347,7 @@ def update_work_item(
 
 
 def archive_work_item(state_root: Path, work_id: str) -> WorkItem:
-    """Mark a work item done and move its scratch dir into `.meridian/work-archive/`."""
+    """Mark a work item done and move its scratch dir into the configured archive path."""
 
     paths = StateRootPaths.from_root_dir(state_root)
     with lock_file(paths.work_items_flock):
@@ -409,7 +409,7 @@ def delete_work_item(
 
 
 def reopen_work_item(state_root: Path, work_id: str, *, status: str = "open") -> WorkItem:
-    """Reopen a work item and restore its scratch dir to `.meridian/work/`."""
+    """Reopen a work item and restore its scratch dir to the configured work path."""
 
     paths = StateRootPaths.from_root_dir(state_root)
     with lock_file(paths.work_items_flock):

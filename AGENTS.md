@@ -164,3 +164,26 @@ Commit after each step that passes tests. Don't accumulate changes across multip
 ## Related Repos
 
 - **mars-agents** (`../mars-agents/`): Standalone agent package manager for `.agents/`. Rust CLI, binary name `mars`. Meridian invokes it via `meridian mars ...` for project package setup and sync. Design spec in `.meridian/work/agent-package-management/design/`. Repo: `meridian-flow/mars-agents`.
+
+### Cross-Platform Paths
+
+Meridian has centralized cross-platform path handling. **Do not write new platform-detection code** — use the existing primitives:
+
+- **`src/meridian/lib/platform/__init__.py`**: `IS_WINDOWS`, `get_home_path()`
+- **`src/meridian/lib/state/user_paths.py`**: `get_user_state_root()`
+
+User state root resolution:
+1. `MERIDIAN_HOME` env var (if set)
+2. Windows: `%LOCALAPPDATA%\meridian`
+3. Windows fallback: `%USERPROFILE%\AppData\Local\meridian`
+4. POSIX fallback: `~/.meridian`
+
+When adding features that need user-level storage (git clones, cache, etc.), put them under `get_user_state_root()`:
+
+```python
+from meridian.lib.state.user_paths import get_user_state_root
+
+repos_dir = get_user_state_root() / "git"  # Cross-platform correct
+```
+
+Do not hardcode `~/.meridian/` or introduce new `LOCALAPPDATA` / `XDG_DATA_HOME` branches.

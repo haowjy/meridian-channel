@@ -10,18 +10,20 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from meridian.lib.config.context_config import ContextConfig
 from meridian.lib.config.settings import resolve_project_root
-from meridian.lib.config.workspace import get_projectable_roots, resolve_workspace_snapshot
+from meridian.lib.context.resolver import resolve_context_paths
 from meridian.lib.core.resolved_context import ResolvedContext
 from meridian.lib.core.util import FormatContext
 from meridian.lib.ops.runtime import resolve_state_root_for_read
-from meridian.lib.state.paths import resolve_fs_dir
+from meridian.lib.state.paths import load_context_config
 
 
 class ContextInput(BaseModel):
     """Input for context query operation."""
 
     model_config = ConfigDict(frozen=True)
+    verbose: bool = False
 
 
 class ContextOutput(BaseModel):
@@ -29,24 +31,53 @@ class ContextOutput(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    work_dir: str | None = None
-    fs_dir: str
-    repo_root: str
-    state_root: str
-    depth: int
-    context_roots: list[str] = Field(default_factory=list)
+    work_path: str
+    work_resolved: str
+    work_source: str
+    work_archive: str
+    work_archive_resolved: str
+    kb_path: str
+    kb_resolved: str
+    kb_source: str
+    render_verbose: bool = Field(default=False, exclude=True, repr=False)
 
     def format_text(self, ctx: FormatContext | None = None) -> str:
-        _ = ctx
+        verbose = self.render_verbose
+        if ctx is not None and ctx.verbosity > 0:
+            verbose = True
+
         lines: list[str] = []
-        lines.append(f"work_dir: {self.work_dir or '(none)'}")
-        lines.append(f"fs_dir: {self.fs_dir}")
-        lines.append(f"repo_root: {self.repo_root}")
-        lines.append(f"state_root: {self.state_root}")
-        lines.append(f"depth: {self.depth}")
-        if self.context_roots:
-            lines.append(f"context_roots: {', '.join(self.context_roots)}")
+        if verbose:
+            lines.append("work:")
+            lines.append(f"  source: {self.work_source}")
+            lines.append(f"  path: {self.work_path}")
+            lines.append(f"  resolved: {self.work_resolved}")
+            lines.append(f"  archive: {self.work_archive}")
+            lines.append(f"  archive_resolved: {self.work_archive_resolved}")
+            lines.append("kb:")
+            lines.append(f"  source: {self.kb_source}")
+            lines.append(f"  path: {self.kb_path}")
+            lines.append(f"  resolved: {self.kb_resolved}")
+            return "\n".join(lines)
+
+        lines.append(f"work: {self.work_path} ({self.work_source})")
+        lines.append(f"  archive: {self.work_archive}")
+        lines.append(f"kb: {self.kb_path} ({self.kb_source})")
         return "\n".join(lines)
+
+    def resolve_name(self, name: str) -> str:
+        """Resolve one context-name query to its absolute path string."""
+
+        normalized = name.strip().lower()
+        if normalized == "work":
+            return self.work_resolved
+        if normalized == "kb":
+            return self.kb_resolved
+        if normalized in {"work.archive", "archive", "archive.work"}:
+            return self.work_archive_resolved
+        raise KeyError(
+            f"Unknown context '{name}'. Expected one of: work, kb, work.archive."
+        )
 
 
 class WorkCurrentInput(BaseModel):
@@ -103,20 +134,20 @@ def _resolve_runtime_context(repo_root: Path, state_root: Path) -> ResolvedConte
 def context_sync(input: ContextInput) -> ContextOutput:
     """Synchronous handler for context query."""
 
-    _ = input
     repo_root = resolve_project_root()
-    state_root = resolve_state_root_for_read(repo_root)
-    resolved = _resolve_runtime_context(repo_root, state_root)
-    workspace_snapshot = resolve_workspace_snapshot(repo_root)
-    context_roots = [root.as_posix() for root in get_projectable_roots(workspace_snapshot)]
+    context_config = load_context_config(repo_root) or ContextConfig()
+    resolved_paths = resolve_context_paths(repo_root, context_config)
 
     return ContextOutput(
-        work_dir=resolved.work_dir.as_posix() if resolved.work_dir is not None else None,
-        fs_dir=resolve_fs_dir(repo_root).as_posix(),
-        repo_root=repo_root.as_posix(),
-        state_root=state_root.as_posix(),
-        depth=resolved.depth,
-        context_roots=context_roots,
+        work_path=context_config.work.path,
+        work_resolved=resolved_paths.work_root.as_posix(),
+        work_source=context_config.work.source.value,
+        work_archive=context_config.work.archive,
+        work_archive_resolved=resolved_paths.work_archive.as_posix(),
+        kb_path=context_config.kb.path,
+        kb_resolved=resolved_paths.kb_root.as_posix(),
+        kb_source=context_config.kb.source.value,
+        render_verbose=input.verbose,
     )
 
 

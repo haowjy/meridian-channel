@@ -80,6 +80,87 @@ def test_runtime_bootstrap_does_not_create_meridian_toml(
     assert not (repo_root / "mars.toml").exists()
 
 
+
+def test_runtime_bootstrap_skips_context_dirs_for_git_backed_sources(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Git-backed context directories are created by git-autosync hooks, not bootstrap.
+
+    Bootstrap should skip creating these directories because:
+    1. The clone doesn't exist yet (lazy clone approach)
+    2. Creating dirs before clone would leave non-git directories at clone paths
+    """
+    repo_root = _repo(tmp_path)
+    remote = "https://example.com/acme/context.git"
+    clone_path = tmp_path / "clones" / "context"
+    (repo_root / "meridian.toml").write_text(
+        "\n".join(
+            [
+                "[context.work]",
+                'source = "git"',
+                f'remote = "{remote}"',
+                'path = ".meridian/work"',
+                'archive = ".meridian/archive/work"',
+                "",
+                "[context.kb]",
+                'source = "git"',
+                f'remote = "{remote}"',
+                'path = ".meridian/kb"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    def _resolve_clone_path(repo_url: str) -> Path:
+        assert repo_url == remote
+        return clone_path
+
+    monkeypatch.setattr("meridian.lib.context.resolver.resolve_clone_path", _resolve_clone_path)
+
+    ensure_runtime_state_bootstrap_sync(repo_root)
+
+    # Root .meridian directory is created
+    assert (repo_root / ".meridian").is_dir()
+
+    # Git-backed context directories are NOT created (no clone exists yet)
+    assert not clone_path.exists()
+    assert not (clone_path / ".meridian" / "work").exists()
+    assert not (clone_path / ".meridian" / "archive" / "work").exists()
+    assert not (clone_path / ".meridian" / "kb").exists()
+
+
+@pytest.mark.parametrize("remote_line", ["", 'remote = ""\n'])
+def test_runtime_bootstrap_git_source_without_remote_falls_back_to_local_dirs(
+    tmp_path: Path,
+    remote_line: str,
+) -> None:
+    repo_root = _repo(tmp_path)
+    (repo_root / "meridian.toml").write_text(
+        "\n".join(
+            [
+                "[context.work]",
+                'source = "git"',
+                remote_line.rstrip("\n"),
+                "",
+                "[context.kb]",
+                'source = "git"',
+                remote_line.rstrip("\n"),
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    ensure_runtime_state_bootstrap_sync(repo_root)
+
+    assert (repo_root / ".meridian").is_dir()
+    assert (repo_root / ".meridian" / "work").is_dir()
+    assert (repo_root / ".meridian" / "archive" / "work").is_dir()
+    assert (repo_root / ".meridian" / "kb").is_dir()
+
+
 def test_config_init_uses_env_repo_root_when_path_not_provided(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

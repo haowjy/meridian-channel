@@ -172,9 +172,30 @@ def register_misc_commands(
         )
 
     @app.command(name="context")
-    def context_cmd() -> None:
-        """Query runtime context: work_dir, fs_dir, repo_root, state_root, depth, context_roots."""
+    def context_cmd(
+        name: Annotated[
+            str | None,
+            Parameter(
+                help=(
+                    "Optional context name to print as an absolute path "
+                    "(work, kb, or work.archive)."
+                ),
+            ),
+        ] = None,
+        verbose: Annotated[
+            bool,
+            Parameter(
+                name="--verbose",
+                help="Show source/path/resolved details for each context.",
+            ),
+        ] = False,
+    ) -> None:
+        """Query configured context paths."""
 
         from meridian.lib.ops.context import ContextInput, context_sync
 
-        emit(context_sync(ContextInput()))
+        output = context_sync(ContextInput(verbose=verbose))
+        if name is None:
+            emit(output)
+            return
+        emit(output.resolve_name(name))

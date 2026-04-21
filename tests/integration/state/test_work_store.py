@@ -58,7 +58,7 @@ def test_work_item_archive_and_reopen_preserves_metadata(tmp_path: Path) -> None
     (active_dir / "notes.md").write_text("hello", encoding="utf-8")
 
     archived = archive_work_item(state_root, item.name)
-    archived_dir = state_root / "work-archive" / item.name
+    archived_dir = state_root / "archive" / "work" / item.name
     assert archived.status == "done"
     assert not active_dir.exists()
     assert (archived_dir / "notes.md").read_text(encoding="utf-8") == "hello"
@@ -111,3 +111,45 @@ def test_list_work_items_repairs_interrupted_archive_status(
     persisted = get_work_item(state_root, item.name)
     assert persisted is not None
     assert persisted.status == "done"
+
+
+def test_archive_and_reopen_use_context_archive_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo_root = tmp_path / "repo"
+    state_root = repo_root / ".meridian"
+    user_state_root = tmp_path / "user-state"
+    repo_root.mkdir()
+    user_state_root.mkdir()
+    monkeypatch.setenv("MERIDIAN_HOME", user_state_root.as_posix())
+    monkeypatch.delenv("MERIDIAN_CONFIG", raising=False)
+    (repo_root / ".git").write_text("gitdir: .git/worktrees/repo\n", encoding="utf-8")
+    state_root.mkdir(parents=True, exist_ok=True)
+    (repo_root / "meridian.local.toml").write_text(
+        "\n".join(
+            [
+                "[context.work]",
+                'path = "external/work"',
+                'archive = "external/archive/work"',
+                "",
+                "[context.kb]",
+                'path = "external/kb"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    item = create_work_item(state_root, "My feature")
+    active_dir = repo_root / "external" / "work" / item.name
+    active_dir.mkdir(parents=True, exist_ok=True)
+    (active_dir / "notes.md").write_text("hello", encoding="utf-8")
+
+    archive_work_item(state_root, item.name)
+    archived_dir = repo_root / "external" / "archive" / "work" / item.name
+    assert not active_dir.exists()
+    assert (archived_dir / "notes.md").read_text(encoding="utf-8") == "hello"
+
+    reopen_work_item(state_root, item.name)
+    assert not archived_dir.exists()
+    assert (active_dir / "notes.md").read_text(encoding="utf-8") == "hello"

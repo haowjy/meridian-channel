@@ -192,6 +192,82 @@ meridian workspace init   # creates workspace.local.toml, adds .git/info/exclude
 
 Idempotent — safe to rerun on an existing file.
 
+## Hooks
+
+Hooks are configured in any Meridian config file. Multiple sources layer in precedence order: `builtin < context < user < project < local`.
+
+```toml
+# meridian.toml or ~/.meridian/config.toml
+
+[[hooks]]
+builtin = "git-autosync"
+remote  = "git@github.com:team/docs.git"
+
+[[hooks]]
+name    = "lint"
+command = "make lint"
+event   = "spawn.finalized"
+failure_policy = "warn"
+```
+
+See [hooks.md](hooks.md) for the full hook schema, event names, and builtin reference.
+
+### `repo` → `remote`
+
+`repo` is a deprecated alias for `remote`. Meridian accepts it with a warning. Replace `repo` with `remote` in your config:
+
+```toml
+# deprecated
+[[hooks]]
+builtin = "git-autosync"
+repo = "git@github.com:team/docs.git"
+
+# correct
+[[hooks]]
+builtin = "git-autosync"
+remote = "git@github.com:team/docs.git"
+```
+
+## Context
+
+Context paths point Meridian at directories for active work, knowledge bases, and work archives. They can be backed by a local path (default) or a remote Git repo that Meridian clones and resolves at runtime.
+
+Configure in `meridian.toml` or `~/.meridian/config.toml`:
+
+```toml
+[context.work]
+source  = "git"
+remote  = "git@github.com:team/docs.git"
+path    = "project/work"
+archive = "project/archive/work"
+
+[context.kb]
+source = "git"
+remote = "git@github.com:team/kb.git"
+path   = "knowledge"
+```
+
+### Schema
+
+#### `[context.work]`
+
+| Key | Type | Default | Purpose |
+| --- | ---- | ------- | ------- |
+| `source` | str | `"local"` | `"local"` or `"git"` |
+| `remote` | str | — | Git remote URL (required when `source = "git"`) |
+| `path` | str | `".meridian/work"` | Path to the work directory, relative to repo or clone root |
+| `archive` | str | `".meridian/archive/work"` | Path to the work archive directory |
+
+#### `[context.kb]`
+
+| Key | Type | Default | Purpose |
+| --- | ---- | ------- | ------- |
+| `source` | str | `"local"` | `"local"` or `"git"` |
+| `remote` | str | — | Git remote URL (required when `source = "git"`) |
+| `path` | str | `".meridian/kb"` | Path to the knowledge base directory |
+
+When `source = "git"`, Meridian clones the remote into a local cache and resolves paths relative to the clone root. Use `meridian context` to inspect the resolved paths.
+
 ## Model Catalog Overrides
 
 Customize aliases, harness routing, and default list visibility in `.meridian/models.toml`:

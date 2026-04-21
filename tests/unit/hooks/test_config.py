@@ -8,9 +8,16 @@ from meridian.lib.hooks.config import load_hooks_config
 
 
 def _repo(tmp_path: Path) -> Path:
-    repo_root = tmp_path / "repo"
+    repo_root = tmp_path / "remote"
     repo_root.mkdir()
     return repo_root
+
+
+def _empty_user_config(tmp_path: Path) -> Path:
+    """Return an empty user config path for test isolation."""
+    path = tmp_path / "empty-user.toml"
+    path.write_text("", encoding="utf-8")
+    return path
 
 
 def test_load_hooks_config_parses_external_and_builtin_entries(tmp_path: Path) -> None:
@@ -23,20 +30,30 @@ def test_load_hooks_config_parses_external_and_builtin_entries(tmp_path: Path) -
         'command = "./scripts/notify.sh"\n'
         "\n"
         "[[hooks]]\n"
-        'builtin = "git-autosync"\n',
+        'builtin = "git-autosync"\n'
+        'remote = "https://github.com/acme/project.git"\n',
         encoding="utf-8",
     )
 
     config = load_hooks_config(repo_root, user_config=user_config)
 
-    by_name = {hook.name: hook for hook in config.hooks}
-    assert set(by_name) == {"notify", "git-autosync"}
-    assert by_name["notify"].command == "./scripts/notify.sh"
-    assert by_name["notify"].event == "spawn.finalized"
-    assert by_name["notify"].source == "user"
-    assert by_name["git-autosync"].builtin == "git-autosync"
-    assert by_name["git-autosync"].event == "spawn.finalized"
-    assert by_name["git-autosync"].interval == "10m"
+    # notify is 1 hook, git-autosync expands to 4 hooks (one per default event)
+    notify_hooks = [h for h in config.hooks if h.name == "notify"]
+    autosync_hooks = [h for h in config.hooks if h.name == "git-autosync"]
+    
+    assert len(notify_hooks) == 1
+    assert notify_hooks[0].command == "./scripts/notify.sh"
+    assert notify_hooks[0].event == "spawn.finalized"
+    assert notify_hooks[0].source == "user"
+    
+    # git-autosync expands to all 4 default events when no explicit event
+    assert len(autosync_hooks) == 4
+    autosync_events = {h.event for h in autosync_hooks}
+    assert autosync_events == {"spawn.start", "spawn.finalized", "work.started", "work.done"}
+    for h in autosync_hooks:
+        assert h.builtin == "git-autosync"
+        assert h.interval is None
+        assert h.remote == "https://github.com/acme/project.git"
 
 
 @pytest.mark.parametrize(
@@ -71,6 +88,11 @@ def test_load_hooks_config_parses_external_and_builtin_entries(tmp_path: Path) -
             "builtin = 'missing-hook'\n",
             "expected one of",
         ),
+        (
+            "[[hooks]]\n"
+            "builtin = 'git-autosync'\n",
+            "'remote' is required for git-autosync",
+        ),
     ],
 )
 def test_load_hooks_config_rejects_invalid_hook_definitions(
@@ -82,25 +104,23 @@ def test_load_hooks_config_rejects_invalid_hook_definitions(
     (repo_root / "meridian.toml").write_text(payload, encoding="utf-8")
 
     with pytest.raises(ValueError, match=expected_message):
-        load_hooks_config(repo_root)
+        load_hooks_config(repo_root, user_config=_empty_user_config(tmp_path))
 
 
-def test_load_hooks_config_auto_registration_is_overridden_by_explicit_builtin(
+def test_load_hooks_config_supports_explicit_git_autosync_builtin(
     tmp_path: Path,
 ) -> None:
     repo_root = _repo(tmp_path)
     (repo_root / "meridian.toml").write_text(
-        "[work.artifacts]\n"
-        'sync = "git"\n'
-        "\n"
         "[[hooks]]\n"
         'builtin = "git-autosync"\n'
         'event = "spawn.finalized"\n'
-        'interval = "30m"\n',
+        'interval = "30m"\n'
+        'remote = "https://github.com/acme/project.git"\n',
         encoding="utf-8",
     )
 
-    config = load_hooks_config(repo_root)
+    config = load_hooks_config(repo_root, user_config=_empty_user_config(tmp_path))
 
     assert len(config.hooks) == 1
     hook = config.hooks[0]
@@ -109,9 +129,10 @@ def test_load_hooks_config_auto_registration_is_overridden_by_explicit_builtin(
     assert hook.auto_registered is False
     assert hook.event == "spawn.finalized"
     assert hook.interval == "30m"
+    assert hook.remote == "https://github.com/acme/project.git"
 
 
-def test_load_hooks_config_auto_registers_git_autosync_with_builtin_defaults(
+def test_load_hooks_config_does_not_auto_register_from_work_artifacts_sync(
     tmp_path: Path,
 ) -> None:
     repo_root = _repo(tmp_path)
@@ -121,16 +142,9 @@ def test_load_hooks_config_auto_registers_git_autosync_with_builtin_defaults(
         encoding="utf-8",
     )
 
-    config = load_hooks_config(repo_root)
+    config = load_hooks_config(repo_root, user_config=_empty_user_config(tmp_path))
 
-    assert len(config.hooks) == 2
-    by_event = {hook.event: hook for hook in config.hooks}
-    assert set(by_event) == {"spawn.finalized", "work.done"}
-    for hook in by_event.values():
-        assert hook.name == "git-autosync"
-        assert hook.builtin == "git-autosync"
-        assert hook.auto_registered is True
-        assert hook.interval == "10m"
+    assert len(config.hooks) == 0
 
 
 def test_load_hooks_config_applies_name_override_across_sources(tmp_path: Path) -> None:
@@ -164,3 +178,66 @@ def test_load_hooks_config_applies_name_override_across_sources(tmp_path: Path) 
     assert config.hooks[0].name == "sync"
     assert config.hooks[0].source == "local"
     assert config.hooks[0].command == "./local-sync.sh"
+
+
+def test_load_hooks_config_does_not_auto_register_from_context_work_source(
+    tmp_path: Path,
+) -> None:
+    repo_root = _repo(tmp_path)
+    user_config = tmp_path / "user.toml"
+    user_config.write_text(
+        "[context.work]\n"
+        'source = "git"\n'
+        'path = ".meridian/work"\n',
+        encoding="utf-8",
+    )
+
+    config = load_hooks_config(repo_root, user_config=user_config)
+
+    assert len(config.hooks) == 0
+
+
+def test_load_hooks_config_does_not_auto_register_for_kb_source_git(
+    tmp_path: Path,
+) -> None:
+    """KB source=git does NOT auto-register git-autosync (hook only syncs work_dir)."""
+    repo_root = _repo(tmp_path)
+    user_config = tmp_path / "user.toml"
+    user_config.write_text(
+        "[context.kb]\n"
+        'source = "git"\n'
+        'path = ".meridian/kb"\n',
+        encoding="utf-8",
+    )
+
+    config = load_hooks_config(repo_root, user_config=user_config)
+
+    assert len(config.hooks) == 0
+
+
+def test_load_hooks_config_explicit_builtin_works_with_context_settings_present(
+    tmp_path: Path,
+) -> None:
+    repo_root = _repo(tmp_path)
+    user_config = tmp_path / "user.toml"
+    user_config.write_text(
+        "[context.work]\n"
+        'source = "git"\n'
+        'path = ".meridian/work"\n'
+        "\n"
+        "[[hooks]]\n"
+        'builtin = "git-autosync"\n'
+        'event = "spawn.finalized"\n'
+        'interval = "5m"\n'
+        'remote = "https://github.com/acme/project.git"\n',
+        encoding="utf-8",
+    )
+
+    config = load_hooks_config(repo_root, user_config=user_config)
+
+    assert len(config.hooks) == 1
+    hook = config.hooks[0]
+    assert hook.name == "git-autosync"
+    assert hook.auto_registered is False
+    assert hook.interval == "5m"
+    assert hook.remote == "https://github.com/acme/project.git"

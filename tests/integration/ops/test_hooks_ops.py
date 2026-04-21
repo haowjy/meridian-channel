@@ -62,7 +62,8 @@ def test_hooks_list_returns_registered_hooks_with_status(
         "\n"
         "[[hooks]]\n"
         "name = 'git-autosync'\n"
-        "builtin = 'git-autosync'\n",
+        "builtin = 'git-autosync'\n"
+        "repo = 'https://github.com/acme/project.git'\n",
         encoding="utf-8",
     )
 

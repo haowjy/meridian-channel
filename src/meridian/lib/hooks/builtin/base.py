@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from meridian.lib.hooks.types import Hook, HookContext, HookResult
+from meridian.plugin_api import Hook, HookContext, HookResult
 
 
 class BuiltinHook(Protocol):
@@ -12,8 +12,16 @@ class BuiltinHook(Protocol):
 
     name: str
     requirements: tuple[str, ...]
-    default_events: tuple[str, ...]
-    default_interval: str | None
+
+    @property
+    def default_events(self) -> tuple[str, ...]:
+        """Default lifecycle events for this builtin hook."""
+        ...
+
+    @property
+    def default_interval(self) -> str | None:
+        """Default throttle interval for this builtin hook."""
+        ...
 
     def check_requirements(self) -> tuple[bool, str | None]:
         """Return whether runtime requirements are available."""

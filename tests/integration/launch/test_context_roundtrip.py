@@ -51,4 +51,4 @@ def test_launch_context_child_env_roundtrips_through_resolved_context(
     assert child_context.chat_id == "chat-parent"
     assert child_context.work_id == "work-parent"
     assert child_context.work_dir == tmp_path / ".meridian" / "work" / "work-parent"
-    assert child_context.fs_dir == tmp_path / ".meridian" / "fs"
+    assert child_context.kb_dir == tmp_path / ".meridian" / "kb"

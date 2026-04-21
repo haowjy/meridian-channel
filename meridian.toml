@@ -51,3 +51,22 @@ agent = "dev-orchestrator"
 # show = ["lifecycle", "sub-run", "error", "system"]
 # Output verbosity preset (str; valid: quiet, normal, verbose, debug).
 # verbosity = "normal"  # example override; default is unset
+
+# -- Context externalization -------------------------------------------------
+# Work items and knowledge base are stored in a separate git repo
+[context.work]
+source = "git"
+remote = "git@github.com:meridian-flow/docs.git"
+path = "meridian-cli/work"
+archive = "meridian-cli/archive/work"
+
+[context.kb]
+source = "git"
+remote = "git@github.com:meridian-flow/docs.git"
+path = "meridian-cli/kb"
+
+# -- Hooks -------------------------------------------------------------------
+# Auto-sync work/kb to the docs repo on spawn and work events
+[[hooks]]
+builtin = "git-autosync"
+remote = "git@github.com:meridian-flow/docs.git"

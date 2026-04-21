@@ -24,7 +24,7 @@ def test_runtime_context_from_environment_delegates_to_resolved_context(
         chat_id="chat-7",
         work_id="work-7",
         work_dir=Path("/repo/.meridian/work/work-7"),
-        fs_dir=Path("/repo/.meridian/fs"),
+        kb_dir=Path("/repo/.meridian/kb"),
     )
 
     def fake_from_environment(cls) -> ResolvedContext:

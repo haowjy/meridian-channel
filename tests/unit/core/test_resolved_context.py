@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from meridian.lib.config.context_config import ContextConfig
 from meridian.lib.core.resolved_context import ContextBackend, ResolvedContext
 
 _MERIDIAN_ENV_KEYS = (
@@ -15,6 +16,7 @@ _MERIDIAN_ENV_KEYS = (
     "MERIDIAN_CHAT_ID",
     "MERIDIAN_WORK_ID",
     "MERIDIAN_WORK_DIR",
+    "MERIDIAN_KB_DIR",
     "MERIDIAN_FS_DIR",
 )
 
@@ -59,7 +61,7 @@ def test_from_environment_without_env_vars(monkeypatch: pytest.MonkeyPatch) -> N
     assert resolved.chat_id == ""
     assert resolved.work_id is None
     assert resolved.work_dir is None
-    assert resolved.fs_dir is None
+    assert resolved.kb_dir is None
     assert backend.session_lookup_calls == []
     assert backend.work_dir_calls == []
 
@@ -82,7 +84,7 @@ def test_from_environment_prefers_explicit_work_id(monkeypatch: pytest.MonkeyPat
 
     assert resolved.work_id == "explicit-work"
     assert backend.session_lookup_calls == []
-    assert backend.work_dir_calls == [(Path("/repo/.meridian"), "explicit-work")]
+    assert backend.work_dir_calls == []
 
 
 def test_from_environment_uses_meridian_work_id(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -97,10 +99,10 @@ def test_from_environment_uses_meridian_work_id(monkeypatch: pytest.MonkeyPatch)
     resolved = ResolvedContext.from_environment(backend=backend)
 
     assert resolved.work_id == "work-from-env"
-    assert resolved.work_dir == Path("/repo/.meridian/work/resolved/work-from-env")
-    assert resolved.fs_dir == Path("/repo/.meridian/fs")
+    assert resolved.work_dir == Path("/repo/.meridian/work/work-from-env")
+    assert resolved.kb_dir == Path("/repo/.meridian/kb")
     assert backend.session_lookup_calls == []
-    assert backend.work_dir_calls == [(Path("/repo/.meridian"), "work-from-env")]
+    assert backend.work_dir_calls == []
 
 
 def test_from_environment_falls_back_to_session_store(
@@ -131,7 +133,7 @@ def test_child_env_overrides_output_format() -> None:
         chat_id="c9",
         work_id="work-123",
         work_dir=Path("/repo/.meridian/work/work-123"),
-        fs_dir=Path("/repo/.meridian/fs"),
+        kb_dir=Path("/repo/.meridian/kb"),
     )
 
     overrides = resolved.child_env_overrides()
@@ -143,7 +145,8 @@ def test_child_env_overrides_output_format() -> None:
         "MERIDIAN_CHAT_ID": "c9",
         "MERIDIAN_WORK_ID": "work-123",
         "MERIDIAN_WORK_DIR": "/repo/.meridian/work/work-123",
-        "MERIDIAN_FS_DIR": "/repo/.meridian/fs",
+        "MERIDIAN_KB_DIR": "/repo/.meridian/kb",
+        "MERIDIAN_FS_DIR": "/repo/.meridian/kb",
     }
     assert resolved.child_env_overrides(increment_depth=False)["MERIDIAN_DEPTH"] == "2"
 
@@ -169,8 +172,8 @@ def test_work_dir_prefers_repo_state_root_over_runtime_state_root(
 
     resolved = ResolvedContext.from_environment(backend=backend)
 
-    assert resolved.work_dir == Path("/repo/.meridian/work/resolved/selected-work")
-    assert backend.work_dir_calls == [(Path("/repo/.meridian"), "selected-work")]
+    assert resolved.work_dir == Path("/repo/.meridian/work/selected-work")
+    assert backend.work_dir_calls == []
 
 
 # ---------------------------------------------------------------------------
@@ -229,7 +232,7 @@ def test_from_environment_empty_repo_root_treated_as_absent(
     resolved = ResolvedContext.from_environment(backend=FakeBackend())
 
     assert resolved.repo_root is None
-    assert resolved.fs_dir is None
+    assert resolved.kb_dir is None
 
 
 def test_from_environment_whitespace_only_repo_root_treated_as_absent(
@@ -346,20 +349,20 @@ def test_from_environment_work_id_resolution_precedence_d8(
     )
     assert resolved_explicit.work_id == "explicit-work"
     assert explicit_backend.session_lookup_calls == []
-    assert explicit_backend.work_dir_calls == [(Path("/repo/.meridian"), "explicit-work")]
+    assert explicit_backend.work_dir_calls == []
 
     env_backend = FakeBackend(session_active_work_id="session-work")
     resolved_env = ResolvedContext.from_environment(backend=env_backend)
     assert resolved_env.work_id == "env-work"
     assert env_backend.session_lookup_calls == []
-    assert env_backend.work_dir_calls == [(Path("/repo/.meridian"), "env-work")]
+    assert env_backend.work_dir_calls == []
 
     monkeypatch.delenv("MERIDIAN_WORK_ID", raising=False)
     session_backend = FakeBackend(session_active_work_id="session-work")
     resolved_session = ResolvedContext.from_environment(backend=session_backend)
     assert resolved_session.work_id == "session-work"
     assert session_backend.session_lookup_calls == [(Path("/runtime/state"), "c42")]
-    assert session_backend.work_dir_calls == [(Path("/repo/.meridian"), "session-work")]
+    assert session_backend.work_dir_calls == []
 
 
 # ---------------------------------------------------------------------------
@@ -414,8 +417,8 @@ def test_work_dir_uses_state_root_directly_when_no_repo_root(
     assert resolved.state_root == state_root
     assert resolved.work_dir == Path("/runtime/state/work/resolved/my-work")
     assert backend.work_dir_calls == [(state_root, "my-work")]
-    # fs_dir requires repo_root — must be None
-    assert resolved.fs_dir is None
+    # kb_dir requires repo_root — must be None
+    assert resolved.kb_dir is None
 
 
 def test_work_dir_is_none_when_no_work_id_even_with_state_root(
@@ -549,5 +552,39 @@ def test_from_environment_relative_repo_root_handled_gracefully(
 
     # Relative path accepted without error — downstream callers must resolve
     assert resolved.repo_root == Path("../relative/repo")
-    # fs_dir is also derived relative — still no error
-    assert resolved.fs_dir == Path("../relative/repo/.meridian/fs")
+    # kb_dir is also derived relative — still no error
+    assert resolved.kb_dir == Path("../relative/repo/.meridian/kb")
+
+
+def test_from_environment_uses_context_config_for_repo_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_meridian_env(monkeypatch)
+    monkeypatch.setenv("MERIDIAN_REPO_ROOT", "/repo")
+    monkeypatch.setenv("MERIDIAN_WORK_ID", "my-work")
+    config = ContextConfig.model_validate(
+        {
+            "work": {"path": "contexts/work", "archive": "contexts/archive/work"},
+            "kb": {"path": "contexts/kb"},
+        }
+    )
+
+    resolved = ResolvedContext.from_environment(context_config=config, backend=FakeBackend())
+
+    assert resolved.work_dir == Path("/repo/contexts/work/my-work")
+    assert resolved.kb_dir == Path("/repo/contexts/kb")
+
+
+def test_child_env_overrides_exports_arbitrary_context_dirs() -> None:
+    resolved = ResolvedContext(
+        depth=0,
+        context_dirs=(
+            ("docs", Path("/contexts/docs")),
+            ("team-notes", Path("/contexts/team-notes")),
+        ),
+    )
+
+    overrides = resolved.child_env_overrides()
+
+    assert overrides["MERIDIAN_CONTEXT_DOCS_DIR"] == "/contexts/docs"
+    assert overrides["MERIDIAN_CONTEXT_TEAM_NOTES_DIR"] == "/contexts/team-notes"

@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, Self
 
+from meridian.lib.config.context_config import ContextConfig
+from meridian.lib.context.resolver import resolve_context_paths
 from meridian.lib.core.types import SpawnId
 from meridian.lib.state import paths as state_paths
 from meridian.lib.state import session_store
@@ -47,7 +49,8 @@ class ResolvedContext:
     chat_id: str = ""
     work_id: str | None = None
     work_dir: Path | None = None
-    fs_dir: Path | None = None
+    kb_dir: Path | None = None
+    context_dirs: tuple[tuple[str, Path], ...] = ()
 
     @classmethod
     def from_environment(
@@ -55,6 +58,7 @@ class ResolvedContext:
         *,
         explicit_work_id: str | None = None,
         backend: ContextBackend | None = None,
+        context_config: ContextConfig | None = None,
     ) -> Self:
         """Resolve and freeze canonical runtime context from ``MERIDIAN_*`` values."""
 
@@ -87,20 +91,35 @@ class ResolvedContext:
         elif state_root is not None and chat_id_raw:
             work_id = backend_impl.get_session_active_work_id(state_root, chat_id_raw)
 
-        work_dir: Path | None = None
-        if work_id:
-            # Repo-scoped state paths take precedence when repo_root is known.
-            if repo_root is not None:
-                repo_state_root = state_paths.resolve_repo_state_paths(repo_root).root_dir
-                work_dir = backend_impl.resolve_work_scratch_dir(repo_state_root, work_id)
-            elif state_root is not None:
-                work_dir = backend_impl.resolve_work_scratch_dir(state_root, work_id)
-
-        fs_dir = (
-            state_paths.resolve_repo_state_paths(repo_root).fs_dir
+        repo_state_paths = (
+            state_paths.resolve_repo_state_paths_from_context(
+                repo_root,
+                context_config=context_config,
+            )
             if repo_root is not None
             else None
         )
+
+        work_dir: Path | None = None
+        if work_id:
+            # Repo-scoped state paths take precedence when repo_root is known.
+            if repo_state_paths is not None:
+                work_dir = repo_state_paths.work_dir / work_id
+            elif state_root is not None:
+                work_dir = backend_impl.resolve_work_scratch_dir(state_root, work_id)
+
+        kb_dir = repo_state_paths.kb_dir if repo_state_paths is not None else None
+
+        resolved_config = context_config
+        if resolved_config is None and repo_root is not None:
+            resolved_config = state_paths.load_context_config(repo_root)
+
+        context_dirs: tuple[tuple[str, Path], ...] = ()
+        if repo_root is not None and resolved_config is not None:
+            resolved_context_paths = resolve_context_paths(repo_root, resolved_config)
+            context_dirs = tuple(
+                sorted((name, path) for name, (path, _) in resolved_context_paths.extra.items())
+            )
 
         return cls(
             spawn_id=SpawnId(spawn_id_raw) if spawn_id_raw else None,
@@ -110,7 +129,8 @@ class ResolvedContext:
             chat_id=chat_id_raw,
             work_id=work_id,
             work_dir=work_dir,
-            fs_dir=fs_dir,
+            kb_dir=kb_dir,
+            context_dirs=context_dirs,
         )
 
     def child_env_overrides(self, *, increment_depth: bool = True) -> dict[str, str]:
@@ -130,6 +150,23 @@ class ResolvedContext:
             overrides["MERIDIAN_WORK_ID"] = self.work_id
         if self.work_dir is not None:
             overrides["MERIDIAN_WORK_DIR"] = self.work_dir.as_posix()
-        if self.fs_dir is not None:
-            overrides["MERIDIAN_FS_DIR"] = self.fs_dir.as_posix()
+        if self.kb_dir is not None:
+            kb_value = self.kb_dir.as_posix()
+            overrides["MERIDIAN_KB_DIR"] = kb_value
+            # Deprecated alias: keep while callers migrate to MERIDIAN_KB_DIR.
+            overrides["MERIDIAN_FS_DIR"] = kb_value
+        for context_name, context_dir in self.context_dirs:
+            env_name = "".join(
+                character if character.isalnum() else "_"
+                for character in context_name.upper()
+            ).strip("_")
+            if not env_name:
+                continue
+            overrides[f"MERIDIAN_CONTEXT_{env_name}_DIR"] = context_dir.as_posix()
         return overrides
+
+    @property
+    def fs_dir(self) -> Path | None:
+        """Deprecated compatibility alias for ``kb_dir``."""
+
+        return self.kb_dir

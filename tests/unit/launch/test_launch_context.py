@@ -171,7 +171,10 @@ def test_build_launch_context_projects_runtime_child_env_paths(
     assert runtime_ctx.env_overrides["MERIDIAN_WORK_DIR"] == (
         tmp_path / ".meridian" / "work" / "work-alpha"
     ).as_posix()
+    assert runtime_ctx.env_overrides["MERIDIAN_KB_DIR"] == (
+        tmp_path / ".meridian" / "kb"
+    ).as_posix()
     assert runtime_ctx.env_overrides["MERIDIAN_FS_DIR"] == (
-        tmp_path / ".meridian" / "fs"
+        tmp_path / ".meridian" / "kb"
     ).as_posix()
     assert set(runtime_ctx.env_overrides) <= ALLOWED_CHILD_ENV_KEYS

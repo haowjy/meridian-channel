@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import tomllib
+import warnings
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,8 +13,12 @@ from typing import cast, get_args
 from meridian.lib.config.project_config_state import resolve_project_config_state
 from meridian.lib.config.settings import (
     normalize_hooks_array,
-    normalize_work_table,
     resolve_user_config_path,
+)
+from meridian.lib.hooks.builtin_registry import (
+    BUILTIN_HOOK_REGISTRY,
+    get_default_events,
+    validate_builtin_options,
 )
 from meridian.lib.hooks.types import (
     EVENT_CLASS,
@@ -24,27 +29,14 @@ from meridian.lib.hooks.types import (
     SpawnStatus,
 )
 
-HOOK_SOURCE_PRECEDENCE: tuple[str, ...] = ("builtin", "user", "project", "local")
+HOOK_SOURCE_PRECEDENCE: tuple[str, ...] = ("builtin", "context", "user", "project", "local")
 _LOCAL_CONFIG_FILENAME = "meridian.local.toml"
 _INTERVAL_PATTERN = re.compile(r"^\d+[smhd]$")
 _KNOWN_FAILURE_POLICIES = frozenset({"fail", "warn", "ignore"})
 _KNOWN_SPAWN_STATUSES = frozenset(get_args(SpawnStatus))
 
-
-@dataclass(frozen=True)
-class BuiltinHookDefaults:
-    """Static builtin hook defaults used before runtime builtin loading exists."""
-
-    default_events: tuple[HookEventName, ...]
-    interval: str | None = None
-
-
-BUILTIN_HOOK_DEFAULTS: dict[str, BuiltinHookDefaults] = {
-    "git-autosync": BuiltinHookDefaults(
-        default_events=("spawn.finalized", "work.done"),
-        interval="10m",
-    )
-}
+# Backward-compatible alias; registry remains the single source of truth.
+BUILTIN_HOOK_DEFAULTS = BUILTIN_HOOK_REGISTRY
 
 
 @dataclass(frozen=True)
@@ -124,9 +116,36 @@ def _hook_from_row(
     source: str,
     row_source: str,
     auto_registered: bool = False,
-) -> Hook:
+) -> tuple[Hook, ...]:
     command = cast("str | None", row.get("command"))
     builtin = cast("str | None", row.get("builtin"))
+
+    raw_options = row.get("options")
+    options: dict[str, object]
+    if raw_options is None:
+        options = {}
+    elif isinstance(raw_options, dict):
+        options = dict(cast("dict[str, object]", raw_options))
+    else:
+        raise ValueError(f"Invalid value for '{row_source}.options': expected table.")
+
+    # Parse remote URL - primary field
+    remote = cast("str | None", row.get("remote"))
+    
+    # Support deprecated 'repo' as alias for 'remote'
+    repo = cast("str | None", row.get("repo"))
+    if repo is not None:
+        warnings.warn(
+            f"Hook config '{row_source}': 'repo' is deprecated, use 'remote' instead.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        if remote is None:
+            remote = repo
+    
+    # Also check options.remote for plugin-style config
+    if remote is not None:
+        options.setdefault("remote", remote)
 
     if command is not None and builtin is not None:
         raise ValueError(
@@ -144,24 +163,41 @@ def _hook_from_row(
         else:
             raise ValueError(f"Invalid hook config '{row_source}': 'name' is required.")
 
-    if builtin is not None and builtin not in BUILTIN_HOOK_DEFAULTS:
-        valid = ", ".join(sorted(BUILTIN_HOOK_DEFAULTS.keys()))
+    if builtin is not None and builtin not in BUILTIN_HOOK_REGISTRY:
+        valid = ", ".join(sorted(BUILTIN_HOOK_REGISTRY.keys()))
         raise ValueError(
             f"Invalid value for '{row_source}.builtin': expected one of [{valid}], got {builtin!r}."
         )
+    if builtin is not None:
+        try:
+            validate_builtin_options(builtin, options)
+        except KeyError:
+            valid = ", ".join(sorted(BUILTIN_HOOK_REGISTRY.keys()))
+            raise ValueError(
+                f"Invalid value for '{row_source}.builtin': expected one of [{valid}], "
+                f"got {builtin!r}."
+            ) from None
+        except ValueError as exc:
+            raise ValueError(f"Invalid hook config '{row_source}': {exc}") from exc
 
-    default_event = (
-        BUILTIN_HOOK_DEFAULTS[builtin].default_events[0] if builtin is not None else None
-    )
+    default_events = get_default_events(builtin) if builtin is not None else ()
     raw_event = cast("str | None", row.get("event"))
-    if raw_event is None:
-        if default_event is None:
-            raise ValueError(f"Invalid hook config '{row_source}': 'event' is required.")
-        event = default_event
-    else:
-        event = _parse_event(raw_event, source=f"{row_source}.event")
 
-    default_interval = BUILTIN_HOOK_DEFAULTS[builtin].interval if builtin is not None else None
+    # Determine which events to register for
+    if raw_event is not None:
+        # Explicit event specified - use only that one
+        events_to_register: tuple[HookEventName, ...] = (
+            _parse_event(raw_event, source=f"{row_source}.event"),
+        )
+    elif default_events:
+        # No explicit event, use all default events for this builtin
+        events_to_register = cast("tuple[HookEventName, ...]", default_events)
+    else:
+        raise ValueError(f"Invalid hook config '{row_source}': 'event' is required.")
+
+    default_interval = (
+        BUILTIN_HOOK_REGISTRY[builtin].interval if builtin is not None else None
+    )
     interval = _parse_interval(
         cast("str | None", row.get("interval")) or default_interval,
         source=f"{row_source}.interval",
@@ -188,47 +224,32 @@ def _hook_from_row(
     exclude = cast("tuple[str, ...] | None", row.get("exclude")) or ()
     when = _parse_when(row.get("when"), source=f"{row_source}.when")
 
-    return Hook(
-        name=name,
-        event=event,
-        source=source,
-        command=command,
-        builtin=builtin,
-        timeout_secs=timeout_secs,
-        interval=interval,
-        enabled=cast("bool", row.get("enabled", True)),
-        priority=cast("int", row.get("priority", 0)),
-        failure_policy=resolved_failure_policy,
-        require_serial=cast("bool", row.get("require_serial", False)),
-        when=when,
-        exclude=exclude,
-        auto_registered=auto_registered,
+    # Create one Hook per event
+    return tuple(
+        Hook(
+            name=name,
+            event=event,
+            source=source,
+            command=command,
+            builtin=builtin,
+            timeout_secs=timeout_secs,
+            interval=interval,
+            enabled=cast("bool", row.get("enabled", True)),
+            priority=cast("int", row.get("priority", 0)),
+            failure_policy=resolved_failure_policy,
+            require_serial=cast("bool", row.get("require_serial", False)),
+            when=when,
+            exclude=exclude,
+            options=options,
+            auto_registered=auto_registered,
+            remote=remote,
+        )
+        for event in events_to_register
     )
 
 
 def _hooks_from_payload(payload: dict[str, object], *, source: str) -> tuple[Hook, ...]:
     hooks: list[Hook] = []
-
-    work = payload.get("work")
-    if work is not None:
-        normalized_work = normalize_work_table(work, source=f"{source}.work")
-        artifacts = normalized_work.get("artifacts")
-        artifacts_dict = (
-            cast("dict[str, object]", artifacts) if isinstance(artifacts, dict) else None
-        )
-        if artifacts_dict is not None and artifacts_dict.get("sync") == "git":
-            defaults = BUILTIN_HOOK_DEFAULTS["git-autosync"]
-            for event in defaults.default_events:
-                hooks.append(
-                    Hook(
-                        name="git-autosync",
-                        event=event,
-                        source=source,
-                        builtin="git-autosync",
-                        interval=defaults.interval,
-                        auto_registered=True,
-                    )
-                )
 
     raw_hooks = payload.get("hooks")
     if raw_hooks is None:
@@ -236,7 +257,7 @@ def _hooks_from_payload(payload: dict[str, object], *, source: str) -> tuple[Hoo
 
     rows = normalize_hooks_array(raw_hooks, source=f"{source}.hooks")
     for index, row in enumerate(rows, start=1):
-        hooks.append(
+        hooks.extend(
             _hook_from_row(
                 row,
                 source=source,
@@ -265,17 +286,17 @@ def _apply_name_overrides(hooks: tuple[Hook, ...]) -> tuple[Hook, ...]:
             effective[key] = hook
             continue
 
-        to_remove_by_name = [
-            key for key, existing in effective.items() if existing.name == hook.name
-        ]
-        for key in to_remove_by_name:
+        # For non-auto-registered hooks, key by (name, event) to allow multi-event builtins
+        # Still remove previous hooks with same name AND event (override semantics)
+        key = (hook.name, hook.event)
+        if key in effective:
             del effective[key]
-        effective[(hook.name, None)] = hook
+        effective[key] = hook
     return tuple(effective.values())
 
 
 def load_hooks_config(repo_root: Path, *, user_config: Path | None = None) -> HooksConfig:
-    """Load hook config with precedence: builtin defaults < user < project < local."""
+    """Load hook config with precedence: builtin < context < user < project < local."""
 
     resolved_repo_root = repo_root.expanduser().resolve()
     resolved_user_config = resolve_user_config_path(user_config)

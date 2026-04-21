@@ -18,9 +18,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from meridian.lib.app.file_service import FileService, _validate_git_ref  # type: ignore[attr-defined]
+from meridian.lib.app.file_service import (  # type: ignore[attr-defined]
+    FileService,
+    _validate_git_ref,
+)
 from meridian.lib.app.path_security import PathSecurityError, validate_project_path
-
 
 # ---------------------------------------------------------------------------
 # F1 — Git ref injection
@@ -274,7 +276,7 @@ class TestReadFileLineOrdering:
         target.write_text("line1\nline2\nline3\n")
 
         svc = FileService(project)
-        with pytest.raises(ValueError, match="start_line.*<=.*end_line"):
+        with pytest.raises(ValueError, match=r"start_line.*<=.*end_line"):
             svc.read_file("f.txt", start_line=5, end_line=2)
 
     def test_equal_start_end_accepted(self, tmp_path: Path) -> None:

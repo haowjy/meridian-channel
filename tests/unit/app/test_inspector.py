@@ -11,10 +11,7 @@ in test_thread_api.py, including:
 
 from __future__ import annotations
 
-import pytest
-
 from meridian.lib.app.inspector import make_event_id, parse_event_id
-
 
 # ---------------------------------------------------------------------------
 # make_event_id

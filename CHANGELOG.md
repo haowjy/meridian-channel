@@ -9,12 +9,17 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **git-autosync**: Built-in hook for syncing git-backed contexts. Auto-registers when `source = "git"`. Interval throttling, fail-open semantics.
 - **App server Phase 1**: Sessions/SSE/Work facade endpoints. Multiplexed SSE stream for live updates.
 - **`meridian.local.toml`**: Personal config overrides, gitignored. Precedence: local > project > user.
+- **Context backend**: Git-backed contexts via `[context.work]` and `[context.kb]` with `source = "git"` and `remote = "..."`. Paths resolve to `~/.meridian/git/<slug>/`. Lazy clone — bootstrap skips git-backed dirs, git-autosync handles cloning.
+- **Plugin API v1**: Stable contract at `meridian.plugin_api` for hooks/plugins. Exports: hook types, state helpers, git helpers, config helpers, file locking.
 
 ### Changed
 - `spawn show/children/files/cancel/wait/log` accept chat_id refs (e.g. `c213`). Resolves to most recent spawn with that chat_id.
 - `meridian context` command — returns context tuple (`work_id`, `repo_root`, `state_root`, `depth`). JSON when spawned or with `--json`; human-friendly text in TTY.
+- Git clone slug shortened: `meridian-flow-docs` instead of `github.com-meridian-flow-docs`. Collision detection still works (errors if existing clone has different remote).
+- Context resolver is now pure — no clone side effects. Bootstrap skips mkdir for git-backed paths.
 
 ### Fixed
+- `spawn --from c123` now uses the chat's primary spawn and transcript pointer. No more latest-child report bleed. `spawn --from p123` keeps concrete spawn report/files context.
 - Top-level unreadable `-f` directory now raises `PermissionError` instead of silent empty tree.
 - Windows: `_fsync_directory` no-op on Windows (not supported).
 - Windows: `output.jsonl` capture enabled on Windows.
@@ -22,7 +27,8 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Windows: `Path.home()` → `get_home_path()` to respect `HOME` env var.
 - Windows: fcntl test skip on Windows.
 - Windows: Path assertion normalized for cross-platform.
-
+- git-autosync event name: `work.start` → `work.started` to match actual lifecycle dispatch.
+- `source = "git"` without `remote`: warns and falls back to local instead of broken state.
 
 ## [0.0.33] - 2026-04-17
 

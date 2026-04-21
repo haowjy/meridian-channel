@@ -32,7 +32,7 @@ def _write_minimal_mars_config(repo_root: Path) -> None:
             "gpt-5.4",
             "review",
             "Review helper",
-            False,
+            True,  # Changed: content is now delivered via file, not argv
         ),
         (
             "gpt-5.4",

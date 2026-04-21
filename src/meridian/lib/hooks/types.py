@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from typing import Literal
 from uuid import UUID
 
 HookEventName = Literal[
     "spawn.created",
     "spawn.running",
+    "spawn.start",
     "spawn.finalized",
+    "work.start",
     "work.started",
     "work.done",
 ]
@@ -24,7 +27,9 @@ HookOutcome = Literal["success", "failure", "timeout", "skipped"]
 EVENT_CLASS: dict[HookEventName, HookEventClass] = {
     "spawn.created": "observe",
     "spawn.running": "observe",
+    "spawn.start": "observe",
     "spawn.finalized": "post",
+    "work.start": "observe",
     "work.started": "observe",
     "work.done": "post",
 }
@@ -42,6 +47,10 @@ DEFAULT_FAILURE_POLICY: dict[HookEventClass, FailurePolicy] = {
 }
 
 HOOK_CONTEXT_SCHEMA_VERSION = 1
+
+
+def _default_options() -> dict[str, object]:
+    return {}
 
 
 @dataclass(frozen=True)
@@ -69,7 +78,11 @@ class Hook:
     require_serial: bool = False
     when: HookWhen | None = None
     exclude: tuple[str, ...] = ()
+    options: Mapping[str, object] = field(default_factory=_default_options)
     auto_registered: bool = False
+    # Legacy field kept for backward compatibility.
+    # Builtins should prefer config.options.
+    remote: str | None = None
 
 
 @dataclass(frozen=True)

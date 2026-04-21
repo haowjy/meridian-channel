@@ -1,3 +1,0 @@
-auth.json
-config.toml
-instructions.md

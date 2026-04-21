@@ -719,10 +719,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
     ),
     _spec(
         name="context",
-        description=(
-            "Query runtime context: work_dir, fs_dir, repo_root, "
-            "state_root, depth, context_roots."
-        ),
+        description="Query configured context catalog (work/kb sources and resolved paths).",
         handler=context,
         sync_handler=context_sync,
         input_type=ContextInput,

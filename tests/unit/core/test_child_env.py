@@ -108,13 +108,14 @@ def test_build_omits_none_fields() -> None:
         parent_depth=0,
         work_id=None,
         work_dir=None,
-        fs_dir=None,
+        kb_dir=None,
     )
     assert "MERIDIAN_REPO_ROOT" not in result
     assert "MERIDIAN_STATE_ROOT" not in result
     assert "MERIDIAN_CHAT_ID" not in result
     assert "MERIDIAN_WORK_ID" not in result
     assert "MERIDIAN_WORK_DIR" not in result
+    assert "MERIDIAN_KB_DIR" not in result
     assert "MERIDIAN_FS_DIR" not in result
 
 
@@ -123,7 +124,7 @@ def test_build_full_overrides() -> None:
     repo = Path("/repo")
     state = Path("/runtime/state")
     work_dir = Path("/repo/.meridian/work/w1")
-    fs_dir = Path("/repo/.meridian/fs")
+    kb_dir = Path("/repo/.meridian/kb")
 
     result = build_child_env_overrides(
         parent_spawn_id=None,
@@ -133,7 +134,7 @@ def test_build_full_overrides() -> None:
         parent_depth=1,
         work_id="w1",
         work_dir=work_dir,
-        fs_dir=fs_dir,
+        kb_dir=kb_dir,
     )
 
     assert result == {
@@ -143,7 +144,8 @@ def test_build_full_overrides() -> None:
         "MERIDIAN_CHAT_ID": "c99",
         "MERIDIAN_WORK_ID": "w1",
         "MERIDIAN_WORK_DIR": "/repo/.meridian/work/w1",
-        "MERIDIAN_FS_DIR": "/repo/.meridian/fs",
+        "MERIDIAN_KB_DIR": "/repo/.meridian/kb",
+        "MERIDIAN_FS_DIR": "/repo/.meridian/kb",
     }
 
 
@@ -157,7 +159,7 @@ def test_build_result_keys_are_subset_of_allowed() -> None:
         parent_depth=0,
         work_id="wid",
         work_dir=Path("/s/work/wid"),
-        fs_dir=Path("/r/.meridian/fs"),
+        kb_dir=Path("/r/.meridian/kb"),
     )
     unexpected = set(result) - ALLOWED_CHILD_ENV_KEYS
     assert unexpected == set(), f"Unexpected keys: {unexpected}"
@@ -174,7 +176,7 @@ def test_integration_matches_resolved_context_child_env_overrides() -> None:
     repo = Path("/my/repo")
     state = Path("/my/state")
     work_dir = Path("/my/state/work/w42")
-    fs_dir = Path("/my/repo/.meridian/fs")
+    kb_dir = Path("/my/repo/.meridian/kb")
 
     ctx = ResolvedContext(
         depth=2,
@@ -183,7 +185,7 @@ def test_integration_matches_resolved_context_child_env_overrides() -> None:
         chat_id="c7",
         work_id="w42",
         work_dir=work_dir,
-        fs_dir=fs_dir,
+        kb_dir=kb_dir,
     )
     expected = ctx.child_env_overrides()
 
@@ -195,7 +197,7 @@ def test_integration_matches_resolved_context_child_env_overrides() -> None:
         parent_depth=2,
         work_id="w42",
         work_dir=work_dir,
-        fs_dir=fs_dir,
+        kb_dir=kb_dir,
     )
 
     assert result == expected

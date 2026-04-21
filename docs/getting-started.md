@@ -12,7 +12,7 @@ Meridian is a coordination layer — it needs at least one harness installed to 
 
 **Claude Code** is the primary session harness — it supports system prompt injection and interactive use. Codex and OpenCode work well as spawn targets for delegated tasks.
 
-**Platform**: macOS, Linux, WSL.
+**Platform**: macOS, Linux, Windows, WSL.
 
 ## Install
 
@@ -86,3 +86,5 @@ Each enabled, existing root is projected to harness launches automatically — `
 
 - [commands.md](commands.md) — full CLI reference
 - [configuration.md](configuration.md) — config keys, model routing, environment variables
+- [hooks.md](hooks.md) — hook events, builtin hooks, and `git-autosync`
+- [plugin-api.md](plugin-api.md) — stable API for hook and plugin authors

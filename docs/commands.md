@@ -13,7 +13,7 @@ Full command surface. Use `--help` on any command for flags and options.
 | `meridian spawn show ID` | Read a spawn's report and status |
 | `meridian spawn log ID` | Stream raw spawn output |
 | `meridian spawn --continue ID -p "more"` | Resume a prior spawn with new input |
-| `meridian spawn --from ID -p "next"` | Start a new spawn inheriting prior context |
+| `meridian spawn --from REF -p "next"` | Start a new spawn with prior spawn or chat/session context |
 | `meridian spawn cancel ID` | Cancel a running spawn |
 | `meridian spawn stats` | Aggregate spawn statistics |
 | `meridian spawn children ID` | List direct child spawns |
@@ -28,6 +28,7 @@ Common `spawn` flags:
 | `-p "prompt"` | Inline prompt |
 | `--prompt-file PATH` | Read prompt from file |
 | `-f FILE` | Attach context file (repeatable) |
+| `--from REF` | Attach prior context from a spawn ref (`p123`) or chat/session ref (`c123`) |
 | `--desc "label"` | Human-readable label in dashboards |
 | `--work SLUG` | Attach to a specific work item |
 | `--approval MODE` | `default` \| `confirm` \| `auto` \| `yolo` |
@@ -48,6 +49,50 @@ Common `spawn` flags:
 | `meridian work create SLUG` | Create a new work item |
 | `meridian work switch SLUG` | Set active work item |
 | `meridian work sessions SLUG` | List sessions attached to a work item |
+
+## Hooks
+
+| Command | Description |
+| ------- | ----------- |
+| `meridian hooks list` | Show all registered hooks |
+| `meridian hooks check` | Validate hook configuration |
+| `meridian hooks run NAME` | Execute a hook manually, bypassing interval throttling |
+| `meridian hooks run NAME --event EVENT` | Execute with a specific event context |
+
+See [hooks.md](hooks.md) for event names, builtin hooks, and hook configuration schema.
+
+## Context
+
+| Command | Description |
+| ------- | ----------- |
+| `meridian context` | Show all resolved context paths |
+| `meridian context work` | Print the absolute path for the `work` context |
+| `meridian context kb` | Print the absolute path for the `kb` context |
+| `meridian context work.archive` | Print the absolute path for the `work.archive` context |
+| `meridian context --verbose` | Show source, path, and resolved details for each context |
+
+```bash
+meridian context           # show all resolved context paths
+meridian context work      # print just the work path
+meridian context --verbose # show source and resolution details
+```
+
+Context paths can be backed by a local directory (default) or a remote Git repo (cloned and resolved at runtime). Configure in `meridian.toml`:
+
+```toml
+[context.work]
+source = "git"
+remote = "git@github.com:team/docs.git"
+path   = "project/work"
+archive = "project/archive/work"
+
+[context.kb]
+source = "git"
+remote = "git@github.com:team/kb.git"
+path   = "knowledge"
+```
+
+See [configuration.md](configuration.md#context) for the full schema.
 
 ## Configuration & Diagnostics
 

@@ -47,7 +47,7 @@ def test_child_env_context_from_environment_uses_resolved_context_parent_fields(
         parent_depth=3,
         work_id="work-explicit",
         work_dir=(project_paths.execution_cwd / ".meridian" / "work" / "work-explicit").resolve(),
-        fs_dir=(project_paths.execution_cwd / ".meridian" / "fs").resolve(),
+        kb_dir=(project_paths.execution_cwd / ".meridian" / "kb").resolve(),
     )
 
 
@@ -86,7 +86,7 @@ def test_child_env_context_from_environment_falls_back_to_session_lookup(
     assert resolved.work_dir == (
         project_paths.execution_cwd / ".meridian" / "work" / "work-session"
     ).resolve()
-    assert resolved.fs_dir == (project_paths.execution_cwd / ".meridian" / "fs").resolve()
+    assert resolved.kb_dir == (project_paths.execution_cwd / ".meridian" / "kb").resolve()
 
 
 def test_child_env_context_from_environment_ignores_session_lookup_failures(
@@ -119,7 +119,7 @@ def test_child_env_context_from_environment_ignores_session_lookup_failures(
 
     assert resolved.work_id is None
     assert resolved.work_dir is None
-    assert resolved.fs_dir == (project_paths.execution_cwd / ".meridian" / "fs").resolve()
+    assert resolved.kb_dir == (project_paths.execution_cwd / ".meridian" / "kb").resolve()
 
 
 def test_child_env_context_child_context_routes_through_contract_helpers(
@@ -134,7 +134,7 @@ def test_child_env_context_child_context_routes_through_contract_helpers(
         parent_depth=5,
         work_id="work-55",
         work_dir=tmp_path / "repo/.meridian/work/work-55",
-        fs_dir=tmp_path / "repo/.meridian/fs",
+        kb_dir=tmp_path / "repo/.meridian/kb",
     )
     expected = {
         "MERIDIAN_DEPTH": "6",
@@ -143,7 +143,8 @@ def test_child_env_context_child_context_routes_through_contract_helpers(
         "MERIDIAN_CHAT_ID": "chat-parent",
         "MERIDIAN_WORK_ID": "work-55",
         "MERIDIAN_WORK_DIR": ctx.work_dir.as_posix(),
-        "MERIDIAN_FS_DIR": ctx.fs_dir.as_posix(),
+        "MERIDIAN_KB_DIR": ctx.kb_dir.as_posix(),
+        "MERIDIAN_FS_DIR": ctx.kb_dir.as_posix(),
     }
     seen: list[dict[str, str]] = []
 
@@ -156,7 +157,7 @@ def test_child_env_context_child_context_routes_through_contract_helpers(
             "parent_depth": 5,
             "work_id": "work-55",
             "work_dir": ctx.work_dir,
-            "fs_dir": ctx.fs_dir,
+            "kb_dir": ctx.kb_dir,
         }
         return dict(expected)
 

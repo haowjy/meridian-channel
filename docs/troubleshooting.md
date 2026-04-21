@@ -40,10 +40,13 @@ To resume a prior spawn:
 meridian spawn --continue ID -p "continue from where you left off"
 ```
 
-To start a new spawn with the prior conversation as context:
+To start a new spawn with a prior spawn or chat/session as context:
 ```bash
-meridian spawn --from ID -p "next task"
+meridian spawn --from REF -p "next task"
 ```
+
+Use a spawn ref such as `p123` to include that spawn's report/files. Use a chat
+ref such as `c123` to point at the exact session transcript and primary spawn.
 
 To find which spawns belong to a work item:
 ```bash

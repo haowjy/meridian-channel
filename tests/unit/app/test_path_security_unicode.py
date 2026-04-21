@@ -42,11 +42,11 @@ class TestUnicodePaths:
         """Deeply nested unicode paths within root must be accepted."""
         project = tmp_path / "project"
         project.mkdir()
-        nested = project / "α" / "β" / "γ"
+        nested = project / "α" / "β" / "γ"  # noqa: RUF001
         nested.mkdir(parents=True)
         (nested / "file.txt").write_text("ok")
 
-        result = validate_project_path(project, "α/β/γ/file.txt")
+        result = validate_project_path(project, "α/β/γ/file.txt")  # noqa: RUF001
         assert result.exists()
 
     def test_path_with_spaces_in_name_accepted(self, tmp_path: Path) -> None:
@@ -90,8 +90,8 @@ class TestUnicodePaths:
         assert str(result).startswith(str(project.resolve()))
 
     def test_unicode_look_alike_dot_does_not_escape(self, tmp_path: Path) -> None:
-        """U+FF0E (fullwidth full stop) is NOT the ASCII '.', so 'ｓｒｃ/ＡＢ' won't
-        be treated as '..' by the OS path parser.  The string is not dangerous."""
+        """U+FF0E (fullwidth full stop) is NOT the ASCII '.', so fullwidth path text
+        won't be treated as '..' by the OS path parser. The string is not dangerous."""
         project = tmp_path / "project"
         project.mkdir()
 

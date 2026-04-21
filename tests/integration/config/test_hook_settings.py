@@ -52,7 +52,9 @@ def test_load_hooks_config_layering_user_project_local(tmp_path: Path) -> None:
     assert by_name["only-user"].source == "user"
 
 
-def test_load_hooks_config_auto_registers_git_sync_from_local_config(tmp_path: Path) -> None:
+def test_load_hooks_config_does_not_auto_register_git_sync_from_local_config(
+    tmp_path: Path,
+) -> None:
     repo_root = _repo(tmp_path)
     (repo_root / "meridian.local.toml").write_text(
         "[work.artifacts]\n"
@@ -62,14 +64,7 @@ def test_load_hooks_config_auto_registers_git_sync_from_local_config(tmp_path: P
 
     hooks = load_hooks_config(repo_root)
 
-    assert len(hooks.hooks) == 2
-    by_event = {hook.event: hook for hook in hooks.hooks}
-    assert set(by_event) == {"spawn.finalized", "work.done"}
-    for hook in by_event.values():
-        assert hook.name == "git-autosync"
-        assert hook.source == "local"
-        assert hook.auto_registered is True
-        assert hook.interval == "10m"
+    assert len(hooks.hooks) == 0
 
 
 def test_load_config_uses_hook_normalization_for_type_validation(tmp_path: Path) -> None:

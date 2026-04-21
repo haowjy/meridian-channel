@@ -1,6 +1,17 @@
 from pathlib import Path
 
-from meridian.lib.state.paths import StateRootPaths, ensure_gitignore, resolve_state_paths
+import pytest
+
+from meridian.lib.config.context_config import ContextConfig
+from meridian.lib.state.paths import (
+    StateRootPaths,
+    ensure_gitignore,
+    load_context_config,
+    resolve_repo_state_paths,
+    resolve_repo_state_paths_for_write,
+    resolve_repo_state_paths_from_context,
+    resolve_state_paths,
+)
 
 
 def test_ensure_gitignore_drops_legacy_config_exception(tmp_path: Path) -> None:
@@ -25,9 +36,9 @@ def test_ensure_gitignore_drops_legacy_config_exception(tmp_path: Path) -> None:
     updated = gitignore_path.read_text(encoding="utf-8")
     assert "!config.toml" not in updated
     assert "!.gitignore" in updated
-    assert "!fs/" in updated
+    assert "!kb/" in updated
     assert "!work/" in updated
-    assert "!work-archive/" in updated
+    assert "!archive/" in updated
 
 
 def test_resolve_state_paths_does_not_expose_project_config_path(tmp_path: Path) -> None:
@@ -44,3 +55,248 @@ def test_state_root_paths_resolves_hook_state_json(tmp_path: Path) -> None:
     paths = StateRootPaths.from_root_dir(state_root)
 
     assert paths.hook_state_json == state_root / "hook-state.json"
+
+
+def test_state_root_paths_override_meridian_dir_stays_root_local(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    override_root = tmp_path / "runtime-override" / ".meridian"
+    override_root.parent.mkdir(parents=True, exist_ok=True)
+    user_state_root = tmp_path / "user-state"
+    user_state_root.mkdir()
+    monkeypatch.setenv("MERIDIAN_HOME", user_state_root.as_posix())
+    (user_state_root / "config.toml").write_text(
+        "\n".join(
+            [
+                "[context.work]",
+                'path = "ctx/work"',
+                'archive = "ctx/archive/work"',
+                "",
+                "[context.kb]",
+                'path = "ctx/kb"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    paths = StateRootPaths.from_root_dir(override_root)
+
+    assert paths.work_dir == override_root / "work"
+    assert paths.work_archive_dir == override_root / "archive" / "work"
+    assert paths.kb_dir == override_root / "kb"
+
+
+def test_state_root_paths_repo_meridian_uses_context_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo_root = tmp_path / "repo"
+    state_root = repo_root / ".meridian"
+    user_state_root = tmp_path / "user-state"
+    repo_root.mkdir()
+    user_state_root.mkdir()
+    monkeypatch.setenv("MERIDIAN_HOME", user_state_root.as_posix())
+    monkeypatch.delenv("MERIDIAN_CONFIG", raising=False)
+    (repo_root / ".git").write_text("gitdir: .git/worktrees/repo\n", encoding="utf-8")
+    (repo_root / "meridian.local.toml").write_text(
+        "\n".join(
+            [
+                "[context.work]",
+                'path = "ctx/work"',
+                'archive = "ctx/archive/work"',
+                "",
+                "[context.kb]",
+                'path = "ctx/kb"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    paths = StateRootPaths.from_root_dir(state_root)
+
+    assert paths.work_dir == repo_root / "ctx/work"
+    assert paths.work_archive_dir == repo_root / "ctx/archive/work"
+    assert paths.kb_dir == repo_root / "ctx/kb"
+
+
+def test_resolve_repo_state_paths_from_context_uses_custom_paths(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    config = ContextConfig.model_validate(
+        {
+            "work": {
+                "path": "contexts/work",
+                "archive": "contexts/archive/work",
+            },
+            "kb": {"path": "contexts/kb"},
+        }
+    )
+
+    paths = resolve_repo_state_paths_from_context(repo_root, context_config=config)
+
+    assert paths.root_dir == repo_root / ".meridian"
+    assert paths.id_file == repo_root / ".meridian" / "id"
+    assert paths.work_dir == repo_root / "contexts/work"
+    assert paths.work_archive_dir == repo_root / "contexts/archive/work"
+    assert paths.kb_dir == repo_root / "contexts/kb"
+
+
+def test_resolve_repo_state_paths_from_context_falls_back_when_project_placeholder_uninitialized(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    config = ContextConfig.model_validate(
+        {
+            "work": {
+                "path": "contexts/{project}/work",
+                "archive": "contexts/{project}/archive/work",
+            },
+            "kb": {"path": "contexts/{project}/kb"},
+        }
+    )
+
+    paths = resolve_repo_state_paths_from_context(repo_root, context_config=config)
+
+    assert paths.root_dir == repo_root / ".meridian"
+    assert paths.work_dir == repo_root / ".meridian" / "work"
+    assert paths.work_archive_dir == repo_root / ".meridian" / "archive" / "work"
+    assert paths.kb_dir == repo_root / ".meridian" / "kb"
+    assert not (repo_root / ".meridian" / "id").exists()
+
+
+def test_resolve_repo_state_paths_for_write_initializes_project_placeholder_paths(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "meridian.toml").write_text(
+        "\n".join(
+            [
+                "[context.work]",
+                'path = "contexts/{project}/work"',
+                'archive = "contexts/{project}/archive/work"',
+                "",
+                "[context.kb]",
+                'path = "contexts/{project}/kb"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    paths = resolve_repo_state_paths_for_write(repo_root)
+    project_uuid = (repo_root / ".meridian" / "id").read_text(encoding="utf-8").strip()
+
+    assert project_uuid
+    assert paths.work_dir == repo_root / f"contexts/{project_uuid}/work"
+    assert paths.work_archive_dir == repo_root / f"contexts/{project_uuid}/archive/work"
+    assert paths.kb_dir == repo_root / f"contexts/{project_uuid}/kb"
+
+
+def test_resolve_repo_state_paths_merges_context_config_precedence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo_root = tmp_path / "repo"
+    home_root = tmp_path / "home"
+    repo_root.mkdir()
+    home_root.mkdir()
+
+    user_config_dir = home_root / ".meridian"
+    user_config_dir.mkdir()
+    monkeypatch.setenv("MERIDIAN_HOME", user_config_dir.as_posix())
+    (user_config_dir / "config.toml").write_text(
+        "\n".join(
+            [
+                "[context.work]",
+                'path = "user/work"',
+                "",
+                "[context.kb]",
+                'path = "user/kb"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (repo_root / "meridian.toml").write_text(
+        "\n".join(
+            [
+                "[context.work]",
+                'archive = "project/archive/work"',
+                "",
+                "[context.kb]",
+                'path = "project/kb"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (repo_root / "meridian.local.toml").write_text(
+        "\n".join(
+            [
+                "[context.work]",
+                'path = "local/work"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    paths = resolve_repo_state_paths(repo_root)
+
+    assert paths.work_dir == repo_root / "local/work"
+    assert paths.work_archive_dir == repo_root / "project/archive/work"
+    assert paths.kb_dir == repo_root / "project/kb"
+
+
+def test_load_context_config_uses_meridian_config_env_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    user_state_root = tmp_path / "user-state"
+    user_state_root.mkdir()
+    monkeypatch.setenv("MERIDIAN_HOME", user_state_root.as_posix())
+    (user_state_root / "config.toml").write_text(
+        "\n".join(
+            [
+                "[context.work]",
+                'path = "home/work"',
+                "",
+                "[context.kb]",
+                'path = "home/kb"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    env_user_config = tmp_path / "env-user-config.toml"
+    env_user_config.write_text(
+        "\n".join(
+            [
+                "[context.work]",
+                'path = "env/work"',
+                'archive = "env/archive/work"',
+                "",
+                "[context.kb]",
+                'path = "env/kb"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MERIDIAN_CONFIG", env_user_config.as_posix())
+
+    context_config = load_context_config(repo_root)
+    resolved_paths = resolve_repo_state_paths(repo_root)
+
+    assert context_config is not None
+    assert context_config.work.path == "env/work"
+    assert context_config.work.archive == "env/archive/work"
+    assert context_config.kb.path == "env/kb"
+    assert resolved_paths.work_dir == repo_root / "env/work"
+    assert resolved_paths.work_archive_dir == repo_root / "env/archive/work"
+    assert resolved_paths.kb_dir == repo_root / "env/kb"

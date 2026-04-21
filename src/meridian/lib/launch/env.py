@@ -45,7 +45,7 @@ def _normalize_meridian_env(env: dict[str, str]) -> None:
     Path derivation now lives in ChildEnvContext/ResolvedContext. This helper
     only trims explicit values and drops blank placeholders.
     """
-    for key in ("MERIDIAN_WORK_DIR", "MERIDIAN_FS_DIR"):
+    for key in ("MERIDIAN_WORK_DIR",):
         if key not in env:
             continue
         normalized = env[key].strip()
@@ -53,6 +53,17 @@ def _normalize_meridian_env(env: dict[str, str]) -> None:
             env[key] = normalized
             continue
         env.pop(key, None)
+
+    kb_value = (env.get("MERIDIAN_KB_DIR", "") if "MERIDIAN_KB_DIR" in env else "").strip()
+    fs_value = (env.get("MERIDIAN_FS_DIR", "") if "MERIDIAN_FS_DIR" in env else "").strip()
+    resolved_kb = kb_value or fs_value
+    if resolved_kb:
+        env["MERIDIAN_KB_DIR"] = resolved_kb
+        # Deprecated alias preserved for older harness/agent environments.
+        env["MERIDIAN_FS_DIR"] = resolved_kb
+        return
+    env.pop("MERIDIAN_KB_DIR", None)
+    env.pop("MERIDIAN_FS_DIR", None)
 
 
 def sanitize_child_env(

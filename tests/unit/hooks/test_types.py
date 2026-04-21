@@ -13,7 +13,9 @@ def test_hook_event_name_literals_exclude_session_idle() -> None:
     assert get_args(HookEventName) == (
         "spawn.created",
         "spawn.running",
+        "spawn.start",
         "spawn.finalized",
+        "work.start",
         "work.started",
         "work.done",
     )

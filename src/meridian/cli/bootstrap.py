@@ -286,7 +286,7 @@ def should_startup_bootstrap(argv: Sequence[str]) -> bool:
     top_level = _first_positional_token(argv)
     if top_level is None:
         return True
-    if top_level in {"context", "session", "completion", "doctor"}:
+    if top_level in {"session", "completion", "doctor"}:
         return False
     subcommand = _first_subcommand_token(argv)
     if top_level == "models" and subcommand in {None, "list", "show"}:
@@ -302,13 +302,18 @@ def should_startup_bootstrap(argv: Sequence[str]) -> bool:
 
 
 def maybe_bootstrap_runtime_state(argv: Sequence[str], *, agent_mode: bool) -> None:
-    if agent_mode or not should_startup_bootstrap(argv):
+    if agent_mode:
         return
     try:
         from meridian.lib.config.settings import resolve_project_root
+        from meridian.lib.context import auto_migrate_contexts
         from meridian.lib.ops.config import ensure_runtime_state_bootstrap_sync
+        from meridian.lib.state.paths import resolve_repo_state_paths
 
         repo_root = resolve_project_root()
+        auto_migrate_contexts(resolve_repo_state_paths(repo_root).root_dir)
+        if not should_startup_bootstrap(argv):
+            return
         ensure_runtime_state_bootstrap_sync(repo_root)
     except Exception:
         pass

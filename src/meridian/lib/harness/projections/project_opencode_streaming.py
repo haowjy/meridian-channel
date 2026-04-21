@@ -36,13 +36,22 @@ _SESSION_PAYLOAD_FIELDS: frozenset[str] = frozenset(
     }
 )
 
-_ACCOUNTED_FIELDS: frozenset[str] = _SERVE_COMMAND_FIELDS | _SESSION_PAYLOAD_FIELDS
+_REFERENCE_FIELDS: frozenset[str] = frozenset({"reference_items"})
+
+_ACCOUNTED_FIELDS: frozenset[str] = (
+    _SERVE_COMMAND_FIELDS | _SESSION_PAYLOAD_FIELDS | _REFERENCE_FIELDS
+)
 _PROJECTED_FIELDS: frozenset[str] = _ACCOUNTED_FIELDS
 _DELEGATED_FIELDS: frozenset[str] = frozenset()
 
 
 def _consume_streaming_lifecycle_fields(spec: OpenCodeLaunchSpec) -> None:
     _ = spec.prompt
+    if spec.reference_items:
+        logger.debug(
+            "OpenCode streaming ignores native reference_items; "
+            "reference content must be delivered by prompt injection"
+        )
     if spec.interactive:
         logger.debug(
             "OpenCode streaming ignores interactive launch flag; "
@@ -136,6 +145,7 @@ __all__ = [
     "_ACCOUNTED_FIELDS",
     "_DELEGATED_FIELDS",
     "_PROJECTED_FIELDS",
+    "_REFERENCE_FIELDS",
     "_SERVE_COMMAND_FIELDS",
     "_SESSION_PAYLOAD_FIELDS",
     "HarnessCapabilityMismatch",

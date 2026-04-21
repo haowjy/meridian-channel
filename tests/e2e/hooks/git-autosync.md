@@ -36,8 +36,7 @@ from meridian.lib.hooks.builtin import BUILTIN_HOOKS
 
 hook = BUILTIN_HOOKS.get("git-autosync")
 assert hook is not None
-assert hook.default_events == ("spawn.finalized", "work.done")
-assert hook.default_interval == "10m"
+assert hook.default_events == ("spawn.start", "spawn.finalized", "work.started", "work.done")
 assert hook.requirements == ("git",)
 print("PASS: git-autosync metadata is registered")
 PY
@@ -64,6 +63,7 @@ hook = Hook(
     event="work.done",
     source="project",
     builtin="git-autosync",
+    repo=os.environ["E2E_REMOTE"],
 )
 context = HookContext(
     event_name="work.done",
@@ -86,6 +86,8 @@ echo "PASS: autosync commit created" || echo "FAIL: autosync commit not created"
 
 ### AUTOSYNC-3. Exclude patterns keep files out of autosync commit [IMPORTANT]
 
+Note: `exclude` only filters newly staged untracked files. It does not block already tracked file modifications from syncing.
+
 ```bash
 uv run python - <<'PY'
 from uuid import uuid4
@@ -107,6 +109,7 @@ hook = Hook(
     event="work.done",
     source="project",
     builtin="git-autosync",
+    repo=os.environ["E2E_REMOTE"],
     exclude=("*.log", "tmp/"),
 )
 context = HookContext(
@@ -161,6 +164,7 @@ hook = Hook(
     event="work.done",
     source="project",
     builtin="git-autosync",
+    repo=os.environ["E2E_REMOTE"],
 )
 context = HookContext(
     event_name="work.done",
@@ -182,7 +186,7 @@ test ! -d "$E2E_WORK/.git/rebase-merge" && test ! -d "$E2E_WORK/.git/rebase-appl
 echo "PASS: rebase state aborted and cleaned" || echo "FAIL: rebase state still present"
 ```
 
-### AUTOSYNC-5. No-op run skips with `nothing_to_commit` [IMPORTANT]
+### AUTOSYNC-5. No-op run skips with `nothing_to_sync` [IMPORTANT]
 
 ```bash
 export E2E_NOOP="$E2E_REPO/noop"
@@ -205,6 +209,7 @@ hook = Hook(
     event="work.done",
     source="project",
     builtin="git-autosync",
+    repo=os.environ["E2E_REMOTE"],
 )
 context = HookContext(
     event_name="work.done",
@@ -218,8 +223,8 @@ context = HookContext(
 result = GitAutosync().execute(context, hook)
 assert result.success is True
 assert result.skipped is True
-assert result.skip_reason == "nothing_to_commit"
-print("PASS: clean tree skipped with nothing_to_commit")
+assert result.skip_reason == "nothing_to_sync"
+print("PASS: clean tree skipped with nothing_to_sync")
 PY
 ```
 
@@ -267,6 +272,7 @@ hook = Hook(
     event="work.done",
     source="project",
     builtin="git-autosync",
+    repo=os.environ["E2E_REMOTE"],
 )
 context = HookContext(
     event_name="work.done",
@@ -284,3 +290,7 @@ assert result.skip_reason == "not_git_repository"
 print("PASS: non-git work dir skipped with not_git_repository")
 PY
 ```
+
+### AUTOSYNC-8. Worktree scenario placeholder [OPTIONAL]
+
+TODO: add a linked-worktree autosync scenario that verifies clean-skip and push behavior when the work dir is a Git worktree checkout rather than the main checkout path.

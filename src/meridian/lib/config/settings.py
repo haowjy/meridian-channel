@@ -23,7 +23,6 @@ _OUTPUT_VERBOSITY_PRESETS = frozenset({"quiet", "normal", "verbose", "debug"})
 _PRIMARY_AUTOCOMPACT_PCT_MIN = 1
 _PRIMARY_AUTOCOMPACT_PCT_MAX = 100
 USER_CONFIG_ENV_VAR = "MERIDIAN_CONFIG"
-_DEFAULT_USER_CONFIG = get_user_state_root() / "config.toml"
 _LOCAL_CONFIG_FILENAME = "meridian.local.toml"
 
 
@@ -228,8 +227,9 @@ def resolve_user_config_path(user_config: Path | None) -> Path | None:
             resolved = Path(raw_env).expanduser()
 
     if resolved is None:
-        if _DEFAULT_USER_CONFIG.is_file():
-            return _DEFAULT_USER_CONFIG
+        default_user_config = get_user_state_root() / "config.toml"
+        if default_user_config.is_file():
+            return default_user_config
         return None
 
     if not resolved.is_file():
@@ -375,6 +375,26 @@ def _normalize_harness_table(
 
 
 def _normalize_hooks_array(raw_value: object, *, source: str) -> tuple[dict[str, object], ...]:
+    allowed_hook_keys = frozenset(
+        {
+            "name",
+            "builtin",
+            "command",
+            "event",
+            "events",
+            "timeout_secs",
+            "interval",
+            "enabled",
+            "priority",
+            "failure_policy",
+            "require_serial",
+            "when",
+            "exclude",
+            "repo",
+            "remote",
+            "options",
+        }
+    )
     if not isinstance(raw_value, list):
         raise ValueError(
             f"Invalid value for '{source}': expected array[table], "
@@ -392,8 +412,21 @@ def _normalize_hooks_array(raw_value: object, *, source: str) -> tuple[dict[str,
 
         row: dict[str, object] = {}
         for key, value in cast("dict[str, object]", item).items():
+            if key not in allowed_hook_keys:
+                logger.warning("Ignoring unknown Meridian config key '%s.%s'.", row_source, key)
+                continue
+
             field_source = f"{row_source}.{key}"
-            if key in {"name", "event", "command", "builtin", "interval", "failure_policy"}:
+            if key in {
+                "name",
+                "event",
+                "command",
+                "builtin",
+                "interval",
+                "failure_policy",
+                "repo",
+            "remote",
+            }:
                 if not isinstance(value, str):
                     raise ValueError(
                         f"Invalid value for '{field_source}': expected str, got "
@@ -422,6 +455,16 @@ def _normalize_hooks_array(raw_value: object, *, source: str) -> tuple[dict[str,
 
             if key == "exclude":
                 row[key] = _parse_toml_list(raw_value=value, source=field_source)
+                continue
+
+            if key == "options":
+                if not isinstance(value, dict):
+                    raise ValueError(
+                        f"Invalid value for '{field_source}': expected table, got "
+                        f"{type(value).__name__} ({value!r})."
+                    )
+                # Preserve plugin-specific options payload as-is; builtin registry validates it.
+                row[key] = dict(cast("dict[str, object]", value))
                 continue
 
             if key == "when":
@@ -513,6 +556,41 @@ def normalize_work_table(raw_value: object, *, source: str) -> dict[str, object]
     return _normalize_work_table(raw_value, source=source)
 
 
+def _normalize_context_table(raw_value: object, *, source: str) -> dict[str, object]:
+    if not isinstance(raw_value, dict):
+        raise ValueError(f"Invalid value for '{source}': expected table.")
+
+    values: dict[str, object] = {}
+    for context_name, context_value in cast("dict[str, object]", raw_value).items():
+        context_source = f"{source}.{context_name}"
+        if not isinstance(context_value, dict):
+            raise ValueError(f"Invalid value for '{context_source}': expected table.")
+
+        context_fields: dict[str, object] = {}
+        for key, value in cast("dict[str, object]", context_value).items():
+            field_source = f"{context_source}.{key}"
+            if key in {"source", "path", "archive", "remote"}:
+                if not isinstance(value, str):
+                    raise ValueError(
+                        f"Invalid value for '{field_source}': expected str, got "
+                        f"{type(value).__name__} ({value!r})."
+                    )
+                context_fields[key] = _normalize_required_string(value, source=field_source)
+                continue
+
+            logger.warning("Ignoring unknown Meridian config key '%s.%s'.", context_source, key)
+
+        values[context_name] = context_fields
+
+    return values
+
+
+def normalize_context_table(raw_value: object, *, source: str) -> dict[str, object]:
+    """Normalize one [context] table with settings-style type checks."""
+
+    return _normalize_context_table(raw_value, source=source)
+
+
 def _normalize_toml_payload(
     *,
     payload: dict[str, object],
@@ -573,6 +651,12 @@ def _normalize_toml_payload(
             normalized["work"] = _merge_nested_dicts(
                 cast("dict[str, object]", normalized.get("work", {})),
                 _normalize_work_table(raw_value, source="work"),
+            )
+            continue
+        if key == "context":
+            normalized["context"] = _merge_nested_dicts(
+                cast("dict[str, object]", normalized.get("context", {})),
+                _normalize_context_table(raw_value, source="context"),
             )
             continue
 

@@ -1,6 +1,6 @@
 # Spawn `--from` Context References
 
-These checks validate the `--from` flag which injects prior spawn context (report, files modified, explore commands) into a new spawn's prompt.
+These checks validate the `--from` flag which injects prior context into a new spawn's prompt. Spawn refs include report/files pointers; chat/session refs point at the exact session transcript and primary spawn.
 
 ## Setup
 
@@ -68,10 +68,20 @@ print('PASS: FROM-1 basic --from')
 
 ### FROM-2. --from with session ID [CRITICAL]
 
-Reference a session ID instead of a spawn ID. Should resolve to the latest succeeded spawn in that session.
+Reference a session ID instead of a spawn ID. Should resolve to the primary spawn for that exact session, not the latest child spawn.
 
 ```bash
-# Seed a failed spawn and a succeeded spawn in session c1
+# Seed a primary spawn plus failed/succeeded child spawns in session c1
+PRIMARY_ID=$(uv run python -c "
+from pathlib import Path
+from meridian.lib.state import spawn_store
+from meridian.lib.state.paths import resolve_state_paths
+repo = Path('$SMOKE_REPO')
+sp = resolve_state_paths(repo)
+sid = spawn_store.start_spawn(sp.root_dir, chat_id='c1', model='gpt', agent='coder', harness='codex', kind='primary', prompt='primary', desc='Primary')
+print(sid)
+")
+
 uv run python -c "
 from pathlib import Path
 from meridian.lib.state import spawn_store
@@ -89,6 +99,19 @@ spawn_store.finalize_spawn(
 )
 "
 
+uv run python -c "
+from pathlib import Path
+from meridian.lib.state import spawn_store
+from meridian.lib.state.paths import resolve_state_paths
+repo = Path('$SMOKE_REPO')
+sp = resolve_state_paths(repo)
+sid = spawn_store.start_spawn(sp.root_dir, chat_id='c1', model='gpt', agent='coder', harness='codex', kind='child', prompt='seed', desc='Succeeded child')
+spawn_store.finalize_spawn(sp.root_dir, str(sid), status='succeeded', exit_code=0, origin='runner')
+rp = sp.root_dir / 'spawns' / str(sid) / 'report.md'
+rp.parent.mkdir(parents=True, exist_ok=True)
+rp.write_text('# Phase 1 Report\n\nImplemented data model.\n')
+"
+
 # Dry-run with session ref
 uv run meridian --json spawn -a coder --from c1 --dry-run -p "Continue from session" > /tmp/meridian-from-session.json 2>&1
 
@@ -97,10 +120,13 @@ import json
 d = json.load(open('/tmp/meridian-from-session.json'))
 resolved = d['context_from_resolved']
 assert len(resolved) == 1, f'expected 1 resolved, got {len(resolved)}'
+assert resolved == ['c1'], f'should preserve chat ref, got {resolved}'
 p = d['composed_prompt']
-assert 'Phase 1 Report' in p, 'should resolve to succeeded spawn with report'
+assert '<prior-session-context chat=\"c1\" primary_spawn=\"$PRIMARY_ID\">' in p, 'missing session context block'
+assert 'Phase 1 Report' not in p, 'session ref should not inline child spawn report'
 assert 'meridian session log c1' in p, 'missing session log command'
-print(f'PASS: FROM-2 session ref resolved to {resolved[0]}')
+assert 'meridian spawn show $PRIMARY_ID' in p, 'missing primary spawn command'
+print(f'PASS: FROM-2 session ref preserved {resolved[0]} and points to primary spawn $PRIMARY_ID')
 " || echo "FAIL: FROM-2"
 ```
 

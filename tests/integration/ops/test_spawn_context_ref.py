@@ -1,8 +1,9 @@
 from pathlib import Path
 
+from meridian.lib.core.domain import SpawnStatus
 from meridian.lib.ops.spawn.api import SpawnCreateInput, spawn_create_sync
 from meridian.lib.ops.spawn.context_ref import render_context_refs, resolve_context_ref
-from meridian.lib.state import spawn_store
+from meridian.lib.state import session_store, spawn_store
 from meridian.lib.state.artifact_store import LocalStore, make_artifact_key
 from meridian.lib.state.paths import resolve_runtime_state_root
 
@@ -35,12 +36,27 @@ def _write_minimal_mars_config(repo_root: Path) -> None:
     )
 
 
+def _seed_session(repo_root: Path, chat_id: str) -> None:
+    state_root = resolve_runtime_state_root(repo_root)
+    session_store.start_session(
+        state_root,
+        chat_id=chat_id,
+        harness="codex",
+        harness_session_id="thread-1",
+        model="gpt-5.3-codex",
+        agent="coder",
+        kind="primary",
+    )
+    session_store.stop_session(state_root, chat_id)
+
+
 def _seed_spawn(
     repo_root: Path,
     *,
     chat_id: str,
-    status: str,
+    status: SpawnStatus,
     desc: str,
+    kind: str = "child",
     report_text: str | None = None,
     written_files: tuple[str, ...] = (),
 ) -> str:
@@ -52,21 +68,22 @@ def _seed_spawn(
             model="gpt-5.3-codex",
             agent="coder",
             harness="codex",
-            kind="child",
+            kind=kind,
             prompt="seed prompt",
             desc=desc,
             harness_session_id="thread-1",
         )
     )
-    exit_code = 0 if status == "succeeded" else 1
-    spawn_store.finalize_spawn(
-        state_root,
-        spawn_id,
-        status=status,
-        exit_code=exit_code,
-        origin="runner",
-        error=None if status == "succeeded" else "failed",
-    )
+    if status not in {"queued", "running", "finalizing"}:
+        exit_code = 0 if status == "succeeded" else 1
+        spawn_store.finalize_spawn(
+            state_root,
+            spawn_id,
+            status=status,
+            exit_code=exit_code,
+            origin="runner",
+            error=None if status == "succeeded" else "failed",
+        )
     if report_text is not None:
         report_path = state_root / "spawns" / spawn_id / "report.md"
         report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -86,12 +103,19 @@ def _seed_spawn(
     return spawn_id
 
 
-def test_resolve_context_ref_session_prefers_latest_succeeded(tmp_path: Path) -> None:
+def test_resolve_context_ref_session_uses_primary_spawn(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
 
+    primary_id = _seed_spawn(
+        repo_root,
+        chat_id="c5",
+        status="running",
+        desc="Primary",
+        kind="primary",
+    )
     _seed_spawn(repo_root, chat_id="c5", status="failed", desc="Phase 0")
-    succeeded_id = _seed_spawn(
+    _seed_spawn(
         repo_root,
         chat_id="c5",
         status="succeeded",
@@ -103,35 +127,59 @@ def test_resolve_context_ref_session_prefers_latest_succeeded(tmp_path: Path) ->
 
     resolved = resolve_context_ref(repo_root, "c5")
 
-    assert resolved.spawn_id == succeeded_id
-    assert resolved.status == "succeeded"
+    assert resolved.ref_kind == "session"
+    assert resolved.primary_spawn_id == primary_id
+    assert resolved.status == "running"
     assert resolved.chat_id == "c5"
-    assert resolved.report_text == "# Report\n\nImplemented phase 1."
-    assert resolved.written_files == ("src/auth/models.py", "src/auth/token_store.py")
 
     rendered = render_context_refs((resolved,))
-    assert f'<prior-spawn-context spawn="{succeeded_id}">' in rendered
-    assert "## Report" in rendered
-    assert "## Files Modified" in rendered
-    assert f"`meridian spawn show {succeeded_id}`" in rendered
+    assert f'<prior-session-context chat="c5" primary_spawn="{primary_id}">' in rendered
+    assert "## Report" not in rendered
+    assert "## Files Modified" not in rendered
+    assert f"`meridian spawn show {primary_id}`" in rendered
     assert "`meridian session log c5`" in rendered
 
 
-def test_resolve_context_ref_session_falls_back_to_latest_when_no_success(tmp_path: Path) -> None:
+def test_resolve_context_ref_session_requires_primary_spawn(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
 
     _seed_spawn(repo_root, chat_id="c8", status="failed", desc="Earlier")
-    latest_id = _seed_spawn(repo_root, chat_id="c8", status="failed", desc="Latest failure")
 
-    resolved = resolve_context_ref(repo_root, "c8")
+    try:
+        resolve_context_ref(repo_root, "c8")
+    except ValueError as exc:
+        assert "No primary spawn found for session 'c8'" in str(exc)
+    else:
+        raise AssertionError("expected missing primary spawn to fail")
 
-    assert resolved.spawn_id == latest_id
-    assert resolved.status == "failed"
 
+def test_resolve_context_ref_accepts_tracked_arbitrary_chat_id(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _seed_session(repo_root, "chat-parent")
+    primary_id = _seed_spawn(
+        repo_root,
+        chat_id="chat-parent",
+        status="running",
+        desc="Primary",
+        kind="primary",
+    )
+    child_id = _seed_spawn(
+        repo_root,
+        chat_id="chat-parent",
+        status="succeeded",
+        desc="Child",
+    )
+
+    resolved = resolve_context_ref(repo_root, "chat-parent")
+
+    assert resolved.ref_kind == "session"
+    assert resolved.primary_spawn_id == primary_id
+    assert resolved.primary_spawn_id != child_id
     rendered = render_context_refs((resolved,))
-    assert "No report available." in rendered
-    assert "## Files Modified" not in rendered
+    assert f"`meridian session log {primary_id}`" in rendered
+    assert "`meridian session log chat-parent`" not in rendered
 
 
 def test_spawn_create_dry_run_injects_prior_context_from_session(tmp_path: Path) -> None:
@@ -139,7 +187,14 @@ def test_spawn_create_dry_run_injects_prior_context_from_session(tmp_path: Path)
     repo_root.mkdir()
     _write_minimal_mars_config(repo_root)
     _write_agent(repo_root / ".agents" / "agents" / "coder.md", sandbox="workspace-write")
-    seed_id = _seed_spawn(
+    primary_id = _seed_spawn(
+        repo_root,
+        chat_id="c11",
+        status="running",
+        desc="Primary",
+        kind="primary",
+    )
+    _seed_spawn(
         repo_root,
         chat_id="c11",
         status="succeeded",
@@ -159,10 +214,14 @@ def test_spawn_create_dry_run_injects_prior_context_from_session(tmp_path: Path)
     )
 
     assert result.status == "dry-run"
-    assert result.context_from_resolved == (seed_id,)
+    assert result.context_from_resolved == ("c11",)
     assert result.composed_prompt is not None
     assert "<prior-run-output>" in result.composed_prompt
-    assert f'<prior-spawn-context spawn="{seed_id}">' in result.composed_prompt
-    assert "# Report\n\nDone." in result.composed_prompt
-    assert "- src/auth/models.py" in result.composed_prompt
-    assert f"`meridian spawn files {seed_id}`" in result.composed_prompt
+    assert (
+        f'<prior-session-context chat="c11" primary_spawn="{primary_id}">'
+        in result.composed_prompt
+    )
+    assert "# Report\n\nDone." not in result.composed_prompt
+    assert "- src/auth/models.py" not in result.composed_prompt
+    assert f"`meridian spawn show {primary_id}`" in result.composed_prompt
+    assert "`meridian session log c11`" in result.composed_prompt

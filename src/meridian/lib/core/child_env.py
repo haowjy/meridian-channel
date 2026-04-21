@@ -20,6 +20,7 @@ ALLOWED_CHILD_ENV_KEYS: frozenset[str] = frozenset(
         "MERIDIAN_CHAT_ID",
         "MERIDIAN_WORK_ID",
         "MERIDIAN_WORK_DIR",
+        "MERIDIAN_KB_DIR",
         "MERIDIAN_FS_DIR",
     }
 )
@@ -45,6 +46,7 @@ def build_child_env_overrides(
     parent_depth: int,
     work_id: str | None = None,
     work_dir: Path | None = None,
+    kb_dir: Path | None = None,
     fs_dir: Path | None = None,
     increment_depth: bool = True,
 ) -> dict[str, str]:
@@ -73,15 +75,21 @@ def build_child_env_overrides(
     work_dir:
         Pre-computed work scratch directory, or ``None`` to omit
         ``MERIDIAN_WORK_DIR``.
+    kb_dir:
+        Pre-computed knowledge-base directory, or ``None`` to omit
+        ``MERIDIAN_KB_DIR``.
     fs_dir:
-        Pre-computed filesystem directory, or ``None`` to omit
-        ``MERIDIAN_FS_DIR``.
+        Deprecated alias for ``kb_dir``. When provided, this value is used
+        as ``MERIDIAN_FS_DIR`` compatibility output and as a fallback source
+        for ``MERIDIAN_KB_DIR`` when ``kb_dir`` is unset.
     increment_depth:
         Whether to increment ``MERIDIAN_DEPTH`` for the child.  Defaults to
         ``True`` for standard child-process launches; use ``False`` for the
         detached background-worker process that inherits the caller's depth.
     """
     from meridian.lib.core.resolved_context import ResolvedContext
+
+    resolved_kb_dir = kb_dir or fs_dir
 
     # Route through ResolvedContext so all launch paths share one contract.
     ctx = ResolvedContext(
@@ -92,7 +100,7 @@ def build_child_env_overrides(
         chat_id=parent_chat_id or "",
         work_id=work_id,
         work_dir=work_dir,
-        fs_dir=fs_dir,
+        kb_dir=resolved_kb_dir,
     )
     return ctx.child_env_overrides(increment_depth=increment_depth)
 

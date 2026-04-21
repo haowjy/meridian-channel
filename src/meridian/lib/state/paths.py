@@ -1,11 +1,14 @@
 """Filesystem path helpers for file-authoritative Meridian state."""
 
 import os
+import tomllib
+import warnings
 from pathlib import Path
-from typing import Self
+from typing import Self, cast
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
+from meridian.lib.config.context_config import ContextConfig
 from meridian.lib.core.types import SpawnId
 from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.user_paths import (
@@ -26,29 +29,39 @@ _GITIGNORE_CONTENT = (
     "id\n"
     "\n"
     "# Track shared repo state\n"
-    "!fs/\n"
-    "!fs/**\n"
+    "!kb/\n"
+    "!kb/**\n"
     "!work/\n"
     "!work/**\n"
-    "!work-archive/\n"
-    "!work-archive/**\n"
+    "!archive/\n"
+    "!archive/**\n"
 )
 _REQUIRED_GITIGNORE_LINES = (
     "!.gitignore",
-    "!fs/",
-    "!fs/**",
+    "!kb/",
+    "!kb/**",
     "!work/",
     "!work/**",
-    "!work-archive/",
-    "!work-archive/**",
+    "!archive/",
+    "!archive/**",
 )
 _DEPRECATED_GITIGNORE_LINES = (
+    "!fs/",
+    "!fs/**",
+    "!work-archive/",
+    "!work-archive/**",
     "!work-items/",
     "!work-items/**",
     "!agents.toml",
     "!agents.lock",
     "!config.toml",
 )
+
+
+def _is_repo_owned_state_root(root_dir: Path) -> bool:
+    """Return True when a `.meridian` root belongs to a git repo parent."""
+
+    return root_dir.name == _MERIDIAN_DIR and (root_dir.parent / ".git").exists()
 
 
 class StateRootPaths(BaseModel):
@@ -70,7 +83,7 @@ class StateRootPaths(BaseModel):
     session_id_counter: Path
     session_id_counter_flock: Path
     sessions_dir: Path
-    fs_dir: Path
+    kb_dir: Path
     work_dir: Path
     work_archive_dir: Path
     work_items_dir: Path
@@ -82,6 +95,10 @@ class StateRootPaths(BaseModel):
     def from_root_dir(cls, root_dir: Path) -> Self:
         """Build state-root-relative paths from an absolute state directory."""
 
+        resolved_repo_paths: StatePaths | None = None
+        if _is_repo_owned_state_root(root_dir):
+            resolved_repo_paths = resolve_repo_state_paths(root_dir.parent)
+
         return cls(
             root_dir=root_dir,
             spawns_jsonl=root_dir / "spawns.jsonl",
@@ -92,9 +109,21 @@ class StateRootPaths(BaseModel):
             session_id_counter=root_dir / "session-id-counter",
             session_id_counter_flock=root_dir / "session-id-counter.flock",
             sessions_dir=root_dir / "sessions",
-            fs_dir=root_dir / "fs",
-            work_dir=root_dir / "work",
-            work_archive_dir=root_dir / "work-archive",
+            kb_dir=(
+                resolved_repo_paths.kb_dir
+                if resolved_repo_paths is not None
+                else root_dir / "kb"
+            ),
+            work_dir=(
+                resolved_repo_paths.work_dir
+                if resolved_repo_paths is not None
+                else root_dir / "work"
+            ),
+            work_archive_dir=(
+                resolved_repo_paths.work_archive_dir
+                if resolved_repo_paths is not None
+                else root_dir / "archive" / "work"
+            ),
             work_items_dir=root_dir / "work-items",
             work_items_flock=root_dir / "work-items.flock",
             work_items_rename_intent=root_dir / "work-items.rename.intent.json",
@@ -109,7 +138,7 @@ class StatePaths(BaseModel):
 
     root_dir: Path
     id_file: Path
-    fs_dir: Path
+    kb_dir: Path
     work_dir: Path
     work_archive_dir: Path
 
@@ -120,9 +149,9 @@ class StatePaths(BaseModel):
         return cls(
             root_dir=root_dir,
             id_file=root_dir / "id",
-            fs_dir=root_dir / "fs",
+            kb_dir=root_dir / "kb",
             work_dir=root_dir / "work",
-            work_archive_dir=root_dir / "work-archive",
+            work_archive_dir=root_dir / "archive" / "work",
         )
 
 
@@ -147,10 +176,164 @@ def _resolve_runtime_state_override(repo_root: Path) -> Path | None:
     return candidate if candidate.is_absolute() else repo_root / candidate
 
 
+def _context_config_paths(
+    repo_root: Path,
+    *,
+    user_config: Path | None = None,
+    project_config: Path | None = None,
+    local_config: Path | None = None,
+) -> tuple[Path | None, Path, Path]:
+    from meridian.lib.config.settings import resolve_user_config_path
+
+    return (
+        resolve_user_config_path(user_config),
+        project_config or (repo_root / "meridian.toml"),
+        local_config or (repo_root / "meridian.local.toml"),
+    )
+
+
+def _load_context_table(path: Path) -> dict[str, object] | None:
+    if not path.is_file():
+        return None
+    try:
+        payload_obj = tomllib.loads(path.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as exc:
+        raise ValueError(f"Invalid TOML in Meridian config '{path.as_posix()}': {exc}") from exc
+
+    payload = cast("dict[str, object]", payload_obj)
+    context = payload.get("context")
+    if context is None:
+        return None
+    if not isinstance(context, dict):
+        raise ValueError(
+            f"Invalid value for 'context' in '{path.as_posix()}': expected table."
+        )
+    return cast("dict[str, object]", context)
+
+
+def _merge_nested_dicts(base: dict[str, object], overrides: dict[str, object]) -> dict[str, object]:
+    merged = dict(base)
+    for key, value in overrides.items():
+        current = merged.get(key)
+        if isinstance(current, dict) and isinstance(value, dict):
+            merged[key] = _merge_nested_dicts(
+                cast("dict[str, object]", current),
+                cast("dict[str, object]", value),
+            )
+            continue
+        merged[key] = value
+    return merged
+
+
 def resolve_repo_state_paths(repo_root: Path) -> StatePaths:
     """Resolve repo-owned `.meridian/` paths only (ignores runtime overrides)."""
 
-    return StatePaths.from_root_dir(repo_root / _MERIDIAN_DIR)
+    return resolve_repo_state_paths_from_context(repo_root)
+
+
+def resolve_repo_state_paths_for_write(repo_root: Path) -> StatePaths:
+    """Resolve repo-owned state paths for write flows.
+
+    If context paths contain ``{project}``, this ensures `.meridian/id` exists
+    before path substitution so write callers never materialize literal
+    placeholder directories.
+    """
+
+    return resolve_repo_state_paths_from_context(repo_root, create_project_uuid=True)
+
+
+def _try_load_context_config(
+    repo_root: Path,
+    *,
+    user_config: Path | None = None,
+    project_config: Path | None = None,
+    local_config: Path | None = None,
+) -> ContextConfig | None:
+    """Try loading merged context config from user/project/local Meridian config files."""
+
+    merged_context: dict[str, object] = {}
+    found_context = False
+    for config_path in _context_config_paths(
+        repo_root,
+        user_config=user_config,
+        project_config=project_config,
+        local_config=local_config,
+    ):
+        if config_path is None:
+            continue
+        context_table = _load_context_table(config_path)
+        if context_table is None:
+            continue
+        found_context = True
+        merged_context = _merge_nested_dicts(merged_context, context_table)
+
+    if not found_context:
+        return None
+
+    try:
+        return ContextConfig.model_validate(merged_context)
+    except ValidationError as exc:
+        raise ValueError(f"Invalid Meridian [context] configuration: {exc}") from exc
+
+
+def load_context_config(
+    repo_root: Path,
+    *,
+    user_config: Path | None = None,
+    project_config: Path | None = None,
+    local_config: Path | None = None,
+) -> ContextConfig | None:
+    """Load merged context config for one repo, or ``None`` when no [context] exists."""
+
+    return _try_load_context_config(
+        repo_root,
+        user_config=user_config,
+        project_config=project_config,
+        local_config=local_config,
+    )
+
+
+def resolve_repo_state_paths_from_context(
+    repo_root: Path,
+    context_config: ContextConfig | None = None,
+    *,
+    create_project_uuid: bool = False,
+) -> StatePaths:
+    """Resolve repo paths with optional context config, falling back to defaults."""
+
+    if context_config is None:
+        context_config = _try_load_context_config(repo_root)
+
+    if context_config is None:
+        return StatePaths.from_root_dir(repo_root / _MERIDIAN_DIR)
+
+    from meridian.lib.context.resolver import (
+        context_uses_project_placeholder,
+        resolve_context_paths,
+    )
+
+    state_root = repo_root / _MERIDIAN_DIR
+    project_uuid: str | None = None
+    if context_uses_project_placeholder(context_config):
+        if create_project_uuid:
+            project_uuid = get_or_create_project_uuid(state_root)
+        else:
+            project_uuid = get_project_uuid(state_root)
+        if project_uuid is None:
+            return StatePaths.from_root_dir(state_root)
+
+    resolved = resolve_context_paths(
+        repo_root,
+        context_config,
+        project_uuid=project_uuid,
+    )
+    return StatePaths(
+        root_dir=state_root,
+        id_file=state_root / "id",
+        kb_dir=resolved.kb_root,
+        work_dir=resolved.work_root,
+        work_archive_dir=resolved.work_archive,
+    )
 
 
 def resolve_state_paths(repo_root: Path) -> StatePaths:
@@ -206,10 +389,21 @@ def resolve_cache_dir(repo_root: Path) -> Path:
     return resolve_runtime_state_root(repo_root) / "cache"
 
 
-def resolve_fs_dir(repo_root: Path) -> Path:
-    """Return `.meridian/fs/` for a repository root."""
+def resolve_kb_dir(repo_root: Path) -> Path:
+    """Return `.meridian/kb/` for a repository root."""
 
-    return resolve_repo_state_paths(repo_root).fs_dir
+    return resolve_repo_state_paths(repo_root).kb_dir
+
+
+def resolve_fs_dir(repo_root: Path) -> Path:
+    """Deprecated alias for :func:`resolve_kb_dir`."""
+
+    warnings.warn(
+        "resolve_fs_dir() is deprecated; use resolve_kb_dir() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return resolve_kb_dir(repo_root)
 
 
 def resolve_work_scratch_dir(state_root: Path, work_id: str) -> Path:

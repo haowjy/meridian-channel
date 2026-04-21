@@ -7,8 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
 
+import structlog
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
+from meridian.lib.config.context_config import ContextSourceType
 from meridian.lib.config.project_config_state import (
     ProjectConfigState,
     resolve_project_config_state,
@@ -19,6 +21,7 @@ from meridian.lib.config.settings import (
     resolve_project_root,
 )
 from meridian.lib.config.workspace import WorkspaceFinding
+from meridian.lib.context import auto_migrate_contexts
 from meridian.lib.core.util import FormatContext, to_jsonable
 from meridian.lib.ops.config_surface import (
     ConfigSurface,
@@ -30,7 +33,8 @@ from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.paths import (
     StateRootPaths,
     ensure_gitignore,
-    resolve_repo_state_paths,
+    load_context_config,
+    resolve_repo_state_paths_for_write,
     resolve_runtime_state_root_for_write,
 )
 
@@ -38,6 +42,7 @@ _SECTION_ORDER: tuple[str, ...] = ("defaults", "timeouts", "harness", "primary",
 _OUTPUT_VERBOSITY_PRESETS = frozenset({"quiet", "normal", "verbose", "debug"})
 _MISSING_PROJECT_CONFIG_MESSAGE = "no project config; run `meridian config init`"
 _LOCAL_CONFIG_FILENAME = "meridian.local.toml"
+logger = structlog.get_logger(__name__)
 
 
 class _ConfigKeySpec(BaseModel):
@@ -732,18 +737,59 @@ def _scaffold_template() -> str:
     return "\n".join(lines)
 
 
-def ensure_runtime_state_bootstrap_sync(repo_root: Path) -> None:
-    """Ensure first-run runtime state exists without creating project-root files."""
+def _has_non_empty_remote(remote: str | None) -> bool:
+    return isinstance(remote, str) and bool(remote.strip())
 
-    repo_state = resolve_repo_state_paths(repo_root)
-    repo_dirs = (
-        repo_state.root_dir,
-        repo_state.fs_dir,
-        repo_state.work_dir,
-        repo_state.work_archive_dir,
-    )
-    for dir_path in repo_dirs:
-        dir_path.mkdir(parents=True, exist_ok=True)
+
+def ensure_runtime_state_bootstrap_sync(repo_root: Path) -> None:
+    """Ensure first-run runtime state exists without creating project-root files.
+
+    For git-backed contexts with configured remotes, we skip directory creation
+    here since git-autosync hooks handle cloning and directory setup. This
+    avoids creating non-git directories at clone paths before the actual clone
+    happens.
+    """
+    context_config = load_context_config(repo_root)
+
+    repo_state = resolve_repo_state_paths_for_write(repo_root)
+    auto_migrate_contexts(repo_state.root_dir)
+
+    # Always create the root .meridian directory
+    repo_state.root_dir.mkdir(parents=True, exist_ok=True)
+
+    # For context directories, skip only git-backed contexts with remotes.
+    if context_config is None:
+        # No context config = all local, create everything
+        repo_state.kb_dir.mkdir(parents=True, exist_ok=True)
+        repo_state.work_dir.mkdir(parents=True, exist_ok=True)
+        repo_state.work_archive_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        kb_git_with_remote = (
+            context_config.kb.source == ContextSourceType.GIT
+            and _has_non_empty_remote(context_config.kb.remote)
+        )
+        work_git_with_remote = (
+            context_config.work.source == ContextSourceType.GIT
+            and _has_non_empty_remote(context_config.work.remote)
+        )
+        if context_config.kb.source == ContextSourceType.GIT and not kb_git_with_remote:
+            logger.warning(
+                "context_source_git_missing_remote_fallback_local",
+                context="kb",
+                configured_remote=context_config.kb.remote,
+            )
+        if context_config.work.source == ContextSourceType.GIT and not work_git_with_remote:
+            logger.warning(
+                "context_source_git_missing_remote_fallback_local",
+                context="work",
+                configured_remote=context_config.work.remote,
+            )
+
+        if not kb_git_with_remote:
+            repo_state.kb_dir.mkdir(parents=True, exist_ok=True)
+        if not work_git_with_remote:
+            repo_state.work_dir.mkdir(parents=True, exist_ok=True)
+            repo_state.work_archive_dir.mkdir(parents=True, exist_ok=True)
 
     runtime_root = resolve_runtime_state_root_for_write(repo_root)
     runtime_state = StateRootPaths.from_root_dir(runtime_root)

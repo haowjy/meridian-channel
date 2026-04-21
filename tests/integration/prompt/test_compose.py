@@ -1,6 +1,4 @@
 """Prompt assembly tests that guard against context and prompt injection."""
-
-import warnings
 from pathlib import Path
 
 from meridian.lib.core.domain import SkillContent

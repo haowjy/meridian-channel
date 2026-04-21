@@ -25,6 +25,8 @@ from meridian.lib.hooks.types import (
     HookResult,
     SpawnStatus,
 )
+from meridian.plugin_api import Hook as PluginHook
+from meridian.plugin_api import HookContext as PluginHookContext
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -254,7 +256,7 @@ class HookDispatcher(LifecycleHook):
                 error=requirements_error,
             )
 
-        result = builtin.execute(context, hook)
+        result = builtin.execute(_to_plugin_context(context), _to_plugin_hook(hook))
         return HookResult(
             hook_name=hook.name,
             event=context.event_name,
@@ -315,3 +317,40 @@ def _normalize_spawn_status(value: str | None) -> SpawnStatus | None:
     if value in ("success", "failure", "cancelled", "timeout", "skipped"):
         return value
     return None
+
+
+def _to_plugin_hook(hook: Hook) -> PluginHook:
+    return PluginHook(
+        name=hook.name,
+        event=hook.event,
+        source=hook.source,
+        builtin=hook.builtin,
+        command=hook.command,
+        enabled=hook.enabled,
+        priority=hook.priority,
+        require_serial=hook.require_serial,
+        exclude=hook.exclude,
+        options=hook.options,
+        failure_policy=hook.failure_policy,
+        remote=hook.remote,
+    )
+
+
+def _to_plugin_context(context: HookContext) -> PluginHookContext:
+    return PluginHookContext(
+        event_name=context.event_name,
+        event_id=context.event_id,
+        timestamp=context.timestamp,
+        repo_root=context.repo_root,
+        state_root=context.state_root,
+        schema_version=context.schema_version,
+        spawn_id=context.spawn_id,
+        spawn_status=context.spawn_status,
+        spawn_agent=context.spawn_agent,
+        spawn_model=context.spawn_model,
+        spawn_duration_secs=context.spawn_duration_secs,
+        spawn_cost_usd=context.spawn_cost_usd,
+        spawn_error=context.spawn_error,
+        work_id=context.work_id,
+        work_dir=context.work_dir,
+    )

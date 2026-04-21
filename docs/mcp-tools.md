@@ -29,9 +29,10 @@ Current MCP tools:
 - `report_show`, `report_search`
 - `models_list`, `models_show`
 - `skills_list`, `skills_show`
+- `hooks_resolve`
 - `doctor`
 
-Not MCP-exposed (CLI-only): config_*, skills_search, sync_*.
+Not MCP-exposed (CLI-only): `config_*`, `hooks_list`, `hooks_check`, `hooks_run`, `skills_search`, `sync_*`.
 
 ## Spawn Statuses
 
@@ -138,6 +139,29 @@ Optional scope to one spawn:
 ```json
 { "name": "scratchpad" }
 ```
+
+## Hooks
+
+### `hooks_resolve`
+
+Returns the enabled hooks for a given event, in execution order.
+
+```json
+{
+  "event": "spawn.finalized"
+}
+```
+
+Optional — scope to a specific repo root:
+
+```json
+{
+  "event": "work.done",
+  "repo_root": "/path/to/repo"
+}
+```
+
+`hooks_list`, `hooks_check`, and `hooks_run` are CLI-only (not MCP-exposed).
 
 ## Diagnostics
 

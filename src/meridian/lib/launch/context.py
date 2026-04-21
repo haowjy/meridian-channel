@@ -355,12 +355,15 @@ def _resolve_surface_request(
             from meridian.lib.ops.spawn.context_ref import (
                 render_context_refs,
                 resolve_context_ref,
+                resolved_context_ref_value,
             )
 
             resolved_context_refs = tuple(
                 resolve_context_ref(project_paths.repo_root, ref) for ref in request.context_from
             )
-            resolved_context_from = tuple(ref.spawn_id for ref in resolved_context_refs)
+            resolved_context_from = tuple(
+                resolved_context_ref_value(ref) for ref in resolved_context_refs
+            )
             prior_output = render_context_refs(resolved_context_refs)
         prompt = compose_run_prompt_text(
             skills=resolved_skills.loaded_skills if prompt_policy.include_skills else (),
