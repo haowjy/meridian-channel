@@ -22,6 +22,7 @@ from meridian.lib.harness.claude_preflight import ensure_claude_session_accessib
 from meridian.lib.harness.registry import HarnessRegistry
 from meridian.lib.state import spawn_store
 from meridian.lib.state.artifact_store import LocalStore, make_artifact_key
+from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.paths import resolve_spawn_log_dir
 from meridian.lib.state.session_store import (
     get_session_active_work_id,
@@ -251,6 +252,13 @@ def run_harness_process(
                     plan_overrides=plan_overrides,
                     runtime_work_id=attached_work_id,
                 )
+                appended_system_prompt = getattr(
+                    runtime_context.spec,
+                    "appended_system_prompt",
+                    runtime_context.run_params.appended_system_prompt,
+                )
+                if isinstance(appended_system_prompt, str) and appended_system_prompt:
+                    atomic_write_text(log_dir / "prompt.md", appended_system_prompt)
                 command = runtime_context.argv
                 resolved_harness_session_id = runtime_context.seed_harness_session_id or ""
                 child_env = dict(runtime_context.env)

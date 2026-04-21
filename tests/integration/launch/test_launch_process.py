@@ -13,8 +13,9 @@ if TYPE_CHECKING:
 
 from meridian.lib.config.settings import load_config
 from meridian.lib.core.types import HarnessId
-from meridian.lib.harness.adapter import SpawnParams
+from meridian.lib.harness.launch_spec import CodexLaunchSpec
 from meridian.lib.harness.registry import get_default_harness_registry
+from meridian.lib.launch import command as launch_command
 from meridian.lib.launch import process
 from meridian.lib.launch.context import build_launch_context
 from meridian.lib.launch.process.subprocess_launcher import SubprocessProcessLauncher
@@ -94,17 +95,22 @@ def test_run_harness_process_fork_uses_new_chat_and_materialized_session(
 
     captured: dict[str, str | None] = {}
 
-    def fake_build_command(run: SpawnParams, perms: object) -> list[str]:
-        _ = perms
-        captured["build_continue_session"] = run.continue_harness_session_id
-        return ["codex", "resume", run.continue_harness_session_id or ""]
+    def fake_project_codex_spec_to_cli_args(
+        spec: CodexLaunchSpec,
+        *,
+        base_command: tuple[str, ...],
+    ) -> list[str]:
+        captured["build_continue_session"] = spec.continue_session_id
+        return [*base_command, "resume", spec.continue_session_id or ""]
 
     def fake_fork_session(source_session_id: str) -> str:
         captured["fork_source_session"] = source_session_id
         return "forked-session"
 
     def fake_run_primary_process_with_capture(**kwargs: object) -> tuple[int, int]:
-        captured["command_session"] = tuple(kwargs["command"])[2]
+        command = tuple(kwargs["command"])
+        assert "resume" in command
+        captured["command_session"] = command[command.index("resume") + 1]
         captured["env_chat_id"] = dict(kwargs["env"]).get("MERIDIAN_CHAT_ID")
         started = kwargs.get("on_child_started")
         assert callable(started)
@@ -125,7 +131,11 @@ def test_run_harness_process_fork_uses_new_chat_and_materialized_session(
         captured["forked_from_chat_id"] = kwargs.get("forked_from_chat_id")
         return "c999"
 
-    monkeypatch.setattr(codex_adapter, "build_command", fake_build_command)
+    monkeypatch.setattr(
+        launch_command,
+        "project_codex_spec_to_cli_args",
+        fake_project_codex_spec_to_cli_args,
+    )
     monkeypatch.setattr(codex_adapter, "fork_session", fake_fork_session)
     monkeypatch.setattr(codex_adapter, "observe_session_id", lambda **kwargs: "forked-session")
     monkeypatch.setattr(
@@ -158,3 +168,77 @@ def test_run_harness_process_fork_uses_new_chat_and_materialized_session(
     finalize_events = [event for event in events if event.get("event") == "finalize"]
     assert len(finalize_events) == 1
     assert finalize_events[0]["origin"] == "launcher"
+
+
+def test_run_harness_process_writes_prompt_file_before_primary_launch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("MERIDIAN_CHAT_ID", raising=False)
+    repo_root = tmp_path
+    (repo_root / "mars.toml").write_text(
+        "[settings]\n"
+        'targets = [".agents"]\n',
+        encoding="utf-8",
+    )
+    harness_registry = get_default_harness_registry()
+    config = load_config(repo_root)
+    launch_context = build_launch_context(
+        spawn_id="dry-run-primary",
+        request=SpawnRequest(
+            prompt="primary prompt",
+            prompt_is_composed=False,
+            model="claude-sonnet-4-5",
+            harness=HarnessId.CLAUDE.value,
+            extra_args=("--append-system-prompt=passthrough system prompt",),
+        ),
+        runtime=LaunchRuntime(
+            argv_intent=LaunchArgvIntent.REQUIRED,
+            composition_surface=LaunchCompositionSurface.PRIMARY,
+            config_snapshot=config.model_dump(mode="json", exclude_none=True),
+            state_root=(tmp_path / ".meridian").as_posix(),
+            project_paths_repo_root=repo_root.as_posix(),
+            project_paths_execution_cwd=repo_root.as_posix(),
+        ),
+        harness_registry=harness_registry,
+        dry_run=True,
+    )
+
+    captured: dict[str, str | bool | None] = {}
+
+    def fake_run_primary_process_with_capture(**kwargs: object) -> tuple[int, int]:
+        command = tuple(kwargs["command"])
+        prompt_flag_index = command.index("--append-system-prompt-file")
+        prompt_file_path = Path(command[prompt_flag_index + 1])
+        captured["prompt_file_exists"] = prompt_file_path.exists()
+        captured["prompt_file_text"] = (
+            prompt_file_path.read_text(encoding="utf-8")
+            if prompt_file_path.exists()
+            else None
+        )
+        captured["prompt_file_is_spawn_log_prompt"] = (
+            prompt_file_path.resolve()
+            == Path(kwargs["output_log_path"]).with_name("prompt.md").resolve()
+        )
+        started = kwargs.get("on_child_started")
+        assert callable(started)
+        started(222)
+        return (0, 222)
+
+    monkeypatch.setattr(
+        process,
+        "_run_primary_process_with_capture",
+        fake_run_primary_process_with_capture,
+    )
+    monkeypatch.setattr(process, "stop_session", lambda *args, **kwargs: None)
+    monkeypatch.setattr(process, "update_session_harness_id", lambda *args, **kwargs: None)
+
+    outcome = process.run_harness_process(launch_context, harness_registry)
+
+    assert captured["prompt_file_exists"] is True
+    assert captured["prompt_file_is_spawn_log_prompt"] is True
+    prompt_file_text = captured["prompt_file_text"]
+    assert isinstance(prompt_file_text, str)
+    assert "primary prompt" in prompt_file_text
+    assert "passthrough system prompt" in prompt_file_text
+    assert outcome.exit_code == 0
