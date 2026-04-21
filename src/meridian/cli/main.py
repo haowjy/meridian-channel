@@ -209,11 +209,23 @@ def root(
     ] = False,
     continue_ref: Annotated[
         str | None,
-        Parameter(name="--continue", help="Continue a previous session reference."),
+        Parameter(
+            name="--continue",
+            help=(
+                "Continue from a session ref: chat id (c123), spawn id (p123), "
+                "or raw harness session id."
+            ),
+        ),
     ] = None,
     fork_ref: Annotated[
         str | None,
-        Parameter(name="--fork", help="Fork from a session or spawn reference."),
+        Parameter(
+            name="--fork",
+            help=(
+                "Fork from a session ref: chat id (c123), spawn id (p123), "
+                "or raw harness session id."
+            ),
+        ),
     ] = None,
     model: Annotated[
         str,
@@ -240,7 +252,10 @@ def root(
     ] = False,
     autocompact: Annotated[
         int | None,
-        Parameter(name="--autocompact", help="Auto-compact threshold in messages."),
+        Parameter(
+            name="--autocompact",
+            help="Autocompact threshold percentage (1-100). Overrides agent profile.",
+        ),
     ] = None,
     effort: Annotated[
         str | None,

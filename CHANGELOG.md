@@ -13,6 +13,7 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Plugin API v1**: Stable contract at `meridian.plugin_api` for hooks/plugins. Exports: hook types, state helpers, git helpers, config helpers, file locking.
 
 ### Changed
+- CLI help text updated: root epilogue and `spawn` description now advertise primary launch/resume/fork forms, session ref syntax (`c123`/`p123`/raw), foreground capture fallback (Unix TTY, falls back to subprocess on Windows/non-TTY), and correct `--autocompact` range (1-100). Agent root help updated to match.
 - `spawn show/children/files/cancel/wait/log` accept chat_id refs (e.g. `c213`). Resolves to most recent spawn with that chat_id.
 - `meridian context` command — returns context tuple (`work_id`, `repo_root`, `state_root`, `depth`). JSON when spawned or with `--json`; human-friendly text in TTY.
 - Git clone slug shortened: `meridian-flow-docs` instead of `github.com-meridian-flow-docs`. Collision detection still works (errors if existing clone has different remote).

@@ -10,6 +10,13 @@ AGENT_ROOT_HELP = """Usage: meridian COMMAND [ARGS]
 
 Multi-agent orchestration across Claude, Codex, and OpenCode.
 
+Primary launch/resume:
+  meridian -m MODEL                     Launch the primary harness
+  meridian --continue c123              Resume session ref (chat id, spawn id,
+                                        or raw harness session id)
+  meridian --fork p123                  Fork from session ref (chat id, spawn id,
+                                        or raw harness session id)
+
 Quick start:
   meridian spawn -m MODEL -p "prompt"   Create a subagent run
   meridian spawn wait ID                Wait for results
@@ -36,11 +43,16 @@ Output:
 
 app = App(
     name="meridian",
-    help=(
-        "Multi-agent orchestration across Claude, Codex, and OpenCode.\n\n"
-        "Global harness selection: --harness (or prefix with claude/codex/opencode)\n"
-        "Bundled package manager: meridian mars <args>\n\n"
-        'Run "meridian spawn -h" for subagent usage.'
+    help="Multi-agent orchestration across Claude, Codex, and OpenCode.",
+    help_epilogue=(
+        "Primary launch/resume:\n\n"
+        "  meridian [-m MODEL]\n\n"
+        "  meridian --continue c123\n\n"
+        "  meridian --fork p123\n\n"
+        "  refs: chat id (c123), spawn id (p123), or raw harness session id\n\n"
+        "Global harness selection: --harness (or prefix with claude/codex/opencode)\n\n"
+        "Bundled package manager: meridian mars ARGS...\n\n"
+        'Run "meridian spawn -h" for subagent usage.\n'
     ),
     version=__version__,
     help_formatter="plain",
@@ -50,12 +62,15 @@ spawn_app = App(
     help=(
         "Run subagents with a model and prompt.\n"
         "Runs in foreground by default; returns when the spawn reaches a terminal state. "
+        "Foreground streaming uses terminal capture when available (Unix TTY sessions). "
+        "On Windows or non-TTY shells, meridian falls back to subprocess capture. "
         "Use --background to return immediately with the spawn ID."
     ),
     help_epilogue=(
         "Examples:\n\n"
         '  meridian spawn -m gpt-5.3-codex -p "Fix the bug in auth.py"\n\n'
         '  meridian spawn -m claude-sonnet-4-6 -p "Review" -f src/main.py\n\n'
+        '  meridian spawn --fork c123 -p "Continue this thread with a branch"\n\n'
         "  meridian spawn wait SPAWN_ID\n"
     ),
     help_formatter="plain",

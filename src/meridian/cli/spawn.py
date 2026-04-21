@@ -274,7 +274,13 @@ def _spawn_create(
     ] = None,
     fork_from: Annotated[
         str | None,
-        Parameter(name="--fork", help="Fork from a session or spawn reference."),
+        Parameter(
+            name="--fork",
+            help=(
+                "Fork from a session ref: chat id (c123), spawn id (p123), "
+                "or raw harness session id."
+            ),
+        ),
     ] = None,
     debug: Annotated[
         bool,
