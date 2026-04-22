@@ -274,6 +274,7 @@ class OpenCodeAdapter(BaseHarnessAdapter[OpenCodeLaunchSpec]):
         # Build inline prompt: SYSTEM_INSTRUCTION blocks first
         system_blocks = [
             content.skill_injection,
+            content.agent_profile_body,
             content.inventory_prompt,
             content.report_instruction,
             *content.passthrough_system_fragments,
