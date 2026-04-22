@@ -272,6 +272,8 @@ def test_spawn_prepare_opencode_uses_native_file_injection_and_keeps_inline_fall
     tmp_path: Path,
 ) -> None:
     _write_minimal_mars_config(tmp_path)
+    write_agent(tmp_path, name="dev-orchestrator", model="claude-sonnet-4-5")
+    write_agent(tmp_path, name="reviewer", model="gpt-5.4")
     file_ref = tmp_path / "README.md"
     file_ref.write_text("# hello\n", encoding="utf-8")
     dir_ref = tmp_path / "src"
@@ -322,6 +324,47 @@ def test_spawn_prepare_opencode_uses_native_file_injection_and_keeps_inline_fall
     }
     assert f"# Reference: {file_ref.as_posix()}" not in preview.resolved_request.prompt
     assert f"# Reference: {dir_ref.as_posix()}/" in preview.resolved_request.prompt
+    assert "# Meridian Agents" not in preview.resolved_request.prompt
+
+
+@pytest.mark.parametrize(
+    ("harness", "model"),
+    [
+        ("codex", "gpt-5.4"),
+        ("opencode", "opencode-gpt-5.3-codex"),
+    ],
+)
+def test_spawn_prepare_non_claude_does_not_include_agent_inventory_by_default(
+    tmp_path: Path,
+    harness: str,
+    model: str,
+) -> None:
+    _write_minimal_mars_config(tmp_path)
+    write_agent(tmp_path, name="dev-orchestrator", model="claude-sonnet-4-5")
+    write_agent(tmp_path, name="reviewer", model="gpt-5.4")
+
+    preview = build_launch_context(
+        spawn_id=f"dry-run-{harness}-spawn-prepare-no-inventory",
+        request=SpawnRequest(
+            prompt="task prompt",
+            prompt_is_composed=False,
+            model=model,
+            harness=harness,
+        ),
+        runtime=LaunchRuntime(
+            argv_intent=LaunchArgvIntent.REQUIRED,
+            composition_surface=LaunchCompositionSurface.SPAWN_PREPARE,
+            runtime_root=(tmp_path / ".meridian").as_posix(),
+            project_paths_project_root=tmp_path.as_posix(),
+            project_paths_execution_cwd=tmp_path.as_posix(),
+        ),
+        harness_registry=get_default_harness_registry(),
+        dry_run=True,
+    )
+
+    assert preview.projected_content is not None
+    assert "# Meridian Agents" not in preview.projected_content.user_turn_content
+    assert "# Meridian Agents" not in preview.resolved_request.prompt
 
 
 def test_spawn_prepare_claude_projects_skills_inventory_and_report_to_system_prompt(

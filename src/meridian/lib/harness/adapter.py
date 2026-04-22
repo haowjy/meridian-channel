@@ -62,6 +62,7 @@ class RunPromptPolicy(BaseModel):
 
     include_agent_body: bool = True
     include_skills: bool = True
+    include_inventory: bool = False
     skill_injection_mode: Literal["none", "append-system-prompt"] = "none"
 
 

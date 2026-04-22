@@ -261,7 +261,8 @@ class ClaudeAdapter(BaseHarnessAdapter[ClaudeLaunchSpec]):
     def run_prompt_policy(self) -> RunPromptPolicy:
         return RunPromptPolicy(
             include_agent_body=False,
-            include_skills=False,
+            include_skills=True,
+            include_inventory=True,
             skill_injection_mode="append-system-prompt",
         )
 

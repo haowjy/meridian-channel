@@ -57,7 +57,7 @@ from .env import merge_env_overrides as _merge_env_overrides
 from .permissions import resolve_permission_pipeline
 from .policies import resolve_policies
 from .prompt import (
-    build_primary_inventory_prompt,
+    build_agent_inventory_prompt,
     build_report_instruction,
     compose_skill_injections,
     dedupe_skill_names,
@@ -444,26 +444,31 @@ def _resolve_surface_request(
 
         skill_injection = ""
         if prompt_policy.include_skills:
-            skill_blocks = [
-                f"# Skill: {skill.name}\n\n{skill.content.strip()}"
-                for skill in resolved_skills.loaded_skills
-                if skill.content.strip()
-            ]
-            skill_injection = "\n\n".join(skill_blocks)
+            skill_injection = compose_skill_injections(resolved_skills.loaded_skills) or ""
 
         agent_profile_body = ""
-        if prompt_policy.include_agent_body and profile is not None and profile.body.strip():
+        if (
+            prompt_policy.include_agent_body
+            and profile is not None
+            and profile.body.strip()
+            and not harness.capabilities.supports_native_agents
+        ):
             rendered_agent_body = substitute_template_variables(
                 profile.body.strip(),
                 resolved_template_variables,
             )
             agent_profile_body = f"# Agent Profile\n\n{rendered_agent_body}"
+        inventory_prompt = ""
+        if prompt_policy.include_inventory:
+            inventory_prompt = (
+                build_agent_inventory_prompt(project_root=project_paths.project_root) or ""
+            )
 
         spawn_composed_content = ComposedLaunchContent(
             skill_injection=skill_injection,
             agent_profile_body=agent_profile_body,
             report_instruction=build_report_instruction(),
-            inventory_prompt="",
+            inventory_prompt=inventory_prompt,
             passthrough_system_fragments=(),
             user_task_prompt=cleaned_user_prompt,
             reference_items=loaded_references,
@@ -504,25 +509,6 @@ def _resolve_surface_request(
                         f"Harness '{harness.id}' does not support session fork; resuming in-place."
                     )
 
-    if (
-        spawn_composed_content is not None
-        and harness.id == HarnessId.CLAUDE
-    ):
-        # Claude spawn-prepare routes system content via append-system-prompt.
-        # Project skill and agent-inventory context there for fresh and resumed runs.
-        spawn_composed_content = ComposedLaunchContent(
-            skill_injection=compose_skill_injections(resolved_skills.loaded_skills) or "",
-            agent_profile_body=spawn_composed_content.agent_profile_body,
-            report_instruction=spawn_composed_content.report_instruction,
-            inventory_prompt=(
-                build_primary_inventory_prompt(project_root=project_paths.project_root) or ""
-            ),
-            passthrough_system_fragments=spawn_composed_content.passthrough_system_fragments,
-            user_task_prompt=spawn_composed_content.user_task_prompt,
-            reference_items=spawn_composed_content.reference_items,
-            prior_output=spawn_composed_content.prior_output,
-        )
-
     final_prompt = prompt
     final_passthrough_args = request.extra_args
     appended_system_prompt: str | None = None
@@ -535,7 +521,7 @@ def _resolve_surface_request(
         ) or "fresh"
         inventory_prompt: str | None = None
         if session_mode != "resume":
-            inventory_prompt = build_primary_inventory_prompt(
+            inventory_prompt = build_agent_inventory_prompt(
                 project_root=project_paths.project_root
             )
 
