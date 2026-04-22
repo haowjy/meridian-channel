@@ -192,6 +192,7 @@ class OperationSpec(BaseModel, Generic[InputT, OutputT]):
     cli_group: str | None = None
     cli_name: str | None = None
     mcp_name: str | None = None
+    agent_default_format: Literal["text", "json"] | None = None
     version: str = "1"
     sync_handler: Callable[[InputT], OutputT] | None = None
     surfaces: frozenset[OperationSurface] = frozenset({"cli", "mcp"})
@@ -232,6 +233,7 @@ def _spec(
     cli_group: str | None,
     cli_name: str | None,
     mcp_name: str | None,
+    agent_default_format: Literal["text", "json"] | None = None,
     surfaces: frozenset[OperationSurface] = frozenset({"cli", "mcp"}),
 ) -> OperationSpec[InputT, OutputT]:
     return OperationSpec(
@@ -244,6 +246,7 @@ def _spec(
         cli_group=cli_group,
         cli_name=cli_name,
         mcp_name=mcp_name,
+        agent_default_format=agent_default_format,
         surfaces=surfaces,
     )
 
@@ -259,6 +262,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="config",
         cli_name="get",
         mcp_name="config_get",
+        agent_default_format="json",
         surfaces=frozenset({"cli"}),
     ),
     _spec(
@@ -271,6 +275,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="config",
         cli_name="init",
         mcp_name="config_init",
+        agent_default_format="text",
         surfaces=frozenset({"cli"}),
     ),
     _spec(
@@ -283,6 +288,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="config",
         cli_name="reset",
         mcp_name="config_reset",
+        agent_default_format="text",
         surfaces=frozenset({"cli"}),
     ),
     _spec(
@@ -295,6 +301,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="config",
         cli_name="set",
         mcp_name="config_set",
+        agent_default_format="text",
         surfaces=frozenset({"cli"}),
     ),
     _spec(
@@ -307,6 +314,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="config",
         cli_name="show",
         mcp_name="config_show",
+        agent_default_format="text",
         surfaces=frozenset({"cli"}),
     ),
     _spec(
@@ -319,6 +327,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="workspace",
         cli_name="init",
         mcp_name="workspace_init",
+        agent_default_format="text",
         surfaces=frozenset({"cli"}),
     ),
     _spec(
@@ -331,6 +340,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="doctor",
         cli_name="doctor",
         mcp_name="doctor",
+        agent_default_format="text",
     ),
     _spec(
         name="hooks.check",
@@ -342,6 +352,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="hooks",
         cli_name="check",
         mcp_name="hooks_check",
+        agent_default_format="text",
         surfaces=frozenset({"cli"}),
     ),
     _spec(
@@ -354,6 +365,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="hooks",
         cli_name="list",
         mcp_name="hooks_list",
+        agent_default_format="text",
         surfaces=frozenset({"cli"}),
     ),
     _spec(
@@ -366,6 +378,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group=None,
         cli_name=None,
         mcp_name="hooks_resolve",
+        agent_default_format="text",
         surfaces=frozenset({"mcp"}),
     ),
     _spec(
@@ -378,6 +391,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="hooks",
         cli_name="run",
         mcp_name="hooks_run",
+        agent_default_format="text",
         surfaces=frozenset({"cli"}),
     ),
     _spec(
@@ -390,6 +404,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="models",
         cli_name="list",
         mcp_name="models_list",
+        agent_default_format="text",
     ),
     _spec(
         name="models.refresh",
@@ -401,6 +416,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="models",
         cli_name="refresh",
         mcp_name="models_refresh",
+        agent_default_format="text",
     ),
     _spec(
         name="report.search",
@@ -412,6 +428,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="report",
         cli_name="search",
         mcp_name="report_search",
+        agent_default_format="text",
     ),
     _spec(
         name="report.show",
@@ -423,6 +440,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="report",
         cli_name="show",
         mcp_name="report_show",
+        agent_default_format="text",
     ),
     _spec(
         name="session.log",
@@ -437,6 +455,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="session",
         cli_name="log",
         mcp_name="session_log",
+        agent_default_format="text",
         surfaces=frozenset({"cli"}),
     ),
     _spec(
@@ -449,6 +468,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="session",
         cli_name="search",
         mcp_name="session_search",
+        agent_default_format="text",
         surfaces=frozenset({"cli"}),
     ),
     _spec(
@@ -461,6 +481,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="spawn",
         cli_name="cancel",
         mcp_name=None,
+        agent_default_format="json",
         surfaces=frozenset({"cli"}),
     ),
     _spec(
@@ -473,6 +494,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="spawn",
         cli_name="files",
         mcp_name="spawn_files",
+        agent_default_format="text",
         surfaces=frozenset({"cli"}),
     ),
     _spec(
@@ -485,6 +507,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="spawn",
         cli_name="children",
         mcp_name="spawn_children",
+        agent_default_format="text",
         surfaces=frozenset({"cli"}),
     ),
     _spec(
@@ -497,6 +520,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="spawn",
         cli_name="continue",
         mcp_name="spawn_continue",
+        agent_default_format="json",
         surfaces=frozenset({"mcp"}),
     ),
     _spec(
@@ -509,6 +533,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="spawn",
         cli_name="create",
         mcp_name="spawn_create",
+        agent_default_format="json",
         surfaces=frozenset({"mcp"}),
     ),
     _spec(
@@ -521,6 +546,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="spawn",
         cli_name="list",
         mcp_name="spawn_list",
+        agent_default_format="text",
     ),
     _spec(
         name="spawn.show",
@@ -535,6 +561,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="spawn",
         cli_name="show",
         mcp_name="spawn_show",
+        agent_default_format="text",
     ),
     _spec(
         name="spawn.stats",
@@ -546,6 +573,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="spawn",
         cli_name="stats",
         mcp_name="spawn_stats",
+        agent_default_format="text",
     ),
     _spec(
         name="spawn.wait",
@@ -557,6 +585,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="spawn",
         cli_name="wait",
         mcp_name="spawn_wait",
+        agent_default_format="json",
     ),
     _spec(
         name="work.clear",
@@ -568,6 +597,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="work",
         cli_name="clear",
         mcp_name="work_clear",
+        agent_default_format="text",
         surfaces=frozenset({"cli"}),
     ),
     _spec(
@@ -580,6 +610,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="work",
         cli_name="done",
         mcp_name="work_done",
+        agent_default_format="text",
         surfaces=frozenset({"cli"}),
     ),
     _spec(
@@ -594,6 +625,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="work",
         cli_name="delete",
         mcp_name="work_delete",
+        agent_default_format="text",
         surfaces=frozenset({"cli"}),
     ),
     _spec(
@@ -608,6 +640,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="work",
         cli_name="reopen",
         mcp_name="work_reopen",
+        agent_default_format="text",
         surfaces=frozenset({"cli"}),
     ),
     _spec(
@@ -623,6 +656,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="work",
         cli_name="list",
         mcp_name="work_list",
+        agent_default_format="text",
         surfaces=frozenset({"cli"}),
     ),
     _spec(
@@ -635,6 +669,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="work",
         cli_name="rename",
         mcp_name="work_rename",
+        agent_default_format="text",
         surfaces=frozenset({"cli"}),
     ),
     _spec(
@@ -647,6 +682,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="work",
         cli_name="show",
         mcp_name="work_show",
+        agent_default_format="text",
         surfaces=frozenset({"cli"}),
     ),
     _spec(
@@ -662,6 +698,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="work",
         cli_name="sessions",
         mcp_name="work_sessions",
+        agent_default_format="text",
         surfaces=frozenset({"cli"}),
     ),
     _spec(
@@ -676,6 +713,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="work",
         cli_name="start",
         mcp_name="work_start",
+        agent_default_format="text",
         surfaces=frozenset({"cli"}),
     ),
     _spec(
@@ -688,6 +726,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="work",
         cli_name="switch",
         mcp_name="work_switch",
+        agent_default_format="text",
         surfaces=frozenset({"cli"}),
     ),
     _spec(
@@ -700,6 +739,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="work",
         cli_name="update",
         mcp_name="work_update",
+        agent_default_format="text",
         surfaces=frozenset({"cli"}),
     ),
     _spec(
@@ -712,6 +752,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="context",
         cli_name="context",
         mcp_name="context",
+        agent_default_format="json",
         surfaces=frozenset({"cli"}),
     ),
     _spec(
@@ -724,6 +765,7 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="work",
         cli_name="current",
         mcp_name="work_current",
+        agent_default_format="json",
         surfaces=frozenset({"cli"}),
     ),
 )
@@ -767,6 +809,15 @@ def get_operation(name: str) -> OperationSpec[Any, Any]:
     return _OPERATIONS_BY_NAME[name]
 
 
+def get_operation_by_cli(group: str, name: str) -> OperationSpec[Any, Any] | None:
+    """Look up an operation by CLI group and command name."""
+
+    for spec in _OPERATIONS:
+        if spec.cli_group == group and spec.cli_name == name:
+            return spec
+    return None
+
+
 def get_operations_for_surface(surface: OperationSurface) -> list[OperationSpec[Any, Any]]:
     """Return operations exposed on one surface, sorted by canonical name."""
 
@@ -787,5 +838,6 @@ __all__ = [
     "get_all_operations",
     "get_mcp_tool_names",
     "get_operation",
+    "get_operation_by_cli",
     "get_operations_for_surface",
 ]

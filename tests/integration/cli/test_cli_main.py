@@ -116,7 +116,24 @@ def test_init_alias_link_uses_mars_link_when_mars_toml_exists(
     ]
 
 
-def test_agent_root_help_mentions_init_command() -> None:
-    assert "init     Initialize repo config; optional --link wiring for tool directories" in (
-        AGENT_ROOT_HELP
-    )
+def test_agent_root_help_restricted_surface_contract() -> None:
+    for visible in (
+        "spawn    Create and manage subagent runs (includes report subgroup)",
+        "work     Work item dashboard and coordination",
+        "models   Model catalog",
+    ):
+        assert visible in AGENT_ROOT_HELP
+
+    normalized_help = AGENT_ROOT_HELP.lower()
+    for hidden in (
+        "config",
+        "doctor",
+        "init",
+        "session",
+        "completion",
+        "serve",
+        "claude",
+        "codex",
+        "opencode",
+    ):
+        assert hidden not in normalized_help

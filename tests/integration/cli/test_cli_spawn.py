@@ -62,7 +62,9 @@ def test_spawn_rejects_prompt_and_prompt_file_together(
         cli_main.main(["--human", "spawn", "-p", "literal", "--prompt-file", "-", "--dry-run"])
 
     assert exc_info.value.code == 1
-    assert "cannot specify both -p and --prompt-file" in capsys.readouterr().err
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "error: cannot specify both -p and --prompt-file\n"
 
 
 def test_spawn_file_only_without_prompt_is_allowed(
@@ -114,6 +116,134 @@ def test_spawn_continue_without_prompt_is_allowed(monkeypatch: pytest.MonkeyPatc
 
     assert exc_info.value.code == 0
     assert captured == {"spawn_id": "p1", "prompt": ""}
+
+
+@pytest.mark.parametrize("prompt_value", ["list", "show", "files", "stats"])
+def test_spawn_default_create_stays_json_when_option_value_matches_subcommand(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    prompt_value: str,
+) -> None:
+    monkeypatch.setenv("MERIDIAN_DEPTH", "1")
+
+    def _fake_spawn_create_sync(
+        payload: SpawnCreateInput,
+        *,
+        sink: object | None = None,
+    ) -> SpawnActionOutput:
+        _ = sink
+        assert payload.prompt == prompt_value
+        return SpawnActionOutput(command="spawn.create", status="dry-run")
+
+    monkeypatch.setattr(spawn_cli, "spawn_create_sync", _fake_spawn_create_sync)
+    monkeypatch.setattr(spawn_cli.sys, "stdin", _FakeStdin("", is_tty=True))
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main.main(["spawn", "-p", prompt_value, "--dry-run"])
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "dry-run"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["spawn", "--continue", "p1", "--dry-run"],
+        ["spawn", "--continue=p1", "--dry-run"],
+    ],
+)
+def test_spawn_continue_default_stays_json(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    argv: list[str],
+) -> None:
+    monkeypatch.setenv("MERIDIAN_DEPTH", "1")
+    captured: dict[str, str] = {}
+
+    def _fake_spawn_continue_sync(
+        payload: SpawnContinueInput,
+        *,
+        sink: object | None = None,
+    ) -> SpawnActionOutput:
+        _ = sink
+        captured["spawn_id"] = payload.spawn_id
+        return SpawnActionOutput(command="spawn.continue", status="dry-run")
+
+    monkeypatch.setattr(spawn_cli, "spawn_continue_sync", _fake_spawn_continue_sync)
+    monkeypatch.setattr(spawn_cli.sys, "stdin", _FakeStdin("", is_tty=True))
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main.main(argv)
+
+    assert exc_info.value.code == 0
+    assert captured["spawn_id"] == "p1"
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "dry-run"
+
+
+def test_spawn_format_text_overrides_agent_default_json(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("MERIDIAN_DEPTH", "1")
+
+    def _fake_spawn_create_sync(
+        payload: SpawnCreateInput,
+        *,
+        sink: object | None = None,
+    ) -> SpawnActionOutput:
+        _ = sink
+        assert payload.prompt == "build"
+        return SpawnActionOutput(command="spawn.create", status="dry-run")
+
+    monkeypatch.setattr(spawn_cli, "spawn_create_sync", _fake_spawn_create_sync)
+    monkeypatch.setattr(spawn_cli.sys, "stdin", _FakeStdin("", is_tty=True))
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main.main(["--format", "text", "spawn", "-p", "build", "--dry-run"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Spawn dry-run." in output
+
+
+def test_spawn_explicit_json_error_is_structured(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("MERIDIAN_DEPTH", "1")
+    monkeypatch.setattr(spawn_cli.sys, "stdin", _FakeStdin("", is_tty=True))
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main.main(["--format", "json", "spawn", "-p", "literal", "--prompt-file", "-"])
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.strip().startswith("{"), captured.err
+    payload = json.loads(captured.err)
+    assert payload["error"] == "cannot specify both -p and --prompt-file"
+    assert payload["exit_code"] == 1
+
+
+def test_spawn_implicit_json_error_is_structured(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("MERIDIAN_DEPTH", "1")
+    monkeypatch.setattr(spawn_cli.sys, "stdin", _FakeStdin("", is_tty=True))
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main.main(["spawn", "-p", "literal", "--prompt-file", "-"])
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.strip().startswith("{"), captured.err
+    payload = json.loads(captured.err)
+    assert payload["error"] == "cannot specify both -p and --prompt-file"
+    assert payload["exit_code"] == 1
 
 
 def test_spawn_list_active_view_includes_finalizing(
@@ -328,11 +458,9 @@ def test_spawn_children_agent_mode_uses_children_text_view(
         cli_main.main(["spawn", "children", "p100"])
 
     assert exc_info.value.code == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert "agent" in payload["text"]
-    assert "desc" in payload["text"]
-    assert "reviewer" in payload["text"]
-    assert "review child" in payload["text"]
+    output = capsys.readouterr().out
+    assert "reviewer" in output
+    assert "review child" in output
 
 
 def _capture_filters_and_return_empty(

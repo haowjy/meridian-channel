@@ -1,6 +1,6 @@
 # Agent Mode
 
-Agent mode should narrow the visible CLI surface and switch default output to machine-readable JSON. These checks are small but important because subagents rely on this contract.
+Agent mode should narrow the visible CLI surface and use per-command output defaults. These checks are small but important because subagents rely on this contract.
 
 ## Setup
 
@@ -41,16 +41,31 @@ print("PASS: --human restored full help")
 PY
 ```
 
-### AGT-3. Agent mode keeps structured output on normal commands [IMPORTANT]
+### AGT-3. Agent mode uses per-command defaults [IMPORTANT]
+
+Agent mode now uses per-command defaults. Read/browse commands like `models list`
+default to text; control-plane commands default to JSON.
 
 ```bash
+# models list defaults to text in agent mode
 MERIDIAN_DEPTH=1 uv run meridian models list > /tmp/meridian-agent-models.out && \
 uv run python - <<'PY'
+text = open("/tmp/meridian-agent-models.out").read()
+assert not text.strip().startswith("{"), "Expected text, got JSON"
+print("PASS: models list output is text in agent mode")
+PY
+```
+
+### AGT-4. Explicit --format json overrides agent defaults [IMPORTANT]
+
+```bash
+MERIDIAN_DEPTH=1 uv run meridian --format json models list > /tmp/meridian-explicit-json.out && \
+uv run python - <<'PY'
 import json
-for line in open("/tmp/meridian-agent-models.out"):
+for line in open("/tmp/meridian-explicit-json.out"):
     line = line.strip()
     if line:
         json.loads(line)
-print("PASS: agent mode kept structured output")
+print("PASS: --format json produces JSON")
 PY
 ```

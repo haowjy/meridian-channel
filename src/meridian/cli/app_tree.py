@@ -8,14 +8,14 @@ from meridian import __version__
 # Not auto-generated — update when adding agent-facing commands.
 AGENT_ROOT_HELP = """Usage: meridian COMMAND [ARGS]
 
-Multi-agent orchestration across Claude, Codex, and OpenCode.
+Multi-agent orchestration CLI.
 
 Primary launch/resume:
   meridian -m MODEL                     Launch the primary harness
-  meridian --continue c123              Resume session ref (chat id, spawn id,
-                                        or raw harness session id)
-  meridian --fork p123                  Fork from session ref (chat id, spawn id,
-                                        or raw harness session id)
+  meridian --continue c123              Resume from ref (chat id, spawn id,
+                                        or raw harness id)
+  meridian --fork p123                  Fork from ref (chat id, spawn id,
+                                        or raw harness id)
 
 Quick start:
   meridian spawn -m MODEL -p "prompt"   Create a subagent run
@@ -25,20 +25,13 @@ Quick start:
 Run 'meridian spawn -h' for full usage.
 
 Commands:
-  init     Initialize repo config; optional --link wiring for tool directories
-  mars     Forward arguments to bundled mars CLI
   spawn    Create and manage subagent runs (includes report subgroup)
-  session  Read and search harness session transcripts
   work     Work item dashboard and coordination
-  hooks    Hook inspection and manual execution
   models   Model catalog
-  config   Repository config inspection and overrides
-  workspace  Local workspace topology setup
-  doctor   Health check and orphan reconciliation
 
 Output:
-  Agent mode defaults to JSON. All commands emit structured JSON.
-  Use --format text to force human-readable output.
+  Agent mode uses per-command defaults: control-plane commands default
+  to JSON, read/browse commands default to text. Use --format to override.
 """
 
 app = App(

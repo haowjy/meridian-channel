@@ -66,7 +66,7 @@ def test_run_mars_passthrough_sync_calls_augment_result() -> None:
     assert observed[0].request.is_sync is True
 
 
-def test_main_mars_defaults_to_json_in_agent_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_mars_defaults_to_text_in_agent_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MERIDIAN_DEPTH", "1")
     captured: dict[str, object] = {}
 
@@ -87,7 +87,7 @@ def test_main_mars_defaults_to_json_in_agent_mode(monkeypatch: pytest.MonkeyPatc
 
     assert exc_info.value.code == 0
     assert captured["args"] == ("list",)
-    assert captured["output_format"] == "json"
+    assert captured["output_format"] == "text"
 
 
 def test_main_mars_honors_explicit_text_in_agent_mode(

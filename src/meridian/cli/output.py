@@ -49,6 +49,27 @@ def normalize_output_format(
     raise SystemExit("--format must be one of: text, json")
 
 
+def resolve_effective_format(
+    *,
+    explicit_format: OutputFormat | None,
+    agent_mode: bool,
+    agent_default_format: Literal["text", "json"] | None,
+) -> OutputFormat:
+    """Resolve the effective output format for a command.
+
+    Resolution order:
+    1. Explicit format from --format/--json always wins
+    2. In agent mode, use operation's agent_default_format if set
+    3. Fall back to "text"
+    """
+
+    if explicit_format is not None:
+        return explicit_format
+    if agent_mode and agent_default_format is not None:
+        return agent_default_format
+    return "text"
+
+
 def _render_text(value: Any) -> str:
     # "text" mode: prefer format_text() if available, fall back to indented JSON
     # for types that have not yet implemented the protocol.
@@ -123,8 +144,11 @@ class JsonSink:
         print(f"warning: {message}", file=self._stderr)
 
     def error(self, message: str, exit_code: int = 1) -> None:
-        _ = exit_code
-        print(f"error: {message}", file=self._stderr)
+        payload = {"error": message, "exit_code": exit_code}
+        print(
+            json.dumps(_to_json_value(payload), separators=(",", ":")),
+            file=self._stderr,
+        )
 
     def heartbeat(self, message: str) -> None:
         print(message, file=self._stderr, flush=True)
@@ -143,68 +167,11 @@ class JsonSink:
         self._stderr.flush()
 
 
-class AgentSink:
-    def __init__(self, *, stdout: TextIO | None = None) -> None:
-        self._stdout = sys.stdout if stdout is None else stdout
-        self._messages: list[dict[str, JSONValue]] = []
-
-    def _append_typed(self, message_type: str, payload: Any) -> None:
-        # Prefer compact text rendering for agent mode — saves tokens.
-        if isinstance(payload, TextFormattable):
-            rendered = payload.format_text(_DEFAULT_FORMAT_CTX)
-            if rendered == "":
-                return
-            self._messages.append(
-                {
-                    "type": message_type,
-                    "text": rendered,
-                }
-            )
-            return
-
-        json_payload = _to_json_value(payload)
-        entry: dict[str, JSONValue] = {"type": message_type}
-        if isinstance(json_payload, dict):
-            for key, value in cast("dict[str, JSONValue]", json_payload).items():
-                if key == "type":
-                    entry["payload_type"] = value
-                else:
-                    entry[key] = value
-        else:
-            entry["payload"] = json_payload
-        self._messages.append(entry)
-
-    def result(self, payload: Any) -> None:
-        self._append_typed("result", payload)
-
-    def status(self, message: str) -> None:
-        _ = message
-
-    def warning(self, message: str) -> None:
-        _ = message
-
-    def error(self, message: str, exit_code: int = 1) -> None:
-        self._messages.append({"type": "error", "error": message, "exit_code": exit_code})
-
-    def heartbeat(self, message: str) -> None:
-        _ = message
-
-    def event(self, payload: dict[str, Any]) -> None:
-        self._append_typed("event", payload)
-
-    def flush(self) -> None:
-        for message in self._messages:
-            print(json.dumps(message, separators=(",", ":"), sort_keys=True), file=self._stdout)
-        self._stdout.flush()
-
-
 _NULL_SINK = NullSink()
 
 
-def create_sink(config: OutputConfig, *, agent_mode: bool = False) -> OutputSink:
+def create_sink(config: OutputConfig) -> OutputSink:
     if config.format == "json":
-        if agent_mode:
-            return AgentSink()
         return JsonSink()
     if config.format == "text":
         return TextSink(format=config.format)

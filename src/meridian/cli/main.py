@@ -36,6 +36,9 @@ from meridian.cli.bootstrap import (
     first_positional_token as _bootstrap_first_positional_token,
 )
 from meridian.cli.bootstrap import (
+    first_positional_token_with_index as _bootstrap_first_positional_token_with_index,
+)
+from meridian.cli.bootstrap import (
     is_root_help_request as _bootstrap_is_root_help_request,
 )
 from meridian.cli.bootstrap import (
@@ -87,6 +90,7 @@ class GlobalOptions(BaseModel):
     force_human: bool = False
     passthrough_args: tuple[str, ...] = ()
     sink: OutputSink | None = None
+    explicit_format: OutputFormat | None = None
 
 
 _GLOBAL_OPTIONS: ContextVar[GlobalOptions | None] = ContextVar("_GLOBAL_OPTIONS", default=None)
@@ -107,10 +111,7 @@ def _resolve_sink(opts: GlobalOptions | None) -> tuple[OutputSink, bool]:
         return opts.sink, False
     if opts is None:
         return create_sink(OutputConfig(format="text")), True
-    return create_sink(
-        opts.output,
-        agent_mode=_agent_sink_enabled(output_explicit=opts.output_explicit),
-    ), True
+    return create_sink(opts.output), True
 
 
 def current_output_sink() -> OutputSink:
@@ -124,9 +125,7 @@ def emit(payload: object) -> None:
     options = get_global_options()
     sink, flush_after = _resolve_sink(options)
     if isinstance(payload, SpawnActionOutput):
-        if options.output.format == "json" or _agent_sink_enabled(
-            output_explicit=options.output_explicit
-        ):
+        if options.output.format == "json":
             emit_output(payload.to_wire(), sink=sink)
         else:
             emit_output(payload, sink=sink)
@@ -144,6 +143,10 @@ def _extract_global_options(argv: Sequence[str]) -> tuple[list[str], GlobalOptio
             json_mode=json_mode,
         ),
     )
+    explicit_format: OutputFormat | None = None
+    if parsed.output_explicit:
+        explicit_format = cast("OutputFormat", parsed.output_format)
+
     return cleaned, GlobalOptions(
         output=OutputConfig(format=cast("OutputFormat", parsed.output_format)),
         config_file=parsed.config_file,
@@ -152,6 +155,7 @@ def _extract_global_options(argv: Sequence[str]) -> tuple[list[str], GlobalOptio
         no_input=parsed.no_input,
         output_explicit=parsed.output_explicit,
         force_human=parsed.force_human,
+        explicit_format=explicit_format,
     )
 
 
@@ -173,12 +177,79 @@ def agent_mode_enabled() -> bool:
     return int(os.getenv("MERIDIAN_DEPTH", "0")) > 0
 
 
+def _resolve_command_path(argv: Sequence[str]) -> tuple[str | None, str | None]:
+    """Resolve CLI command path (group, subcommand) from argv.
+
+    Returns (group, subcommand) where either may be None.
+    Special handling for spawn default routes which are not in the manifest.
+    """
+    resolved_group = _bootstrap_first_positional_token_with_index(argv)
+    if resolved_group is None:
+        return None, None
+    group_index, group = resolved_group
+
+    from meridian.lib.ops.manifest import get_operation_by_cli
+
+    # Spawn has a default handler. Only the immediate token after "spawn" can
+    # select a real subcommand. Later non-flag tokens can be option values.
+    if group == "spawn":
+        spawn_subcommands = {
+            name for name in spawn_app.resolved_commands() if not name.startswith("-")
+        }
+        next_token = argv[group_index + 1] if group_index + 1 < len(argv) else None
+        if (
+            next_token is not None
+            and not next_token.startswith("-")
+            and next_token in spawn_subcommands
+        ):
+            return "spawn", next_token
+        if "--continue" in argv or any(token.startswith("--continue=") for token in argv):
+            return "spawn", "continue"
+        return "spawn", "create"
+
+    # Get non-flag tokens after the group.
+    remaining = [a for a in argv[group_index:] if not a.startswith("-")]
+    subcommand = remaining[1] if len(remaining) > 1 else None
+
+    # Check for single-command groups (cli_name == cli_group)
+    if (
+        (subcommand is None or get_operation_by_cli(group, subcommand) is None)
+        and get_operation_by_cli(group, group) is not None
+    ):
+        return group, group
+
+    return group, subcommand
+
+
+def _resolve_output_format_for_command(
+    *,
+    argv: Sequence[str],
+    explicit_format: OutputFormat | None,
+    agent_mode: bool,
+) -> OutputFormat:
+    """Resolve effective output format based on command and context."""
+    from typing import Literal
+
+    from meridian.cli.output import resolve_effective_format
+    from meridian.lib.ops.manifest import get_operation_by_cli
+
+    group, subcommand = _resolve_command_path(argv)
+
+    agent_default_format: Literal["text", "json"] | None = None
+    if group is not None and subcommand is not None:
+        op = get_operation_by_cli(group, subcommand)
+        if op is not None:
+            agent_default_format = op.agent_default_format
+
+    return resolve_effective_format(
+        explicit_format=explicit_format,
+        agent_mode=agent_mode,
+        agent_default_format=agent_default_format,
+    )
+
+
 def _interactive_terminal_attached() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
-
-
-def _agent_sink_enabled(*, output_explicit: bool) -> bool:
-    return not (output_explicit or not agent_mode_enabled() or _interactive_terminal_attached())
 
 
 @app.default
@@ -604,16 +675,22 @@ def main(argv: Sequence[str] | None = None) -> None:
     if not (cleaned_args and cleaned_args[0] == "mars"):
         cleaned_args, passthrough_args = _split_passthrough_args(cleaned_args)
         options = options.model_copy(update={"passthrough_args": passthrough_args})
-    agent_mode = (
+    effective_agent_mode = (
         agent_mode_enabled() and not options.force_human and not _interactive_terminal_attached()
     )
-    if agent_mode and not options.output_explicit:
-        options = options.model_copy(update={"output": OutputConfig(format="json")})
+
+    # Resolve output format based on command and agent mode
+    resolved_format = _resolve_output_format_for_command(
+        argv=cleaned_args,
+        explicit_format=options.explicit_format,
+        agent_mode=effective_agent_mode,
+    )
+    options = options.model_copy(update={"output": OutputConfig(format=resolved_format)})
 
     if cleaned_args and cleaned_args[0] == "mars":
         _run_mars_passthrough(cleaned_args[1:], output_format=options.output.format)
 
-    if agent_mode and (not cleaned_args or _is_root_help_request(cleaned_args)):
+    if effective_agent_mode and (not cleaned_args or _is_root_help_request(cleaned_args)):
         _print_agent_root_help()
         return
 
@@ -621,10 +698,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     maybe_bootstrap_runtime_state(cleaned_args, agent_mode=agent_mode_enabled())
 
-    active_sink = create_sink(
-        options.output,
-        agent_mode=_agent_sink_enabled(output_explicit=options.output_explicit),
-    )
+    active_sink = create_sink(options.output)
     options = options.model_copy(update={"sink": active_sink})
     token = _GLOBAL_OPTIONS.set(options)
     try:

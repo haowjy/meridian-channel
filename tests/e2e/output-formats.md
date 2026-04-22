@@ -54,16 +54,30 @@ print("PASS: --format text produced text output")
 PY
 ```
 
-### FMT-4. Agent mode defaults to JSON output [IMPORTANT]
+### FMT-4. Agent mode uses per-command defaults [IMPORTANT]
+
+Agent mode now uses per-command defaults instead of forcing JSON globally.
+Read/browse commands default to text; control-plane commands default to JSON.
 
 ```bash
+# models list defaults to text in agent mode
 MERIDIAN_DEPTH=1 uv run meridian models list > /tmp/meridian-formats-agent.out && \
 uv run python - <<'PY'
+text = open("/tmp/meridian-formats-agent.out").read()
+assert not text.strip().startswith("{"), "Expected text output"
+print("PASS: agent mode used text for models list")
+PY
+```
+
+### FMT-5. Agent mode JSON default for control-plane commands [IMPORTANT]
+
+```bash
+# work current defaults to JSON in agent mode (control-plane command)
+export MERIDIAN_PROJECT_DIR="$SMOKE_REPO"
+MERIDIAN_DEPTH=1 uv run meridian work current > /tmp/meridian-work-current.out && \
+uv run python - <<'PY'
 import json
-for line in open("/tmp/meridian-formats-agent.out"):
-    line = line.strip()
-    if line:
-        json.loads(line)
-print("PASS: agent mode emitted JSON lines")
+data = json.load(open("/tmp/meridian-work-current.out"))
+print("PASS: work current output is JSON in agent mode")
 PY
 ```

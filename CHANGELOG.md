@@ -3,6 +3,10 @@
 Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [SemVer](https://semver.org/). Versions `0.0.6` through `0.0.25` in git history only — changelog fell stale, resumed at `[Unreleased]`.
 ## [Unreleased]
 
+### Changed
+- Agent mode output defaults now per command: control-plane -> JSON, read/browse -> text.
+- JSON mode no hidden JSONL `AgentSink` envelope; command JSON writes direct.
+
 ## [0.0.40-rc.2] - 2026-04-22
 
 ### Changed
