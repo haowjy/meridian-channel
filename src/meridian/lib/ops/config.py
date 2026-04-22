@@ -220,7 +220,7 @@ for spec in _CONFIG_KEY_SPECS:
 class ConfigInitInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class ConfigInitOutput(BaseModel):
@@ -238,7 +238,7 @@ class ConfigInitOutput(BaseModel):
 class ConfigShowInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class ConfigResolvedValue(BaseModel):
@@ -296,7 +296,7 @@ class ConfigSetInput(BaseModel):
 
     key: str
     value: str
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class ConfigSetOutput(BaseModel):
@@ -315,7 +315,7 @@ class ConfigGetInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     key: str
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class ConfigGetOutput(BaseModel):
@@ -336,7 +336,7 @@ class ConfigResetInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     key: str
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class ConfigResetOutput(BaseModel):
@@ -360,8 +360,8 @@ class _ConfigInspectionState:
     resolved_values: dict[str, object]
 
 
-def _resolve_project_config_state(repo_root: Path) -> ProjectConfigState:
-    return resolve_project_config_state(repo_root)
+def _resolve_project_config_state(project_root: Path) -> ProjectConfigState:
+    return resolve_project_config_state(project_root)
 
 
 def _require_project_config_path(state: ProjectConfigState) -> Path:
@@ -370,8 +370,8 @@ def _require_project_config_path(state: ProjectConfigState) -> Path:
     return state.path
 
 
-def _resolve_project_root(repo_root: str | None) -> Path:
-    explicit = Path(repo_root).expanduser().resolve() if repo_root else None
+def _resolve_project_root(project_root: str | None) -> Path:
+    explicit = Path(project_root).expanduser().resolve() if project_root else None
     return resolve_project_root(explicit)
 
 
@@ -626,12 +626,12 @@ def _source_for_key(
     return "builtin", None
 
 
-def _build_config_inspection_state(repo_root: Path) -> _ConfigInspectionState:
-    surface = build_config_surface(repo_root)
+def _build_config_inspection_state(project_root: Path) -> _ConfigInspectionState:
+    surface = build_config_surface(project_root)
     project_overrides = _extract_file_overrides(
         _read_file_payload(surface.project_config.write_path)
     )
-    local_config_path = repo_root / _LOCAL_CONFIG_FILENAME
+    local_config_path = project_root / _LOCAL_CONFIG_FILENAME
     if local_config_path.is_file():
         local_overrides = _extract_file_overrides(_read_file_payload(local_config_path))
         project_overrides = {**project_overrides, **local_overrides}
@@ -741,7 +741,7 @@ def _has_non_empty_remote(remote: str | None) -> bool:
     return isinstance(remote, str) and bool(remote.strip())
 
 
-def ensure_runtime_state_bootstrap_sync(repo_root: Path) -> None:
+def ensure_runtime_state_bootstrap_sync(project_root: Path) -> None:
     """Ensure first-run runtime state exists without creating project-root files.
 
     For git-backed contexts with configured remotes, we skip directory creation
@@ -749,9 +749,9 @@ def ensure_runtime_state_bootstrap_sync(repo_root: Path) -> None:
     avoids creating non-git directories at clone paths before the actual clone
     happens.
     """
-    context_config = load_context_config(repo_root)
+    context_config = load_context_config(project_root)
 
-    repo_state = resolve_repo_paths_for_write(repo_root)
+    repo_state = resolve_repo_paths_for_write(project_root)
     auto_migrate_contexts(repo_state.root_dir)
 
     # Always create the root .meridian directory
@@ -791,7 +791,7 @@ def ensure_runtime_state_bootstrap_sync(repo_root: Path) -> None:
             repo_state.work_dir.mkdir(parents=True, exist_ok=True)
             repo_state.work_archive_dir.mkdir(parents=True, exist_ok=True)
 
-    runtime_root = resolve_project_runtime_root_for_write(repo_root)
+    runtime_root = resolve_project_runtime_root_for_write(project_root)
     runtime_state = RuntimePaths.from_root_dir(runtime_root)
     runtime_dirs = (
         runtime_state.root_dir,
@@ -799,14 +799,14 @@ def ensure_runtime_state_bootstrap_sync(repo_root: Path) -> None:
     )
     for dir_path in runtime_dirs:
         dir_path.mkdir(parents=True, exist_ok=True)
-    ensure_gitignore(repo_root)
+    ensure_gitignore(project_root)
 
 
-def ensure_state_bootstrap_sync(repo_root: Path) -> ConfigInitOutput:
+def ensure_state_bootstrap_sync(project_root: Path) -> ConfigInitOutput:
     """Ensure runtime state exists and scaffold project config when missing."""
 
-    ensure_runtime_state_bootstrap_sync(repo_root)
-    state = _resolve_project_config_state(repo_root)
+    ensure_runtime_state_bootstrap_sync(project_root)
+    state = _resolve_project_config_state(project_root)
     if state.path is not None:
         return ConfigInitOutput(path=state.path.as_posix(), created=False)
 
@@ -815,18 +815,18 @@ def ensure_state_bootstrap_sync(repo_root: Path) -> ConfigInitOutput:
 
 
 def config_init_sync(payload: ConfigInitInput) -> ConfigInitOutput:
-    # init targets explicit path, then MERIDIAN_REPO_ROOT, then CWD.
-    if payload.repo_root:
-        repo_root = Path(payload.repo_root).expanduser().resolve()
+    # init targets explicit path, then MERIDIAN_PROJECT_DIR, then CWD.
+    if payload.project_root:
+        project_root = Path(payload.project_root).expanduser().resolve()
     else:
-        env_root = os.getenv("MERIDIAN_REPO_ROOT", "").strip()
-        repo_root = Path(env_root).expanduser().resolve() if env_root else Path.cwd().resolve()
-    return ensure_state_bootstrap_sync(repo_root)
+        env_root = os.getenv("MERIDIAN_PROJECT_DIR", "").strip()
+        project_root = Path(env_root).expanduser().resolve() if env_root else Path.cwd().resolve()
+    return ensure_state_bootstrap_sync(project_root)
 
 
 def config_show_sync(payload: ConfigShowInput) -> ConfigShowOutput:
-    repo_root = _resolve_project_root(payload.repo_root)
-    inspection = _build_config_inspection_state(repo_root)
+    project_root = _resolve_project_root(payload.project_root)
+    inspection = _build_config_inspection_state(project_root)
 
     values: list[ConfigResolvedValue] = []
     for spec in _CONFIG_KEY_SPECS:
@@ -854,8 +854,8 @@ def config_show_sync(payload: ConfigShowInput) -> ConfigShowOutput:
 
 
 def config_set_sync(payload: ConfigSetInput) -> ConfigSetOutput:
-    repo_root = _resolve_project_root(payload.repo_root)
-    path = _require_project_config_path(_resolve_project_config_state(repo_root))
+    project_root = _resolve_project_root(payload.project_root)
+    path = _require_project_config_path(_resolve_project_config_state(project_root))
 
     spec = _resolve_key_spec(payload.key)
     value = _parse_cli_value(spec, payload.value)
@@ -873,9 +873,9 @@ def config_set_sync(payload: ConfigSetInput) -> ConfigSetOutput:
 
 
 def config_get_sync(payload: ConfigGetInput) -> ConfigGetOutput:
-    repo_root = _resolve_project_root(payload.repo_root)
+    project_root = _resolve_project_root(payload.project_root)
     spec = _resolve_key_spec(payload.key)
-    inspection = _build_config_inspection_state(repo_root)
+    inspection = _build_config_inspection_state(project_root)
     source, env_var = _source_for_key(
         spec,
         project_overrides=inspection.project_overrides,
@@ -891,8 +891,8 @@ def config_get_sync(payload: ConfigGetInput) -> ConfigGetOutput:
 
 
 def config_reset_sync(payload: ConfigResetInput) -> ConfigResetOutput:
-    repo_root = _resolve_project_root(payload.repo_root)
-    path = _require_project_config_path(_resolve_project_config_state(repo_root))
+    project_root = _resolve_project_root(payload.project_root)
+    path = _require_project_config_path(_resolve_project_config_state(project_root))
     spec = _resolve_key_spec(payload.key)
 
     file_overrides = _extract_file_overrides(_read_file_payload(path))

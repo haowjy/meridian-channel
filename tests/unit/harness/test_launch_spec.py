@@ -40,7 +40,7 @@ def _resolver(
 
 def test_claude_resolve_launch_spec_normalizes_effort_and_maps_fields(tmp_path: Path) -> None:
     resolver = _resolver()
-    child_repo_root = tmp_path / "child-repo"
+    child_project_root = tmp_path / "child-repo"
     report_path = tmp_path / ".meridian" / "spawns" / "p123" / "report.md"
     run = SpawnParams(
         prompt="test prompt",
@@ -51,7 +51,7 @@ def test_claude_resolve_launch_spec_normalizes_effort_and_maps_fields(tmp_path: 
         continue_harness_session_id="  claude-session  ",
         continue_fork=True,
         appended_system_prompt="system-prompt",
-        repo_root=child_repo_root.as_posix(),
+        project_root=child_project_root.as_posix(),
         report_output_path=report_path.as_posix(),
     )
 

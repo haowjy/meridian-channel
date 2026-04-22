@@ -25,7 +25,7 @@ class _FastAPIApp(Protocol):
 def register_catalog_routes(
     app: object,
     *,
-    repo_root: Path,
+    project_root: Path,
     http_exception: HTTPExceptionCallable,
 ) -> None:
     """Register /api/models and /api/agents routes on *app*."""
@@ -47,7 +47,7 @@ def register_catalog_routes(
 
         Returns an empty list when the agents directory does not exist.
         """
-        profiles = scan_agent_profiles(repo_root=repo_root)
+        profiles = scan_agent_profiles(project_root=project_root)
         agents: list[AgentSummary] = [
             AgentSummary(
                 name=profile.name,

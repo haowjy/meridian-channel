@@ -169,17 +169,17 @@ def test_spawn_children_resolves_parent_reference_before_filtering(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    state_root = repo_root / ".meridian"
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    state_root = project_root / ".meridian"
     seen: dict[str, object] = {}
 
-    monkeypatch.setattr(spawn_cli, "resolve_project_root", lambda: repo_root)
+    monkeypatch.setattr(spawn_cli, "resolve_project_root", lambda: project_root)
     monkeypatch.setattr(spawn_cli, "resolve_runtime_root_for_read", lambda _root: state_root)
     monkeypatch.setattr(
         spawn_cli,
         "resolve_spawn_reference",
-        lambda _repo_root, ref: "p77" if ref == "c213" else ref,
+        lambda _project_root, ref: "p77" if ref == "c213" else ref,
     )
     monkeypatch.setattr(
         spawn_cli.spawn_store,

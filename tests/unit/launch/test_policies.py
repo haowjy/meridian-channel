@@ -19,8 +19,8 @@ from meridian.lib.ops.spawn.prepare import build_create_payload
 from tests.support.fixtures import write_agent
 
 
-def _write_minimal_mars_config(repo_root: Path) -> None:
-    (repo_root / "mars.toml").write_text(
+def _write_minimal_mars_config(project_root: Path) -> None:
+    (project_root / "mars.toml").write_text(
         "[settings]\n"
         'targets = [".agents"]\n',
         encoding="utf-8",
@@ -33,7 +33,7 @@ def test_resolve_policies_warns_and_uses_no_profile_when_config_agent_is_missing
     _write_minimal_mars_config(tmp_path)
 
     policies = resolve_policies(
-        repo_root=tmp_path,
+        project_root=tmp_path,
         layers=(),
         config_overrides=RuntimeOverrides(agent="missing-config-agent"),
         config=MeridianConfig(),
@@ -53,7 +53,7 @@ def test_primary_launch_context_has_no_profile_when_agent_is_unset(tmp_path: Pat
     preview = build_launch_context(
         spawn_id="dry-run-primary",
         request=build_primary_spawn_request(request=LaunchRequest()),
-        runtime=build_primary_launch_runtime(repo_root=tmp_path),
+        runtime=build_primary_launch_runtime(project_root=tmp_path),
         harness_registry=registry,
         dry_run=True,
     )
@@ -79,7 +79,7 @@ def test_build_launch_context_surfaces_warning_channel_without_agent_metadata_si
         runtime=LaunchRuntime(
             argv_intent=LaunchArgvIntent.REQUIRED,
             state_root=(tmp_path / ".meridian").as_posix(),
-            project_paths_repo_root=tmp_path.as_posix(),
+            project_paths_project_root=tmp_path.as_posix(),
             project_paths_execution_cwd=tmp_path.as_posix(),
         ),
         harness_registry=registry,
@@ -99,7 +99,7 @@ def test_spawn_prepare_derives_harness_from_model_before_default_harness(tmp_pat
     prepared = build_create_payload(
         SpawnCreateInput(
             prompt="derive harness from model",
-            repo_root=tmp_path.as_posix(),
+            project_root=tmp_path.as_posix(),
             dry_run=True,
         ),
         runtime=runtime,
@@ -114,7 +114,7 @@ def test_resolve_policies_cli_model_override_can_replace_profile_harness(tmp_pat
     write_agent(tmp_path, name="explorer", model="gpt-5.4", harness="codex")
 
     policies = resolve_policies(
-        repo_root=tmp_path,
+        project_root=tmp_path,
         layers=(
             RuntimeOverrides(agent="explorer", model="claude-haiku-4-5"),
             RuntimeOverrides(),
@@ -132,7 +132,7 @@ def test_resolve_policies_errors_on_same_layer_user_harness_model_conflict(tmp_p
     _write_minimal_mars_config(tmp_path)
     with pytest.raises(ValueError, match="incompatible with model"):
         resolve_policies(
-            repo_root=tmp_path,
+            project_root=tmp_path,
             layers=(
                 RuntimeOverrides(model="claude-haiku-4-5", harness="codex"),
                 RuntimeOverrides(),

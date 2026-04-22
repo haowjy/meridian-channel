@@ -13,9 +13,9 @@ from meridian.lib.ops.runtime import async_from_sync, resolve_roots_for_read, ru
 from meridian.lib.state import session_store, spawn_store, work_store
 
 
-def _display_path(repo_root: Path, path: Path) -> str:
+def _display_path(project_root: Path, path: Path) -> str:
     try:
-        return path.relative_to(repo_root).as_posix()
+        return path.relative_to(project_root).as_posix()
     except ValueError:
         return path.as_posix()
 
@@ -135,8 +135,8 @@ def _associated_with_work_item(
     return (spawn.work_id or "").strip() == work_id
 
 
-def work_dir_display(repo_root: Path, repo_state_root: Path, work_id: str) -> str:
-    return _display_path(repo_root, work_store.work_scratch_dir(repo_state_root, work_id))
+def work_dir_display(project_root: Path, repo_state_root: Path, work_id: str) -> str:
+    return _display_path(project_root, work_store.work_scratch_dir(repo_state_root, work_id))
 
 
 class WorkDashboardItem(BaseModel):
@@ -150,7 +150,7 @@ class WorkDashboardItem(BaseModel):
 class WorkDashboardInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class WorkDashboardOutput(BaseModel):
@@ -202,7 +202,7 @@ class WorkListInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     done_only: bool = False
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class WorkListOutput(BaseModel):
@@ -226,7 +226,7 @@ class WorkShowInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     work_id: str
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class WorkShowOutput(BaseModel):
@@ -271,7 +271,7 @@ class WorkSessionsInput(BaseModel):
 
     work_id: str = ""
     all: bool = False
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class WorkSessionsOutput(BaseModel):
@@ -385,7 +385,7 @@ def work_dashboard_sync(
     ctx: RuntimeContext | None = None,
 ) -> WorkDashboardOutput:
     _ = ctx
-    roots = resolve_roots_for_read(payload.repo_root)
+    roots = resolve_roots_for_read(payload.project_root)
     repo_state_root = roots.repo_state_root
     runtime_state_root = roots.runtime_root
     items_by_name = {item.name: item for item in work_store.list_work_items(repo_state_root)}
@@ -437,7 +437,7 @@ def work_list_sync(
     ctx: RuntimeContext | None = None,
 ) -> WorkListOutput:
     _ = ctx
-    repo_state_root = resolve_roots_for_read(payload.repo_root).repo_state_root
+    repo_state_root = resolve_roots_for_read(payload.project_root).repo_state_root
     items = work_store.list_work_items(repo_state_root)
     if payload.done_only:
         items = [item for item in items if item.status == "done"]
@@ -461,8 +461,8 @@ def work_show_sync(
     ctx: RuntimeContext | None = None,
 ) -> WorkShowOutput:
     _ = ctx
-    roots = resolve_roots_for_read(payload.repo_root)
-    repo_root = roots.repo_root
+    roots = resolve_roots_for_read(payload.project_root)
+    project_root = roots.project_root
     repo_state_root = roots.repo_state_root
     runtime_state_root = roots.runtime_root
 
@@ -491,7 +491,7 @@ def work_show_sync(
         status=item.status,
         description=item.description,
         created_at=item.created_at,
-        work_dir=work_dir_display(repo_root, repo_state_root, item.name),
+        work_dir=work_dir_display(project_root, repo_state_root, item.name),
         spawns=tuple(associated_spawns),
         sessions=_work_sessions_for_work_id(runtime_state_root, item.name, include_all=False),
     )
@@ -501,7 +501,7 @@ def work_sessions_sync(
     payload: WorkSessionsInput,
     ctx: RuntimeContext | None = None,
 ) -> WorkSessionsOutput:
-    roots = resolve_roots_for_read(payload.repo_root)
+    roots = resolve_roots_for_read(payload.project_root)
     repo_state_root = roots.repo_state_root
     runtime_state_root = roots.runtime_root
     resolved_work_id = _resolve_work_id(

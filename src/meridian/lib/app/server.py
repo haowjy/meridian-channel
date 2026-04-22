@@ -150,9 +150,9 @@ def create_app(
     app.state.spawn_manager = spawn_manager
 
     runtime_root = spawn_manager.state_root
-    project_paths = resolve_project_config_paths(repo_root=spawn_manager.repo_root)
-    repo_state_root = resolve_repo_paths(project_paths.repo_root).root_dir
-    lifecycle_service = create_lifecycle_service(project_paths.repo_root, runtime_root)
+    project_paths = resolve_project_config_paths(project_root=spawn_manager.project_root)
+    repo_state_root = resolve_repo_paths(project_paths.project_root).root_dir
+    lifecycle_service = create_lifecycle_service(project_paths.project_root, runtime_root)
     spawn_id_lock = asyncio.Lock()
 
     # Import route registration functions
@@ -205,13 +205,13 @@ def create_app(
         app_obj,
         state_root=runtime_root,
         repo_state_root=repo_state_root,
-        repo_root=project_paths.repo_root,
+        project_root=project_paths.project_root,
         event_broadcaster=event_broadcaster,
         http_exception=http_exception,
     )
 
     # Register file routes
-    file_service = FileService(project_paths.repo_root)
+    file_service = FileService(project_paths.project_root)
     register_file_routes(
         app_obj,
         file_service,
@@ -223,7 +223,7 @@ def create_app(
 
     register_catalog_routes(
         app_obj,
-        repo_root=project_paths.repo_root,
+        project_root=project_paths.project_root,
         http_exception=http_exception,
     )
 

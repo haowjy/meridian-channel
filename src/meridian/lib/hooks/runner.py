@@ -42,8 +42,8 @@ def _as_bytes(data: bytes | str | None) -> bytes:
 class ExternalHookRunner:
     """Run one external hook command with context transport and timeout handling."""
 
-    def __init__(self, repo_root: Path) -> None:
-        self._repo_root = repo_root.expanduser().resolve()
+    def __init__(self, project_root: Path) -> None:
+        self._project_root = project_root.expanduser().resolve()
 
     def run(self, hook: Hook, context: HookContext, *, timeout_secs: int) -> HookResult:
         """Execute one hook command and return structured result."""
@@ -78,7 +78,7 @@ class ExternalHookRunner:
             process = subprocess.Popen(
                 hook.command,
                 shell=True,
-                cwd=self._repo_root,
+                cwd=self._project_root,
                 env=env,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,

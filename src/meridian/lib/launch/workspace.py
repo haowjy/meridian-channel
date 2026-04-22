@@ -5,10 +5,10 @@ from pathlib import Path
 from meridian.lib.config.workspace import WorkspaceSnapshot, resolve_workspace_snapshot
 
 
-def resolve_workspace_snapshot_for_launch(repo_root: Path) -> WorkspaceSnapshot:
+def resolve_workspace_snapshot_for_launch(project_root: Path) -> WorkspaceSnapshot:
     """Resolve launch workspace snapshot and raise on invalid topology."""
 
-    snapshot = resolve_workspace_snapshot(repo_root)
+    snapshot = resolve_workspace_snapshot(project_root)
     if snapshot.status != "invalid":
         return snapshot
     details = "; ".join(finding.message for finding in snapshot.findings if finding.message.strip())
@@ -21,10 +21,10 @@ def resolve_workspace_snapshot_for_launch(repo_root: Path) -> WorkspaceSnapshot:
     )
 
 
-def ensure_workspace_valid_for_launch(repo_root: Path) -> None:
+def ensure_workspace_valid_for_launch(project_root: Path) -> None:
     """Raise when workspace topology is invalid for launch-time commands."""
 
-    resolve_workspace_snapshot_for_launch(repo_root)
+    resolve_workspace_snapshot_for_launch(project_root)
 
 
 __all__ = ["ensure_workspace_valid_for_launch", "resolve_workspace_snapshot_for_launch"]

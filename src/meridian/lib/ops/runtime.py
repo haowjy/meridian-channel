@@ -39,7 +39,7 @@ class OperationRuntime(BaseModel):
 
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
-    repo_root: Path
+    project_root: Path
     config: MeridianConfig
     harness_registry: Any  # HarnessRegistry — typed as Any to avoid circular import
     artifacts: LocalStore
@@ -48,7 +48,7 @@ class OperationRuntime(BaseModel):
 
 @dataclass(frozen=True)
 class ResolvedRoots:
-    repo_root: Path
+    project_root: Path
     repo_state_root: Path
     runtime_root: Path
 
@@ -60,14 +60,14 @@ def runtime_context(ctx: RuntimeContext | None) -> RuntimeContext:
 
 
 def resolve_runtime_root_and_config(
-    repo_root: str | None = None,
+    project_root: str | None = None,
     *,
     sink: OutputSink | None = None,
 ) -> tuple[Path, MeridianConfig]:
     """Resolve repository root and load operational config."""
 
     _ = sink
-    explicit_root = Path(repo_root).expanduser().resolve() if repo_root else None
+    explicit_root = Path(project_root).expanduser().resolve() if project_root else None
     resolved_root = resolve_project_root(explicit_root)
     from meridian.lib.ops.config import ensure_runtime_state_bootstrap_sync
 
@@ -76,20 +76,20 @@ def resolve_runtime_root_and_config(
 
 
 def resolve_runtime_root_and_config_for_read(
-    repo_root: str | None = None,
+    project_root: str | None = None,
     *,
     sink: OutputSink | None = None,
 ) -> tuple[Path, MeridianConfig]:
     """Resolve repository root and load config without bootstrapping runtime state."""
 
     _ = sink
-    explicit_root = Path(repo_root).expanduser().resolve() if repo_root else None
+    explicit_root = Path(project_root).expanduser().resolve() if project_root else None
     resolved_root = resolve_project_root(explicit_root)
     return resolved_root, load_config(resolved_root)
 
 
 def build_runtime_from_root_and_config(
-    repo_root: Path,
+    project_root: Path,
     config: MeridianConfig,
     *,
     sink: OutputSink | None = None,
@@ -99,89 +99,89 @@ def build_runtime_from_root_and_config(
     from meridian.lib.harness.registry import get_default_harness_registry
 
     return OperationRuntime(
-        repo_root=repo_root,
+        project_root=project_root,
         config=config,
         harness_registry=get_default_harness_registry(),
         artifacts=LocalStore(
-            root_dir=resolve_project_runtime_root_for_write(repo_root) / "artifacts"
+            root_dir=resolve_project_runtime_root_for_write(project_root) / "artifacts"
         ),
         sink=sink or NullSink(),
     )
 
 
 def build_runtime(
-    repo_root: str | None = None,
+    project_root: str | None = None,
     *,
     sink: OutputSink | None = None,
 ) -> OperationRuntime:
     """Build a runtime bundle rooted at one repository path."""
 
-    resolved_root, config = resolve_runtime_root_and_config(repo_root, sink=sink)
+    resolved_root, config = resolve_runtime_root_and_config(project_root, sink=sink)
     return build_runtime_from_root_and_config(resolved_root, config, sink=sink)
 
 
-def resolve_runtime_root(repo_root: Path) -> Path:
+def resolve_runtime_root(project_root: Path) -> Path:
     """Resolve runtime state root for write paths."""
 
-    return resolve_project_runtime_root_for_write(repo_root)
+    return resolve_project_runtime_root_for_write(project_root)
 
 
-def resolve_runtime_root_or_none(repo_root: Path) -> Path | None:
+def resolve_runtime_root_or_none(project_root: Path) -> Path | None:
     """Resolve runtime state root for read paths, returning None when uninitialized."""
 
-    return resolve_project_runtime_root_or_none(repo_root)
+    return resolve_project_runtime_root_or_none(project_root)
 
 
-def resolve_runtime_root_for_read(repo_root: Path) -> Path:
+def resolve_runtime_root_for_read(project_root: Path) -> Path:
     """Resolve runtime state root for read paths without UUID creation.
 
     If a UUID exists but its user runtime root is still empty while repo-local
     state has data, prefer repo-local state as a compatibility fallback.
     """
 
-    repo_state_dir = resolve_repo_paths(repo_root).root_dir
-    runtime_root = resolve_project_runtime_root_or_none(repo_root)
+    project_state_dir = resolve_repo_paths(project_root).root_dir
+    runtime_root = resolve_project_runtime_root_or_none(project_root)
     if runtime_root is None:
-        return repo_state_dir
+        return project_state_dir
 
-    if runtime_root == repo_state_dir:
+    if runtime_root == project_state_dir:
         return runtime_root
 
     runtime_has_events = (runtime_root / "spawns.jsonl").is_file() or (
         runtime_root / "sessions.jsonl"
     ).is_file()
-    repo_has_events = (repo_state_dir / "spawns.jsonl").is_file() or (
-        repo_state_dir / "sessions.jsonl"
+    repo_has_events = (project_state_dir / "spawns.jsonl").is_file() or (
+        project_state_dir / "sessions.jsonl"
     ).is_file()
     if not runtime_has_events and repo_has_events:
-        return repo_state_dir
+        return project_state_dir
 
     return runtime_root
 
 
-def get_project_uuid(repo_root: Path) -> str:
+def get_project_uuid(project_root: Path) -> str:
     """Get/create project UUID, returns UUID string."""
 
-    return get_or_create_project_uuid(resolve_repo_paths(repo_root).root_dir)
+    return get_or_create_project_uuid(resolve_repo_paths(project_root).root_dir)
 
 
-def resolve_roots(repo_root: str | None) -> ResolvedRoots:
-    resolved_repo_root, _ = resolve_runtime_root_and_config(repo_root)
-    repo_state_dir = resolve_repo_paths(resolved_repo_root).root_dir
+def resolve_roots(project_root: str | None) -> ResolvedRoots:
+    resolved_project_root, _ = resolve_runtime_root_and_config(project_root)
+    project_state_dir = resolve_repo_paths(resolved_project_root).root_dir
     return ResolvedRoots(
-        repo_root=resolved_repo_root,
-        repo_state_root=repo_state_dir,
-        runtime_root=resolve_runtime_root(resolved_repo_root),
+        project_root=resolved_project_root,
+        repo_state_root=project_state_dir,
+        runtime_root=resolve_runtime_root(resolved_project_root),
     )
 
 
-def resolve_roots_for_read(repo_root: str | None) -> ResolvedRoots:
-    resolved_repo_root, _ = resolve_runtime_root_and_config_for_read(repo_root)
-    repo_state_dir = resolve_repo_paths(resolved_repo_root).root_dir
+def resolve_roots_for_read(project_root: str | None) -> ResolvedRoots:
+    resolved_project_root, _ = resolve_runtime_root_and_config_for_read(project_root)
+    project_state_dir = resolve_repo_paths(resolved_project_root).root_dir
     return ResolvedRoots(
-        repo_root=resolved_repo_root,
-        repo_state_root=repo_state_dir,
-        runtime_root=resolve_runtime_root_for_read(resolved_repo_root),
+        project_root=resolved_project_root,
+        repo_state_root=project_state_dir,
+        runtime_root=resolve_runtime_root_for_read(resolved_project_root),
     )
 
 

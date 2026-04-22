@@ -9,7 +9,7 @@ export REPO_ROOT=/abs/path/to/meridian-channel
 export SMOKE_REPO="$(mktemp -d /tmp/meridian-quick.XXXXXX)"
 git -C "$SMOKE_REPO" init --quiet
 for var in $(env | awk -F= '/^MERIDIAN_/ {print $1}'); do unset "$var"; done
-export MERIDIAN_REPO_ROOT="$SMOKE_REPO"
+export MERIDIAN_PROJECT_DIR="$SMOKE_REPO"
 export MERIDIAN_PROJECT_ROOT="$SMOKE_REPO/.meridian"
 mkdir -p "$SMOKE_REPO/.agents/agents"
 cat > "$SMOKE_REPO/.agents/agents/reviewer.md" <<'EOF'
@@ -77,7 +77,7 @@ echo "FAIL: --show-superseded ($SUPERSEDED_COUNT) should show >= default ($DEFAU
 ```bash
 uv run meridian doctor >/tmp/meridian-qs-doctor.txt && \
 grep -q '^ok:' /tmp/meridian-qs-doctor.txt && \
-grep -q '^repo_root:' /tmp/meridian-qs-doctor.txt && \
+grep -q '^project_root:' /tmp/meridian-qs-doctor.txt && \
 echo "PASS: doctor returned health data" || echo "FAIL: doctor output was unexpected"
 ```
 

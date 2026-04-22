@@ -67,7 +67,7 @@ class ConnectionConfig:
     spawn_id: SpawnId
     harness_id: HarnessId
     prompt: str
-    repo_root: Path
+    project_root: Path
     env_overrides: dict[str, str]
     timeout_seconds: float | None = None
     ws_bind_host: str = "127.0.0.1"

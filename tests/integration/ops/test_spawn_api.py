@@ -14,8 +14,8 @@ def _isolate_runtime_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MERIDIAN_DEPTH", "1")
 
 
-def _state_root(repo_root: Path) -> Path:
-    state_root = resolve_project_runtime_root_for_write(repo_root)
+def _state_root(project_root: Path) -> Path:
+    state_root = resolve_project_runtime_root_for_write(project_root)
     state_root.mkdir(parents=True, exist_ok=True)
     return state_root
 
@@ -24,11 +24,11 @@ def test_spawn_create_dry_run_resolves_project_root_from_nested_cwd(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    nested = repo_root / "src" / "feature"
-    (repo_root / ".agents" / "skills").mkdir(parents=True)
+    project_root = tmp_path / "repo"
+    nested = project_root / "src" / "feature"
+    (project_root / ".agents" / "skills").mkdir(parents=True)
     nested.mkdir(parents=True)
-    reference_file = repo_root / "guide.md"
+    reference_file = project_root / "guide.md"
     reference_file.write_text("# Guide\n", encoding="utf-8")
     monkeypatch.chdir(nested)
 
@@ -53,9 +53,9 @@ def test_spawn_create_dry_run_resolves_project_root_from_nested_cwd(
 
 
 def test_spawn_stats_includes_finalizing_bucket(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    state_root = _state_root(repo_root)
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    state_root = _state_root(project_root)
 
     running_id = spawn_store.start_spawn(
         state_root,
@@ -91,7 +91,7 @@ def test_spawn_stats_includes_finalizing_bucket(tmp_path: Path) -> None:
     )
 
     output = spawn_api.spawn_stats_sync(
-        SpawnStatsInput(repo_root=repo_root.as_posix())
+        SpawnStatsInput(project_root=project_root.as_posix())
     )
 
     assert output.total_runs == 3
@@ -107,9 +107,9 @@ def test_spawn_stats_includes_finalizing_bucket(tmp_path: Path) -> None:
 def test_spawn_list_does_not_infer_running_star_from_exited_at(
     tmp_path: Path,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    state_root = _state_root(repo_root)
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    state_root = _state_root(project_root)
 
     spawn_id = spawn_store.start_spawn(
         state_root,
@@ -127,7 +127,7 @@ def test_spawn_list_does_not_infer_running_star_from_exited_at(
     )
 
     output = spawn_api.spawn_list_sync(
-        SpawnListInput(repo_root=repo_root.as_posix(), statuses=("running",))
+        SpawnListInput(project_root=project_root.as_posix(), statuses=("running",))
     )
 
     assert len(output.spawns) == 1

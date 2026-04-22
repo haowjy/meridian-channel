@@ -33,21 +33,21 @@ if TYPE_CHECKING:
     )
 
 
-def _resolve_work_id_for_launch(repo_root: Path, request: LaunchRequest) -> str | None:
+def _resolve_work_id_for_launch(project_root: Path, request: LaunchRequest) -> str | None:
     """Resolve work item before entering the launch layer (policy, not mechanism)."""
 
     from meridian.lib.ops.work_attachment import ensure_explicit_work_item
 
     explicit_work_id = (request.work_id or "").strip() or None
     if explicit_work_id is not None:
-        repo_state_root = resolve_repo_paths(repo_root).root_dir
+        repo_state_root = resolve_repo_paths(project_root).root_dir
         return ensure_explicit_work_item(repo_state_root, explicit_work_id)
     return None
 
 
 def launch_primary(
     *,
-    repo_root: Path,
+    project_root: Path,
     request: LaunchRequest,
     harness_registry: HarnessRegistry,
 ) -> LaunchResult:
@@ -58,10 +58,10 @@ def launch_primary(
     from .process import run_harness_process
     from .types import LaunchResult
 
-    runtime = build_primary_launch_runtime(repo_root=repo_root)
+    runtime = build_primary_launch_runtime(project_root=project_root)
     resolved_work_id = None
     if not request.dry_run:
-        resolved_work_id = _resolve_work_id_for_launch(repo_root, request)
+        resolved_work_id = _resolve_work_id_for_launch(project_root, request)
 
     preview_context = build_launch_context(
         spawn_id="dry-run-primary",

@@ -8,7 +8,7 @@ from meridian.cli import primary_launch
 def test_run_primary_launch_rejects_continue_cross_harness(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def _fake_resolve_session_reference(_repo_root: object, _ref: str) -> object:
+    def _fake_resolve_session_reference(_project_root: object, _ref: str) -> object:
         return type(
             "Resolved",
             (),

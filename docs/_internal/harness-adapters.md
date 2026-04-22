@@ -115,7 +115,7 @@ Spawned harness processes inherit Meridian runtime context such as:
 - `MERIDIAN_SPAWN_ID`
 - `MERIDIAN_PARENT_SPAWN_ID`
 - `MERIDIAN_DEPTH`
-- `MERIDIAN_REPO_ROOT`
+- `MERIDIAN_PROJECT_DIR`
 - `MERIDIAN_PROJECT_ROOT`
 
 Trusted harness launches broadly inherit the parent environment in addition to

@@ -45,7 +45,7 @@ def _is_head_constraint(value: object) -> bool:
     return value.strip().upper() == "HEAD"
 
 
-def check_upgrade_availability(repo_root: Path | None = None) -> UpgradeAvailability | None:
+def check_upgrade_availability(project_root: Path | None = None) -> UpgradeAvailability | None:
     """Classify dependency upgrades from ``mars outdated --json``.
 
     Returns ``None`` when the check cannot be completed (missing binary, command
@@ -59,8 +59,8 @@ def check_upgrade_availability(repo_root: Path | None = None) -> UpgradeAvailabi
         return None
 
     command = [executable, "outdated", "--json"]
-    if repo_root is not None:
-        command.extend(["--root", repo_root.as_posix()])
+    if project_root is not None:
+        command.extend(["--root", project_root.as_posix()])
 
     try:
         result = subprocess.run(

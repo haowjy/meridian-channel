@@ -37,13 +37,13 @@ class FakeManager:
         self,
         *,
         state_root: Path,
-        repo_root: Path,
+        project_root: Path,
         completion_ready: asyncio.Event,
         wait_calls: list[SpawnId],
         heartbeat_calls: list[SpawnId],
     ) -> None:
         self.state_root = state_root
-        self.repo_root = repo_root
+        self.project_root = project_root
         self._completion_ready = completion_ready
         self._wait_calls = wait_calls
         self._heartbeat_calls = heartbeat_calls
@@ -108,7 +108,7 @@ def _create_spawn_handler(
 ) -> tuple[Callable[[server_module.SpawnCreateRequest], Any], FakeManager]:
     manager = FakeManager(
         state_root=resolve_state_paths(tmp_path).root_dir,
-        repo_root=tmp_path,
+        project_root=tmp_path,
         completion_ready=completion_ready,
         wait_calls=wait_calls,
         heartbeat_calls=heartbeat_calls,

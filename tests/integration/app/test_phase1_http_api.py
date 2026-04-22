@@ -17,9 +17,9 @@ from meridian.lib.state.paths import resolve_repo_paths, resolve_state_paths
 
 
 class FakeManager:
-    def __init__(self, *, repo_root: Path) -> None:
-        self.repo_root = repo_root
-        self.state_root = resolve_state_paths(repo_root).root_dir
+    def __init__(self, *, project_root: Path) -> None:
+        self.project_root = project_root
+        self.state_root = resolve_state_paths(project_root).root_dir
 
     async def shutdown(self) -> None:
         return None
@@ -34,23 +34,23 @@ class FakeManager:
 
 @pytest.fixture
 def app_client(tmp_path: Path) -> Iterator[tuple[TestClient, Path, object]]:
-    repo_root = tmp_path
-    manager = FakeManager(repo_root=repo_root)
+    project_root = tmp_path
+    manager = FakeManager(project_root=project_root)
     app = create_app(cast("Any", manager), allow_unsafe_no_permissions=True)
     with TestClient(app) as client:
-        yield client, repo_root, app
+        yield client, project_root, app
 
 
-def _state_root(repo_root: Path) -> Path:
-    return resolve_state_paths(repo_root).root_dir
+def _state_root(project_root: Path) -> Path:
+    return resolve_state_paths(project_root).root_dir
 
 
-def _repo_state_root(repo_root: Path) -> Path:
-    return resolve_repo_paths(repo_root).root_dir
+def _repo_state_root(project_root: Path) -> Path:
+    return resolve_repo_paths(project_root).root_dir
 
 
 def _write_spawn(
-    repo_root: Path,
+    project_root: Path,
     *,
     spawn_id: str,
     status: str,
@@ -59,7 +59,7 @@ def _write_spawn(
     agent: str = "api-agent",
     harness: str = "codex",
 ) -> None:
-    state_root = _state_root(repo_root)
+    state_root = _state_root(project_root)
     spawn_store.start_spawn(
         state_root,
         spawn_id=spawn_id,
@@ -89,8 +89,8 @@ def _write_spawn(
     heartbeat_path.write_text("alive\n", encoding="utf-8")
 
 
-def _write_spawn_output(repo_root: Path, spawn_id: str, events: list[dict[str, object]]) -> None:
-    output_path = _state_root(repo_root) / "spawns" / spawn_id / "output.jsonl"
+def _write_spawn_output(project_root: Path, spawn_id: str, events: list[dict[str, object]]) -> None:
+    output_path = _state_root(project_root) / "spawns" / spawn_id / "output.jsonl"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
         "".join(json.dumps(event) + "\n" for event in events),
@@ -98,24 +98,24 @@ def _write_spawn_output(repo_root: Path, spawn_id: str, events: list[dict[str, o
     )
 
 
-def _read_active_work_json(repo_root: Path) -> dict[str, object]:
-    active_path = _repo_state_root(repo_root) / "app" / "active_work.json"
+def _read_active_work_json(project_root: Path) -> dict[str, object]:
+    active_path = _repo_state_root(project_root) / "app" / "active_work.json"
     return cast("dict[str, object]", json.loads(active_path.read_text(encoding="utf-8")))
 
 
 def test_spawns_list_static_route_wins_and_applies_query_filters(
     app_client: tuple[TestClient, Path, object],
 ) -> None:
-    client, repo_root, _app = app_client
+    client, project_root, _app = app_client
     _write_spawn(
-        repo_root,
+        project_root,
         spawn_id="p1",
         status="running",
         started_at="2026-04-20T00:00:01Z",
         work_id="feature-a",
     )
     _write_spawn(
-        repo_root,
+        project_root,
         spawn_id="p2",
         status="succeeded",
         started_at="2026-04-20T00:00:02Z",
@@ -135,30 +135,30 @@ def test_spawns_list_static_route_wins_and_applies_query_filters(
 def test_spawns_stats_and_events_parse_query_params(
     app_client: tuple[TestClient, Path, object],
 ) -> None:
-    client, repo_root, _app = app_client
+    client, project_root, _app = app_client
     _write_spawn(
-        repo_root,
+        project_root,
         spawn_id="p1",
         status="running",
         started_at="2026-04-20T00:00:01Z",
         work_id="alpha",
     )
     _write_spawn(
-        repo_root,
+        project_root,
         spawn_id="p2",
         status="succeeded",
         started_at="2026-04-20T00:00:02Z",
         work_id="alpha",
     )
     _write_spawn(
-        repo_root,
+        project_root,
         spawn_id="p3",
         status="failed",
         started_at="2026-04-20T00:00:03Z",
         work_id="beta",
     )
     _write_spawn_output(
-        repo_root,
+        project_root,
         "p2",
         [
             {"type": "stdout", "text": "one"},
@@ -192,8 +192,8 @@ def test_spawns_stats_and_events_parse_query_params(
 def test_work_routes_resolve_static_active_path_and_filter_listing(
     app_client: tuple[TestClient, Path, object],
 ) -> None:
-    client, repo_root, _app = app_client
-    state_root = _state_root(repo_root)
+    client, project_root, _app = app_client
+    state_root = _state_root(project_root)
     work_store.create_work_item(state_root, "feature-a", "A")
     work_store.create_work_item(state_root, "feature-b", "B")
     work_store.archive_work_item(state_root, "feature-b")
@@ -213,8 +213,8 @@ def test_work_routes_resolve_static_active_path_and_filter_listing(
 def test_active_work_roundtrip_persists_and_falls_back_after_archive(
     app_client: tuple[TestClient, Path, object],
 ) -> None:
-    client, repo_root, _app = app_client
-    state_root = _state_root(repo_root)
+    client, project_root, _app = app_client
+    state_root = _state_root(project_root)
     work_store.create_work_item(state_root, "older-task", "older")
     work_store.create_work_item(state_root, "newer-task", "newer")
 
@@ -222,7 +222,7 @@ def test_active_work_roundtrip_persists_and_falls_back_after_archive(
 
     assert set_response.status_code == 200
     assert set_response.json() == {"work_id": "older-task"}
-    assert _read_active_work_json(repo_root) == {"work_id": "older-task"}
+    assert _read_active_work_json(project_root) == {"work_id": "older-task"}
     assert client.get("/api/work/active").json() == {"work_id": "older-task"}
 
     work_store.archive_work_item(state_root, "older-task")
@@ -231,13 +231,13 @@ def test_active_work_roundtrip_persists_and_falls_back_after_archive(
 
     assert fallback_response.status_code == 200
     assert fallback_response.json() == {"work_id": "newer-task"}
-    assert _read_active_work_json(repo_root) == {"work_id": "newer-task"}
+    assert _read_active_work_json(project_root) == {"work_id": "newer-task"}
 
 
 def test_stream_endpoint_connects_and_emits_work_events(
     app_client: tuple[TestClient, Path, object],
 ) -> None:
-    _client, _repo_root, app = app_client
+    _client, _project_root, app = app_client
     broadcaster = app.state.stream_broadcaster
     stream_route = next((route for route in app.routes if route.path == "/api/stream"), None)
     assert stream_route is not None

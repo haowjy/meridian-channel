@@ -32,9 +32,9 @@ from meridian.lib.state.paths import resolve_state_paths
 
 
 class FakeManager:
-    def __init__(self, *, repo_root: Path) -> None:
-        self.repo_root = repo_root
-        self.state_root = resolve_state_paths(repo_root).root_dir
+    def __init__(self, *, project_root: Path) -> None:
+        self.project_root = project_root
+        self.state_root = resolve_state_paths(project_root).root_dir
 
     async def shutdown(self) -> None:
         return None
@@ -49,19 +49,19 @@ class FakeManager:
 
 @pytest.fixture
 def app_client(tmp_path: Path) -> Iterator[tuple[TestClient, Path]]:
-    repo_root = tmp_path
-    manager = FakeManager(repo_root=repo_root)
+    project_root = tmp_path
+    manager = FakeManager(project_root=project_root)
     app = create_app(cast("Any", manager), allow_unsafe_no_permissions=True)
     with TestClient(app) as client:
-        yield client, repo_root
+        yield client, project_root
 
 
-def _state_root(repo_root: Path) -> Path:
-    return resolve_state_paths(repo_root).root_dir
+def _state_root(project_root: Path) -> Path:
+    return resolve_state_paths(project_root).root_dir
 
 
 def _write_spawn(
-    repo_root: Path,
+    project_root: Path,
     *,
     spawn_id: str,
     chat_id: str,
@@ -69,7 +69,7 @@ def _write_spawn(
     status: str = "succeeded",
 ) -> None:
     """Register a spawn record in spawns.jsonl."""
-    state_root = _state_root(repo_root)
+    state_root = _state_root(project_root)
     spawn_store.start_spawn(
         state_root,
         spawn_id=spawn_id,
@@ -94,12 +94,12 @@ def _write_spawn(
 
 
 def _write_artifact_output(
-    repo_root: Path,
+    project_root: Path,
     spawn_id: str,
     events: list[dict[str, object]],
 ) -> None:
     """Write output.jsonl into the artifact store used by the inspector."""
-    artifact_dir = _state_root(repo_root) / "artifacts" / spawn_id
+    artifact_dir = _state_root(project_root) / "artifacts" / spawn_id
     artifact_dir.mkdir(parents=True, exist_ok=True)
     output_path = artifact_dir / "output.jsonl"
     output_path.write_text(
@@ -187,9 +187,9 @@ def test_get_event_returns_correct_payload(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """APP-THREAD-01: Valid event_id returns the raw event payload."""
-    client, repo_root = app_client
-    _write_spawn(repo_root, spawn_id="p1", chat_id="c1")
-    _write_artifact_output(repo_root, "p1", [_ASSISTANT_EVENT, _RESULT_EVENT])
+    client, project_root = app_client
+    _write_spawn(project_root, spawn_id="p1", chat_id="c1")
+    _write_artifact_output(project_root, "p1", [_ASSISTANT_EVENT, _RESULT_EVENT])
 
     response = client.get("/api/threads/c1/events/p1:0")
 
@@ -205,9 +205,9 @@ def test_get_event_by_spawn_id_direct(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """APP-THREAD-01: Using a spawn_id directly in the chat_id field also works."""
-    client, repo_root = app_client
-    _write_spawn(repo_root, spawn_id="p1", chat_id="c1")
-    _write_artifact_output(repo_root, "p1", [_ASSISTANT_EVENT, _TOOL_USE_EVENT])
+    client, project_root = app_client
+    _write_spawn(project_root, spawn_id="p1", chat_id="c1")
+    _write_artifact_output(project_root, "p1", [_ASSISTANT_EVENT, _TOOL_USE_EVENT])
 
     response = client.get("/api/threads/p1/events/p1:1")
 
@@ -220,8 +220,8 @@ def test_get_event_invalid_event_id_format(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """APP-THREAD-01: Malformed event_id returns 400."""
-    client, repo_root = app_client
-    _write_spawn(repo_root, spawn_id="p1", chat_id="c1")
+    client, project_root = app_client
+    _write_spawn(project_root, spawn_id="p1", chat_id="c1")
 
     response = client.get("/api/threads/c1/events/badformat")
 
@@ -232,7 +232,7 @@ def test_get_event_unknown_chat_id_returns_404(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """APP-THREAD-01: Unknown chat_id returns 404."""
-    client, _repo_root = app_client
+    client, _project_root = app_client
 
     response = client.get("/api/threads/c999/events/p1:0")
 
@@ -243,9 +243,9 @@ def test_get_event_out_of_range_line_index_returns_404(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """APP-THREAD-01: Line index beyond artifact length returns 404."""
-    client, repo_root = app_client
-    _write_spawn(repo_root, spawn_id="p1", chat_id="c1")
-    _write_artifact_output(repo_root, "p1", [_ASSISTANT_EVENT])
+    client, project_root = app_client
+    _write_spawn(project_root, spawn_id="p1", chat_id="c1")
+    _write_artifact_output(project_root, "p1", [_ASSISTANT_EVENT])
 
     response = client.get("/api/threads/c1/events/p1:99")
 
@@ -256,10 +256,10 @@ def test_get_event_spawn_not_in_chat_returns_404(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """APP-THREAD-01: Event spawn_id not associated with chat_id returns 404."""
-    client, repo_root = app_client
-    _write_spawn(repo_root, spawn_id="p1", chat_id="c1")
-    _write_spawn(repo_root, spawn_id="p2", chat_id="c2")
-    _write_artifact_output(repo_root, "p2", [_ASSISTANT_EVENT])
+    client, project_root = app_client
+    _write_spawn(project_root, spawn_id="p1", chat_id="c1")
+    _write_spawn(project_root, spawn_id="p2", chat_id="c2")
+    _write_artifact_output(project_root, "p2", [_ASSISTANT_EVENT])
 
     # p2 belongs to c2, not c1
     response = client.get("/api/threads/c1/events/p2:0")
@@ -271,20 +271,20 @@ def test_get_event_stable_id_survives_restart(
     tmp_path: Path,
 ) -> None:
     """APP-THREAD-01: Event ID stays the same across app restarts (artifact-derived)."""
-    repo_root = tmp_path
+    project_root = tmp_path
 
     # First app instance
-    manager = FakeManager(repo_root=repo_root)
+    manager = FakeManager(project_root=project_root)
     app1 = create_app(cast("Any", manager), allow_unsafe_no_permissions=True)
-    _write_spawn(repo_root, spawn_id="p1", chat_id="c1")
-    _write_artifact_output(repo_root, "p1", [_ASSISTANT_EVENT, _RESULT_EVENT])
+    _write_spawn(project_root, spawn_id="p1", chat_id="c1")
+    _write_artifact_output(project_root, "p1", [_ASSISTANT_EVENT, _RESULT_EVENT])
     with TestClient(app1) as client1:
         r1 = client1.get("/api/threads/c1/events/p1:0")
         assert r1.status_code == 200
         event_id_first = r1.json()["event_id"]
 
     # Second app instance (simulating restart)
-    manager2 = FakeManager(repo_root=repo_root)
+    manager2 = FakeManager(project_root=project_root)
     app2 = create_app(cast("Any", manager2), allow_unsafe_no_permissions=True)
     with TestClient(app2) as client2:
         r2 = client2.get("/api/threads/c1/events/p1:0")
@@ -303,11 +303,11 @@ def test_get_tool_call_returns_tool_use_payload(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """APP-THREAD-02: Valid call_id for a tool_use event returns the payload."""
-    client, repo_root = app_client
-    _write_spawn(repo_root, spawn_id="p1", chat_id="c1")
+    client, project_root = app_client
+    _write_spawn(project_root, spawn_id="p1", chat_id="c1")
     # line 0: assistant text; line 1: tool_use; line 2: tool_result
     _write_artifact_output(
-        repo_root, "p1", [_ASSISTANT_EVENT, _TOOL_USE_EVENT, _TOOL_RESULT_EVENT]
+        project_root, "p1", [_ASSISTANT_EVENT, _TOOL_USE_EVENT, _TOOL_RESULT_EVENT]
     )
 
     response = client.get("/api/threads/c1/tool-calls/p1:1")
@@ -324,9 +324,9 @@ def test_get_tool_call_non_tool_line_returns_404(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """APP-THREAD-02: Requesting a call_id that points to a non-tool event returns 404."""
-    client, repo_root = app_client
-    _write_spawn(repo_root, spawn_id="p1", chat_id="c1")
-    _write_artifact_output(repo_root, "p1", [_ASSISTANT_EVENT])
+    client, project_root = app_client
+    _write_spawn(project_root, spawn_id="p1", chat_id="c1")
+    _write_artifact_output(project_root, "p1", [_ASSISTANT_EVENT])
 
     response = client.get("/api/threads/c1/tool-calls/p1:0")
 
@@ -337,10 +337,10 @@ def test_list_tool_calls_returns_all_tool_events(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """APP-THREAD-02: List endpoint returns all tool_use events for a thread."""
-    client, repo_root = app_client
-    _write_spawn(repo_root, spawn_id="p1", chat_id="c1")
+    client, project_root = app_client
+    _write_spawn(project_root, spawn_id="p1", chat_id="c1")
     _write_artifact_output(
-        repo_root,
+        project_root,
         "p1",
         [_ASSISTANT_EVENT, _TOOL_USE_EVENT, _TOOL_RESULT_EVENT, _RESULT_EVENT],
     )
@@ -359,9 +359,9 @@ def test_list_tool_calls_empty_when_no_tool_events(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """APP-THREAD-02: No tool_use events → empty tool_calls list."""
-    client, repo_root = app_client
-    _write_spawn(repo_root, spawn_id="p1", chat_id="c1")
-    _write_artifact_output(repo_root, "p1", [_ASSISTANT_EVENT, _RESULT_EVENT])
+    client, project_root = app_client
+    _write_spawn(project_root, spawn_id="p1", chat_id="c1")
+    _write_artifact_output(project_root, "p1", [_ASSISTANT_EVENT, _RESULT_EVENT])
 
     response = client.get("/api/threads/c1/tool-calls")
 
@@ -373,7 +373,7 @@ def test_get_tool_call_unknown_thread_returns_404(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """APP-THREAD-02: Unknown thread ID returns 404 for tool-call lookup."""
-    client, _repo_root = app_client
+    client, _project_root = app_client
 
     response = client.get("/api/threads/c999/tool-calls/p1:0")
 
@@ -389,9 +389,9 @@ def test_token_usage_from_result_event(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """APP-THREAD-03: Token usage is extracted from persisted artifacts."""
-    client, repo_root = app_client
-    _write_spawn(repo_root, spawn_id="p1", chat_id="c1")
-    _write_artifact_output(repo_root, "p1", [_ASSISTANT_EVENT, _RESULT_EVENT])
+    client, project_root = app_client
+    _write_spawn(project_root, spawn_id="p1", chat_id="c1")
+    _write_artifact_output(project_root, "p1", [_ASSISTANT_EVENT, _RESULT_EVENT])
 
     response = client.get("/api/threads/c1/token-usage")
 
@@ -406,8 +406,8 @@ def test_token_usage_zero_when_no_artifacts(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """APP-THREAD-03: No artifact → token fields are None (not an error)."""
-    client, repo_root = app_client
-    _write_spawn(repo_root, spawn_id="p1", chat_id="c1")
+    client, project_root = app_client
+    _write_spawn(project_root, spawn_id="p1", chat_id="c1")
     # No artifact output written — empty state.
 
     response = client.get("/api/threads/c1/token-usage")
@@ -424,7 +424,7 @@ def test_token_usage_unknown_thread_returns_404(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """APP-THREAD-03: Unknown thread returns 404."""
-    client, _repo_root = app_client
+    client, _project_root = app_client
 
     response = client.get("/api/threads/c999/token-usage")
 
@@ -435,16 +435,16 @@ def test_token_usage_works_with_tokens_json(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """APP-THREAD-03: Token usage from tokens.json artifact is also supported."""
-    client, repo_root = app_client
-    _write_spawn(repo_root, spawn_id="p1", chat_id="c1")
+    client, project_root = app_client
+    _write_spawn(project_root, spawn_id="p1", chat_id="c1")
     # Write tokens.json artifact instead of embedding in output.jsonl
-    artifact_dir = _state_root(repo_root) / "artifacts" / "p1"
+    artifact_dir = _state_root(project_root) / "artifacts" / "p1"
     artifact_dir.mkdir(parents=True, exist_ok=True)
     (artifact_dir / "tokens.json").write_text(
         json.dumps({"input_tokens": 500, "output_tokens": 100}),
         encoding="utf-8",
     )
-    _write_artifact_output(repo_root, "p1", [_ASSISTANT_EVENT])
+    _write_artifact_output(project_root, "p1", [_ASSISTANT_EVENT])
 
     response = client.get("/api/threads/c1/token-usage")
 
@@ -458,13 +458,13 @@ def test_thread_routes_do_not_require_live_connection(
     tmp_path: Path,
 ) -> None:
     """APP-THREAD-01..03: All inspector endpoints work on a completed, static session."""
-    repo_root = tmp_path
-    manager = FakeManager(repo_root=repo_root)
+    project_root = tmp_path
+    manager = FakeManager(project_root=project_root)
     app = create_app(cast("Any", manager), allow_unsafe_no_permissions=True)
 
-    _write_spawn(repo_root, spawn_id="p1", chat_id="c1", status="succeeded")
+    _write_spawn(project_root, spawn_id="p1", chat_id="c1", status="succeeded")
     _write_artifact_output(
-        repo_root,
+        project_root,
         "p1",
         [_ASSISTANT_EVENT, _TOOL_USE_EVENT, _RESULT_EVENT],
     )

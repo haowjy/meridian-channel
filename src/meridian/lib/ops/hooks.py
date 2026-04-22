@@ -22,7 +22,7 @@ from meridian.lib.ops.runtime import resolve_roots, resolve_roots_for_read
 class HookListInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class HookListItem(BaseModel):
@@ -108,7 +108,7 @@ class HookRunInput(BaseModel):
 
     name: str
     event: HookEventName | None = None
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class HookRunResult(BaseModel):
@@ -159,7 +159,7 @@ class HookResolveInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     event: HookEventName
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class HookResolveItem(BaseModel):
@@ -239,8 +239,8 @@ def _hook_status(hook: Hook) -> str:
 
 
 def hooks_list_sync(payload: HookListInput) -> HookListOutput:
-    roots = resolve_roots_for_read(payload.repo_root)
-    registry = HookRegistry(roots.repo_root)
+    roots = resolve_roots_for_read(payload.project_root)
+    registry = HookRegistry(roots.project_root)
     hooks = tuple(
         HookListItem(
             name=hook.name,
@@ -280,7 +280,7 @@ def _manual_context(
     *,
     hook: Hook,
     event: HookEventName,
-    repo_root: Path,
+    project_root: Path,
     state_root: Path,
 ) -> HookContext:
     when = hook.when
@@ -291,7 +291,7 @@ def _manual_context(
         event_name=event,
         event_id=uuid4(),
         timestamp=datetime.now(UTC).isoformat(),
-        repo_root=repo_root.as_posix(),
+        project_root=project_root.as_posix(),
         state_root=state_root.as_posix(),
         spawn_id="manual",
         spawn_status=spawn_status,
@@ -303,7 +303,7 @@ def _manual_context(
         return replace(
             base,
             work_id="manual",
-            work_dir=repo_root.as_posix(),
+            work_dir=project_root.as_posix(),
         )
 
     return base
@@ -324,8 +324,8 @@ def _result_to_output(result: HookResult) -> HookRunResult:
 
 
 def hooks_run_sync(payload: HookRunInput) -> HookRunOutput:
-    roots = resolve_roots(payload.repo_root)
-    registry = HookRegistry(roots.repo_root)
+    roots = resolve_roots(payload.project_root)
+    registry = HookRegistry(roots.project_root)
 
     hook_name = payload.name.strip()
     if not hook_name:
@@ -341,7 +341,7 @@ def hooks_run_sync(payload: HookRunInput) -> HookRunOutput:
         effective_hook = replace(effective_hook, event=run_event)
 
     dispatcher = HookDispatcher(
-        roots.repo_root,
+        roots.project_root,
         roots.runtime_root,
         registry=_SingleHookRegistry(effective_hook),
         interval_tracker=_BypassIntervalTracker(IntervalTracker(roots.runtime_root)),
@@ -349,7 +349,7 @@ def hooks_run_sync(payload: HookRunInput) -> HookRunOutput:
     context = _manual_context(
         hook=effective_hook,
         event=run_event,
-        repo_root=roots.repo_root,
+        project_root=roots.project_root,
         state_root=roots.runtime_root,
     )
 
@@ -366,8 +366,8 @@ def hooks_run_sync(payload: HookRunInput) -> HookRunOutput:
 
 
 def hooks_resolve_sync(payload: HookResolveInput) -> HookResolveOutput:
-    roots = resolve_roots_for_read(payload.repo_root)
-    registry = HookRegistry(roots.repo_root)
+    roots = resolve_roots_for_read(payload.project_root)
+    registry = HookRegistry(roots.project_root)
 
     hooks = tuple(
         HookResolveItem(

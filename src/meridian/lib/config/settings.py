@@ -29,7 +29,7 @@ _LOCAL_CONFIG_FILENAME = "meridian.local.toml"
 class _SettingsLoadContext(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    repo_root: Path
+    project_root: Path
     user_config: Path | None
     resolve_models: bool = True
 
@@ -40,11 +40,11 @@ _SETTINGS_CONTEXT: ContextVar[_SettingsLoadContext | None] = ContextVar(
 )
 
 
-def _current_repo_root() -> Path | None:
+def _current_project_root() -> Path | None:
     context = _SETTINGS_CONTEXT.get()
     if context is None:
         return None
-    return context.repo_root
+    return context.project_root
 
 
 def _normalize_required_string(raw: str, *, source: str) -> str:
@@ -63,19 +63,19 @@ def _normalize_optional_string(raw: str | None, *, source: str) -> str | None:
     return normalized
 
 
-def _normalize_model_identifier(model: str, *, repo_root: Path | None) -> str:
+def _normalize_model_identifier(model: str, *, project_root: Path | None) -> str:
     normalized = model.strip()
     if not normalized:
         return normalized
     context = _SETTINGS_CONTEXT.get()
     if context is not None and context.resolve_models is False:
         return normalized
-    if repo_root is None:
+    if project_root is None:
         return normalized
     try:
         from meridian.lib.catalog.models import resolve_model
 
-        return str(resolve_model(normalized, repo_root=repo_root).model_id)
+        return str(resolve_model(normalized, project_root=project_root).model_id)
     except ValueError:
         # Unknown model IDs are allowed here and validated during launch.
         return normalized
@@ -208,12 +208,12 @@ def _read_toml(path: Path) -> dict[str, object]:
     return cast("dict[str, object]", payload_obj)
 
 
-def _resolve_project_toml(repo_root: Path) -> Path | None:
-    return resolve_project_config_state(repo_root).path
+def _resolve_project_toml(project_root: Path) -> Path | None:
+    return resolve_project_config_state(project_root).path
 
 
-def _resolve_local_toml(repo_root: Path) -> Path | None:
-    local_config = repo_root / _LOCAL_CONFIG_FILENAME
+def _resolve_local_toml(project_root: Path) -> Path | None:
+    local_config = project_root / _LOCAL_CONFIG_FILENAME
     if not local_config.is_file():
         return None
     return local_config
@@ -349,7 +349,7 @@ def _normalize_harness_table(
     raw_value: object,
     *,
     source: str,
-    repo_root: Path,
+    project_root: Path,
 ) -> dict[str, object]:
     if not isinstance(raw_value, dict):
         raise ValueError(f"Invalid value for '{source}': expected table.")
@@ -369,7 +369,7 @@ def _normalize_harness_table(
         if not normalized:
             values[key] = normalized
             continue
-        values[key] = _normalize_model_identifier(normalized, repo_root=repo_root)
+        values[key] = _normalize_model_identifier(normalized, project_root=project_root)
 
     return values
 
@@ -595,7 +595,7 @@ def _normalize_toml_payload(
     *,
     payload: dict[str, object],
     path: Path,
-    repo_root: Path,
+    project_root: Path,
 ) -> dict[str, object]:
     section_aliases: dict[str, dict[str, str]] = {
         "defaults": {
@@ -641,7 +641,7 @@ def _normalize_toml_payload(
         if key == "harness":
             normalized["harness"] = _merge_nested_dicts(
                 cast("dict[str, object]", normalized.get("harness", {})),
-                _normalize_harness_table(raw_value, source="harness", repo_root=repo_root),
+                _normalize_harness_table(raw_value, source="harness", project_root=project_root),
             )
             continue
         if key == "hooks":
@@ -681,7 +681,7 @@ def _normalize_toml_payload(
                 if field_name == "default_model":
                     coerced = _normalize_model_identifier(
                         cast("str", coerced),
-                        repo_root=repo_root,
+                        project_root=project_root,
                     )
                 normalized[field_name] = coerced
             continue
@@ -697,13 +697,13 @@ def _normalize_toml_payload(
             source=key,
         )
         if field_name == "default_model":
-            coerced = _normalize_model_identifier(cast("str", coerced), repo_root=repo_root)
+            coerced = _normalize_model_identifier(cast("str", coerced), project_root=project_root)
         normalized[field_name] = coerced
 
     return normalized
 
 
-def _env_alias_overrides(repo_root: Path) -> dict[str, object]:
+def _env_alias_overrides(project_root: Path) -> dict[str, object]:
     values: dict[str, object] = {}
     env_specs: tuple[tuple[str, tuple[str, ...], Literal["int", "float", "str"]], ...] = (
         ("MERIDIAN_MAX_DEPTH", ("max_depth",), "int"),
@@ -745,7 +745,7 @@ def _env_alias_overrides(repo_root: Path) -> dict[str, object]:
             ("harness", "opencode"),
             ("primary", "model"),
         }:
-            parsed = _normalize_model_identifier(cast("str", parsed), repo_root=repo_root)
+            parsed = _normalize_model_identifier(cast("str", parsed), project_root=project_root)
 
         _assign_nested_value(values, field_path, parsed)
 
@@ -843,7 +843,7 @@ class PrimaryConfig(BaseModel):
         normalized = _normalize_optional_string(value, source="primary.model")
         if normalized is None:
             return None
-        return _normalize_model_identifier(normalized, repo_root=_current_repo_root())
+        return _normalize_model_identifier(normalized, project_root=_current_project_root())
 
     @field_validator("harness", "agent")
     @classmethod
@@ -903,7 +903,7 @@ class HarnessConfig(BaseModel):
         normalized = value.strip()
         if not normalized:
             return normalized
-        return _normalize_model_identifier(normalized, repo_root=_current_repo_root())
+        return _normalize_model_identifier(normalized, project_root=_current_project_root())
 
 
 class MeridianConfig(BaseSettings):
@@ -935,7 +935,7 @@ class MeridianConfig(BaseSettings):
         normalized = value.strip()
         if not normalized:
             return normalized
-        return _normalize_model_identifier(normalized, repo_root=_current_repo_root())
+        return _normalize_model_identifier(normalized, project_root=_current_project_root())
 
     @field_validator("default_harness")
     @classmethod
@@ -970,28 +970,28 @@ class MeridianConfig(BaseSettings):
             context = _SETTINGS_CONTEXT.get()
             if context is None:
                 return {}
-            project_config = _resolve_project_toml(context.repo_root)
+            project_config = _resolve_project_toml(context.project_root)
             if project_config is None:
                 return {}
             payload = _read_toml(project_config)
             return _normalize_toml_payload(
                 payload=payload,
                 path=project_config,
-                repo_root=context.repo_root,
+                project_root=context.project_root,
             )
 
         def local_toml_source() -> dict[str, object]:
             context = _SETTINGS_CONTEXT.get()
             if context is None:
                 return {}
-            local_config = _resolve_local_toml(context.repo_root)
+            local_config = _resolve_local_toml(context.project_root)
             if local_config is None:
                 return {}
             payload = _read_toml(local_config)
             return _normalize_toml_payload(
                 payload=payload,
                 path=local_config,
-                repo_root=context.repo_root,
+                project_root=context.project_root,
             )
 
         def user_toml_source() -> dict[str, object]:
@@ -1002,7 +1002,7 @@ class MeridianConfig(BaseSettings):
             return _normalize_toml_payload(
                 payload=payload,
                 path=context.user_config,
-                repo_root=context.repo_root,
+                project_root=context.project_root,
             )
 
         def layered_env_source() -> dict[str, object]:
@@ -1010,7 +1010,7 @@ class MeridianConfig(BaseSettings):
             if context is None:
                 return {}
             _ = env_settings
-            return _env_alias_overrides(context.repo_root)
+            return _env_alias_overrides(context.project_root)
 
         return (
             init_settings,
@@ -1022,7 +1022,7 @@ class MeridianConfig(BaseSettings):
 
 
 def load_config(
-    repo_root: Path,
+    project_root: Path,
     *,
     user_config: Path | None = None,
     resolve_models: bool = True,
@@ -1033,12 +1033,12 @@ def load_config(
     from ENV here — they are read separately via RuntimeOverrides.from_env().
     """
 
-    resolved_repo_root = repo_root.expanduser().resolve()
+    resolved_project_root = project_root.expanduser().resolve()
     resolved_user_config = resolve_user_config_path(user_config)
 
     token = _SETTINGS_CONTEXT.set(
         _SettingsLoadContext(
-            repo_root=resolved_repo_root,
+            project_root=resolved_project_root,
             user_config=resolved_user_config,
             resolve_models=resolve_models,
         )
@@ -1054,7 +1054,7 @@ def resolve_project_root(explicit: Path | None = None) -> Path:
 
     Precedence:
     1. Explicit function argument.
-    2. `MERIDIAN_REPO_ROOT` environment variable.
+    2. `MERIDIAN_PROJECT_DIR` environment variable.
     3. Current directory / ancestors containing `.agents/skills/`.
     4. Current working directory.
     """
@@ -1062,7 +1062,7 @@ def resolve_project_root(explicit: Path | None = None) -> Path:
     if explicit is not None:
         return explicit.expanduser().resolve()
 
-    env_root = os.getenv("MERIDIAN_REPO_ROOT")
+    env_root = os.getenv("MERIDIAN_PROJECT_DIR")
     if env_root:
         return Path(env_root).expanduser().resolve()
 

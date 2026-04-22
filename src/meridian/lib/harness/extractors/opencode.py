@@ -43,7 +43,7 @@ _PATH_HINT_KEYS: frozenset[str] = frozenset(
     {
         "directory",
         "cwd",
-        "repo_root",
+        "project_root",
         "repoRoot",
         "state_root",
         "stateRoot",

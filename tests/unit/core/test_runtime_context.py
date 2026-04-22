@@ -19,7 +19,7 @@ def test_runtime_context_from_environment_delegates_to_resolved_context(
     expected = ResolvedContext(
         spawn_id=SpawnId("p123"),
         depth=4,
-        repo_root=Path("/repo"),
+        project_root=Path("/repo"),
         state_root=Path("/runtime/state"),
         chat_id="chat-7",
         work_id="work-7",
@@ -38,7 +38,7 @@ def test_runtime_context_from_environment_delegates_to_resolved_context(
     assert resolved == RuntimeContext(
         spawn_id=SpawnId("p123"),
         depth=4,
-        repo_root=Path("/repo"),
+        project_root=Path("/repo"),
         state_root=Path("/runtime/state"),
         chat_id="chat-7",
         work_id="work-7",
@@ -49,7 +49,7 @@ def test_runtime_context_to_env_overrides_uses_repo_scoped_work_dir() -> None:
     ctx = RuntimeContext(
         spawn_id=SpawnId("p456"),
         depth=2,
-        repo_root=Path("/repo"),
+        project_root=Path("/repo"),
         state_root=Path("/runtime/state"),
         chat_id="chat-9",
         work_id="work-9",
@@ -58,7 +58,7 @@ def test_runtime_context_to_env_overrides_uses_repo_scoped_work_dir() -> None:
     assert ctx.to_env_overrides() == {
         "MERIDIAN_DEPTH": "2",
         "MERIDIAN_SPAWN_ID": "p456",
-        "MERIDIAN_REPO_ROOT": "/repo",
+        "MERIDIAN_PROJECT_DIR": "/repo",
         "MERIDIAN_PROJECT_ROOT": "/runtime/state",
         "MERIDIAN_CHAT_ID": "chat-9",
         "MERIDIAN_WORK_ID": "work-9",

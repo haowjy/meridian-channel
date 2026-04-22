@@ -33,7 +33,7 @@ print(api.__version__)  # "1.0.0"
 | `event_name` | `HookEventName` | all events |
 | `event_id` | `UUID` | all events |
 | `timestamp` | `str` (ISO 8601) | all events |
-| `repo_root` | `str` | all events |
+| `project_root` | `str` | all events |
 | `state_root` | `str` | all events |
 | `schema_version` | `int` | all events |
 | `spawn_id` | `str \| None` | spawn events |

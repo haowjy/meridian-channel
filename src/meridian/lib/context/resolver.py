@@ -52,7 +52,7 @@ def context_uses_project_placeholder(config: ContextConfig) -> bool:
 
 def _resolve_path(
     path_spec: str,
-    repo_root: Path,
+    project_root: Path,
     project_uuid: str | None,
     *,
     source: ContextSourceType = ContextSourceType.LOCAL,
@@ -75,36 +75,36 @@ def _resolve_path(
     candidate = Path(path_spec).expanduser()
     if candidate.is_absolute():
         return candidate
-    return repo_root / candidate
+    return project_root / candidate
 
 
 def resolve_context_paths(
-    repo_root: Path,
+    project_root: Path,
     config: ContextConfig,
     project_uuid: str | None = None,
 ) -> ResolvedContextPaths:
     """Resolve context paths from config."""
 
     if project_uuid is None:
-        project_uuid = get_project_uuid(repo_root / ".meridian")
+        project_uuid = get_project_uuid(project_root / ".meridian")
 
     work_root = _resolve_path(
         config.work.path,
-        repo_root,
+        project_root,
         project_uuid,
         source=config.work.source,
         remote=config.work.remote,
     )
     work_archive = _resolve_path(
         config.work.archive,
-        repo_root,
+        project_root,
         project_uuid,
         source=config.work.source,
         remote=config.work.remote,
     )
     kb_root = _resolve_path(
         config.kb.path,
-        repo_root,
+        project_root,
         project_uuid,
         source=config.kb.source,
         remote=config.kb.remote,
@@ -122,7 +122,7 @@ def resolve_context_paths(
         extra[name] = (
             _resolve_path(
                 parsed.path,
-                repo_root,
+                project_root,
                 project_uuid,
                 source=parsed.source,
                 remote=parsed.remote,

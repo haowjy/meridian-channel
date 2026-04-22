@@ -72,7 +72,7 @@ def _build_config(tmp_path: Path) -> ConnectionConfig:
         spawn_id=SpawnId("p321"),
         harness_id=HarnessId.CODEX,
         prompt="hello",
-        repo_root=tmp_path,
+        project_root=tmp_path,
         env_overrides={},
     )
 

@@ -57,10 +57,10 @@ class SessionContextRef(BaseModel):
 type ContextRef = SpawnContextRef | SessionContextRef
 
 
-def _select_primary_spawn_for_session(repo_root: Path, chat_id: str) -> spawn_store.SpawnRecord:
+def _select_primary_spawn_for_session(project_root: Path, chat_id: str) -> spawn_store.SpawnRecord:
     from meridian.lib.state.reaper import reconcile_spawns
 
-    state_root = resolve_runtime_root_for_read(repo_root)
+    state_root = resolve_runtime_root_for_read(project_root)
     spawns = reconcile_spawns(
         state_root,
         spawn_store.list_spawns(state_root, filters={"chat_id": chat_id}),
@@ -72,24 +72,24 @@ def _select_primary_spawn_for_session(repo_root: Path, chat_id: str) -> spawn_st
     return primary_spawns[-1]
 
 
-def _is_tracked_session(repo_root: Path, chat_id: str) -> bool:
-    state_root = resolve_runtime_root_for_read(repo_root)
+def _is_tracked_session(project_root: Path, chat_id: str) -> bool:
+    state_root = resolve_runtime_root_for_read(project_root)
     return bool(session_store.get_session_records(state_root, {chat_id}))
 
 
-def _load_report_text(repo_root: Path, spawn_id: str) -> str | None:
-    _, report_text = read_report_text(repo_root, spawn_id)
+def _load_report_text(project_root: Path, spawn_id: str) -> str | None:
+    _, report_text = read_report_text(project_root, spawn_id)
     return report_text
 
 
-def _load_written_files(repo_root: Path, spawn_id: str) -> tuple[str, ...]:
+def _load_written_files(project_root: Path, spawn_id: str) -> tuple[str, ...]:
     try:
-        return read_written_files(repo_root, spawn_id)
+        return read_written_files(project_root, spawn_id)
     except (FileNotFoundError, OSError):
         return ()
 
 
-def resolve_context_ref(repo_root: Path, ref: str) -> ContextRef:
+def resolve_context_ref(project_root: Path, ref: str) -> ContextRef:
     """Resolve one --from value to concrete prior context payload."""
 
     normalized = ref.strip()
@@ -97,23 +97,23 @@ def resolve_context_ref(repo_root: Path, ref: str) -> ContextRef:
         raise ValueError("context reference is required")
 
     if normalized.startswith("@") or _SPAWN_REF_RE.fullmatch(normalized):
-        spawn_id = resolve_spawn_reference(repo_root, normalized)
-        spawn_row = read_spawn_row(repo_root, spawn_id)
+        spawn_id = resolve_spawn_reference(project_root, normalized)
+        spawn_row = read_spawn_row(project_root, spawn_id)
         if spawn_row is None:
             raise ValueError(f"Spawn '{spawn_id}' not found")
-        return _spawn_context_ref(spawn_row, repo_root)
-    if _SESSION_REF_RE.fullmatch(normalized) or _is_tracked_session(repo_root, normalized):
-        primary_row = _select_primary_spawn_for_session(repo_root, normalized)
+        return _spawn_context_ref(spawn_row, project_root)
+    if _SESSION_REF_RE.fullmatch(normalized) or _is_tracked_session(project_root, normalized):
+        primary_row = _select_primary_spawn_for_session(project_root, normalized)
         return _session_context_ref(primary_row)
 
-    spawn_id = resolve_spawn_reference(repo_root, normalized)
-    row = read_spawn_row(repo_root, spawn_id)
+    spawn_id = resolve_spawn_reference(project_root, normalized)
+    row = read_spawn_row(project_root, spawn_id)
     if row is None:
         raise ValueError(f"Spawn '{spawn_id}' not found")
-    return _spawn_context_ref(row, repo_root)
+    return _spawn_context_ref(row, project_root)
 
 
-def _spawn_context_ref(row: spawn_store.SpawnRecord, repo_root: Path) -> SpawnContextRef:
+def _spawn_context_ref(row: spawn_store.SpawnRecord, project_root: Path) -> SpawnContextRef:
     return SpawnContextRef(
         spawn_id=row.id,
         status=row.status,
@@ -121,8 +121,8 @@ def _spawn_context_ref(row: spawn_store.SpawnRecord, repo_root: Path) -> SpawnCo
         desc=row.desc or "",
         model=row.model or "",
         harness=row.harness or "",
-        report_text=_load_report_text(repo_root, row.id),
-        written_files=_load_written_files(repo_root, row.id),
+        report_text=_load_report_text(project_root, row.id),
+        written_files=_load_written_files(project_root, row.id),
         harness_session_id=row.harness_session_id,
         chat_id=row.chat_id,
     )

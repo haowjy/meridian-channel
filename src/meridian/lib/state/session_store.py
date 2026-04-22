@@ -651,13 +651,13 @@ def get_session_harness_ids(state_root: Path, chat_id: str) -> tuple[str, ...]:
     return record.harness_session_ids
 
 
-def collect_active_chat_ids(repo_root: Path) -> frozenset[str] | None:
+def collect_active_chat_ids(project_root: Path) -> frozenset[str] | None:
     """Collect chat IDs with start events that lack a stop event."""
 
     from meridian.lib.state.paths import resolve_project_runtime_root_or_none
 
     try:
-        state_root = resolve_project_runtime_root_or_none(repo_root)
+        state_root = resolve_project_runtime_root_or_none(project_root)
         if state_root is None:
             return frozenset()
         sessions_file = state_root / "sessions.jsonl"

@@ -17,12 +17,12 @@ def _python_command(script_path: Path) -> str:
     return subprocess.list2cmdline([sys.executable, str(script_path)])
 
 
-def _context(repo_root: Path, state_root: Path) -> HookContext:
+def _context(project_root: Path, state_root: Path) -> HookContext:
     return HookContext(
         event_name="spawn.finalized",
         event_id=uuid4(),
         timestamp="2026-04-19T12:00:00+00:00",
-        repo_root=str(repo_root),
+        project_root=str(project_root),
         state_root=str(state_root),
         spawn_id="p123",
         spawn_status="success",
@@ -41,8 +41,8 @@ def _external_hook(command: str) -> Hook:
 
 
 def test_external_runner_sets_cwd_env_and_json_stdin(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
     state_root = tmp_path / "state"
 
     script = tmp_path / "echo_context.py"
@@ -54,7 +54,7 @@ def test_external_runner_sets_cwd_env_and_json_stdin(tmp_path: Path) -> None:
         "print(os.getcwd())\n"
         "print(os.environ['MERIDIAN_HOOK_EVENT'])\n"
         "print(os.environ['MERIDIAN_HOOK_EVENT_ID'])\n"
-        "print(os.environ['MERIDIAN_REPO_ROOT'])\n"
+        "print(os.environ['MERIDIAN_PROJECT_DIR'])\n"
         "print(os.environ['MERIDIAN_PROJECT_ROOT'])\n"
         "print(os.environ['MERIDIAN_SPAWN_ID'])\n"
         "print(payload['event_name'])\n"
@@ -62,8 +62,8 @@ def test_external_runner_sets_cwd_env_and_json_stdin(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    runner = ExternalHookRunner(repo_root)
-    context = _context(repo_root, state_root)
+    runner = ExternalHookRunner(project_root)
+    context = _context(project_root, state_root)
     hook = _external_hook(_python_command(script))
 
     result = runner.run(hook, context, timeout_secs=5)
@@ -73,10 +73,10 @@ def test_external_runner_sets_cwd_env_and_json_stdin(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert result.stdout is not None
     lines = result.stdout.strip().splitlines()
-    assert lines[0] == str(repo_root.resolve())
+    assert lines[0] == str(project_root.resolve())
     assert lines[1] == "spawn.finalized"
     assert lines[2] == str(context.event_id)
-    assert lines[3] == str(repo_root.resolve())
+    assert lines[3] == str(project_root.resolve())
     assert lines[4] == str(state_root)
     assert lines[5] == "p123"
     assert lines[6] == "spawn.finalized"
@@ -84,8 +84,8 @@ def test_external_runner_sets_cwd_env_and_json_stdin(tmp_path: Path) -> None:
 
 
 def test_external_runner_captures_nonzero_exit_and_1kb_tails(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
     state_root = tmp_path / "state"
 
     script = tmp_path / "emit_large_output.py"
@@ -97,10 +97,10 @@ def test_external_runner_captures_nonzero_exit_and_1kb_tails(tmp_path: Path) -> 
         encoding="utf-8",
     )
 
-    runner = ExternalHookRunner(repo_root)
+    runner = ExternalHookRunner(project_root)
     result = runner.run(
         _external_hook(_python_command(script)),
-        _context(repo_root, state_root),
+        _context(project_root, state_root),
         timeout_secs=5,
     )
 
@@ -117,8 +117,8 @@ def test_external_runner_captures_nonzero_exit_and_1kb_tails(tmp_path: Path) -> 
 
 
 def test_external_runner_marks_timeout_and_terminates_process(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
 
     class FakeProcess:
         def __init__(self) -> None:
@@ -153,7 +153,7 @@ def test_external_runner_marks_timeout_and_terminates_process(tmp_path: Path) ->
         def __getattr__(self, name: str) -> object:
             return getattr(self._process, name)
 
-    runner = ExternalHookRunner(repo_root)
+    runner = ExternalHookRunner(project_root)
     from _pytest.monkeypatch import MonkeyPatch
 
     monkeypatch = MonkeyPatch()
@@ -162,7 +162,7 @@ def test_external_runner_marks_timeout_and_terminates_process(tmp_path: Path) ->
     try:
         result = runner.run(
             _external_hook("ignored"),
-            _context(repo_root, tmp_path / "state"),
+            _context(project_root, tmp_path / "state"),
             timeout_secs=1,
         )
     finally:
@@ -178,8 +178,8 @@ def test_external_runner_marks_timeout_and_terminates_process(tmp_path: Path) ->
 
 
 def test_external_runner_omits_null_context_variables(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
     state_root = tmp_path / "state"
 
     script = tmp_path / "check_missing_env.py"
@@ -191,10 +191,10 @@ def test_external_runner_omits_null_context_variables(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    runner = ExternalHookRunner(repo_root)
+    runner = ExternalHookRunner(project_root)
     result = runner.run(
         _external_hook(_python_command(script)),
-        _context(repo_root, state_root),
+        _context(project_root, state_root),
         timeout_secs=5,
     )
 
@@ -207,8 +207,8 @@ def test_external_runner_timeout_escalates_from_terminate_to_kill(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
 
     class FakeProcess:
         def __init__(self) -> None:
@@ -257,10 +257,10 @@ def test_external_runner_timeout_escalates_from_terminate_to_kill(
 
     monkeypatch.setattr("meridian.lib.hooks.runner.subprocess.Popen", FakePopen)
 
-    runner = ExternalHookRunner(repo_root)
+    runner = ExternalHookRunner(project_root)
     result = runner.run(
         _external_hook("ignored"),
-        _context(repo_root, tmp_path / "state"),
+        _context(project_root, tmp_path / "state"),
         timeout_secs=1,
     )
 
@@ -276,8 +276,8 @@ def test_external_runner_short_circuits_when_hooks_disabled(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
     state_root = tmp_path / "state"
     marker = tmp_path / "ran.txt"
 
@@ -289,10 +289,10 @@ def test_external_runner_short_circuits_when_hooks_disabled(
     )
 
     monkeypatch.setenv("MERIDIAN_HOOKS_ENABLED", "false")
-    runner = ExternalHookRunner(repo_root)
+    runner = ExternalHookRunner(project_root)
     result = runner.run(
         _external_hook(_python_command(script)),
-        _context(repo_root, state_root),
+        _context(project_root, state_root),
         timeout_secs=5,
     )
 

@@ -92,7 +92,7 @@ class HookContext:
     event_name: HookEventName
     event_id: UUID
     timestamp: str
-    repo_root: str
+    project_root: str
     state_root: str
     schema_version: int = HOOK_CONTEXT_SCHEMA_VERSION
 
@@ -115,7 +115,7 @@ class HookContext:
             "MERIDIAN_HOOK_EVENT_ID": str(self.event_id),
             "MERIDIAN_HOOK_TIMESTAMP": self.timestamp,
             "MERIDIAN_HOOK_SCHEMA_VERSION": str(self.schema_version),
-            "MERIDIAN_REPO_ROOT": self.repo_root,
+            "MERIDIAN_PROJECT_DIR": self.project_root,
             "MERIDIAN_PROJECT_ROOT": self.state_root,
             "MERIDIAN_SPAWN_ID": self.spawn_id,
             "MERIDIAN_SPAWN_STATUS": self.spawn_status,
@@ -141,7 +141,7 @@ class HookContext:
             "event_name": self.event_name,
             "event_id": str(self.event_id),
             "timestamp": self.timestamp,
-            "repo_root": self.repo_root,
+            "project_root": self.project_root,
             "state_root": self.state_root,
             "spawn": {
                 "id": self.spawn_id,

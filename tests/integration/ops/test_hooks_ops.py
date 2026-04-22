@@ -41,14 +41,14 @@ def test_hooks_list_returns_registered_hooks_with_status(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    (repo_root / ".git").mkdir()
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    (project_root / ".git").mkdir()
     user_config = tmp_path / "user-config.toml"
     user_config.write_text("", encoding="utf-8")
     monkeypatch.setenv("MERIDIAN_CONFIG", user_config.as_posix())
 
-    (repo_root / "meridian.toml").write_text(
+    (project_root / "meridian.toml").write_text(
         "[[hooks]]\n"
         "name = 'record-finalized'\n"
         "event = 'spawn.finalized'\n"
@@ -67,7 +67,9 @@ def test_hooks_list_returns_registered_hooks_with_status(
         encoding="utf-8",
     )
 
-    output = hooks_ops.hooks_list_sync(hooks_ops.HookListInput(repo_root=repo_root.as_posix()))
+    output = hooks_ops.hooks_list_sync(
+        hooks_ops.HookListInput(project_root=project_root.as_posix())
+    )
 
     by_name = {hook.name: hook for hook in output.hooks}
     assert by_name["record-finalized"].hook_type == "external"
@@ -113,10 +115,10 @@ def test_hooks_run_bypasses_interval_throttling(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    (repo_root / ".git").mkdir()
-    state_root = repo_root / ".meridian"
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    (project_root / ".git").mkdir()
+    state_root = project_root / ".meridian"
 
     user_config = tmp_path / "user-config.toml"
     user_config.write_text("", encoding="utf-8")
@@ -128,7 +130,7 @@ def test_hooks_run_bypasses_interval_throttling(
     _write_hook_recorder(recorder)
     command = _python_command(recorder, marker.as_posix())
 
-    (repo_root / "meridian.toml").write_text(
+    (project_root / "meridian.toml").write_text(
         f"[[hooks]]\n"
         f"name = 'record-finalized'\n"
         f"event = 'spawn.finalized'\n"
@@ -141,7 +143,7 @@ def test_hooks_run_bypasses_interval_throttling(
     IntervalTracker(state_root).mark_run("record-finalized")
 
     output = hooks_ops.hooks_run_sync(
-        hooks_ops.HookRunInput(name="record-finalized", repo_root=repo_root.as_posix())
+        hooks_ops.HookRunInput(name="record-finalized", project_root=project_root.as_posix())
     )
 
     assert output.hook == "record-finalized"
@@ -155,10 +157,10 @@ def test_hooks_run_accepts_event_override(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    (repo_root / ".git").mkdir()
-    state_root = repo_root / ".meridian"
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    (project_root / ".git").mkdir()
+    state_root = project_root / ".meridian"
 
     user_config = tmp_path / "user-config.toml"
     user_config.write_text("", encoding="utf-8")
@@ -170,11 +172,8 @@ def test_hooks_run_accepts_event_override(
     _write_hook_recorder(recorder)
     command = _python_command(recorder, marker.as_posix())
 
-    (repo_root / "meridian.toml").write_text(
-        f"[[hooks]]\n"
-        f"name = 'record-finalized'\n"
-        f"event = 'spawn.finalized'\n"
-        f"command = '{command}'\n",
+    (project_root / "meridian.toml").write_text(
+        f"[[hooks]]\nname = 'record-finalized'\nevent = 'spawn.finalized'\ncommand = '{command}'\n",
         encoding="utf-8",
     )
 
@@ -182,7 +181,7 @@ def test_hooks_run_accepts_event_override(
         hooks_ops.HookRunInput(
             name="record-finalized",
             event="work.done",
-            repo_root=repo_root.as_posix(),
+            project_root=project_root.as_posix(),
         )
     )
 
@@ -196,9 +195,9 @@ def test_hooks_resolve_returns_enabled_hooks_in_dispatch_order(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    (repo_root / ".git").mkdir()
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    (project_root / ".git").mkdir()
 
     user_config = tmp_path / "user.toml"
     user_config.write_text(
@@ -210,7 +209,7 @@ def test_hooks_resolve_returns_enabled_hooks_in_dispatch_order(
         encoding="utf-8",
     )
     monkeypatch.setenv("MERIDIAN_CONFIG", user_config.as_posix())
-    (repo_root / "meridian.toml").write_text(
+    (project_root / "meridian.toml").write_text(
         "[[hooks]]\n"
         "name = 'project-low'\n"
         "event = 'work.done'\n"
@@ -226,7 +225,7 @@ def test_hooks_resolve_returns_enabled_hooks_in_dispatch_order(
     )
 
     output = hooks_ops.hooks_resolve_sync(
-        hooks_ops.HookResolveInput(event="work.done", repo_root=repo_root.as_posix())
+        hooks_ops.HookResolveInput(event="work.done", project_root=project_root.as_posix())
     )
 
     assert [item.name for item in output.hooks] == ["user-high", "project-low"]

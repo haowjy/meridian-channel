@@ -32,12 +32,12 @@ class ResolvedPolicies:
     warning: str | None = None
 
 
-def _derive_harness_from_model(model_str: str, *, repo_root: Path) -> HarnessId:
+def _derive_harness_from_model(model_str: str, *, project_root: Path) -> HarnessId:
     """Derive harness from model when no layer specifies harness."""
 
     from meridian.lib.catalog.models import resolve_model as resolve_model_entry
 
-    resolved = resolve_model_entry(model_str, repo_root=repo_root)
+    resolved = resolve_model_entry(model_str, project_root=project_root)
     return resolved.harness
 
 
@@ -46,7 +46,7 @@ def _resolve_final_model(
     layer_model: str | None,
     harness_id: HarnessId,
     config: MeridianConfig,
-    repo_root: Path,
+    project_root: Path,
 ) -> str:
     """Resolve final model string after harness is known."""
 
@@ -54,7 +54,7 @@ def _resolve_final_model(
 
     if layer_model:
         try:
-            catalog_entry = resolve_model_entry(layer_model, repo_root=repo_root)
+            catalog_entry = resolve_model_entry(layer_model, project_root=project_root)
             return str(catalog_entry.model_id)
         except ValueError:
             return layer_model
@@ -78,7 +78,7 @@ def _first_set_layer_index(
 
 def resolve_policies(
     *,
-    repo_root: Path,
+    project_root: Path,
     layers: tuple[RuntimeOverrides, ...],
     config_overrides: RuntimeOverrides,
     config: MeridianConfig,
@@ -93,7 +93,7 @@ def resolve_policies(
     configured_default_agent = pre_profile_resolved.agent if not requested_agent else ""
 
     profile, profile_warning = load_agent_profile_with_fallback(
-        repo_root=repo_root,
+        project_root=project_root,
         requested_agent=requested_agent,
         configured_default=configured_default_agent,
     )
@@ -113,12 +113,14 @@ def resolve_policies(
     if resolved.harness:
         harness_id = HarnessId(resolved.harness)
     elif resolved.model:
-        harness_id = _derive_harness_from_model(resolved.model, repo_root=repo_root)
+        harness_id = _derive_harness_from_model(resolved.model, project_root=project_root)
     else:
         harness_id = HarnessId(configured_default_harness or "claude")
 
     if resolved.model and model_set_in_pre_profile_layers and harness_from_profile_or_config:
-        model_derived_harness = _derive_harness_from_model(resolved.model, repo_root=repo_root)
+        model_derived_harness = _derive_harness_from_model(
+            resolved.model, project_root=project_root
+        )
         if harness_id != model_derived_harness:
             harness_id = model_derived_harness
 
@@ -134,7 +136,7 @@ def resolve_policies(
         layer_model=resolved.model,
         harness_id=harness_id,
         config=config,
-        repo_root=repo_root,
+        project_root=project_root,
     )
 
     user_explicit_same_precedence = (
@@ -148,7 +150,7 @@ def resolve_policies(
             model=ModelId(final_model),
             harness_override=str(harness_id),
             harness_registry=harness_registry,
-            repo_root=repo_root,
+            project_root=project_root,
         )
 
     profile_skills: tuple[str, ...] = ()
@@ -156,7 +158,7 @@ def resolve_policies(
         profile_skills = dedupe_skill_names(profile.skills)
     resolved_skills = resolve_skills_from_profile(
         profile_skills=profile_skills,
-        repo_root=repo_root,
+        project_root=project_root,
         readonly=skills_readonly,
     )
 

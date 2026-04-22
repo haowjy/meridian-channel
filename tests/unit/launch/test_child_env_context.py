@@ -16,7 +16,7 @@ from meridian.lib.launch.context import ChildEnvContext
 def _project_paths(tmp_path: Path) -> ProjectConfigPaths:
     execution_cwd = tmp_path / "child-cwd"
     execution_cwd.mkdir()
-    return ProjectConfigPaths(repo_root=tmp_path, execution_cwd=execution_cwd)
+    return ProjectConfigPaths(project_root=tmp_path, execution_cwd=execution_cwd)
 
 
 def test_child_env_context_from_environment_uses_resolved_context_parent_fields(
@@ -41,7 +41,7 @@ def test_child_env_context_from_environment_uses_resolved_context_parent_fields(
 
     assert resolved == ChildEnvContext(
         parent_spawn_id=None,
-        repo_root=project_paths.execution_cwd.resolve(),
+        project_root=project_paths.execution_cwd.resolve(),
         state_root=runtime_state_root.resolve(),
         parent_chat_id="parent-chat",
         parent_depth=3,
@@ -128,7 +128,7 @@ def test_child_env_context_child_context_routes_through_contract_helpers(
 ) -> None:
     ctx = ChildEnvContext(
         parent_spawn_id=None,
-        repo_root=tmp_path / "repo",
+        project_root=tmp_path / "repo",
         state_root=tmp_path / "runtime-state",
         parent_chat_id="chat-parent",
         parent_depth=5,
@@ -138,7 +138,7 @@ def test_child_env_context_child_context_routes_through_contract_helpers(
     )
     expected = {
         "MERIDIAN_DEPTH": "6",
-        "MERIDIAN_REPO_ROOT": ctx.repo_root.as_posix(),
+        "MERIDIAN_PROJECT_DIR": ctx.project_root.as_posix(),
         "MERIDIAN_PROJECT_ROOT": ctx.state_root.as_posix(),
         "MERIDIAN_CHAT_ID": "chat-parent",
         "MERIDIAN_WORK_ID": "work-55",
@@ -151,7 +151,7 @@ def test_child_env_context_child_context_routes_through_contract_helpers(
     def fake_build_child_env_overrides(**kwargs: object) -> dict[str, str]:
         assert kwargs == {
             "parent_spawn_id": None,
-            "repo_root": ctx.repo_root,
+            "project_root": ctx.project_root,
             "state_root": ctx.state_root,
             "parent_chat_id": "chat-parent",
             "parent_depth": 5,

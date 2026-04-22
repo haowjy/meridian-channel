@@ -23,10 +23,10 @@ def run_app(
     from meridian.lib.ops.runtime import resolve_runtime_root, resolve_runtime_root_and_config
     from meridian.lib.streaming.spawn_manager import SpawnManager
 
-    repo_root, _ = resolve_runtime_root_and_config(None)
-    state_root = resolve_runtime_root(repo_root)
+    project_root, _ = resolve_runtime_root_and_config(None)
+    state_root = resolve_runtime_root(project_root)
 
-    manager = SpawnManager(state_root=state_root, repo_root=repo_root, debug=debug)
+    manager = SpawnManager(state_root=state_root, project_root=project_root, debug=debug)
     app = create_app(
         manager,
         allow_unsafe_no_permissions=allow_unsafe_no_permissions,

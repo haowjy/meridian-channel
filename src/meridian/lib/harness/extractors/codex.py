@@ -31,7 +31,7 @@ _ROLLOUT_FILENAME_RE = re.compile(
 )
 
 
-def _resolve_rollout_session_id(path: Path, repo_root: Path) -> str | None:
+def _resolve_rollout_session_id(path: Path, project_root: Path) -> str | None:
     session_id: str | None = None
     saw_assistant_message = False
     saw_turn_aborted = False
@@ -65,7 +65,7 @@ def _resolve_rollout_session_id(path: Path, repo_root: Path) -> str | None:
             if not isinstance(cwd, str):
                 continue
             try:
-                if Path(cwd).expanduser().resolve() != repo_root:
+                if Path(cwd).expanduser().resolve() != project_root:
                     return None
             except OSError:
                 continue
@@ -116,7 +116,7 @@ def _detect_primary_session_id(
     if not sessions_root.is_dir():
         return None
 
-    repo_root = child_cwd.resolve()
+    project_root = child_cwd.resolve()
     candidates: list[tuple[float, Path]] = []
     for candidate in sessions_root.rglob("rollout-*.jsonl"):
         if _ROLLOUT_FILENAME_RE.match(candidate.name) is None:
@@ -128,7 +128,7 @@ def _detect_primary_session_id(
         candidates.append((modified_at, candidate))
 
     for _, candidate in sorted(candidates, key=lambda item: item[0], reverse=True):
-        resolved = _resolve_rollout_session_id(candidate, repo_root)
+        resolved = _resolve_rollout_session_id(candidate, project_root)
         if resolved:
             return resolved
     return None

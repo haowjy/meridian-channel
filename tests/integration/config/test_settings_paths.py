@@ -10,84 +10,84 @@ def test_resolve_project_root_prefers_agents_skills_ancestor(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    nested = repo_root / "src" / "feature"
-    (repo_root / ".agents" / "skills").mkdir(parents=True)
+    project_root = tmp_path / "repo"
+    nested = project_root / "src" / "feature"
+    (project_root / ".agents" / "skills").mkdir(parents=True)
     nested.mkdir(parents=True)
     monkeypatch.chdir(nested)
 
-    assert resolve_project_root() == repo_root.resolve()
+    assert resolve_project_root() == project_root.resolve()
 
 
 def test_resolve_project_root_stops_at_git_boundary(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    nested = repo_root / "src" / "feature"
-    repo_root.mkdir()
+    project_root = tmp_path / "repo"
+    nested = project_root / "src" / "feature"
+    project_root.mkdir()
     nested.mkdir(parents=True)
-    (repo_root / ".git").mkdir()
+    (project_root / ".git").mkdir()
     monkeypatch.chdir(nested)
 
-    assert resolve_project_root() == repo_root.resolve()
+    assert resolve_project_root() == project_root.resolve()
 
 
-def test_load_config_reads_meridian_toml_at_repo_root(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    config_path = repo_root / "meridian.toml"
+def test_load_config_reads_meridian_toml_at_project_root(tmp_path: Path) -> None:
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    config_path = project_root / "meridian.toml"
     config_path.write_text("[defaults]\nharness = \"claude\"\n", encoding="utf-8")
 
-    assert load_config(repo_root).default_harness == "claude"
+    assert load_config(project_root).default_harness == "claude"
 
 
 def test_load_config_ignores_legacy_state_path_when_root_config_missing(
     tmp_path: Path,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    legacy_path = repo_root / ".meridian" / "config.toml"
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    legacy_path = project_root / ".meridian" / "config.toml"
     legacy_path.parent.mkdir()
     legacy_path.write_text("[defaults]\nharness = \"claude\"\n", encoding="utf-8")
 
-    assert load_config(repo_root).default_harness == "codex"
+    assert load_config(project_root).default_harness == "codex"
 
 
 def test_resolve_project_config_state_reports_absent_and_write_target(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
 
-    state = resolve_project_config_state(repo_root)
+    state = resolve_project_config_state(project_root)
 
     assert state.status == "absent"
     assert state.path is None
-    assert state.write_path == repo_root.resolve() / "meridian.toml"
+    assert state.write_path == project_root.resolve() / "meridian.toml"
 
 
 def test_resolve_project_config_state_ignores_legacy_state_config(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    legacy_path = repo_root / ".meridian" / "config.toml"
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    legacy_path = project_root / ".meridian" / "config.toml"
     legacy_path.parent.mkdir()
     legacy_path.write_text("[defaults]\nmax_depth = 7\n", encoding="utf-8")
 
-    state = resolve_project_config_state(repo_root)
+    state = resolve_project_config_state(project_root)
 
     assert state.status == "absent"
     assert state.path is None
-    assert state.write_path == repo_root.resolve() / "meridian.toml"
+    assert state.write_path == project_root.resolve() / "meridian.toml"
 
 
 def test_resolve_project_config_state_reports_present_when_meridian_toml_exists(
     tmp_path: Path,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    config_path = repo_root / "meridian.toml"
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    config_path = project_root / "meridian.toml"
     config_path.write_text("[defaults]\nmax_depth = 7\n", encoding="utf-8")
 
-    state = resolve_project_config_state(repo_root)
+    state = resolve_project_config_state(project_root)
 
     assert state.status == "present"
     assert state.path == config_path.resolve()

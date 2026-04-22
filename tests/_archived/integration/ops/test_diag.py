@@ -14,10 +14,10 @@ from meridian.lib.ops.config import ConfigShowInput, config_show_sync
 from meridian.lib.ops.diag import DoctorInput, doctor_sync
 
 
-def _create_repo_root(tmp_path: Path) -> Path:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    return repo_root
+def _create_project_root(tmp_path: Path) -> Path:
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    return project_root
 
 
 def _warning_by_code(result: diag.DoctorOutput, code: str) -> diag.DoctorWarning:
@@ -25,16 +25,16 @@ def _warning_by_code(result: diag.DoctorOutput, code: str) -> diag.DoctorWarning
 
 
 def _setup_warning_shape_case(
-    repo_root: Path,
+    project_root: Path,
     monkeypatch: pytest.MonkeyPatch,
     *,
     create_agents_dir: bool = True,
     create_skills_dir: bool = True,
 ) -> None:
     if create_agents_dir:
-        (repo_root / ".agents" / "agents").mkdir(parents=True, exist_ok=True)
+        (project_root / ".agents" / "agents").mkdir(parents=True, exist_ok=True)
     if create_skills_dir:
-        (repo_root / ".agents" / "skills").mkdir(parents=True, exist_ok=True)
+        (project_root / ".agents" / "skills").mkdir(parents=True, exist_ok=True)
 
     # Keep warning tests focused on one producer at a time.
     monkeypatch.setattr(diag, "_repair_stale_session_locks", lambda *_args, **_kwargs: 0)
@@ -53,12 +53,12 @@ def _setup_warning_shape_case(
 
 def _apply_warning_trigger(
     trigger: str,
-    repo_root: Path,
+    project_root: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     if trigger == "missing_skills_directories":
         _setup_warning_shape_case(
-            repo_root,
+            project_root,
             monkeypatch,
             create_agents_dir=True,
             create_skills_dir=False,
@@ -66,14 +66,14 @@ def _apply_warning_trigger(
         return
     if trigger == "missing_agent_profile_directories":
         _setup_warning_shape_case(
-            repo_root,
+            project_root,
             monkeypatch,
             create_agents_dir=False,
             create_skills_dir=True,
         )
         return
     if trigger == "active_spawns_present":
-        _setup_warning_shape_case(repo_root, monkeypatch)
+        _setup_warning_shape_case(project_root, monkeypatch)
         monkeypatch.setattr(
             diag.spawn_store,
             "list_spawns",
@@ -99,10 +99,10 @@ def test_doctor_warning_shape_for_non_mars_warnings(
     expected_code: str,
     expected_payload_keys: tuple[str, ...],
 ) -> None:
-    repo_root = _create_repo_root(tmp_path)
-    _apply_warning_trigger(trigger, repo_root, monkeypatch)
+    project_root = _create_project_root(tmp_path)
+    _apply_warning_trigger(trigger, project_root, monkeypatch)
 
-    result = doctor_sync(DoctorInput(repo_root=repo_root.as_posix()))
+    result = doctor_sync(DoctorInput(project_root=project_root.as_posix()))
 
     assert isinstance(result.warnings, tuple)
     matching = [warning for warning in result.warnings if warning.code == expected_code]
@@ -121,8 +121,8 @@ def test_doctor_skips_orphan_run_repair_when_depth_is_nonzero(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = _create_repo_root(tmp_path)
-    _setup_warning_shape_case(repo_root, monkeypatch)
+    project_root = _create_project_root(tmp_path)
+    _setup_warning_shape_case(project_root, monkeypatch)
     monkeypatch.setenv("MERIDIAN_DEPTH", "1")
     called = False
 
@@ -133,7 +133,7 @@ def test_doctor_skips_orphan_run_repair_when_depth_is_nonzero(
 
     monkeypatch.setattr(diag, "_repair_orphan_runs", _unexpected_repair)
 
-    result = doctor_sync(DoctorInput(repo_root=repo_root.as_posix()))
+    result = doctor_sync(DoctorInput(project_root=project_root.as_posix()))
 
     assert called is False
     assert "orphan_runs" not in result.repaired
@@ -143,10 +143,10 @@ def test_doctor_reports_no_warnings_when_conditions_are_clear(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = _create_repo_root(tmp_path)
-    _setup_warning_shape_case(repo_root, monkeypatch)
+    project_root = _create_project_root(tmp_path)
+    _setup_warning_shape_case(project_root, monkeypatch)
 
-    result = doctor_sync(DoctorInput(repo_root=repo_root.as_posix()))
+    result = doctor_sync(DoctorInput(project_root=project_root.as_posix()))
 
     assert result.warnings == ()
     assert result.ok is True
@@ -156,7 +156,7 @@ def test_doctor_reports_outdated_dependency_warning(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = _create_repo_root(tmp_path)
+    project_root = _create_project_root(tmp_path)
     monkeypatch.setattr(
         diag,
         "check_upgrade_availability",
@@ -166,7 +166,7 @@ def test_doctor_reports_outdated_dependency_warning(
         ),
     )
 
-    result = doctor_sync(DoctorInput(repo_root=repo_root.as_posix()))
+    result = doctor_sync(DoctorInput(project_root=project_root.as_posix()))
 
     outdated = _warning_by_code(result, "outdated_dependencies")
     assert outdated.payload == {
@@ -190,14 +190,14 @@ def test_doctor_reports_update_check_failure_warning(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = _create_repo_root(tmp_path)
+    project_root = _create_project_root(tmp_path)
     monkeypatch.setattr(
         diag,
         "check_upgrade_availability",
         lambda *_args, **_kwargs: None,
     )
 
-    result = doctor_sync(DoctorInput(repo_root=repo_root.as_posix()))
+    result = doctor_sync(DoctorInput(project_root=project_root.as_posix()))
 
     updates_check = _warning_by_code(result, "updates_check_failed")
     assert updates_check.message == (
@@ -211,7 +211,7 @@ def test_doctor_surfaces_beyond_constraint_warning_from_outdated_payload(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = _create_repo_root(tmp_path)
+    project_root = _create_project_root(tmp_path)
     monkeypatch.setattr(mars_ops, "resolve_mars_executable", lambda: "/usr/bin/mars")
     real_run = subprocess.run
     outdated_payload = [
@@ -236,7 +236,7 @@ def test_doctor_surfaces_beyond_constraint_warning_from_outdated_payload(
 
     monkeypatch.setattr(mars_ops.subprocess, "run", _fake_run)
 
-    result = doctor_sync(DoctorInput(repo_root=repo_root.as_posix()))
+    result = doctor_sync(DoctorInput(project_root=project_root.as_posix()))
 
     outdated = _warning_by_code(result, "outdated_dependencies")
     assert outdated.payload == {
@@ -255,8 +255,8 @@ def test_doctor_uses_shared_config_surface_builder(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = _create_repo_root(tmp_path)
-    _setup_warning_shape_case(repo_root, monkeypatch)
+    project_root = _create_project_root(tmp_path)
+    _setup_warning_shape_case(project_root, monkeypatch)
     calls: list[Path] = []
     original_builder = diag.build_config_surface
 
@@ -266,17 +266,17 @@ def test_doctor_uses_shared_config_surface_builder(
 
     monkeypatch.setattr(diag, "build_config_surface", _tracked_builder)
 
-    doctor_sync(DoctorInput(repo_root=repo_root.as_posix()))
+    doctor_sync(DoctorInput(project_root=project_root.as_posix()))
 
-    assert calls == [repo_root]
+    assert calls == [project_root]
 
 
 def test_doctor_warning_surface_matches_config_show_for_missing_root(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "missing-repo"
-    shown = config_show_sync(ConfigShowInput(repo_root=repo_root.as_posix()))
+    project_root = tmp_path / "missing-repo"
+    shown = config_show_sync(ConfigShowInput(project_root=project_root.as_posix()))
     assert shown.warning is not None
 
     monkeypatch.setattr(diag, "_repair_stale_session_locks", lambda *_args, **_kwargs: 0)
@@ -292,7 +292,7 @@ def test_doctor_warning_surface_matches_config_show_for_missing_root(
         lambda *_args, **_kwargs: [],
     )
 
-    result = doctor_sync(DoctorInput(repo_root=repo_root.as_posix()))
+    result = doctor_sync(DoctorInput(project_root=project_root.as_posix()))
 
     assert shown.warning in {warning.message for warning in result.warnings}
 
@@ -301,14 +301,14 @@ def test_doctor_text_output_prefixes_warning_code(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = _create_repo_root(tmp_path)
+    project_root = _create_project_root(tmp_path)
     monkeypatch.setattr(
         diag,
         "check_upgrade_availability",
         lambda *_args, **_kwargs: None,
     )
 
-    result = doctor_sync(DoctorInput(repo_root=repo_root.as_posix()))
+    result = doctor_sync(DoctorInput(project_root=project_root.as_posix()))
 
     text = result.format_text()
     assert "warning: updates_check_failed: Could not check for dependency updates" in text
@@ -318,24 +318,24 @@ def test_doctor_surfaces_workspace_invalid_warning(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = _create_repo_root(tmp_path)
-    _setup_warning_shape_case(repo_root, monkeypatch)
-    (repo_root / "workspace.local.toml").write_text("[[context-roots]]\n", encoding="utf-8")
+    project_root = _create_project_root(tmp_path)
+    _setup_warning_shape_case(project_root, monkeypatch)
+    (project_root / "workspace.local.toml").write_text("[[context-roots]]\n", encoding="utf-8")
 
-    result = doctor_sync(DoctorInput(repo_root=repo_root.as_posix()))
+    result = doctor_sync(DoctorInput(project_root=project_root.as_posix()))
 
     warning = _warning_by_code(result, "workspace_invalid")
     assert "Invalid workspace schema" in warning.message
-    assert warning.payload == {"path": (repo_root / "workspace.local.toml").resolve().as_posix()}
+    assert warning.payload == {"path": (project_root / "workspace.local.toml").resolve().as_posix()}
 
 
 def test_doctor_surfaces_workspace_unknown_and_missing_root_warnings(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = _create_repo_root(tmp_path)
-    _setup_warning_shape_case(repo_root, monkeypatch)
-    (repo_root / "workspace.local.toml").write_text(
+    project_root = _create_project_root(tmp_path)
+    _setup_warning_shape_case(project_root, monkeypatch)
+    (project_root / "workspace.local.toml").write_text(
         'future = "value"\n'
         "[[context-roots]]\n"
         'path = "./missing-root"\n'
@@ -343,13 +343,13 @@ def test_doctor_surfaces_workspace_unknown_and_missing_root_warnings(
         encoding="utf-8",
     )
 
-    result = doctor_sync(DoctorInput(repo_root=repo_root.as_posix()))
+    result = doctor_sync(DoctorInput(project_root=project_root.as_posix()))
 
     unknown = _warning_by_code(result, "workspace_unknown_key")
     assert unknown.payload == {"keys": ["future", "context-roots[1].note"]}
     missing = _warning_by_code(result, "workspace_missing_root")
     assert missing.payload == {
-        "roots": [(repo_root / "missing-root").resolve().as_posix()],
+        "roots": [(project_root / "missing-root").resolve().as_posix()],
     }
 
 
@@ -357,16 +357,16 @@ def test_doctor_surfaces_workspace_unsupported_harness_for_codex(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = _create_repo_root(tmp_path)
-    _setup_warning_shape_case(repo_root, monkeypatch)
-    (repo_root / "shared").mkdir()
-    (repo_root / "workspace.local.toml").write_text(
+    project_root = _create_project_root(tmp_path)
+    _setup_warning_shape_case(project_root, monkeypatch)
+    (project_root / "shared").mkdir()
+    (project_root / "workspace.local.toml").write_text(
         "[[context-roots]]\n"
         'path = "./shared"\n',
         encoding="utf-8",
     )
 
-    result = doctor_sync(DoctorInput(repo_root=repo_root.as_posix()))
+    result = doctor_sync(DoctorInput(project_root=project_root.as_posix()))
 
     warning = _warning_by_code(result, "workspace_unsupported_harness")
     assert warning.payload == {
@@ -379,7 +379,7 @@ def test_doctor_skips_mars_model_resolution_for_config_surface(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = _create_repo_root(tmp_path)
+    project_root = _create_project_root(tmp_path)
     monkeypatch.setenv("MERIDIAN_DEFAULT_MODEL", "gpt-5.4")
     monkeypatch.setattr(diag, "_repair_stale_session_locks", lambda *_args, **_kwargs: 0)
     monkeypatch.setattr(diag, "_repair_orphan_runs", lambda *_args, **_kwargs: 0)
@@ -399,6 +399,6 @@ def test_doctor_skips_mars_model_resolution_for_config_surface(
 
     monkeypatch.setattr(catalog_models, "resolve_model", _unexpected_resolve_model)
 
-    result = doctor_sync(DoctorInput(repo_root=repo_root.as_posix()))
+    result = doctor_sync(DoctorInput(project_root=project_root.as_posix()))
 
-    assert result.repo_root == repo_root.as_posix()
+    assert result.project_root == project_root.as_posix()

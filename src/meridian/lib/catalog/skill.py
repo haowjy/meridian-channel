@@ -77,8 +77,8 @@ def discover_skill_files(skills_dir: Path) -> list[Path]:
     return sorted(path for path in skills_dir.rglob("SKILL.md") if path.is_file())
 
 
-def _skill_search_dirs(repo_root: Path) -> list[Path]:
-    return [repo_root / ".agents" / "skills"]
+def _skill_search_dirs(project_root: Path) -> list[Path]:
+    return [project_root / ".agents" / "skills"]
 
 
 def files_have_equal_text(first: Path, second: Path) -> bool:
@@ -89,12 +89,12 @@ def files_have_equal_text(first: Path, second: Path) -> bool:
 
 
 def scan_skills(
-    repo_root: Path | None = None,
+    project_root: Path | None = None,
     skills_dirs: list[Path] | None = None,
 ) -> list[SkillDocument]:
     """Scan configured skill directories and parse all discovered skills."""
 
-    root = resolve_project_root(repo_root)
+    root = resolve_project_root(project_root)
     directories = skills_dirs if skills_dirs is not None else _skill_search_dirs(root)
     documents: list[SkillDocument] = []
     selected_by_name: dict[str, SkillDocument] = {}
@@ -130,18 +130,18 @@ class SkillRegistry:
 
     def __init__(
         self,
-        repo_root: Path | None = None,
+        project_root: Path | None = None,
         *,
         readonly: bool = False,
     ) -> None:
-        self._repo_root = resolve_project_root(repo_root)
-        self._skills_dirs = tuple(_skill_search_dirs(self._repo_root))
+        self._project_root = resolve_project_root(project_root)
+        self._skills_dirs = tuple(_skill_search_dirs(self._project_root))
         self._readonly = readonly
         self._filesystem_documents: tuple[SkillDocument, ...] | None = None
 
     @property
-    def repo_root(self) -> Path:
-        return self._repo_root
+    def project_root(self) -> Path:
+        return self._project_root
 
     @property
     def skills_dirs(self) -> tuple[Path, ...]:
@@ -154,7 +154,7 @@ class SkillRegistry:
     def _scan_documents(self, *, refresh: bool = False) -> tuple[SkillDocument, ...]:
         if self._filesystem_documents is None or refresh:
             self._filesystem_documents = tuple(
-                scan_skills(self._repo_root, skills_dirs=list(self._skills_dirs))
+                scan_skills(self._project_root, skills_dirs=list(self._skills_dirs))
             )
         return self._filesystem_documents
 
@@ -175,7 +175,7 @@ class SkillRegistry:
         else:
             scan_dirs = list(self._skills_dirs)
 
-        documents = tuple(scan_skills(self._repo_root, skills_dirs=scan_dirs))
+        documents = tuple(scan_skills(self._project_root, skills_dirs=scan_dirs))
         self._filesystem_documents = documents
         return IndexReport(indexed_count=len(documents))
 

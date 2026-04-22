@@ -62,11 +62,11 @@ def test_init_alias_link_uses_mars_init_when_mars_toml_missing(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    captured_repo_root: dict[str, str] = {}
+    captured_project_root: dict[str, str] = {}
     captured_mars: list[tuple[tuple[str, ...], str | None]] = []
 
     def _fake_config_init(payload: Any) -> object:
-        captured_repo_root["value"] = payload.repo_root
+        captured_project_root["value"] = payload.project_root
         return object()
 
     def _fake_run_mars_passthrough(
@@ -83,7 +83,7 @@ def test_init_alias_link_uses_mars_init_when_mars_toml_missing(
     cli_main.init_alias(path=tmp_path.as_posix(), link=".claude")
 
     expected_root = tmp_path.resolve().as_posix()
-    assert captured_repo_root["value"] == expected_root
+    assert captured_project_root["value"] == expected_root
     assert captured_mars == [
         (("--root", expected_root, "init", "--link", ".claude"), "text"),
     ]

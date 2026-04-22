@@ -161,7 +161,7 @@ def _spawn_child_env(
 
 def _spawn_background_worker_env(
     *,
-    repo_root: Path,
+    project_root: Path,
     work_id: str | None = None,
     autocompact: int | None = None,
 ) -> dict[str, str]:
@@ -180,16 +180,16 @@ def _spawn_background_worker_env(
     work_dir: Path | None = None
     if normalized_work_id:
         work_dir = resolve_work_scratch_dir(
-            resolve_repo_paths(repo_root).root_dir,
+            resolve_repo_paths(project_root).root_dir,
             normalized_work_id,
         )
 
-    # Omit repo_root/state_root/chat_id (pass None) — those are already
+    # Omit project_root/state_root/chat_id (pass None) — those are already
     # correct in the inherited os.environ.  increment_depth=False because the
     # background worker is a peer, not a depth-child.
     child_env = build_child_env_overrides(
         parent_spawn_id=None,  # inherited from os.environ
-        repo_root=None,
+        project_root=None,
         state_root=None,
         parent_chat_id=None,
         parent_depth=parent_depth,
@@ -248,9 +248,9 @@ def _init_spawn(
     ctx: RuntimeContext | None = None,
 ) -> _SpawnContext:
     resolved_context = runtime_context(ctx)
-    project_paths = resolve_project_config_paths(repo_root=runtime.repo_root)
-    repo_state_root = resolve_repo_paths(project_paths.repo_root).root_dir
-    state_root = resolve_runtime_root(project_paths.repo_root)
+    project_paths = resolve_project_config_paths(project_root=runtime.project_root)
+    repo_state_root = resolve_repo_paths(project_paths.project_root).root_dir
+    state_root = resolve_runtime_root(project_paths.project_root)
     resolved_work_id = _resolve_work_id(
         payload=payload,
         runtime_context=resolved_context,
@@ -260,7 +260,7 @@ def _init_spawn(
         resolved_work_id = cast("str", resolved_work_id)
         resolved_work_id = ensure_explicit_work_item(repo_state_root, resolved_work_id)
     resolved_desc = (desc if desc is not None else payload.desc).strip() or None
-    service = create_lifecycle_service(project_paths.repo_root, state_root)
+    service = create_lifecycle_service(project_paths.project_root, state_root)
     spawn_id = service.start(
         chat_id=resolve_chat_id(ctx=resolved_context, fallback="c0"),
         parent_id=str(resolved_context.spawn_id) if resolved_context.spawn_id else None,
@@ -319,7 +319,7 @@ def _write_params_json(
     work_id: str | None = None,
 ) -> None:
     """Write resolved execution params to the spawn directory."""
-    params_path = resolve_spawn_log_dir(project_paths.repo_root, spawn_id) / "params.json"
+    params_path = resolve_spawn_log_dir(project_paths.project_root, spawn_id) / "params.json"
     params_path.parent.mkdir(parents=True, exist_ok=True)
     params_payload = {
         "model": request.model or "",
@@ -455,8 +455,8 @@ async def _execute_existing_spawn(
     ctx: RuntimeContext | None = None,
 ) -> int:
     resolved_context = runtime_context(ctx)
-    runtime = build_runtime(str(project_paths.repo_root), sink=sink)
-    state_root = resolve_runtime_root(project_paths.repo_root)
+    runtime = build_runtime(str(project_paths.project_root), sink=sink)
+    state_root = resolve_runtime_root(project_paths.project_root)
     spawn_record = spawn_store.get_spawn(state_root, spawn_id)
     if spawn_record is None:
         logger.error("Spawn not found for background execution.", spawn_id=str(spawn_id))
@@ -505,7 +505,7 @@ async def _execute_existing_spawn(
     if not resolved_execution_cwd:
         resolved_execution_cwd = str(
             resolve_child_execution_cwd(
-                repo_root=project_paths.repo_root,
+                project_root=project_paths.project_root,
                 spawn_id=str(spawn_id),
                 harness_id=resolved_harness_id,
             )
@@ -577,7 +577,7 @@ async def _execute_existing_spawn(
             update={
                 "argv_intent": LaunchArgvIntent.SPEC_ONLY,
                 "state_root": state_root.as_posix(),
-                "project_paths_repo_root": project_paths.repo_root.as_posix(),
+                "project_paths_project_root": project_paths.project_root.as_posix(),
                 "project_paths_execution_cwd": resolved_execution_cwd,
             }
         )
@@ -590,7 +590,7 @@ async def _execute_existing_spawn(
             runtime_work_id=runtime_work_id,
         )
         write_projection_artifacts(
-            log_dir=resolve_spawn_log_dir(project_paths.repo_root, spawn.spawn_id),
+            log_dir=resolve_spawn_log_dir(project_paths.project_root, spawn.spawn_id),
             launch_context=launch_context,
             surface="spawn",
         )
@@ -598,7 +598,7 @@ async def _execute_existing_spawn(
             spawn,
             request=final_request,
             launch_context=launch_context,
-            repo_root=project_paths.repo_root,
+            project_root=project_paths.project_root,
             state_root=state_root,
             artifacts=runtime.artifacts,
             harness_session_id_observer=session_context.harness_session_id_observer,
@@ -618,7 +618,7 @@ def _build_background_worker_command(
         "--spawn-id",
         spawn_id,
         "--repo-root",
-        project_paths.repo_root.as_posix(),
+        project_paths.project_root.as_posix(),
     )
 
 
@@ -630,7 +630,7 @@ def execute_spawn_background(
     ctx: RuntimeContext | None = None,
 ) -> SpawnActionOutput:
     resolved_context = runtime_context(ctx)
-    project_paths = resolve_project_config_paths(repo_root=runtime.repo_root)
+    project_paths = resolve_project_config_paths(project_root=runtime.project_root)
     if payload.stream:
         logger.warning("--stream requires --foreground; output goes to spawn log files.")
     autocompact = request.autocompact
@@ -648,22 +648,22 @@ def execute_spawn_background(
     spawn_id_text = str(context.spawn.spawn_id)
     execution_cwd_str = str(
         resolve_child_execution_cwd(
-            repo_root=project_paths.repo_root,
+            project_root=project_paths.project_root,
             spawn_id=spawn_id_text,
             harness_id=request.harness or "",
         )
     )
     # Record pre-computed execution_cwd immediately so it's correct even if
     # the background worker dies before runner.py's authoritative update.
-    if execution_cwd_str != str(project_paths.repo_root):
+    if execution_cwd_str != str(project_paths.project_root):
         spawn_store.update_spawn(
             context.state_root,
             context.spawn.spawn_id,
             execution_cwd=execution_cwd_str,
         )
-    log_dir = resolve_spawn_log_dir(project_paths.repo_root, context.spawn.spawn_id)
+    log_dir = resolve_spawn_log_dir(project_paths.project_root, context.spawn.spawn_id)
     log_dir.mkdir(parents=True, exist_ok=True)
-    lifecycle_service = create_lifecycle_service(project_paths.repo_root, context.state_root)
+    lifecycle_service = create_lifecycle_service(project_paths.project_root, context.state_root)
     try:
         _write_params_json(
             project_paths,
@@ -683,7 +683,7 @@ def execute_spawn_background(
             argv_intent=LaunchArgvIntent.SPEC_ONLY,
             debug=payload.debug,
             state_root=context.state_root.as_posix(),
-            project_paths_repo_root=project_paths.repo_root.as_posix(),
+            project_paths_project_root=project_paths.project_root.as_posix(),
             project_paths_execution_cwd=execution_cwd_str,
         )
         _persist_bg_worker_request(
@@ -732,7 +732,7 @@ def execute_spawn_background(
     launch_env = dict(os.environ)
     launch_env.update(
         _spawn_background_worker_env(
-            repo_root=project_paths.repo_root,
+            project_root=project_paths.project_root,
             work_id=context.work_id,
             autocompact=autocompact,
         )
@@ -813,7 +813,7 @@ def execute_spawn_blocking(
     ctx: RuntimeContext | None = None,
 ) -> SpawnActionOutput:
     resolved_context = runtime_context(ctx)
-    project_paths = resolve_project_config_paths(repo_root=runtime.repo_root)
+    project_paths = resolve_project_config_paths(project_root=runtime.project_root)
     autocompact = request.autocompact
     context = _init_spawn(
         payload=payload,
@@ -830,12 +830,12 @@ def execute_spawn_blocking(
     spawn = context.spawn
     execution_cwd_str = str(
         resolve_child_execution_cwd(
-            repo_root=project_paths.repo_root,
+            project_root=project_paths.project_root,
             spawn_id=str(spawn.spawn_id),
             harness_id=request.harness or "",
         )
     )
-    if execution_cwd_str != str(project_paths.repo_root):
+    if execution_cwd_str != str(project_paths.project_root):
         # Pre-compute execution CWD for immediate visibility.
         # runner.py writes the authoritative value right before execution.
         spawn_store.update_spawn(
@@ -917,7 +917,7 @@ def execute_spawn_blocking(
             debug=payload.debug,
             harness_command_override=os.getenv("MERIDIAN_HARNESS_COMMAND", "").strip() or None,
             state_root=context.state_root.as_posix(),
-            project_paths_repo_root=project_paths.repo_root.as_posix(),
+            project_paths_project_root=project_paths.project_root.as_posix(),
             project_paths_execution_cwd=project_paths.execution_cwd.as_posix(),
         )
         launch_context = build_launch_context(
@@ -929,7 +929,7 @@ def execute_spawn_blocking(
             runtime_work_id=runtime_work_id,
         )
         write_projection_artifacts(
-            log_dir=resolve_spawn_log_dir(project_paths.repo_root, spawn.spawn_id),
+            log_dir=resolve_spawn_log_dir(project_paths.project_root, spawn.spawn_id),
             launch_context=launch_context,
             surface="spawn",
         )
@@ -938,7 +938,7 @@ def execute_spawn_blocking(
                 spawn,
                 request=launch_request,
                 launch_context=launch_context,
-                repo_root=project_paths.repo_root,
+                project_root=project_paths.project_root,
                 state_root=context.state_root,
                 artifacts=runtime.artifacts,
                 event_observer=event_observer,
@@ -949,7 +949,7 @@ def execute_spawn_blocking(
             )
         )
     duration = time.monotonic() - started
-    row = read_spawn_row(project_paths.repo_root, str(spawn.spawn_id))
+    row = read_spawn_row(project_paths.project_root, str(spawn.spawn_id))
     # Report is read on-demand via `spawn show`, not inlined here.
     status = "failed"
     if row is not None:
@@ -1011,17 +1011,17 @@ def _background_worker_main(
     parser = _build_background_worker_parser()
     parsed = parser.parse_args(list(argv) if argv is not None else None)
 
-    repo_root = Path(parsed.repo_root).expanduser().resolve()
-    project_paths = resolve_project_config_paths(repo_root=repo_root)
+    project_root = Path(parsed.project_root).expanduser().resolve()
+    project_paths = resolve_project_config_paths(project_root=project_root)
     spawn_id = SpawnId(parsed.spawn_id)
-    state_root = resolve_runtime_root(project_paths.repo_root)
-    log_dir = resolve_spawn_log_dir(project_paths.repo_root, spawn_id)
+    state_root = resolve_runtime_root(project_paths.project_root)
+    log_dir = resolve_spawn_log_dir(project_paths.project_root, spawn_id)
     try:
         try:
             launch_request = _load_bg_worker_request(log_dir)
         except Exception as exc:
             error = f"Failed to load background worker request: {exc}"
-            create_lifecycle_service(repo_root, state_root).finalize(
+            create_lifecycle_service(project_root, state_root).finalize(
                 str(spawn_id),
                 status="failed",
                 exit_code=1,

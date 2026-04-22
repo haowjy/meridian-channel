@@ -33,10 +33,10 @@ def _write_hook_recorder(path: Path) -> None:
 def test_spawn_lifecycle_dispatches_spawn_hooks_with_expected_context(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    (repo_root / ".git").mkdir()
-    state_root = repo_root / ".meridian"
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    (project_root / ".git").mkdir()
+    state_root = project_root / ".meridian"
 
     user_config = tmp_path / "user-config.toml"
     user_config.write_text("", encoding="utf-8")
@@ -48,7 +48,7 @@ def test_spawn_lifecycle_dispatches_spawn_hooks_with_expected_context(
     _write_hook_recorder(recorder)
     command = _python_command(recorder, marker.as_posix())
 
-    (repo_root / "meridian.toml").write_text(
+    (project_root / "meridian.toml").write_text(
         f"[[hooks]]\n"
         f"name = 'record-created'\n"
         f"event = 'spawn.created'\n"
@@ -60,7 +60,7 @@ def test_spawn_lifecycle_dispatches_spawn_hooks_with_expected_context(
         encoding="utf-8",
     )
 
-    lifecycle = create_lifecycle_service(repo_root, state_root)
+    lifecycle = create_lifecycle_service(project_root, state_root)
     spawn_id = lifecycle.start(
         chat_id="chat-1",
         model="gpt-5.4",
@@ -89,7 +89,7 @@ def test_spawn_lifecycle_dispatches_spawn_hooks_with_expected_context(
     assert created["spawn"]["agent"] == "reviewer"
     assert created["spawn"]["model"] == "gpt-5.4"
     assert created["work"]["id"] == "hook-work"
-    assert created["repo_root"] == repo_root.resolve().as_posix()
+    assert created["project_root"] == project_root.resolve().as_posix()
     assert created["state_root"] == state_root.resolve().as_posix()
 
     finalized = by_event["spawn.finalized"]

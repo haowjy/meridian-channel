@@ -21,7 +21,7 @@ class ResolvedRunInputs(BaseModel):
     agent: str | None = None
     adhoc_agent_payload: str = ""
     extra_args: tuple[str, ...] = ()
-    repo_root: str | None = None
+    project_root: str | None = None
     mcp_tools: tuple[str, ...] = ()
     interactive: bool = False
     continue_harness_session_id: str | None = None

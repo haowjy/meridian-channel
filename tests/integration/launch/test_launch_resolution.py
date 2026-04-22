@@ -20,8 +20,8 @@ from meridian.lib.launch.types import LaunchRequest
 from tests.support.fixtures import write_agent, write_skill
 
 
-def _write_minimal_mars_config(repo_root: Path) -> None:
-    (repo_root / "mars.toml").write_text(
+def _write_minimal_mars_config(project_root: Path) -> None:
+    (project_root / "mars.toml").write_text(
         "[settings]\n"
         'targets = [".agents"]\n',
         encoding="utf-8",
@@ -74,7 +74,7 @@ def test_primary_launch_injects_inventory_by_harness_family(
         request=build_primary_spawn_request(
             request=LaunchRequest(model=model, agent="dev-orchestrator")
         ),
-        runtime=build_primary_launch_runtime(repo_root=tmp_path),
+        runtime=build_primary_launch_runtime(project_root=tmp_path),
         harness_registry=registry,
         dry_run=True,
     )
@@ -118,7 +118,7 @@ def test_workspace_roots_append_after_claude_preflight_projection(
         runtime=LaunchRuntime(
             argv_intent=LaunchArgvIntent.REQUIRED,
             state_root=(tmp_path / ".meridian").as_posix(),
-            project_paths_repo_root=tmp_path.as_posix(),
+            project_paths_project_root=tmp_path.as_posix(),
             project_paths_execution_cwd=tmp_path.as_posix(),
         ),
         harness_registry=registry,
@@ -173,7 +173,7 @@ def test_opencode_workspace_projection_handles_parent_env_suppression(
         runtime=LaunchRuntime(
             argv_intent=LaunchArgvIntent.REQUIRED,
             state_root=(tmp_path / ".meridian").as_posix(),
-            project_paths_repo_root=tmp_path.as_posix(),
+            project_paths_project_root=tmp_path.as_posix(),
             project_paths_execution_cwd=tmp_path.as_posix(),
         ),
         harness_registry=registry,
@@ -216,7 +216,7 @@ def test_spawn_prepare_opencode_uses_native_file_injection_and_keeps_inline_fall
             argv_intent=LaunchArgvIntent.REQUIRED,
             composition_surface=LaunchCompositionSurface.SPAWN_PREPARE,
             state_root=(tmp_path / ".meridian").as_posix(),
-            project_paths_repo_root=tmp_path.as_posix(),
+            project_paths_project_root=tmp_path.as_posix(),
             project_paths_execution_cwd=tmp_path.as_posix(),
         ),
         harness_registry=get_default_harness_registry(),

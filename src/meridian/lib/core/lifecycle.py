@@ -421,7 +421,7 @@ def _hooks_dispatch_enabled(env: Mapping[str, str] | None = None) -> bool:
     return value.strip().lower() != "false"
 
 
-def get_hook_dispatcher(repo_root: Path, state_root: Path) -> HookDispatcher | None:
+def get_hook_dispatcher(project_root: Path, state_root: Path) -> HookDispatcher | None:
     """Build a hook dispatcher when hook dispatch is enabled."""
 
     if not _hooks_dispatch_enabled():
@@ -436,18 +436,18 @@ def get_hook_dispatcher(repo_root: Path, state_root: Path) -> HookDispatcher | N
         )
         return None
 
-    return HookDispatcher(repo_root, state_root)
+    return HookDispatcher(project_root, state_root)
 
 
 def create_lifecycle_service(
-    repo_root: Path,
+    project_root: Path,
     state_root: Path,
     *,
     repository: SpawnRepository | None = None,
 ) -> SpawnLifecycleService:
     """Create a spawn lifecycle service with centralized hook wiring."""
 
-    dispatcher = get_hook_dispatcher(repo_root, state_root)
+    dispatcher = get_hook_dispatcher(project_root, state_root)
     hooks: list[LifecycleHook] | None = [dispatcher] if dispatcher is not None else None
     return SpawnLifecycleService(
         state_root,

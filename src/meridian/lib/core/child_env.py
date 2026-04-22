@@ -14,7 +14,7 @@ from meridian.lib.core.types import SpawnId
 ALLOWED_CHILD_ENV_KEYS: frozenset[str] = frozenset(
     {
         "MERIDIAN_SPAWN_ID",
-        "MERIDIAN_REPO_ROOT",
+        "MERIDIAN_PROJECT_DIR",
         "MERIDIAN_PROJECT_ROOT",
         "MERIDIAN_DEPTH",
         "MERIDIAN_CHAT_ID",
@@ -40,7 +40,7 @@ def validate_child_env_keys(overrides: Mapping[str, str]) -> None:
 def build_child_env_overrides(
     *,
     parent_spawn_id: str | None,
-    repo_root: Path | None,
+    project_root: Path | None,
     state_root: Path | None,
     parent_chat_id: str | None,
     parent_depth: int,
@@ -59,8 +59,8 @@ def build_child_env_overrides(
     ----------
     parent_spawn_id:
         Parent spawn ID string, or ``None`` to omit ``MERIDIAN_SPAWN_ID``.
-    repo_root:
-        Repo root path, or ``None`` to omit ``MERIDIAN_REPO_ROOT``.
+    project_root:
+        Repo root path, or ``None`` to omit ``MERIDIAN_PROJECT_DIR``.
     state_root:
         State root path, or ``None`` to omit ``MERIDIAN_PROJECT_ROOT``.
     parent_chat_id:
@@ -95,7 +95,7 @@ def build_child_env_overrides(
     ctx = ResolvedContext(
         spawn_id=SpawnId(parent_spawn_id) if parent_spawn_id else None,
         depth=parent_depth,
-        repo_root=repo_root,
+        project_root=project_root,
         state_root=state_root,
         chat_id=parent_chat_id or "",
         work_id=work_id,

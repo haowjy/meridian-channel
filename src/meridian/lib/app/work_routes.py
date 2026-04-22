@@ -98,7 +98,7 @@ def _write_active_work_state(repo_state_root: Path, work_id: str | None) -> None
 def _work_item_to_projection(
     item: object,
     *,
-    repo_root: Path,
+    project_root: Path,
     repo_state_root: Path,
     spawn_count: int = 0,
     session_count: int = 0,
@@ -118,7 +118,7 @@ def _work_item_to_projection(
         name=name,
         status=status,
         description=description,
-        work_dir=work_dir_display(repo_root, repo_state_root, name),
+        work_dir=work_dir_display(project_root, repo_state_root, name),
         created_at=created_at,
         last_activity_at=last_activity_at,
         spawn_count=spawn_count,
@@ -131,7 +131,7 @@ def register_work_routes(
     *,
     state_root: Path,
     repo_state_root: Path,
-    repo_root: Path,
+    project_root: Path,
     event_broadcaster: StreamBroadcaster | None = None,
     http_exception: HTTPExceptionCallable,
 ) -> None:
@@ -197,7 +197,7 @@ def register_work_routes(
             projections.append(
                 _work_item_to_projection(
                     item,
-                    repo_root=repo_root,
+                    project_root=project_root,
                     repo_state_root=repo_state_root,
                     spawn_count=spawn_count,
                     session_count=session_count,
@@ -222,7 +222,7 @@ def register_work_routes(
         spawn_count, session_count, last_activity = _get_work_stats(item.name)
         return _work_item_to_projection(
             item,
-            repo_root=repo_root,
+            project_root=project_root,
             repo_state_root=repo_state_root,
             spawn_count=spawn_count,
             session_count=session_count,
@@ -252,7 +252,7 @@ def register_work_routes(
         _broadcast("work.created", {"work_id": item.name, "status": item.status})
         return _work_item_to_projection(
             item,
-            repo_root=repo_root,
+            project_root=project_root,
             repo_state_root=repo_state_root,
         )
 
@@ -272,7 +272,7 @@ def register_work_routes(
         _broadcast("work.archived", {"work_id": archived_item.name, "status": archived_item.status})
         return _work_item_to_projection(
             archived_item,
-            repo_root=repo_root,
+            project_root=project_root,
             repo_state_root=repo_state_root,
         )
 

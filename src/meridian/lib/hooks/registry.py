@@ -15,13 +15,15 @@ class HookRegistry:
 
     def __init__(
         self,
-        repo_root: Path,
+        project_root: Path,
         *,
         user_config: Path | None = None,
         hooks_config: HooksConfig | None = None,
     ) -> None:
-        self._repo_root = repo_root.expanduser().resolve()
-        self._config = hooks_config or load_hooks_config(self._repo_root, user_config=user_config)
+        self._project_root = project_root.expanduser().resolve()
+        self._config = hooks_config or load_hooks_config(
+            self._project_root, user_config=user_config
+        )
         self._hooks = {hook.name: hook for hook in self._config.hooks}
         self._by_event: dict[HookEventName, list[Hook]] = {}
         self._build_event_index()

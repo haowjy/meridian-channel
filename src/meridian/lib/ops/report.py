@@ -17,40 +17,40 @@ from meridian.lib.state import spawn_store
 
 
 def _resolve_target_spawn_id(
-    repo_root: Path,
+    project_root: Path,
     spawn_id: str | None,
     *,
     current_spawn_id: str | None = None,
 ) -> str:
     candidate = (spawn_id or "").strip()
     if candidate:
-        return resolve_spawn_reference(repo_root, candidate)
+        return resolve_spawn_reference(project_root, candidate)
     normalized_current_spawn = (current_spawn_id or "").strip()
     if normalized_current_spawn:
-        return resolve_spawn_reference(repo_root, normalized_current_spawn)
+        return resolve_spawn_reference(project_root, normalized_current_spawn)
     raise ValueError("Spawn ID is required. Pass --spawn or set MERIDIAN_SPAWN_ID.")
 
 
 def _resolve_spawn(
     *,
-    repo_root: Path,
+    project_root: Path,
     spawn_id: str | None,
     ctx: RuntimeContext | None = None,
 ) -> str:
     resolved_ctx = runtime_context(ctx)
     resolved_spawn = _resolve_target_spawn_id(
-        repo_root,
+        project_root,
         spawn_id,
         current_spawn_id=str(resolved_ctx.spawn_id or ""),
     )
-    state_root = resolve_runtime_root_for_read(repo_root)
+    state_root = resolve_runtime_root_for_read(project_root)
     if spawn_store.get_spawn(state_root, resolved_spawn) is None:
         raise ValueError(f"Spawn '{resolved_spawn}' not found")
     return resolved_spawn
 
 
-def _report_path(repo_root: Path, *, spawn_id: str) -> Path:
-    return resolve_runtime_root_for_read(repo_root) / "spawns" / spawn_id / "report.md"
+def _report_path(project_root: Path, *, spawn_id: str) -> Path:
+    return resolve_runtime_root_for_read(project_root) / "spawns" / spawn_id / "report.md"
 
 
 def _report_snippet(text: str, *, query: str) -> str:
@@ -73,7 +73,7 @@ class ReportShowInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     spawn_id: str | None = None
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class ReportShowOutput(BaseModel):
@@ -94,7 +94,7 @@ class ReportSearchInput(BaseModel):
     query: str = ""
     spawn_id: str | None = None
     limit: int = 20
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class ReportSearchResult(BaseModel):
@@ -123,12 +123,12 @@ def report_show_sync(
     payload: ReportShowInput,
     ctx: RuntimeContext | None = None,
 ) -> ReportShowOutput:
-    explicit_repo_root = (
-        Path(payload.repo_root).expanduser().resolve() if payload.repo_root else None
+    explicit_project_root = (
+        Path(payload.project_root).expanduser().resolve() if payload.project_root else None
     )
-    repo_root = resolve_project_root(explicit_repo_root)
-    spawn_id = _resolve_spawn(repo_root=repo_root, spawn_id=payload.spawn_id, ctx=ctx)
-    report_path = _report_path(repo_root, spawn_id=spawn_id)
+    project_root = resolve_project_root(explicit_project_root)
+    spawn_id = _resolve_spawn(project_root=project_root, spawn_id=payload.spawn_id, ctx=ctx)
+    report_path = _report_path(project_root, spawn_id=spawn_id)
     if not report_path.is_file():
         raise ValueError(f"Report for spawn '{spawn_id}' not found")
     report = report_path.read_text(encoding="utf-8", errors="ignore").strip()
@@ -144,26 +144,28 @@ def report_search_sync(
     ctx: RuntimeContext | None = None,
 ) -> ReportSearchOutput:
     resolved_ctx = runtime_context(ctx)
-    explicit_repo_root = (
-        Path(payload.repo_root).expanduser().resolve() if payload.repo_root else None
+    explicit_project_root = (
+        Path(payload.project_root).expanduser().resolve() if payload.project_root else None
     )
-    repo_root = resolve_project_root(explicit_repo_root)
+    project_root = resolve_project_root(explicit_project_root)
     limit = payload.limit if payload.limit > 0 else 20
     query = payload.query.strip()
 
     if payload.spawn_id is not None and payload.spawn_id.strip():
-        spawn_ids = (resolve_spawn_reference(repo_root, payload.spawn_id.strip()),)
+        spawn_ids = (resolve_spawn_reference(project_root, payload.spawn_id.strip()),)
     elif resolved_ctx.spawn_id is not None:
-        spawn_ids = (resolve_spawn_reference(repo_root, str(resolved_ctx.spawn_id)),)
+        spawn_ids = (resolve_spawn_reference(project_root, str(resolved_ctx.spawn_id)),)
     else:
         spawn_ids = tuple(
             row.id
-            for row in reversed(spawn_store.list_spawns(resolve_runtime_root_for_read(repo_root)))
+            for row in reversed(
+                spawn_store.list_spawns(resolve_runtime_root_for_read(project_root))
+            )
         )
 
     matches: list[ReportSearchResult] = []
     for spawn_id in spawn_ids:
-        report_path = _report_path(repo_root, spawn_id=spawn_id)
+        report_path = _report_path(project_root, spawn_id=spawn_id)
         if not report_path.is_file():
             continue
         report = report_path.read_text(encoding="utf-8", errors="ignore")

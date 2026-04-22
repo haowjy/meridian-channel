@@ -23,7 +23,7 @@ from meridian.lib.safety.permissions import (
 )
 
 _MERIDIAN_RUNTIME_KEYS = (
-    "MERIDIAN_REPO_ROOT",
+    "MERIDIAN_PROJECT_DIR",
     "MERIDIAN_PROJECT_ROOT",
     "MERIDIAN_DEPTH",
     "MERIDIAN_CHAT_ID",
@@ -248,7 +248,7 @@ def test_merge_env_overrides_rejects_meridian_keys_from_plan_and_preflight() -> 
 
 def test_merge_env_overrides_accepts_runtime_meridian_keys() -> None:
     runtime_overrides = {
-        "MERIDIAN_REPO_ROOT": "/repo",
+        "MERIDIAN_PROJECT_DIR": "/repo",
         "MERIDIAN_PROJECT_ROOT": "/repo/.meridian",
         "MERIDIAN_DEPTH": "2",
         "MERIDIAN_CHAT_ID": "c-parent",

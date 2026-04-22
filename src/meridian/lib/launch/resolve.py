@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 def load_agent_profile_with_fallback(
     *,
-    repo_root: Path,
+    project_root: Path,
     requested_agent: str | None = None,
     configured_default: str | None = None,
 ) -> tuple[AgentProfile | None, str | None]:
@@ -40,7 +40,7 @@ def load_agent_profile_with_fallback(
         return (
             load_agent_profile(
                 requested_profile,
-                repo_root=repo_root,
+                project_root=project_root,
             ),
             None,
         )
@@ -51,7 +51,7 @@ def load_agent_profile_with_fallback(
             return (
                 load_agent_profile(
                     configured_profile,
-                    repo_root=repo_root,
+                    project_root=project_root,
                 ),
                 None,
             )
@@ -76,13 +76,13 @@ class ResolvedSkills(BaseModel):
 def resolve_skills_from_profile(
     *,
     profile_skills: tuple[str, ...],
-    repo_root: Path,
+    project_root: Path,
     readonly: bool = False,
 ) -> ResolvedSkills:
     """Load and resolve skills declared in an agent profile."""
 
     registry = SkillRegistry(
-        repo_root=repo_root,
+        project_root=project_root,
         readonly=readonly,
     )
     manifests = registry.list_skills()
@@ -140,11 +140,11 @@ def resolve_harness(
     model: ModelId,
     harness_override: str | None,
     harness_registry: HarnessRegistry,
-    repo_root: Path,
+    project_root: Path,
 ) -> HarnessId:
     from meridian.lib.catalog.models import resolve_model
 
-    resolved = resolve_model(str(model), repo_root=repo_root)
+    resolved = resolve_model(str(model), project_root=project_root)
     routed_harness_id = resolved.harness
     supported_primary_harnesses = tuple(
         harness_id
@@ -174,7 +174,7 @@ def resolve_harness(
 
 def resolve_policies(
     *,
-    repo_root: Path,
+    project_root: Path,
     layers: tuple[RuntimeOverrides, ...],
     config_overrides: RuntimeOverrides,
     config: MeridianConfig,
@@ -187,7 +187,7 @@ def resolve_policies(
     from .policies import resolve_policies as _resolve_policies
 
     return _resolve_policies(
-        repo_root=repo_root,
+        project_root=project_root,
         layers=layers,
         config_overrides=config_overrides,
         config=config,

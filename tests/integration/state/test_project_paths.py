@@ -16,45 +16,47 @@ def _clear_state_root_override(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_project_paths_is_frozen(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    paths = ProjectConfigPaths(repo_root=repo_root.resolve(), execution_cwd=repo_root.resolve())
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    paths = ProjectConfigPaths(
+        project_root=project_root.resolve(), execution_cwd=project_root.resolve()
+    )
 
     with pytest.raises(ValidationError, match="frozen"):
-        paths.repo_root = tmp_path
+        paths.project_root = tmp_path
 
 
-def test_resolve_project_paths_resolves_repo_root_and_execution_cwd(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
+def test_resolve_project_paths_resolves_project_root_and_execution_cwd(tmp_path: Path) -> None:
+    project_root = tmp_path / "repo"
     execution_cwd = tmp_path / "exec"
-    repo_root.mkdir()
+    project_root.mkdir()
     execution_cwd.mkdir()
 
-    paths = resolve_project_config_paths(repo_root=repo_root, execution_cwd=execution_cwd)
+    paths = resolve_project_config_paths(project_root=project_root, execution_cwd=execution_cwd)
 
-    assert paths.repo_root == repo_root.resolve()
+    assert paths.project_root == project_root.resolve()
     assert paths.execution_cwd == execution_cwd.resolve()
 
 
-def test_resolve_project_paths_defaults_execution_cwd_to_repo_root(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+def test_resolve_project_paths_defaults_execution_cwd_to_project_root(tmp_path: Path) -> None:
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
 
-    paths = resolve_project_config_paths(repo_root=repo_root)
+    paths = resolve_project_config_paths(project_root=project_root)
 
-    assert paths.repo_root == repo_root.resolve()
-    assert paths.execution_cwd == repo_root.resolve()
+    assert paths.project_root == project_root.resolve()
+    assert paths.execution_cwd == project_root.resolve()
 
 
 def test_project_paths_exposes_root_file_policy(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
 
-    paths = resolve_project_config_paths(repo_root=repo_root)
+    paths = resolve_project_config_paths(project_root=project_root)
 
-    assert paths.meridian_toml == repo_root.resolve() / "meridian.toml"
-    assert paths.meridian_local_toml == repo_root.resolve() / "meridian.local.toml"
-    assert paths.workspace_local_toml == repo_root.resolve() / "workspace.local.toml"
+    assert paths.meridian_toml == project_root.resolve() / "meridian.toml"
+    assert paths.meridian_local_toml == project_root.resolve() / "meridian.local.toml"
+    assert paths.workspace_local_toml == project_root.resolve() / "workspace.local.toml"
     assert paths.workspace_ignore_targets == PROJECT_ROOT_IGNORE_TARGETS
 
 
@@ -62,12 +64,12 @@ def test_project_paths_workspace_local_toml_uses_state_root_parent_override(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
+    project_root = tmp_path / "repo"
     override_root = tmp_path / "custom-state" / ".meridian"
-    repo_root.mkdir()
+    project_root.mkdir()
     override_root.parent.mkdir(parents=True)
     monkeypatch.setenv("MERIDIAN_PROJECT_ROOT", override_root.as_posix())
 
-    paths = resolve_project_config_paths(repo_root=repo_root)
+    paths = resolve_project_config_paths(project_root=project_root)
 
     assert paths.workspace_local_toml == override_root.parent / "workspace.local.toml"

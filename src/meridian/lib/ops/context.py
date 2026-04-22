@@ -99,24 +99,24 @@ class WorkCurrentOutput(BaseModel):
 
 
 @contextmanager
-def _resolved_context_env_defaults(repo_root: Path, state_root: Path) -> Iterator[None]:
+def _resolved_context_env_defaults(project_root: Path, state_root: Path) -> Iterator[None]:
     """Provide repo/state env defaults so `ResolvedContext` can resolve fully."""
 
-    original_repo_root = os.environ.get("MERIDIAN_REPO_ROOT")
+    original_project_root = os.environ.get("MERIDIAN_PROJECT_DIR")
     original_state_root = os.environ.get("MERIDIAN_PROJECT_ROOT")
 
-    if not (original_repo_root or "").strip():
-        os.environ["MERIDIAN_REPO_ROOT"] = repo_root.as_posix()
+    if not (original_project_root or "").strip():
+        os.environ["MERIDIAN_PROJECT_DIR"] = project_root.as_posix()
     if not (original_state_root or "").strip():
         os.environ["MERIDIAN_PROJECT_ROOT"] = state_root.as_posix()
 
     try:
         yield
     finally:
-        if original_repo_root is None:
-            os.environ.pop("MERIDIAN_REPO_ROOT", None)
+        if original_project_root is None:
+            os.environ.pop("MERIDIAN_PROJECT_DIR", None)
         else:
-            os.environ["MERIDIAN_REPO_ROOT"] = original_repo_root
+            os.environ["MERIDIAN_PROJECT_DIR"] = original_project_root
 
         if original_state_root is None:
             os.environ.pop("MERIDIAN_PROJECT_ROOT", None)
@@ -124,19 +124,19 @@ def _resolved_context_env_defaults(repo_root: Path, state_root: Path) -> Iterato
             os.environ["MERIDIAN_PROJECT_ROOT"] = original_state_root
 
 
-def _resolve_runtime_context(repo_root: Path, state_root: Path) -> ResolvedContext:
+def _resolve_runtime_context(project_root: Path, state_root: Path) -> ResolvedContext:
     """Resolve context from environment with repo/state defaults applied."""
 
-    with _resolved_context_env_defaults(repo_root, state_root):
+    with _resolved_context_env_defaults(project_root, state_root):
         return ResolvedContext.from_environment()
 
 
 def context_sync(input: ContextInput) -> ContextOutput:
     """Synchronous handler for context query."""
 
-    repo_root = resolve_project_root()
-    context_config = load_context_config(repo_root) or ContextConfig()
-    resolved_paths = resolve_context_paths(repo_root, context_config)
+    project_root = resolve_project_root()
+    context_config = load_context_config(project_root) or ContextConfig()
+    resolved_paths = resolve_context_paths(project_root, context_config)
 
     return ContextOutput(
         work_path=context_config.work.path,
@@ -161,9 +161,9 @@ def work_current_sync(input: WorkCurrentInput) -> WorkCurrentOutput:
     """Synchronous handler for work current query."""
 
     _ = input
-    repo_root = resolve_project_root()
-    state_root = resolve_runtime_root_for_read(repo_root)
-    resolved = _resolve_runtime_context(repo_root, state_root)
+    project_root = resolve_project_root()
+    state_root = resolve_runtime_root_for_read(project_root)
+    resolved = _resolve_runtime_context(project_root, state_root)
 
     return WorkCurrentOutput(
         work_dir=resolved.work_dir.as_posix() if resolved.work_dir is not None else None

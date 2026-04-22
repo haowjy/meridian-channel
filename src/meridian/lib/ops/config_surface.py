@@ -78,7 +78,7 @@ class ConfigSurface(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    repo_root: Path
+    project_root: Path
     project_config: ProjectConfigState
     user_config_path: Path | None
     resolved_config: MeridianConfig
@@ -87,10 +87,10 @@ class ConfigSurface(BaseModel):
     warning: str | None = None
 
 
-def build_config_surface(repo_root: Path) -> ConfigSurface:
+def build_config_surface(project_root: Path) -> ConfigSurface:
     """Build shared config inspection state for one resolved repository root."""
 
-    resolved_root = repo_root.expanduser().resolve()
+    resolved_root = project_root.expanduser().resolve()
     user_config_path = resolve_user_config_path(None)
     warning: str | None = None
     if not resolved_root.exists():
@@ -98,7 +98,7 @@ def build_config_surface(repo_root: Path) -> ConfigSurface:
     workspace_snapshot = resolve_workspace_snapshot(resolved_root)
 
     return ConfigSurface(
-        repo_root=resolved_root,
+        project_root=resolved_root,
         project_config=resolve_project_config_state(resolved_root),
         user_config_path=user_config_path,
         resolved_config=load_config(

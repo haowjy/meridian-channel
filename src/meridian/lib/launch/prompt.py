@@ -156,10 +156,12 @@ def compose_skill_injections(skills: Sequence[SkillContent]) -> str | None:
     return _join_sections(blocks)
 
 
-def build_primary_inventory_prompt(*, repo_root: Path) -> str | None:
+def build_primary_inventory_prompt(*, project_root: Path) -> str | None:
     """Render installed agent inventory for primary-launch startup context."""
 
-    agents = sorted(scan_agent_profiles(repo_root=repo_root), key=lambda profile: profile.name)
+    agents = sorted(
+        scan_agent_profiles(project_root=project_root), key=lambda profile: profile.name
+    )
 
     if not agents:
         return None

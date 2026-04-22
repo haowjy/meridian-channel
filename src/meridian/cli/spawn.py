@@ -318,8 +318,8 @@ def _spawn_create(
         if context_from:
             raise ValueError("Cannot combine --fork with --from (MVP limitation).")
 
-        repo_root, _ = resolve_runtime_root_and_config(None)
-        resolved_reference = resolve_session_reference(repo_root, resolved_fork_from)
+        project_root, _ = resolve_runtime_root_and_config(None)
+        resolved_reference = resolve_session_reference(project_root, resolved_fork_from)
         if resolved_reference.missing_harness_session_id:
             raise ValueError(missing_fork_session_error(resolved_fork_from))
 
@@ -511,9 +511,9 @@ def _spawn_children(
     normalized_ref = spawn_id.strip()
     if not normalized_ref:
         raise ValueError("spawn_id is required")
-    repo_root = resolve_project_root()
-    normalized_spawn_id = resolve_spawn_reference(repo_root, normalized_ref)
-    state_root = resolve_runtime_root_for_read(repo_root)
+    project_root = resolve_project_root()
+    normalized_spawn_id = resolve_spawn_reference(project_root, normalized_ref)
+    state_root = resolve_runtime_root_for_read(project_root)
     from meridian.lib.state.reaper import reconcile_spawns
 
     children = list(
@@ -614,8 +614,8 @@ def _spawn_cancel(
     emit: Any,
     spawn_id: str,
 ) -> None:
-    repo_root, _ = resolve_runtime_root_and_config(None)
-    resolved_spawn_id = resolve_spawn_reference(repo_root, spawn_id)
+    project_root, _ = resolve_runtime_root_and_config(None)
+    resolved_spawn_id = resolve_spawn_reference(project_root, spawn_id)
     result = spawn_cancel_sync(
         SpawnCancelInput(
             spawn_id=resolved_spawn_id,

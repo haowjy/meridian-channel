@@ -22,12 +22,12 @@ from meridian.lib.streaming.spawn_manager import SpawnManager
 from meridian.lib.streaming.types import InjectResult
 
 
-def _build_config(spawn_id: SpawnId, repo_root: Path) -> ConnectionConfig:
+def _build_config(spawn_id: SpawnId, project_root: Path) -> ConnectionConfig:
     return ConnectionConfig(
         spawn_id=spawn_id,
         harness_id=HarnessId.CODEX,
         prompt="hello",
-        repo_root=repo_root,
+        project_root=project_root,
         env_overrides={},
     )
 
@@ -59,8 +59,8 @@ async def test_wait_for_completion_survives_cleanup_without_private_hooks(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path
-    state_root = resolve_state_paths(repo_root).root_dir
+    project_root = tmp_path
+    state_root = resolve_state_paths(project_root).root_dir
     cleanup_started = asyncio.Event()
     release_cleanup = asyncio.Event()
 
@@ -145,8 +145,8 @@ async def test_wait_for_completion_survives_cleanup_without_private_hooks(
         launch_mode="foreground",
         status="running",
     )
-    manager = SpawnManager(state_root=state_root, repo_root=repo_root)
-    await manager.start_spawn(_build_config(spawn_id, repo_root), _build_spec())
+    manager = SpawnManager(state_root=state_root, project_root=project_root)
+    await manager.start_spawn(_build_config(spawn_id, project_root), _build_spec())
 
     try:
         await asyncio.wait_for(cleanup_started.wait(), timeout=1.0)

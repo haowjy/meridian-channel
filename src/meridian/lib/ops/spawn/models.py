@@ -37,7 +37,7 @@ class SpawnCreateInput(BaseModel):
     quiet: bool = False
     stream: bool = False
     background: bool = False
-    repo_root: str | None = None
+    project_root: str | None = None
     timeout: float | None = None
     approval: str | None = None
     autocompact: int | None = None
@@ -158,7 +158,7 @@ class SpawnListInput(BaseModel):
     model: str | None = None
     limit: int = 20
     failed: bool = False
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class SpawnStatsInput(BaseModel):
@@ -167,7 +167,7 @@ class SpawnStatsInput(BaseModel):
     spawn_id: str | None = None
     session: str | None = None
     flat: bool = False
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class SpawnStatsChild(BaseModel):
@@ -333,14 +333,14 @@ class SpawnShowInput(BaseModel):
 
     spawn_id: str
     include_report_body: bool = True
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class SpawnCancelInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     spawn_id: str
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class SpawnDetailOutput(BaseModel):
@@ -457,7 +457,7 @@ class SpawnWrittenFilesInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     spawn_id: str
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class SpawnWrittenFilesOutput(BaseModel):
@@ -486,7 +486,7 @@ class SpawnContinueInput(BaseModel):
     dry_run: bool = False
     timeout: float | None = None
     background: bool = False
-    repo_root: str | None = None
+    project_root: str | None = None
     passthrough_args: tuple[str, ...] = ()
     approval: str | None = None
 
@@ -502,7 +502,7 @@ class SpawnWaitInput(BaseModel):
     verbose: bool = False
     quiet: bool = False
     include_report_body: bool = False
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class SpawnWaitMultiOutput(BaseModel):

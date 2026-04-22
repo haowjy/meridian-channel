@@ -31,9 +31,9 @@ def _model(
     )
 
 
-def _init_repo(repo_root: Path) -> None:
-    repo_root.mkdir()
-    (repo_root / "mars.toml").write_text(
+def _init_repo(project_root: Path) -> None:
+    project_root.mkdir()
+    (project_root / "mars.toml").write_text(
         "[settings]\n"
         'targets = [".agents"]\n',
         encoding="utf-8",
@@ -44,8 +44,8 @@ def test_models_list_uses_visibility_rules_and_keeps_aliased_models_visible(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
+    project_root = tmp_path / "repo"
+    _init_repo(project_root)
 
     old_date = (date.today() - timedelta(days=365)).isoformat()
     monkeypatch.setattr(
@@ -69,7 +69,7 @@ def test_models_list_uses_visibility_rules_and_keeps_aliased_models_visible(
     )
     monkeypatch.setattr(
         "meridian.lib.ops.catalog.load_merged_aliases",
-        lambda repo_root=None: [
+        lambda project_root=None: [
             AliasEntry(
                 alias="gem",
                 model_id="gemini-3.1-pro",
@@ -78,7 +78,7 @@ def test_models_list_uses_visibility_rules_and_keeps_aliased_models_visible(
         ],
     )
 
-    output = models_list_sync(ModelsListInput(repo_root=repo_root.as_posix()))
+    output = models_list_sync(ModelsListInput(project_root=project_root.as_posix()))
     model_ids = {str(model.model_id) for model in output.models}
     assert model_ids == {"gpt-5.4", "gemini-3.1-pro"}
 
@@ -96,8 +96,8 @@ def test_models_list_superseded_visibility_toggle(
     show_superseded: bool,
     expected_model_ids: set[str],
 ) -> None:
-    repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
+    project_root = tmp_path / "repo"
+    _init_repo(project_root)
 
     today = date.today().isoformat()
     yesterday = (date.today() - timedelta(days=30)).isoformat()
@@ -110,12 +110,12 @@ def test_models_list_superseded_visibility_toggle(
     )
     monkeypatch.setattr(
         "meridian.lib.ops.catalog.load_merged_aliases",
-        lambda repo_root=None: [],
+        lambda project_root=None: [],
     )
 
     output = models_list_sync(
         ModelsListInput(
-            repo_root=repo_root.as_posix(),
+            project_root=project_root.as_posix(),
             show_superseded=show_superseded,
         )
     )
@@ -127,8 +127,8 @@ def test_models_list_aliased_model_survives_superseded(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
+    project_root = tmp_path / "repo"
+    _init_repo(project_root)
 
     today = date.today().isoformat()
     yesterday = (date.today() - timedelta(days=30)).isoformat()
@@ -141,7 +141,7 @@ def test_models_list_aliased_model_survives_superseded(
     )
     monkeypatch.setattr(
         "meridian.lib.ops.catalog.load_merged_aliases",
-        lambda repo_root=None: [
+        lambda project_root=None: [
             AliasEntry(
                 alias="old-gpt",
                 model_id="gpt-5.2",
@@ -150,7 +150,7 @@ def test_models_list_aliased_model_survives_superseded(
         ],
     )
 
-    output = models_list_sync(ModelsListInput(repo_root=repo_root.as_posix()))
+    output = models_list_sync(ModelsListInput(project_root=project_root.as_posix()))
     model_ids = {str(model.model_id) for model in output.models}
     assert "gpt-5.4" in model_ids
     assert "gpt-5.2" in model_ids

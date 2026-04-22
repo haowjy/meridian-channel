@@ -15,7 +15,7 @@ def test_resolve_model_returns_concrete_model_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def mock_mars_resolve(
-        name: str, repo_root: object = None
+        name: str, project_root: object = None
     ) -> dict[str, object] | None:
         if name == "codex":
             return {
@@ -40,7 +40,7 @@ def test_resolve_model_raw_model_id_pattern_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def mock_mars_resolve(
-        name: str, repo_root: object = None
+        name: str, project_root: object = None
     ) -> dict[str, object] | None:
         return None
 
@@ -56,7 +56,7 @@ def test_resolve_model_raw_model_id_pattern_fallback(
 
 def test_resolve_model_unknown_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     def mock_mars_resolve(
-        name: str, repo_root: object = None
+        name: str, project_root: object = None
     ) -> dict[str, object] | None:
         return None
 
@@ -72,7 +72,7 @@ def test_resolve_model_unavailable_harness_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def mock_mars_resolve(
-        name: str, repo_root: object = None
+        name: str, project_root: object = None
     ) -> dict[str, object] | None:
         return {
             "name": "opus",

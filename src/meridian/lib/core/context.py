@@ -15,7 +15,7 @@ class RuntimeContext(BaseModel):
 
     spawn_id: SpawnId | None = None
     depth: int = 0
-    repo_root: Path | None = None
+    project_root: Path | None = None
     state_root: Path | None = None
     chat_id: str = ""
     work_id: str | None = None
@@ -28,7 +28,7 @@ class RuntimeContext(BaseModel):
         return cls(
             spawn_id=resolved.spawn_id,
             depth=resolved.depth,
-            repo_root=resolved.repo_root,
+            project_root=resolved.project_root,
             state_root=resolved.state_root,
             chat_id=resolved.chat_id,
             work_id=resolved.work_id,
@@ -40,17 +40,17 @@ class RuntimeContext(BaseModel):
         overrides: dict[str, str] = {"MERIDIAN_DEPTH": str(self.depth)}
         if self.spawn_id is not None:
             overrides["MERIDIAN_SPAWN_ID"] = str(self.spawn_id)
-        if self.repo_root is not None:
-            overrides["MERIDIAN_REPO_ROOT"] = self.repo_root.as_posix()
+        if self.project_root is not None:
+            overrides["MERIDIAN_PROJECT_DIR"] = self.project_root.as_posix()
         if self.state_root is not None:
             overrides["MERIDIAN_PROJECT_ROOT"] = self.state_root.as_posix()
         if self.chat_id:
             overrides["MERIDIAN_CHAT_ID"] = self.chat_id
         if self.work_id:
             overrides["MERIDIAN_WORK_ID"] = self.work_id
-            if self.repo_root is not None:
+            if self.project_root is not None:
                 overrides["MERIDIAN_WORK_DIR"] = resolve_work_scratch_dir(
-                    resolve_repo_paths(self.repo_root).root_dir,
+                    resolve_repo_paths(self.project_root).root_dir,
                     self.work_id,
                 ).as_posix()
             elif self.state_root is not None:

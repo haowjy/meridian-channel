@@ -27,7 +27,7 @@ from meridian.lib.ops.runtime import async_from_sync
 class ModelsListInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    repo_root: str | None = None
+    project_root: str | None = None
     all: bool = False
     show_superseded: bool = False
 
@@ -35,7 +35,7 @@ class ModelsListInput(BaseModel):
 class ModelsRefreshInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class CatalogModel(BaseModel):
@@ -184,8 +184,8 @@ class ModelsRefreshOutput(BaseModel):
         return f"Refreshed models.dev cache ({self.refreshed} models)."
 
 
-def _repo_root(repo_root: str | None) -> Path | None:
-    explicit = Path(repo_root).expanduser().resolve() if repo_root is not None else None
+def _project_root(project_root: str | None) -> Path | None:
+    explicit = Path(project_root).expanduser().resolve() if project_root is not None else None
     return resolve_project_root(explicit)
 
 
@@ -210,12 +210,12 @@ def _build_catalog_model(
     model_id: str,
     discovered: DiscoveredModel | None,
     aliases: list[AliasEntry],
-    repo_root: Path | None,
+    project_root: Path | None,
     description: str | None = None,
     pinned: bool = False,
 ) -> CatalogModel:
     try:
-        harness = resolve_model(model_id, repo_root=repo_root).harness
+        harness = resolve_model(model_id, project_root=project_root).harness
     except ValueError:
         if discovered is not None:
             harness = discovered.harness
@@ -277,8 +277,8 @@ def _cost_tier(cost_input: float | None) -> str | None:
 
 
 def models_list_sync(payload: ModelsListInput) -> ModelsListOutput:
-    root = _repo_root(payload.repo_root)
-    aliases = load_merged_aliases(repo_root=root)
+    root = _project_root(payload.project_root)
+    aliases = load_merged_aliases(project_root=root)
     visibility = DEFAULT_MODEL_VISIBILITY
     discovered = load_discovered_models()
 
@@ -303,7 +303,7 @@ def models_list_sync(payload: ModelsListInput) -> ModelsListOutput:
             model_id=model_id,
             discovered=discovered_by_model_id.get(model_id),
             aliases=aliases_by_model_id.get(model_id, []),
-            repo_root=root,
+            project_root=root,
             description=descriptions.get(model_id),
             pinned=model_id in pinned_ids,
         )

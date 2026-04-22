@@ -12,8 +12,8 @@ from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_project_runtime_root
 
 
-def _state_root(repo_root: Path) -> Path:
-    state_root = resolve_project_runtime_root(repo_root)
+def _state_root(project_root: Path) -> Path:
+    state_root = resolve_project_runtime_root(project_root)
     state_root.mkdir(parents=True, exist_ok=True)
     return state_root
 
@@ -34,9 +34,9 @@ def _seed_running_spawn(state_root: Path, spawn_id: str) -> None:
 def test_spawn_show_sync_renders_finalizing_status_and_orphan_finalization_hint(
     tmp_path: Path,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    state_root = _state_root(repo_root)
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    state_root = _state_root(project_root)
     _seed_running_spawn(state_root, "p1")
     spawn_store.record_spawn_exited(
         state_root,
@@ -54,7 +54,7 @@ def test_spawn_show_sync_renders_finalizing_status_and_orphan_finalization_hint(
         SpawnShowInput(
             spawn_id="p1",
             include_report_body=False,
-            repo_root=repo_root.as_posix(),
+            project_root=project_root.as_posix(),
         )
     )
 
@@ -70,9 +70,9 @@ def test_spawn_show_sync_renders_finalizing_status_and_orphan_finalization_hint(
 
 
 def test_spawn_list_sync_no_longer_renders_running_asterisk_suffix(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    state_root = _state_root(repo_root)
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    state_root = _state_root(project_root)
     _seed_running_spawn(state_root, "p2")
     spawn_store.record_spawn_exited(
         state_root,
@@ -81,7 +81,7 @@ def test_spawn_list_sync_no_longer_renders_running_asterisk_suffix(tmp_path: Pat
         exited_at="2026-04-12T14:00:00Z",
     )
 
-    output = spawn_api.spawn_list_sync(SpawnListInput(repo_root=repo_root.as_posix()))
+    output = spawn_api.spawn_list_sync(SpawnListInput(project_root=project_root.as_posix()))
 
     assert len(output.spawns) == 1
     assert output.spawns[0].status == "running"

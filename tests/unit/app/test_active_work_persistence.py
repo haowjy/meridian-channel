@@ -50,14 +50,14 @@ def _find_route(app: _RouteApp, method: str, path: str) -> Callable[..., Any]:
     raise AssertionError(f"missing route {method} {path}")
 
 
-def _register_routes(repo_root: Path) -> tuple[_RouteApp, Callable[..., Any]]:
+def _register_routes(project_root: Path) -> tuple[_RouteApp, Callable[..., Any]]:
     app = _RouteApp()
-    repo_state_root = repo_root / ".meridian"
+    repo_state_root = project_root / ".meridian"
     register_work_routes(
         app,
         state_root=repo_state_root,
         repo_state_root=repo_state_root,
-        repo_root=repo_root,
+        project_root=project_root,
         http_exception=HTTPException,
     )
     return app, _find_route(app, "GET", "/api/work/active")
@@ -90,9 +90,9 @@ async def test_get_active_work_prefers_persisted_open_item_over_newer_work(
 ) -> None:
     """Stored active work should win over the most recent open work item."""
 
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    repo_state_root = repo_root / ".meridian"
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    repo_state_root = project_root / ".meridian"
     timestamps = iter(
         [
             "2026-04-20T12:00:00Z",
@@ -104,7 +104,7 @@ async def test_get_active_work_prefers_persisted_open_item_over_newer_work(
     work_store.create_work_item(repo_state_root, "beta")
     _write_active_work_state(repo_state_root, "alpha")
 
-    _app, get_active_work = _register_routes(repo_root)
+    _app, get_active_work = _register_routes(project_root)
     response = await get_active_work()
 
     assert response == {"work_id": "alpha"}
@@ -117,9 +117,9 @@ async def test_get_active_work_falls_back_to_latest_open_item_and_persists_it(
 ) -> None:
     """Fallback should choose the newest open work item and persist it."""
 
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    repo_state_root = repo_root / ".meridian"
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    repo_state_root = project_root / ".meridian"
 
     timestamps = iter(
         [
@@ -135,7 +135,7 @@ async def test_get_active_work_falls_back_to_latest_open_item_and_persists_it(
     work_store.create_work_item(repo_state_root, "gamma")
     work_store.archive_work_item(repo_state_root, "gamma")
 
-    _app, get_active_work = _register_routes(repo_root)
+    _app, get_active_work = _register_routes(project_root)
     response = await get_active_work()
 
     assert response == {"work_id": "beta"}

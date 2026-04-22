@@ -107,9 +107,9 @@ def test_session_log_resolves_opencode_storage_session_file(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    state_root = resolve_project_runtime_root(repo_root)
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    state_root = resolve_project_runtime_root(project_root)
     state_root.mkdir(parents=True, exist_ok=True)
 
     xdg_data_home = tmp_path / "xdg-data"
@@ -136,7 +136,7 @@ def test_session_log_resolves_opencode_storage_session_file(
     output = session_log_sync(
         SessionLogInput(
             ref="p1",
-            repo_root=repo_root.as_posix(),
+            project_root=project_root.as_posix(),
             compaction=0,
             last_n=5,
             offset=0,
@@ -151,9 +151,9 @@ def test_session_log_resolves_opencode_storage_session_file(
 def test_resolve_target_chat_missing_harness_session_id_reports_unavailable_transcript(
     tmp_path: Path,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    state_root = resolve_project_runtime_root(repo_root)
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    state_root = resolve_project_runtime_root(project_root)
     state_root.mkdir(parents=True, exist_ok=True)
 
     chat_id = session_store.start_session(
@@ -168,7 +168,7 @@ def test_resolve_target_chat_missing_harness_session_id_reports_unavailable_tran
         with pytest.raises(ValueError) as exc:
             resolve_target(
                 SessionLogInput(ref=chat_id),
-                repo_root=repo_root,
+                project_root=project_root,
                 state_root=state_root,
             )
         assert str(exc.value) == (
@@ -182,9 +182,9 @@ def test_resolve_target_chat_missing_harness_session_id_reports_unavailable_tran
 def test_session_log_spawn_missing_harness_session_id_reads_live_output(
     tmp_path: Path,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    state_root = resolve_project_runtime_root(repo_root)
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    state_root = resolve_project_runtime_root(project_root)
     state_root.mkdir(parents=True, exist_ok=True)
 
     spawn_store.start_spawn(
@@ -210,7 +210,7 @@ def test_session_log_spawn_missing_harness_session_id_reads_live_output(
     )
 
     output = session_log_sync(
-        SessionLogInput(ref="p42", repo_root=repo_root.as_posix(), last_n=5)
+        SessionLogInput(ref="p42", project_root=project_root.as_posix(), last_n=5)
     )
 
     assert output.session_id == "p42"
@@ -223,9 +223,9 @@ def test_session_log_spawn_missing_harness_session_id_reads_live_output(
 def test_session_log_chat_missing_harness_session_id_reads_primary_spawn_output(
     tmp_path: Path,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    state_root = resolve_project_runtime_root(repo_root)
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    state_root = resolve_project_runtime_root(project_root)
     state_root.mkdir(parents=True, exist_ok=True)
 
     chat_id = session_store.start_session(
@@ -260,7 +260,7 @@ def test_session_log_chat_missing_harness_session_id_reads_primary_spawn_output(
         )
 
         output = session_log_sync(
-            SessionLogInput(ref=chat_id, repo_root=repo_root.as_posix(), last_n=5)
+            SessionLogInput(ref=chat_id, project_root=project_root.as_posix(), last_n=5)
         )
 
         assert output.session_id == chat_id
@@ -273,15 +273,15 @@ def test_session_log_chat_missing_harness_session_id_reads_primary_spawn_output(
 
 
 def test_resolve_target_chat_not_found_preserves_missing_chat_error(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    state_root = resolve_project_runtime_root(repo_root)
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    state_root = resolve_project_runtime_root(project_root)
     state_root.mkdir(parents=True, exist_ok=True)
 
     with pytest.raises(ValueError) as exc:
         resolve_target(
             SessionLogInput(ref="c999"),
-            repo_root=repo_root,
+            project_root=project_root,
             state_root=state_root,
         )
     assert str(exc.value) == "Chat 'c999' not found"

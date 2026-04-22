@@ -321,7 +321,7 @@ Use `meridian models config init/show/get/set/reset` to manage this file from th
 
 | Variable | Purpose |
 |---|---|
-| `MERIDIAN_REPO_ROOT` | Force repo root resolution |
+| `MERIDIAN_PROJECT_DIR` | Force repo root resolution |
 | `MERIDIAN_CONFIG` | User config overlay path |
 | `MERIDIAN_HOME` | Override user state root (default `~/.meridian/` on Unix/macOS, `%LOCALAPPDATA%\meridian\` on Windows) |
 | `MERIDIAN_PROJECT_ROOT` | Override the runtime state root. Absolute path = use as-is; relative path = resolve relative to repo root. Repo-owned paths (`fs/`, `work/`, `work-archive/`) always stay in `.meridian/` regardless of this setting. |

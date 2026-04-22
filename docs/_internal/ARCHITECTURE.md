@@ -367,7 +367,7 @@ Key env vars:
 | `MERIDIAN_SPAWN_ID` | Current spawn ID |
 | `MERIDIAN_PARENT_SPAWN_ID` | Parent spawn ID |
 | `MERIDIAN_DEPTH` | Nesting depth (0 = primary) |
-| `MERIDIAN_REPO_ROOT` | Repository root path |
+| `MERIDIAN_PROJECT_DIR` | Repository root path |
 | `MERIDIAN_CHAT_ID` | Current session chat ID |
 
 ---

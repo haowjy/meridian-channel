@@ -177,7 +177,7 @@ class _HangingAfterTurnCompletedConnection:
     def __init__(self) -> None:
         self.state = "created"
         self._spawn_id = SpawnId("")
-        self._repo_root: Path | None = None
+        self._project_root: Path | None = None
         self._session_id = "thread-123"
         self.stop_calls = 0
         self.capabilities = ConnectionCapabilities(
@@ -208,7 +208,7 @@ class _HangingAfterTurnCompletedConnection:
     async def start(self, config: ConnectionConfig, spec: ResolvedLaunchSpec) -> None:
         _ = spec
         self._spawn_id = config.spawn_id
-        self._repo_root = config.repo_root
+        self._project_root = config.project_root
         self.state = "connected"
 
     async def stop(self) -> None:
@@ -228,9 +228,9 @@ class _HangingAfterTurnCompletedConnection:
         return None
 
     async def events(self):  # type: ignore[no-untyped-def]
-        repo_root = self._repo_root
-        assert repo_root is not None
-        spawn_dir = resolve_spawn_log_dir(repo_root, self._spawn_id)
+        project_root = self._project_root
+        assert project_root is not None
+        spawn_dir = resolve_spawn_log_dir(project_root, self._spawn_id)
         spawn_dir.mkdir(parents=True, exist_ok=True)
         (spawn_dir / "report.md").write_text(
             "# Done\n\nStreaming turn completed.\n",
@@ -259,9 +259,9 @@ class _HangingAfterTurnCompletedConnection:
 
 class _ReportThenHangConnection(_HangingAfterTurnCompletedConnection):
     async def events(self):  # type: ignore[no-untyped-def]
-        repo_root = self._repo_root
-        assert repo_root is not None
-        spawn_dir = resolve_spawn_log_dir(repo_root, self._spawn_id)
+        project_root = self._project_root
+        assert project_root is not None
+        spawn_dir = resolve_spawn_log_dir(project_root, self._spawn_id)
         spawn_dir.mkdir(parents=True, exist_ok=True)
         (spawn_dir / "report.md").write_text(
             "# Done\n\nWatchdog fallback completed.\n",
@@ -286,9 +286,9 @@ class _ClaudeResultThenHangConnection(_HangingAfterTurnCompletedConnection):
         return HarnessId.CLAUDE
 
     async def events(self):  # type: ignore[no-untyped-def]
-        repo_root = self._repo_root
-        assert repo_root is not None
-        spawn_dir = resolve_spawn_log_dir(repo_root, self._spawn_id)
+        project_root = self._project_root
+        assert project_root is not None
+        spawn_dir = resolve_spawn_log_dir(project_root, self._spawn_id)
         spawn_dir.mkdir(parents=True, exist_ok=True)
         (spawn_dir / "report.md").write_text(
             "# Done\n\nClaude result completed.\n",
@@ -328,9 +328,9 @@ class _OpenCodeIdleThenHangConnection(_HangingAfterTurnCompletedConnection):
         return HarnessId.OPENCODE
 
     async def events(self):  # type: ignore[no-untyped-def]
-        repo_root = self._repo_root
-        assert repo_root is not None
-        spawn_dir = resolve_spawn_log_dir(repo_root, self._spawn_id)
+        project_root = self._project_root
+        assert project_root is not None
+        spawn_dir = resolve_spawn_log_dir(project_root, self._spawn_id)
         spawn_dir.mkdir(parents=True, exist_ok=True)
         (spawn_dir / "report.md").write_text(
             "# Done\n\nOpenCode session became idle.\n",
@@ -386,9 +386,9 @@ class _ClaudeResultErrorThenCloseConnection(_HangingAfterTurnCompletedConnection
 
 class _TurnCompletedThenCloseConnection(_HangingAfterTurnCompletedConnection):
     async def events(self):  # type: ignore[no-untyped-def]
-        repo_root = self._repo_root
-        assert repo_root is not None
-        spawn_dir = resolve_spawn_log_dir(repo_root, self._spawn_id)
+        project_root = self._project_root
+        assert project_root is not None
+        spawn_dir = resolve_spawn_log_dir(project_root, self._spawn_id)
         spawn_dir.mkdir(parents=True, exist_ok=True)
         (spawn_dir / "report.md").write_text(
             "# Done\n\nTurn completed before shutdown.\n",
@@ -406,9 +406,9 @@ class _TurnCompletedThenCloseConnection(_HangingAfterTurnCompletedConnection):
 
 class _ItemCompletedThenCloseConnection(_HangingAfterTurnCompletedConnection):
     async def events(self):  # type: ignore[no-untyped-def]
-        repo_root = self._repo_root
-        assert repo_root is not None
-        spawn_dir = resolve_spawn_log_dir(repo_root, self._spawn_id)
+        project_root = self._project_root
+        assert project_root is not None
+        spawn_dir = resolve_spawn_log_dir(project_root, self._spawn_id)
         spawn_dir.mkdir(parents=True, exist_ok=True)
         (spawn_dir / "report.md").write_text(
             "# Done\n\nItem completed before shutdown.\n",
@@ -512,7 +512,7 @@ async def _execute_with_context(
     run: Spawn,
     *,
     request: SpawnRequest,
-    repo_root: Path,
+    project_root: Path,
     state_root: Path,
     artifacts: LocalStore,
     registry: HarnessRegistry,
@@ -525,8 +525,8 @@ async def _execute_with_context(
         runtime=LaunchRuntime(
             argv_intent=LaunchArgvIntent.SPEC_ONLY,
             state_root=state_root.as_posix(),
-            project_paths_repo_root=repo_root.as_posix(),
-            project_paths_execution_cwd=(cwd or repo_root).resolve().as_posix(),
+            project_paths_project_root=project_root.as_posix(),
+            project_paths_execution_cwd=(cwd or project_root).resolve().as_posix(),
         ),
         harness_registry=registry,
     )
@@ -534,7 +534,7 @@ async def _execute_with_context(
         run,
         request=request,
         launch_context=launch_context,
-        repo_root=repo_root,
+        project_root=project_root,
         state_root=state_root,
         artifacts=artifacts,
         **kwargs,
@@ -559,7 +559,7 @@ async def test_run_streaming_spawn_finishes_after_turn_completed_when_stream_dra
                 spawn_id=SpawnId("p1"),
                 harness_id=HarnessId.CODEX,
                 prompt="hello",
-                repo_root=tmp_path,
+                project_root=tmp_path,
                 env_overrides={},
             ),
             spec=CodexLaunchSpec(
@@ -567,7 +567,7 @@ async def test_run_streaming_spawn_finishes_after_turn_completed_when_stream_dra
                 permission_resolver=TieredPermissionResolver(config=PermissionConfig()),
             ),
             state_root=state_root,
-            repo_root=tmp_path,
+            project_root=tmp_path,
             spawn_id=SpawnId("p1"),
         ),
         timeout=1.0,
@@ -599,7 +599,7 @@ async def test_run_streaming_spawn_threads_caller_permission_resolver_without_sw
                 spawn_id=SpawnId("p-resolver"),
                 harness_id=HarnessId.CODEX,
                 prompt="hello",
-                repo_root=tmp_path,
+                project_root=tmp_path,
                 env_overrides={},
             ),
             spec=CodexLaunchSpec(
@@ -608,7 +608,7 @@ async def test_run_streaming_spawn_threads_caller_permission_resolver_without_sw
                 permission_resolver=resolver,
             ),
             state_root=state_root,
-            repo_root=tmp_path,
+            project_root=tmp_path,
             spawn_id=SpawnId("p-resolver"),
         ),
         timeout=1.0,
@@ -638,7 +638,7 @@ async def test_run_streaming_spawn_raises_structured_missing_binary_error(
                 spawn_id=SpawnId("p-missing"),
                 harness_id=HarnessId.CODEX,
                 prompt="hello",
-                repo_root=tmp_path,
+                project_root=tmp_path,
                 env_overrides={},
             ),
             spec=CodexLaunchSpec(
@@ -646,7 +646,7 @@ async def test_run_streaming_spawn_raises_structured_missing_binary_error(
                 permission_resolver=TieredPermissionResolver(config=PermissionConfig()),
             ),
             state_root=state_root,
-            repo_root=tmp_path,
+            project_root=tmp_path,
             spawn_id=SpawnId("p-missing"),
         )
 
@@ -694,7 +694,7 @@ async def test_execute_with_streaming_succeeds_when_turn_completes_and_stream_dr
         _execute_with_context(
             run,
             request=_build_plan(),
-            repo_root=tmp_path,
+            project_root=tmp_path,
             state_root=state_root,
             artifacts=artifacts,
             registry=registry,
@@ -775,7 +775,7 @@ async def test_execute_with_streaming_succeeds_after_report_watchdog_cleanup(
         _execute_with_context(
             run,
             request=_build_plan(),
-            repo_root=tmp_path,
+            project_root=tmp_path,
             state_root=state_root,
             artifacts=artifacts,
             registry=registry,
@@ -866,7 +866,7 @@ async def test_execute_with_streaming_waits_for_delayed_terminal_failure_after_d
         _execute_with_context(
             run,
             request=_build_plan(HarnessId.CLAUDE, "claude-opus-4-1"),
-            repo_root=tmp_path,
+            project_root=tmp_path,
             state_root=state_root,
             artifacts=artifacts,
             registry=registry,
@@ -978,7 +978,7 @@ async def test_execute_with_streaming_prefers_terminal_over_same_wakeup_signal(
         _execute_with_context(
             run,
             request=_build_plan(),
-            repo_root=tmp_path,
+            project_root=tmp_path,
             state_root=state_root,
             artifacts=artifacts,
             registry=registry,
@@ -1108,7 +1108,7 @@ async def test_execute_with_streaming_signal_wins_without_spawn_terminal_event(
         _execute_with_context(
             run,
             request=_build_plan(),
-            repo_root=tmp_path,
+            project_root=tmp_path,
             state_root=state_root,
             artifacts=artifacts,
             registry=registry,
@@ -1172,7 +1172,7 @@ async def test_execute_with_streaming_persists_missing_binary_diagnostics(
         _execute_with_context(
             run,
             request=_build_plan(HarnessId.CLAUDE, "claude-opus-4-1"),
-            repo_root=tmp_path,
+            project_root=tmp_path,
             state_root=state_root,
             artifacts=artifacts,
             registry=registry,
@@ -1237,7 +1237,7 @@ async def test_execute_with_streaming_codex_uses_adapter_resolved_launch_spec(
         _execute_with_context(
             run,
             request=request,
-            repo_root=tmp_path,
+            project_root=tmp_path,
             state_root=state_root,
             artifacts=artifacts,
             registry=registry,
@@ -1273,7 +1273,7 @@ async def test_run_streaming_spawn_finishes_on_claude_result_without_connection_
                 spawn_id=SpawnId("p2"),
                 harness_id=HarnessId.CLAUDE,
                 prompt="hello",
-                repo_root=tmp_path,
+                project_root=tmp_path,
                 env_overrides={},
             ),
             spec=ClaudeLaunchSpec(
@@ -1281,7 +1281,7 @@ async def test_run_streaming_spawn_finishes_on_claude_result_without_connection_
                 permission_resolver=TieredPermissionResolver(config=PermissionConfig()),
             ),
             state_root=state_root,
-            repo_root=tmp_path,
+            project_root=tmp_path,
             spawn_id=SpawnId("p2"),
         ),
         timeout=1.0,
@@ -1326,7 +1326,7 @@ async def test_run_streaming_spawn_finishes_on_claude_result_without_connection_
 #         execute_with_streaming(
 #             run,
 #             request=_build_plan(HarnessId.CLAUDE, "claude-opus-4-1"),
-#             repo_root=tmp_path,
+#             project_root=tmp_path,
 #             state_root=state_root,
 #             artifacts=artifacts,
 #             registry=registry,
@@ -1362,7 +1362,7 @@ async def test_run_streaming_spawn_finishes_on_opencode_idle_without_connection_
                 spawn_id=SpawnId("p3"),
                 harness_id=HarnessId.OPENCODE,
                 prompt="hello",
-                repo_root=tmp_path,
+                project_root=tmp_path,
                 env_overrides={},
             ),
             spec=OpenCodeLaunchSpec(
@@ -1370,7 +1370,7 @@ async def test_run_streaming_spawn_finishes_on_opencode_idle_without_connection_
                 permission_resolver=TieredPermissionResolver(config=PermissionConfig()),
             ),
             state_root=state_root,
-            repo_root=tmp_path,
+            project_root=tmp_path,
             spawn_id=SpawnId("p3"),
         ),
         timeout=1.0,
@@ -1399,7 +1399,7 @@ async def test_run_streaming_spawn_preserves_none_model_in_launch_spec(
                 spawn_id=SpawnId("p4"),
                 harness_id=HarnessId.OPENCODE,
                 prompt="hello",
-                repo_root=tmp_path,
+                project_root=tmp_path,
                 env_overrides={},
             ),
             spec=OpenCodeLaunchSpec(
@@ -1408,7 +1408,7 @@ async def test_run_streaming_spawn_preserves_none_model_in_launch_spec(
                 permission_resolver=TieredPermissionResolver(config=PermissionConfig()),
             ),
             state_root=state_root,
-            repo_root=tmp_path,
+            project_root=tmp_path,
             spawn_id=SpawnId("p4"),
         ),
         timeout=1.0,
@@ -1459,7 +1459,7 @@ async def test_execute_with_streaming_succeeds_when_opencode_idle_completes_but_
         _execute_with_context(
             run,
             request=_build_plan(HarnessId.OPENCODE, "openrouter/qwen/qwen3-coder:free"),
-            repo_root=tmp_path,
+            project_root=tmp_path,
             state_root=state_root,
             artifacts=artifacts,
             registry=registry,
@@ -1522,7 +1522,7 @@ async def test_execute_with_streaming_opencode_uses_adapter_normalized_launch_sp
         _execute_with_context(
             run,
             request=request,
-            repo_root=tmp_path,
+            project_root=tmp_path,
             state_root=state_root,
             artifacts=artifacts,
             registry=registry,
@@ -1616,7 +1616,7 @@ async def test_execute_with_streaming_starts_and_ticks_runner_heartbeat(
         _execute_with_context(
             run,
             request=_build_plan(),
-            repo_root=tmp_path,
+            project_root=tmp_path,
             state_root=state_root,
             artifacts=artifacts,
             registry=registry,
@@ -1697,7 +1697,7 @@ async def test_execute_with_streaming_marks_finalizing_before_terminal_finalize(
         _execute_with_context(
             run,
             request=_build_plan(),
-            repo_root=tmp_path,
+            project_root=tmp_path,
             state_root=state_root,
             artifacts=artifacts,
             registry=registry,
@@ -1765,7 +1765,7 @@ async def test_execute_with_streaming_tolerates_mark_finalizing_cas_miss(
         _execute_with_context(
             run,
             request=_build_plan(),
-            repo_root=tmp_path,
+            project_root=tmp_path,
             state_root=state_root,
             artifacts=artifacts,
             registry=registry,
@@ -1833,7 +1833,7 @@ async def test_execute_with_streaming_cancels_heartbeat_when_finalize_raises(
             _execute_with_context(
                 run,
                 request=_build_plan(),
-                repo_root=tmp_path,
+                project_root=tmp_path,
                 state_root=state_root,
                 artifacts=artifacts,
                 registry=registry,
@@ -1902,7 +1902,7 @@ async def test_execute_with_streaming_cancels_heartbeat_when_finalize_raises_val
             _execute_with_context(
                 run,
                 request=_build_plan(),
-                repo_root=tmp_path,
+                project_root=tmp_path,
                 state_root=state_root,
                 artifacts=artifacts,
                 registry=registry,
@@ -1978,7 +1978,7 @@ async def test_execute_with_streaming_continues_when_terminal_heartbeat_touch_fa
         _execute_with_context(
             run,
             request=_build_plan(),
-            repo_root=tmp_path,
+            project_root=tmp_path,
             state_root=state_root,
             artifacts=artifacts,
             registry=registry,

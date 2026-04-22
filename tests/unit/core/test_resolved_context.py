@@ -11,7 +11,7 @@ from meridian.lib.core.resolved_context import ContextBackend, ResolvedContext
 _MERIDIAN_ENV_KEYS = (
     "MERIDIAN_SPAWN_ID",
     "MERIDIAN_DEPTH",
-    "MERIDIAN_REPO_ROOT",
+    "MERIDIAN_PROJECT_DIR",
     "MERIDIAN_PROJECT_ROOT",
     "MERIDIAN_CHAT_ID",
     "MERIDIAN_WORK_ID",
@@ -56,7 +56,7 @@ def test_from_environment_without_env_vars(monkeypatch: pytest.MonkeyPatch) -> N
 
     assert resolved.spawn_id is None
     assert resolved.depth == 0
-    assert resolved.repo_root is None
+    assert resolved.project_root is None
     assert resolved.state_root is None
     assert resolved.chat_id == ""
     assert resolved.work_id is None
@@ -69,11 +69,11 @@ def test_from_environment_without_env_vars(monkeypatch: pytest.MonkeyPatch) -> N
 def test_from_environment_prefers_explicit_work_id(monkeypatch: pytest.MonkeyPatch) -> None:
     """Explicit work override must win over MERIDIAN_WORK_ID in resolver precedence."""
     _clear_meridian_env(monkeypatch)
-    repo_root = Path("/repo")
+    project_root = Path("/repo")
     state_root = Path("/runtime/state")
     backend = FakeBackend()
 
-    monkeypatch.setenv("MERIDIAN_REPO_ROOT", repo_root.as_posix())
+    monkeypatch.setenv("MERIDIAN_PROJECT_DIR", project_root.as_posix())
     monkeypatch.setenv("MERIDIAN_PROJECT_ROOT", state_root.as_posix())
     monkeypatch.setenv("MERIDIAN_WORK_ID", "work-from-env")
 
@@ -90,10 +90,10 @@ def test_from_environment_prefers_explicit_work_id(monkeypatch: pytest.MonkeyPat
 def test_from_environment_uses_meridian_work_id(monkeypatch: pytest.MonkeyPatch) -> None:
     """Resolver must honor MERIDIAN_WORK_ID when no explicit override is provided."""
     _clear_meridian_env(monkeypatch)
-    repo_root = Path("/repo")
+    project_root = Path("/repo")
     backend = FakeBackend()
 
-    monkeypatch.setenv("MERIDIAN_REPO_ROOT", repo_root.as_posix())
+    monkeypatch.setenv("MERIDIAN_PROJECT_DIR", project_root.as_posix())
     monkeypatch.setenv("MERIDIAN_WORK_ID", "work-from-env")
 
     resolved = ResolvedContext.from_environment(backend=backend)
@@ -128,7 +128,7 @@ def test_child_env_overrides_output_format() -> None:
     """Child-env projection must serialize the canonical ResolvedContext fields."""
     resolved = ResolvedContext(
         depth=2,
-        repo_root=Path("/repo"),
+        project_root=Path("/repo"),
         state_root=Path("/runtime/state"),
         chat_id="c9",
         work_id="work-123",
@@ -140,7 +140,7 @@ def test_child_env_overrides_output_format() -> None:
 
     assert overrides == {
         "MERIDIAN_DEPTH": "3",
-        "MERIDIAN_REPO_ROOT": "/repo",
+        "MERIDIAN_PROJECT_DIR": "/repo",
         "MERIDIAN_PROJECT_ROOT": "/runtime/state",
         "MERIDIAN_CHAT_ID": "c9",
         "MERIDIAN_WORK_ID": "work-123",
@@ -162,11 +162,11 @@ def test_resolved_context_is_frozen() -> None:
 def test_work_dir_prefers_repo_state_root_over_runtime_state_root(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Resolver must derive work_dir from repo-scoped state when repo_root exists."""
+    """Resolver must derive work_dir from repo-scoped state when project_root exists."""
     _clear_meridian_env(monkeypatch)
     backend = FakeBackend()
 
-    monkeypatch.setenv("MERIDIAN_REPO_ROOT", "/repo")
+    monkeypatch.setenv("MERIDIAN_PROJECT_DIR", "/repo")
     monkeypatch.setenv("MERIDIAN_PROJECT_ROOT", "/runtime/state")
     monkeypatch.setenv("MERIDIAN_WORK_ID", "selected-work")
 
@@ -222,29 +222,29 @@ def test_from_environment_float_string_depth_defaults_to_zero(
 # ---------------------------------------------------------------------------
 
 
-def test_from_environment_empty_repo_root_treated_as_absent(
+def test_from_environment_empty_project_root_treated_as_absent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An empty MERIDIAN_REPO_ROOT must be treated as if the variable were absent."""
+    """An empty MERIDIAN_PROJECT_DIR must be treated as if the variable were absent."""
     _clear_meridian_env(monkeypatch)
-    monkeypatch.setenv("MERIDIAN_REPO_ROOT", "")
+    monkeypatch.setenv("MERIDIAN_PROJECT_DIR", "")
 
     resolved = ResolvedContext.from_environment(backend=FakeBackend())
 
-    assert resolved.repo_root is None
+    assert resolved.project_root is None
     assert resolved.kb_dir is None
 
 
-def test_from_environment_whitespace_only_repo_root_treated_as_absent(
+def test_from_environment_whitespace_only_project_root_treated_as_absent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A whitespace-only MERIDIAN_REPO_ROOT must be stripped and treated as absent."""
+    """A whitespace-only MERIDIAN_PROJECT_DIR must be stripped and treated as absent."""
     _clear_meridian_env(monkeypatch)
-    monkeypatch.setenv("MERIDIAN_REPO_ROOT", "   ")
+    monkeypatch.setenv("MERIDIAN_PROJECT_DIR", "   ")
 
     resolved = ResolvedContext.from_environment(backend=FakeBackend())
 
-    assert resolved.repo_root is None
+    assert resolved.project_root is None
 
 
 def test_from_environment_empty_work_id_env_treated_as_absent(
@@ -337,7 +337,7 @@ def test_from_environment_work_id_resolution_precedence_d8(
 ) -> None:
     """D8 precedence: explicit_work_id > MERIDIAN_WORK_ID > session lookup."""
     _clear_meridian_env(monkeypatch)
-    monkeypatch.setenv("MERIDIAN_REPO_ROOT", "/repo")
+    monkeypatch.setenv("MERIDIAN_PROJECT_DIR", "/repo")
     monkeypatch.setenv("MERIDIAN_PROJECT_ROOT", "/runtime/state")
     monkeypatch.setenv("MERIDIAN_CHAT_ID", "c42")
     monkeypatch.setenv("MERIDIAN_WORK_ID", "env-work")
@@ -370,12 +370,12 @@ def test_from_environment_work_id_resolution_precedence_d8(
 # ---------------------------------------------------------------------------
 
 
-def test_resolved_context_frozen_repo_root() -> None:
-    """ResolvedContext must reject mutations to repo_root."""
-    resolved = ResolvedContext(repo_root=Path("/repo"))
+def test_resolved_context_frozen_project_root() -> None:
+    """ResolvedContext must reject mutations to project_root."""
+    resolved = ResolvedContext(project_root=Path("/repo"))
 
     with pytest.raises(FrozenInstanceError):
-        resolved.repo_root = Path("/other")  # type: ignore[misc]
+        resolved.project_root = Path("/other")  # type: ignore[misc]
 
 
 def test_resolved_context_frozen_chat_id() -> None:
@@ -395,14 +395,14 @@ def test_resolved_context_frozen_work_id() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Edge case 5: Work dir derivation when only state_root is available (no repo_root)
+# Edge case 5: Work dir derivation when only state_root is available (no project_root)
 # ---------------------------------------------------------------------------
 
 
-def test_work_dir_uses_state_root_directly_when_no_repo_root(
+def test_work_dir_uses_state_root_directly_when_no_project_root(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When only MERIDIAN_PROJECT_ROOT is set (no MERIDIAN_REPO_ROOT),
+    """When only MERIDIAN_PROJECT_ROOT is set (no MERIDIAN_PROJECT_DIR),
     work_dir must be resolved against state_root, not a derived repo state root."""
     _clear_meridian_env(monkeypatch)
     state_root = Path("/runtime/state")
@@ -413,11 +413,11 @@ def test_work_dir_uses_state_root_directly_when_no_repo_root(
 
     resolved = ResolvedContext.from_environment(backend=backend)
 
-    assert resolved.repo_root is None
+    assert resolved.project_root is None
     assert resolved.state_root == state_root
     assert resolved.work_dir == Path("/runtime/state/work/resolved/my-work")
     assert backend.work_dir_calls == [(state_root, "my-work")]
-    # kb_dir requires repo_root — must be None
+    # kb_dir requires project_root — must be None
     assert resolved.kb_dir is None
 
 
@@ -535,23 +535,23 @@ def test_child_env_overrides_minimal_context_only_emits_depth() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Edge case: relative path in MERIDIAN_REPO_ROOT is handled without error
+# Edge case: relative path in MERIDIAN_PROJECT_DIR is handled without error
 # ---------------------------------------------------------------------------
 
 
-def test_from_environment_relative_repo_root_handled_gracefully(
+def test_from_environment_relative_project_root_handled_gracefully(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A relative path string in MERIDIAN_REPO_ROOT must not raise an exception.
+    """A relative path string in MERIDIAN_PROJECT_DIR must not raise an exception.
     The module performs no filesystem existence check — it merely constructs
     the Path object and derives downstream paths from it."""
     _clear_meridian_env(monkeypatch)
-    monkeypatch.setenv("MERIDIAN_REPO_ROOT", "../relative/repo")
+    monkeypatch.setenv("MERIDIAN_PROJECT_DIR", "../relative/repo")
 
     resolved = ResolvedContext.from_environment(backend=FakeBackend())
 
     # Relative path accepted without error — downstream callers must resolve
-    assert resolved.repo_root == Path("../relative/repo")
+    assert resolved.project_root == Path("../relative/repo")
     # kb_dir is also derived relative — still no error
     assert resolved.kb_dir == Path("../relative/repo/.meridian/kb")
 
@@ -560,7 +560,7 @@ def test_from_environment_uses_context_config_for_repo_paths(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _clear_meridian_env(monkeypatch)
-    monkeypatch.setenv("MERIDIAN_REPO_ROOT", "/repo")
+    monkeypatch.setenv("MERIDIAN_PROJECT_DIR", "/repo")
     monkeypatch.setenv("MERIDIAN_WORK_ID", "my-work")
     config = ContextConfig.model_validate(
         {

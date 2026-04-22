@@ -18,14 +18,14 @@ def test_claude_adapter_detects_latest_project_session(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
     fake_home = tmp_path / "home"
     monkeypatch.setenv("HOME", fake_home.as_posix())
 
     old_session_id = str(uuid4())
     new_session_id = str(uuid4())
-    project_dir = fake_home / ".claude" / "projects" / project_slug(repo_root)
+    project_dir = fake_home / ".claude" / "projects" / project_slug(project_root)
     project_dir.mkdir(parents=True)
 
     old_path = project_dir / f"{old_session_id}.jsonl"
@@ -46,23 +46,26 @@ def test_claude_adapter_detects_latest_project_session(
     adapter = ClaudeAdapter()
     assert (
         adapter.detect_primary_session_id(
-            repo_root=repo_root,
+            project_root=project_root,
             started_at_epoch=now - 1,
             started_at_local_iso=None,
         )
         == new_session_id
     )
-    assert adapter.owns_untracked_session(repo_root=repo_root, session_ref=new_session_id) is True
-    assert infer_harness_from_untracked_session_ref(repo_root, new_session_id) == "claude"
+    assert (
+        adapter.owns_untracked_session(project_root=project_root, session_ref=new_session_id)
+        is True
+    )
+    assert infer_harness_from_untracked_session_ref(project_root, new_session_id) == "claude"
 
 
 def test_claude_adapter_resolves_session_from_prefixed_child_project_slug(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    child_cwd = repo_root / ".meridian" / "spawns" / "p1"
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    child_cwd = project_root / ".meridian" / "spawns" / "p1"
     child_cwd.mkdir(parents=True)
     fake_home = tmp_path / "home"
     monkeypatch.setenv("HOME", fake_home.as_posix())
@@ -78,25 +81,25 @@ def test_claude_adapter_resolves_session_from_prefixed_child_project_slug(
 
     adapter = ClaudeAdapter()
     assert (
-        adapter.resolve_session_file(repo_root=repo_root, session_id=session_id)
+        adapter.resolve_session_file(project_root=project_root, session_id=session_id)
         == child_session_path
     )
-    assert adapter.owns_untracked_session(repo_root=repo_root, session_ref=session_id) is True
+    assert adapter.owns_untracked_session(project_root=project_root, session_ref=session_id) is True
 
 
-def test_claude_adapter_resolve_prefers_repo_root_project_slug(
+def test_claude_adapter_resolve_prefers_project_root_project_slug(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    child_cwd = repo_root / ".meridian" / "spawns" / "p1"
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    child_cwd = project_root / ".meridian" / "spawns" / "p1"
     child_cwd.mkdir(parents=True)
     fake_home = tmp_path / "home"
     monkeypatch.setenv("HOME", fake_home.as_posix())
 
     session_id = str(uuid4())
-    root_project_dir = fake_home / ".claude" / "projects" / project_slug(repo_root)
+    root_project_dir = fake_home / ".claude" / "projects" / project_slug(project_root)
     root_project_dir.mkdir(parents=True)
     root_session_path = root_project_dir / f"{session_id}.jsonl"
     root_session_path.write_text(
@@ -114,7 +117,7 @@ def test_claude_adapter_resolve_prefers_repo_root_project_slug(
 
     adapter = ClaudeAdapter()
     assert (
-        adapter.resolve_session_file(repo_root=repo_root, session_id=session_id)
+        adapter.resolve_session_file(project_root=project_root, session_id=session_id)
         == root_session_path
     )
     assert child_session_path.exists()
@@ -124,8 +127,8 @@ def test_codex_adapter_owns_session_detection(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
     fake_home = tmp_path / "home"
     monkeypatch.setenv("HOME", fake_home.as_posix())
 
@@ -139,7 +142,7 @@ def test_codex_adapter_owns_session_detection(
                 json.dumps(
                     {
                         "type": "session_meta",
-                        "payload": {"id": session_id, "cwd": repo_root.as_posix()},
+                        "payload": {"id": session_id, "cwd": project_root.as_posix()},
                     }
                 ),
                 json.dumps(
@@ -159,22 +162,22 @@ def test_codex_adapter_owns_session_detection(
     adapter = CodexAdapter()
     assert (
         adapter.detect_primary_session_id(
-            repo_root=repo_root,
+            project_root=project_root,
             started_at_epoch=now - 1,
             started_at_local_iso=None,
         )
         == session_id
     )
-    assert adapter.owns_untracked_session(repo_root=repo_root, session_ref=session_id) is True
-    assert infer_harness_from_untracked_session_ref(repo_root, session_id) == "codex"
+    assert adapter.owns_untracked_session(project_root=project_root, session_ref=session_id) is True
+    assert infer_harness_from_untracked_session_ref(project_root, session_id) == "codex"
 
 
 def test_opencode_adapter_owns_session_detection(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
     fake_home = tmp_path / "home"
     monkeypatch.setenv("HOME", fake_home.as_posix())
 
@@ -185,7 +188,7 @@ def test_opencode_adapter_owns_session_detection(
     log_path.write_text(
         (
             "INF 2026-03-08T12:00:05 +12ms service=session "
-            f"id={session_id} directory={repo_root.as_posix()} created\n"
+            f"id={session_id} directory={project_root.as_posix()} created\n"
         ),
         encoding="utf-8",
     )
@@ -195,11 +198,11 @@ def test_opencode_adapter_owns_session_detection(
     adapter = OpenCodeAdapter()
     assert (
         adapter.detect_primary_session_id(
-            repo_root=repo_root,
+            project_root=project_root,
             started_at_epoch=now - 1,
             started_at_local_iso="2026-03-08T12:00:00",
         )
         == session_id
     )
-    assert adapter.owns_untracked_session(repo_root=repo_root, session_ref=session_id) is True
-    assert infer_harness_from_untracked_session_ref(repo_root, session_id) == "opencode"
+    assert adapter.owns_untracked_session(project_root=project_root, session_ref=session_id) is True
+    assert infer_harness_from_untracked_session_ref(project_root, session_id) == "opencode"

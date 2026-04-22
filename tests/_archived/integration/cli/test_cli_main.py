@@ -103,8 +103,8 @@ def test_main_uses_runtime_only_bootstrap_on_startup(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
     calls = {"runtime_bootstrap": 0, "config_bootstrap": 0}
 
     settings_mod = importlib.import_module("meridian.lib.config.settings")
@@ -112,7 +112,7 @@ def test_main_uses_runtime_only_bootstrap_on_startup(
 
     def _resolve_project_root(explicit: Path | None = None) -> Path:
         _ = explicit
-        return repo_root
+        return project_root
 
     def _runtime_bootstrap(root: Path) -> None:
         _ = root
@@ -172,7 +172,7 @@ def test_init_alias_without_link_emits_config_init_result(
     result = object()
 
     def _fake_config_init_sync(payload: object) -> object:
-        captured["repo_root"] = payload.repo_root  # type: ignore[attr-defined]
+        captured["project_root"] = payload.project_root  # type: ignore[attr-defined]
         return result
 
     def _fake_emit(payload: object) -> None:
@@ -183,7 +183,7 @@ def test_init_alias_without_link_emits_config_init_result(
 
     cli_main.init_alias(path=tmp_path.as_posix())
 
-    assert captured["repo_root"] == tmp_path.resolve().as_posix()
+    assert captured["project_root"] == tmp_path.resolve().as_posix()
     assert emitted == [result]
 
 
@@ -256,7 +256,7 @@ def test_init_help_mentions_link_flag(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("MERIDIAN_REPO_ROOT", raising=False)
+    monkeypatch.delenv("MERIDIAN_PROJECT_DIR", raising=False)
 
     with pytest.raises(SystemExit) as exc_info:
         cli_main.main(["init", "--help"])

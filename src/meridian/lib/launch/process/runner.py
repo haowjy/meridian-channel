@@ -119,7 +119,7 @@ def run_harness_process(
 ) -> ProcessOutcome:
     """Start session, spawn tracking, launch process, wait for exit."""
 
-    repo_root = launch_context.repo_root
+    project_root = launch_context.project_root
     execution_cwd = launch_context.execution_cwd
     state_root = launch_context.state_root
     preview_context = launch_context
@@ -132,9 +132,8 @@ def run_harness_process(
     session_scope_harness_session_id = resolved_harness_session_id
     if session_mode == SessionMode.FORK:
         session_scope_harness_session_id = (
-            (preview_request.session.requested_harness_session_id or "").strip()
-            or session_scope_harness_session_id
-        )
+            preview_request.session.requested_harness_session_id or ""
+        ).strip() or session_scope_harness_session_id
     harness_adapter = preview_context.harness
     harness_id = HarnessId(session_metadata.harness)
     chat_id: str | None = None
@@ -143,12 +142,10 @@ def run_harness_process(
     primary_started_epoch = 0.0
     primary_started_local_iso: str | None = None
     artifacts = LocalStore(root_dir=state_root / "artifacts")
-    lifecycle_service = create_lifecycle_service(repo_root, state_root)
+    lifecycle_service = create_lifecycle_service(project_root, state_root)
 
     resume_chat_id = (
-        preview_request.session.continue_chat_id
-        if session_mode == SessionMode.RESUME
-        else None
+        preview_request.session.continue_chat_id if session_mode == SessionMode.RESUME else None
     )
     exit_code = 2
     try:
@@ -182,9 +179,7 @@ def run_harness_process(
                 should_fork = (
                     session_mode == SessionMode.FORK
                     and harness_id == HarnessId.CODEX
-                    and bool(
-                        (preview_request.session.requested_harness_session_id or "").strip()
-                    )
+                    and bool((preview_request.session.requested_harness_session_id or "").strip())
                 )
                 primary_spawn_id = SpawnId(
                     lifecycle_service.start(
@@ -226,7 +221,7 @@ def run_harness_process(
                         }
                     )
                     resolved_harness_session_id = forked_session_id
-                log_dir = resolve_spawn_log_dir(repo_root, primary_spawn_id)
+                log_dir = resolve_spawn_log_dir(project_root, primary_spawn_id)
                 primary_started = time.monotonic()
                 primary_started_epoch = time.time()
                 primary_started_local_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
@@ -237,7 +232,7 @@ def run_harness_process(
                     update={
                         "composition_surface": LaunchCompositionSurface.PRIMARY,
                         "state_root": state_root.as_posix(),
-                        "project_paths_repo_root": repo_root.as_posix(),
+                        "project_paths_project_root": project_root.as_posix(),
                         "project_paths_execution_cwd": execution_cwd.as_posix(),
                         "report_output_path": (log_dir / "report.md").as_posix(),
                     }
@@ -307,7 +302,9 @@ def run_harness_process(
                 durable_report = False
                 terminated_after_completion = False
                 if primary_spawn_id is not None:
-                    report_path = resolve_spawn_log_dir(repo_root, primary_spawn_id) / "report.md"
+                    report_path = (
+                        resolve_spawn_log_dir(project_root, primary_spawn_id) / "report.md"
+                    )
                     try:
                         report_text = (
                             report_path.read_text(encoding="utf-8")
@@ -345,7 +342,7 @@ def run_harness_process(
                             artifacts=artifacts,
                             spawn_id=primary_spawn_id,
                             current_session_id=resolved_harness_session_id,
-                            repo_root=repo_root,
+                            project_root=project_root,
                             started_at_epoch=primary_started_epoch,
                             started_at_local_iso=primary_started_local_iso,
                         )

@@ -21,14 +21,14 @@ from meridian.lib.state.session_store import cleanup_stale_sessions
 class DoctorInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class DoctorOutput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     ok: bool
-    repo_root: str
+    project_root: str
     runs_checked: int
     agents_dir: str
     skills_dir: str
@@ -42,7 +42,7 @@ class DoctorOutput(BaseModel):
         status = "ok" if self.ok else "WARNINGS"
         pairs: list[tuple[str, str | None]] = [
             ("ok", status),
-            ("repo_root", self.repo_root),
+            ("project_root", self.project_root),
             ("runs_checked", str(self.runs_checked)),
             ("agents_dir", self.agents_dir),
             ("skills_dir", self.skills_dir),
@@ -62,19 +62,19 @@ class DoctorWarning(BaseModel):
     payload: dict[str, object] | None = None
 
 
-def _count_runs(repo_root: Path) -> int:
-    return len(spawn_store.list_spawns(resolve_runtime_root(repo_root)))
+def _count_runs(project_root: Path) -> int:
+    return len(spawn_store.list_spawns(resolve_runtime_root(project_root)))
 
 
-def _repair_stale_session_locks(repo_root: Path) -> int:
-    cleanup = cleanup_stale_sessions(resolve_runtime_root(repo_root))
+def _repair_stale_session_locks(project_root: Path) -> int:
+    cleanup = cleanup_stale_sessions(resolve_runtime_root(project_root))
     return len(cleanup.cleaned_ids)
 
 
-def _repair_orphan_runs(repo_root: Path) -> int:
+def _repair_orphan_runs(project_root: Path) -> int:
     from meridian.lib.state.reaper import reconcile_spawns
 
-    state_root = resolve_runtime_root(repo_root)
+    state_root = resolve_runtime_root(project_root)
     spawns = spawn_store.list_spawns(state_root)
     running_before = sum(1 for s in spawns if is_active_spawn_status(s.status))
     reconciled = reconcile_spawns(state_root, spawns)
@@ -83,23 +83,25 @@ def _repair_orphan_runs(repo_root: Path) -> int:
 
 
 def doctor_sync(payload: DoctorInput) -> DoctorOutput:
-    explicit_root = Path(payload.repo_root).expanduser().resolve() if payload.repo_root else None
+    explicit_root = (
+        Path(payload.project_root).expanduser().resolve() if payload.project_root else None
+    )
     surface = build_config_surface(resolve_project_root(explicit_root))
-    repo_root = surface.repo_root
-    ensure_runtime_state_bootstrap_sync(repo_root)
+    project_root = surface.project_root
+    ensure_runtime_state_bootstrap_sync(project_root)
 
     repaired: list[str] = []
-    stale_locks = _repair_stale_session_locks(repo_root)
+    stale_locks = _repair_stale_session_locks(project_root)
     if stale_locks > 0:
         repaired.append("stale_session_locks")
 
     if int(os.getenv("MERIDIAN_DEPTH", "0")) <= 0:
-        orphan_runs = _repair_orphan_runs(repo_root)
+        orphan_runs = _repair_orphan_runs(project_root)
         if orphan_runs > 0:
             repaired.append("orphan_runs")
 
-    agents_dir = repo_root / ".agents" / "agents"
-    skills_dir = repo_root / ".agents" / "skills"
+    agents_dir = project_root / ".agents" / "agents"
+    skills_dir = project_root / ".agents" / "skills"
     agents_dirs = [agents_dir] if agents_dir.is_dir() else []
     skills_dirs = [skills_dir] if skills_dir.is_dir() else []
 
@@ -149,7 +151,7 @@ def doctor_sync(payload: DoctorInput) -> DoctorOutput:
             )
         )
 
-    availability = check_upgrade_availability(repo_root)
+    availability = check_upgrade_availability(project_root)
     if availability is None:
         warnings.append(
             DoctorWarning(
@@ -172,7 +174,7 @@ def doctor_sync(payload: DoctorInput) -> DoctorOutput:
 
     running = [
         row.id
-        for row in spawn_store.list_spawns(resolve_runtime_root(repo_root))
+        for row in spawn_store.list_spawns(resolve_runtime_root(project_root))
         if is_active_spawn_status(row.status)
     ]
     if running:
@@ -186,8 +188,8 @@ def doctor_sync(payload: DoctorInput) -> DoctorOutput:
 
     return DoctorOutput(
         ok=not warnings,
-        repo_root=repo_root.as_posix(),
-        runs_checked=_count_runs(repo_root),
+        project_root=project_root.as_posix(),
+        runs_checked=_count_runs(project_root),
         agents_dir=agents_dir.as_posix(),
         skills_dir=skills_dir.as_posix(),
         warnings=tuple(warnings),

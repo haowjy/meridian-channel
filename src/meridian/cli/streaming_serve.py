@@ -42,10 +42,10 @@ async def streaming_serve(
         supported = ", ".join(item.value for item in HarnessId)
         raise ValueError(f"unsupported harness '{harness}'. Supported: {supported}") from exc
 
-    repo_root, _ = resolve_runtime_root_and_config(None)
-    state_root = resolve_runtime_root(repo_root)
+    project_root, _ = resolve_runtime_root_and_config(None)
+    state_root = resolve_runtime_root(project_root)
     start_monotonic = time.monotonic()
-    lifecycle = create_lifecycle_service(repo_root, state_root)
+    lifecycle = create_lifecycle_service(project_root, state_root)
     spawn_id = SpawnId(
         lifecycle.start(
             chat_id=str(uuid4()),
@@ -74,7 +74,7 @@ async def streaming_serve(
         spawn_id=spawn_id,
         harness_id=harness_id,
         prompt=prompt,
-        repo_root=repo_root,
+        project_root=project_root,
         env_overrides={},
         debug_tracer=tracer,
     )
@@ -90,8 +90,8 @@ async def streaming_serve(
     launch_runtime = LaunchRuntime(
         argv_intent=LaunchArgvIntent.SPEC_ONLY,
         state_root=state_root.as_posix(),
-        project_paths_repo_root=repo_root.as_posix(),
-        project_paths_execution_cwd=repo_root.as_posix(),
+        project_paths_project_root=project_root.as_posix(),
+        project_paths_execution_cwd=project_root.as_posix(),
     )
     launch_ctx = build_launch_context(
         spawn_id=str(spawn_id),
@@ -115,7 +115,7 @@ async def streaming_serve(
             config=config,
             spec=launch_ctx.spec,
             state_root=state_root,
-            repo_root=repo_root,
+            project_root=project_root,
             spawn_id=spawn_id,
         )
         outcome_status = outcome.status

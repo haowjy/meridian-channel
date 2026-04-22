@@ -214,12 +214,12 @@ class _TestableOpenCodeConnection(OpenCodeConnection):
             raise AssertionError("Unexpected _post_json call in test") from exc
 
 
-def _connection_config(harness_id: HarnessId, repo_root: Path) -> ConnectionConfig:
+def _connection_config(harness_id: HarnessId, project_root: Path) -> ConnectionConfig:
     return ConnectionConfig(
         spawn_id=SpawnId("p-parity"),
         harness_id=harness_id,
         prompt="prompt text",
-        repo_root=repo_root,
+        project_root=project_root,
         env_overrides={},
     )
 
@@ -491,15 +491,15 @@ def test_duplicate_bundle_registration_raises(
     class AdapterA:
         handled_fields = frozenset(SpawnParams.model_fields)
 
-        def owns_untracked_session(self, *, repo_root: Path, session_ref: str) -> bool:
-            _ = repo_root, session_ref
+        def owns_untracked_session(self, *, project_root: Path, session_ref: str) -> bool:
+            _ = project_root, session_ref
             return False
 
     class AdapterB:
         handled_fields = frozenset(SpawnParams.model_fields)
 
-        def owns_untracked_session(self, *, repo_root: Path, session_ref: str) -> bool:
-            _ = repo_root, session_ref
+        def owns_untracked_session(self, *, project_root: Path, session_ref: str) -> bool:
+            _ = project_root, session_ref
             return False
 
     first = HarnessBundle(

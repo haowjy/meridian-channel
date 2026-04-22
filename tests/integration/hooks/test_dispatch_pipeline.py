@@ -63,7 +63,7 @@ def _context(event_name: HookEventName = "spawn.finalized") -> HookContext:
         event_name=event_name,
         event_id=uuid4(),
         timestamp="2026-04-20T00:00:00+00:00",
-        repo_root="/repo",
+        project_root="/repo",
         state_root="/repo/.meridian",
         spawn_id="p123",
         spawn_status="success",
@@ -220,8 +220,8 @@ def test_dispatch_pipeline_executes_builtin_hook_in_process(tmp_path: Path) -> N
 
 
 def test_dispatch_pipeline_persists_interval_state_across_runs(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
     state_root = tmp_path / "state"
     marker = tmp_path / "runs.jsonl"
     script = tmp_path / "record_run.py"
@@ -245,9 +245,9 @@ def test_dispatch_pipeline_persists_interval_state_across_runs(tmp_path: Path) -
             ),
         )
     )
-    registry = HookRegistry(repo_root, hooks_config=hooks)
+    registry = HookRegistry(project_root, hooks_config=hooks)
 
-    first_dispatcher = HookDispatcher(repo_root, state_root, registry=registry)
+    first_dispatcher = HookDispatcher(project_root, state_root, registry=registry)
     first_results = first_dispatcher.fire(
         _context(),
     )
@@ -259,7 +259,7 @@ def test_dispatch_pipeline_persists_interval_state_across_runs(tmp_path: Path) -
     persisted_state = json.loads(hook_state_path.read_text(encoding="utf-8"))
     assert "throttled-recorder" in persisted_state
 
-    second_dispatcher = HookDispatcher(repo_root, state_root, registry=registry)
+    second_dispatcher = HookDispatcher(project_root, state_root, registry=registry)
     second_results = second_dispatcher.fire(_context())
 
     assert [result.outcome for result in second_results] == ["skipped"]
@@ -268,8 +268,8 @@ def test_dispatch_pipeline_persists_interval_state_across_runs(tmp_path: Path) -
 
 
 def test_dispatch_pipeline_times_out_then_continues_to_later_hooks(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
     state_root = tmp_path / "state"
     term_marker = tmp_path / "term.txt"
     success_marker = tmp_path / "success.txt"
@@ -317,8 +317,8 @@ def test_dispatch_pipeline_times_out_then_continues_to_later_hooks(tmp_path: Pat
             ),
         )
     )
-    registry = HookRegistry(repo_root, hooks_config=hooks)
-    dispatcher = HookDispatcher(repo_root, state_root, registry=registry)
+    registry = HookRegistry(project_root, hooks_config=hooks)
+    dispatcher = HookDispatcher(project_root, state_root, registry=registry)
 
     results = dispatcher.fire(_context())
 
@@ -335,8 +335,8 @@ def test_dispatch_pipeline_times_out_then_continues_to_later_hooks(tmp_path: Pat
 def test_dispatch_pipeline_logs_fail_open_failures_and_completion_metadata(
     tmp_path: Path,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
     state_root = tmp_path / "state"
     success_marker = tmp_path / "success.txt"
 
@@ -368,8 +368,8 @@ def test_dispatch_pipeline_logs_fail_open_failures_and_completion_metadata(
             ),
         )
     )
-    registry = HookRegistry(repo_root, hooks_config=hooks)
-    dispatcher = HookDispatcher(repo_root, state_root, registry=registry)
+    registry = HookRegistry(project_root, hooks_config=hooks)
+    dispatcher = HookDispatcher(project_root, state_root, registry=registry)
 
     with capture_logs() as logs:
         results = dispatcher.fire(_context())
@@ -408,8 +408,8 @@ def test_dispatch_pipeline_logs_fail_open_failures_and_completion_metadata(
 
 
 def test_dispatch_pipeline_logs_exit_code_on_completion(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
     state_root = tmp_path / "state"
     success_marker = tmp_path / "success.txt"
     success_script = tmp_path / "success.py"
@@ -430,8 +430,8 @@ def test_dispatch_pipeline_logs_exit_code_on_completion(tmp_path: Path) -> None:
             ),
         )
     )
-    registry = HookRegistry(repo_root, hooks_config=hooks)
-    dispatcher = HookDispatcher(repo_root, state_root, registry=registry)
+    registry = HookRegistry(project_root, hooks_config=hooks)
+    dispatcher = HookDispatcher(project_root, state_root, registry=registry)
 
     with capture_logs() as logs:
         results = dispatcher.fire(_context())

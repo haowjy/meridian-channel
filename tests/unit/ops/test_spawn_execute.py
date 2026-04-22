@@ -36,13 +36,13 @@ def _make_launch_context(
     request = SpawnRequest(prompt=run_inputs.prompt, model="gpt-5.4", harness="opencode")
     runtime = LaunchRuntime(
         state_root=(tmp_path / ".meridian").as_posix(),
-        project_paths_repo_root=tmp_path.as_posix(),
+        project_paths_project_root=tmp_path.as_posix(),
         project_paths_execution_cwd=tmp_path.as_posix(),
     )
     return LaunchContext(
         request=request,
         runtime=runtime,
-        repo_root=tmp_path,
+        project_root=tmp_path,
         execution_cwd=tmp_path,
         state_root=tmp_path / ".meridian",
         work_id=None,
@@ -81,7 +81,7 @@ def test_write_projection_artifacts_uses_projected_content_for_spawn(tmp_path: P
     run_inputs = ResolvedRunInputs(
         prompt="do thing",
         model=ModelId("opencode-gpt-5.4"),
-        repo_root=tmp_path.as_posix(),
+        project_root=tmp_path.as_posix(),
         reference_items=reference_items,
     )
     spec = OpenCodeLaunchSpec(
@@ -180,7 +180,7 @@ def test_write_projection_artifacts_uses_projected_content_for_primary(tmp_path:
 
 
 def test_write_params_json_does_not_write_legacy_prompt_md(tmp_path: Path) -> None:
-    project_paths = ProjectConfigPaths(repo_root=tmp_path, execution_cwd=tmp_path)
+    project_paths = ProjectConfigPaths(project_root=tmp_path, execution_cwd=tmp_path)
     spawn_id = SpawnId("p123")
     request = SpawnRequest(prompt="prompt", model="gpt-5.4", harness="codex")
 

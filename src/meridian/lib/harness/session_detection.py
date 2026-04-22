@@ -9,7 +9,7 @@ from meridian.lib.harness.registry import HarnessRegistry, get_default_harness_r
 
 
 def infer_harness_from_untracked_session_ref(
-    repo_root: Path,
+    project_root: Path,
     session_ref: str,
     *,
     registry: HarnessRegistry | None = None,
@@ -28,7 +28,7 @@ def infer_harness_from_untracked_session_ref(
             getattr(bundle.adapter, "owns_untracked_session", None),
         )
         if callable(owns_untracked) and owns_untracked(
-            repo_root=repo_root,
+            project_root=project_root,
             session_ref=normalized,
         ):
             return harness_id
@@ -41,6 +41,6 @@ def infer_harness_from_untracked_session_ref(
             adapter = active_registry.get_subprocess_harness(harness_id)
         except TypeError:
             continue
-        if adapter.owns_untracked_session(repo_root=repo_root, session_ref=normalized):
+        if adapter.owns_untracked_session(project_root=project_root, session_ref=normalized):
             return harness_id
     return None

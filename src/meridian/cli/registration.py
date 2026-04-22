@@ -16,7 +16,7 @@ HandlerFactory = Callable[[], Callable[..., None]]
 
 # Input model fields that should never become CLI arguments because they are
 # injected at runtime by the calling context rather than provided by the user.
-_IMPLICIT_INPUT_FIELDS: frozenset[str] = frozenset({"repo_root"})
+_IMPLICIT_INPUT_FIELDS: frozenset[str] = frozenset({"project_root"})
 
 
 def _make_auto_handler(

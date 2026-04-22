@@ -330,7 +330,7 @@ class ClaudeConnection(HarnessConnection[ClaudeLaunchSpec]):
         return None
 
     async def _start_subprocess(self, config: ConnectionConfig, spec: ClaudeLaunchSpec) -> None:
-        spawn_dir = resolve_spawn_log_dir(config.repo_root, config.spawn_id)
+        spawn_dir = resolve_spawn_log_dir(config.project_root, config.spawn_id)
         spawn_dir.mkdir(parents=True, exist_ok=True)
 
         stderr_path = spawn_dir / "stderr.log"
@@ -347,7 +347,7 @@ class ClaudeConnection(HarnessConnection[ClaudeLaunchSpec]):
         try:
             self._process = await asyncio.create_subprocess_exec(
                 *command,
-                cwd=str(config.repo_root),
+                cwd=str(config.project_root),
                 env=env,
                 stdin=PIPE,
                 stdout=PIPE,

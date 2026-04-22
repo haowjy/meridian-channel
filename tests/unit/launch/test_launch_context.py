@@ -38,7 +38,7 @@ def _build_launch_runtime(
         harness_command_override=override,
         report_output_path=(tmp_path / "report.md").as_posix(),
         state_root=(tmp_path / ".meridian").as_posix(),
-        project_paths_repo_root=tmp_path.as_posix(),
+        project_paths_project_root=tmp_path.as_posix(),
         project_paths_execution_cwd=tmp_path.as_posix(),
     )
 
@@ -163,7 +163,7 @@ def test_build_launch_context_projects_runtime_child_env_paths(
 
     assert runtime_ctx.env_overrides["MERIDIAN_DEPTH"] == "3"
     assert runtime_ctx.env_overrides["MERIDIAN_CHAT_ID"] == "c-parent"
-    assert runtime_ctx.env_overrides["MERIDIAN_REPO_ROOT"] == tmp_path.as_posix()
+    assert runtime_ctx.env_overrides["MERIDIAN_PROJECT_DIR"] == tmp_path.as_posix()
     assert runtime_ctx.env_overrides["MERIDIAN_PROJECT_ROOT"] == (
         tmp_path / ".meridian"
     ).as_posix()

@@ -23,13 +23,13 @@ _LOG_ROLE_MARKER_RE = re.compile(r"^(user|assistant|codex|exec)$", re.IGNORECASE
 
 
 def _select_latest_spawn_id(
-    repo_root: Path,
+    project_root: Path,
     *,
     statuses: tuple[str, ...] | None,
 ) -> str | None:
     from meridian.lib.state.reaper import reconcile_spawns
 
-    state_root = resolve_runtime_root_for_read(repo_root)
+    state_root = resolve_runtime_root_for_read(project_root)
     spawns = reconcile_spawns(state_root, spawn_store.list_spawns(state_root))
     if statuses is not None:
         wanted = set(statuses)
@@ -39,12 +39,12 @@ def _select_latest_spawn_id(
     return spawns[-1].id
 
 
-def resolve_spawn_reference(repo_root: Path, ref: str) -> str:
+def resolve_spawn_reference(project_root: Path, ref: str) -> str:
     normalized = ref.strip()
     if not normalized:
         raise ValueError("spawn_id is required")
     if not normalized.startswith("@"):
-        state_root = resolve_runtime_root_for_read(repo_root)
+        state_root = resolve_runtime_root_for_read(project_root)
         resolved = resolve_spawn_ref(state_root, normalized)
         return str(resolved) if resolved is not None else normalized
 
@@ -55,18 +55,18 @@ def resolve_spawn_reference(repo_root: Path, ref: str) -> str:
             f"Unknown spawn reference '{normalized}'. Supported references: {supported}"
         )
 
-    resolved = _select_latest_spawn_id(repo_root, statuses=status_filter)
+    resolved = _select_latest_spawn_id(project_root, statuses=status_filter)
     if resolved is None:
         raise ValueError(f"No spawns found for reference '{normalized}'")
     return resolved
 
 
-def resolve_spawn_references(repo_root: Path, refs: tuple[str, ...]) -> tuple[str, ...]:
-    return tuple(dict.fromkeys(resolve_spawn_reference(repo_root, ref) for ref in refs))
+def resolve_spawn_references(project_root: Path, refs: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(resolve_spawn_reference(project_root, ref) for ref in refs))
 
 
-def read_spawn_row(repo_root: Path, spawn_id: str) -> spawn_store.SpawnRecord | None:
-    state_root = resolve_runtime_root_for_read(repo_root)
+def read_spawn_row(project_root: Path, spawn_id: str) -> spawn_store.SpawnRecord | None:
+    state_root = resolve_runtime_root_for_read(project_root)
     record = spawn_store.get_spawn(state_root, spawn_id)
     if record is not None and is_active_spawn_status(record.status):
         from meridian.lib.state.reaper import reconcile_active_spawn
@@ -76,12 +76,12 @@ def read_spawn_row(repo_root: Path, spawn_id: str) -> spawn_store.SpawnRecord | 
 
 
 def read_report(
-    repo_root: Path,
+    project_root: Path,
     spawn_id: str,
     *,
     include_body: bool,
 ) -> tuple[str | None, str | None]:
-    report_path = resolve_runtime_root_for_read(repo_root) / "spawns" / spawn_id / "report.md"
+    report_path = resolve_runtime_root_for_read(project_root) / "spawns" / spawn_id / "report.md"
     if not report_path.is_file():
         return None, None
     if not include_body:
@@ -90,8 +90,8 @@ def read_report(
     return report_path.as_posix(), text
 
 
-def read_report_text(repo_root: Path, spawn_id: str) -> tuple[str | None, str | None]:
-    return read_report(repo_root, spawn_id, include_body=True)
+def read_report_text(project_root: Path, spawn_id: str) -> tuple[str | None, str | None]:
+    return read_report(project_root, spawn_id, include_body=True)
 
 
 def _truncate_log_message(value: str, *, max_chars: int = _RUNNING_LOG_MESSAGE_LIMIT) -> str:
@@ -184,36 +184,36 @@ def extract_last_assistant_message(stderr_text: str) -> str | None:
     return _truncate_log_message(last_message)
 
 
-def _read_running_log_details(repo_root: Path, spawn_id: str) -> tuple[str, str | None]:
-    stderr_path = resolve_runtime_root_for_read(repo_root) / "spawns" / spawn_id / "stderr.log"
+def _read_running_log_details(project_root: Path, spawn_id: str) -> tuple[str, str | None]:
+    stderr_path = resolve_runtime_root_for_read(project_root) / "spawns" / spawn_id / "stderr.log"
     if not stderr_path.is_file():
         return stderr_path.as_posix(), None
     stderr_text = stderr_path.read_text(encoding="utf-8", errors="ignore")
     return stderr_path.as_posix(), extract_last_assistant_message(stderr_text)
 
 
-def read_written_files(repo_root: Path, spawn_id: str) -> tuple[str, ...]:
+def read_written_files(project_root: Path, spawn_id: str) -> tuple[str, ...]:
     from meridian.lib.core.types import SpawnId
     from meridian.lib.launch.written_files import extract_written_files
     from meridian.lib.state.artifact_store import LocalStore
 
-    artifacts = LocalStore(root_dir=resolve_runtime_root_for_read(repo_root) / "artifacts")
+    artifacts = LocalStore(root_dir=resolve_runtime_root_for_read(project_root) / "artifacts")
     return extract_written_files(artifacts, SpawnId(spawn_id))
 
 
 def detail_from_row(
     *,
-    repo_root: Path,
+    project_root: Path,
     row: spawn_store.SpawnRecord,
     include_report_body: bool,
 ) -> SpawnDetailOutput:
-    report_path, report_body = read_report(repo_root, row.id, include_body=include_report_body)
+    report_path, report_body = read_report(project_root, row.id, include_body=include_report_body)
     report_summary = report_body[:500] if report_body else None
 
     last_message: str | None = None
     log_path: str | None = None
     if is_active_spawn_status(row.status):
-        log_path, last_message = _read_running_log_details(repo_root, row.id)
+        log_path, last_message = _read_running_log_details(project_root, row.id)
 
     return SpawnDetailOutput(
         spawn_id=row.id,

@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 def test_resolve_runtime_context_delegates_to_resolved_context(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("MERIDIAN_REPO_ROOT", raising=False)
+    monkeypatch.delenv("MERIDIAN_PROJECT_DIR", raising=False)
     monkeypatch.delenv("MERIDIAN_PROJECT_ROOT", raising=False)
 
     seen_env: list[tuple[str | None, str | None]] = []
@@ -36,7 +36,7 @@ def test_resolve_runtime_context_delegates_to_resolved_context(
         _ = cls
         seen_env.append(
             (
-                os.environ.get("MERIDIAN_REPO_ROOT"),
+                os.environ.get("MERIDIAN_PROJECT_DIR"),
                 os.environ.get("MERIDIAN_PROJECT_ROOT"),
             )
         )
@@ -48,17 +48,17 @@ def test_resolve_runtime_context_delegates_to_resolved_context(
 
     assert resolved is expected
     assert seen_env == [("/repo", "/runtime/state")]
-    assert os.environ.get("MERIDIAN_REPO_ROOT") is None
+    assert os.environ.get("MERIDIAN_PROJECT_DIR") is None
     assert os.environ.get("MERIDIAN_PROJECT_ROOT") is None
 
 
 def test_context_sync_returns_catalog_fields_from_context_resolution(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    repo_root = Path("/repo")
+    project_root = Path("/repo")
 
     def fake_resolve_project_root() -> Path:
-        return repo_root
+        return project_root
 
     def fake_load_context_config(_repo: Path) -> None:
         return None
@@ -96,7 +96,7 @@ def test_context_sync_returns_catalog_fields_from_context_resolution(
 
 
 def test_context_sync_uses_loaded_config_paths_and_sources(monkeypatch: MonkeyPatch) -> None:
-    repo_root = Path("/repo")
+    project_root = Path("/repo")
     config = ContextConfig.model_validate(
         {
             "work": {
@@ -112,7 +112,7 @@ def test_context_sync_uses_loaded_config_paths_and_sources(monkeypatch: MonkeyPa
     )
 
     def fake_resolve_project_root() -> Path:
-        return repo_root
+        return project_root
 
     def fake_load_context_config(_repo: Path) -> ContextConfig:
         return config
@@ -212,13 +212,13 @@ def test_context_output_resolve_name_supports_catalog_paths() -> None:
 
 
 def test_work_current_sync_uses_resolved_context(monkeypatch: MonkeyPatch) -> None:
-    repo_root = Path("/repo")
+    project_root = Path("/repo")
     state_root = Path("/runtime/state")
 
     def fake_resolve_project_root() -> Path:
-        return repo_root
+        return project_root
 
-    def fake_resolve_runtime_root_for_read(_repo_root: Path) -> Path:
+    def fake_resolve_runtime_root_for_read(_project_root: Path) -> Path:
         return state_root
 
     def fake_resolve_runtime_context(_repo: Path, _state: Path) -> ResolvedContext:
@@ -244,4 +244,4 @@ def test_ops_context_env_parsing_is_limited_to_repo_and_state_defaults() -> None
     source = source_path.read_text(encoding="utf-8")
     meridian_keys = set(re.findall(r"MERIDIAN_[A-Z_]+", source))
 
-    assert meridian_keys == {"MERIDIAN_REPO_ROOT", "MERIDIAN_PROJECT_ROOT"}
+    assert meridian_keys == {"MERIDIAN_PROJECT_DIR", "MERIDIAN_PROJECT_ROOT"}

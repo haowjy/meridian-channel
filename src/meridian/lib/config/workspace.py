@@ -263,10 +263,10 @@ def _evaluate_workspace_config(config: WorkspaceConfig) -> WorkspaceSnapshot:
     )
 
 
-def resolve_workspace_snapshot(repo_root: Path) -> WorkspaceSnapshot:
+def resolve_workspace_snapshot(project_root: Path) -> WorkspaceSnapshot:
     """Resolve canonical workspace snapshot from project-root paths."""
 
-    workspace_path = resolve_project_config_paths(repo_root).workspace_local_toml
+    workspace_path = resolve_project_config_paths(project_root).workspace_local_toml
     if not workspace_path.exists():
         return WorkspaceSnapshot.none()
     if not workspace_path.is_file():

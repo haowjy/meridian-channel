@@ -20,10 +20,10 @@ def _isolate_runtime_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     monkeypatch.setenv("MERIDIAN_HOME", (tmp_path / "user-home").as_posix())
 
 
-def _create_repo_root(tmp_path: Path) -> Path:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    return repo_root
+def _create_project_root(tmp_path: Path) -> Path:
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    return project_root
 
 
 def _warning_by_code(result: diag.DoctorOutput, code: str) -> diag.DoctorWarning:
@@ -31,19 +31,19 @@ def _warning_by_code(result: diag.DoctorOutput, code: str) -> diag.DoctorWarning
 
 
 def _create_agent_skill_dirs(
-    repo_root: Path,
+    project_root: Path,
     *,
     create_agents_dir: bool = True,
     create_skills_dir: bool = True,
 ) -> None:
     if create_agents_dir:
-        (repo_root / ".agents" / "agents").mkdir(parents=True, exist_ok=True)
+        (project_root / ".agents" / "agents").mkdir(parents=True, exist_ok=True)
     if create_skills_dir:
-        (repo_root / ".agents" / "skills").mkdir(parents=True, exist_ok=True)
+        (project_root / ".agents" / "skills").mkdir(parents=True, exist_ok=True)
 
 
-def _seed_active_spawn(repo_root: Path) -> str:
-    state_root = resolve_project_runtime_root_for_write(repo_root)
+def _seed_active_spawn(project_root: Path) -> str:
+    state_root = resolve_project_runtime_root_for_write(project_root)
     state_root.mkdir(parents=True, exist_ok=True)
     return spawn_store.start_spawn(
         state_root,
@@ -56,7 +56,7 @@ def _seed_active_spawn(repo_root: Path) -> str:
 
 
 def _run_doctor_without_upgrade_noise(
-    repo_root: Path,
+    project_root: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> diag.DoctorOutput:
     monkeypatch.setattr(
@@ -64,7 +64,7 @@ def _run_doctor_without_upgrade_noise(
         "check_upgrade_availability",
         lambda *_args, **_kwargs: mars_ops.UpgradeAvailability(),
     )
-    return doctor_sync(DoctorInput(repo_root=repo_root.as_posix()))
+    return doctor_sync(DoctorInput(project_root=project_root.as_posix()))
 
 
 @pytest.mark.parametrize(
@@ -82,18 +82,18 @@ def test_doctor_warning_shape_for_non_mars_warnings(
     expected_code: str,
     expected_payload_keys: tuple[str, ...],
 ) -> None:
-    repo_root = _create_repo_root(tmp_path)
+    project_root = _create_project_root(tmp_path)
     if trigger == "missing_skills_directories":
-        _create_agent_skill_dirs(repo_root, create_agents_dir=True, create_skills_dir=False)
+        _create_agent_skill_dirs(project_root, create_agents_dir=True, create_skills_dir=False)
     elif trigger == "missing_agent_profile_directories":
-        _create_agent_skill_dirs(repo_root, create_agents_dir=False, create_skills_dir=True)
+        _create_agent_skill_dirs(project_root, create_agents_dir=False, create_skills_dir=True)
     elif trigger == "active_spawns_present":
-        _create_agent_skill_dirs(repo_root)
-        _seed_active_spawn(repo_root)
+        _create_agent_skill_dirs(project_root)
+        _seed_active_spawn(project_root)
     else:  # pragma: no cover - defensive
         raise AssertionError(f"Unknown warning trigger: {trigger}")
 
-    result = _run_doctor_without_upgrade_noise(repo_root, monkeypatch)
+    result = _run_doctor_without_upgrade_noise(project_root, monkeypatch)
 
     assert isinstance(result.warnings, tuple)
     matching = [warning for warning in result.warnings if warning.code == expected_code]
@@ -111,9 +111,9 @@ def test_doctor_skips_orphan_run_repair_when_depth_is_nonzero(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = _create_repo_root(tmp_path)
-    _create_agent_skill_dirs(repo_root)
-    _seed_active_spawn(repo_root)
+    project_root = _create_project_root(tmp_path)
+    _create_agent_skill_dirs(project_root)
+    _seed_active_spawn(project_root)
     monkeypatch.setenv("MERIDIAN_DEPTH", "1")
     monkeypatch.setattr(
         diag,
@@ -121,7 +121,7 @@ def test_doctor_skips_orphan_run_repair_when_depth_is_nonzero(
         lambda *_args, **_kwargs: mars_ops.UpgradeAvailability(),
     )
 
-    result = doctor_sync(DoctorInput(repo_root=repo_root.as_posix()))
+    result = doctor_sync(DoctorInput(project_root=project_root.as_posix()))
 
     assert "orphan_runs" not in result.repaired
 
@@ -130,10 +130,10 @@ def test_doctor_reports_no_warnings_when_conditions_are_clear(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = _create_repo_root(tmp_path)
-    _create_agent_skill_dirs(repo_root)
+    project_root = _create_project_root(tmp_path)
+    _create_agent_skill_dirs(project_root)
 
-    result = _run_doctor_without_upgrade_noise(repo_root, monkeypatch)
+    result = _run_doctor_without_upgrade_noise(project_root, monkeypatch)
 
     assert result.warnings == ()
     assert result.ok is True
@@ -143,8 +143,8 @@ def test_doctor_reports_outdated_dependency_warning(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = _create_repo_root(tmp_path)
-    _create_agent_skill_dirs(repo_root)
+    project_root = _create_project_root(tmp_path)
+    _create_agent_skill_dirs(project_root)
     monkeypatch.setattr(
         diag,
         "check_upgrade_availability",
@@ -154,7 +154,7 @@ def test_doctor_reports_outdated_dependency_warning(
         ),
     )
 
-    result = doctor_sync(DoctorInput(repo_root=repo_root.as_posix()))
+    result = doctor_sync(DoctorInput(project_root=project_root.as_posix()))
 
     outdated = _warning_by_code(result, "outdated_dependencies")
     assert outdated.payload == {
@@ -178,11 +178,11 @@ def test_doctor_reports_update_check_failure_warning(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = _create_repo_root(tmp_path)
-    _create_agent_skill_dirs(repo_root)
+    project_root = _create_project_root(tmp_path)
+    _create_agent_skill_dirs(project_root)
     monkeypatch.setattr(diag, "check_upgrade_availability", lambda *_args, **_kwargs: None)
 
-    result = doctor_sync(DoctorInput(repo_root=repo_root.as_posix()))
+    result = doctor_sync(DoctorInput(project_root=project_root.as_posix()))
 
     updates_check = _warning_by_code(result, "updates_check_failed")
     assert updates_check.message == (
@@ -196,8 +196,8 @@ def test_doctor_warning_surface_matches_config_show_for_missing_root(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "missing-repo"
-    shown = config_show_sync(ConfigShowInput(repo_root=repo_root.as_posix()))
+    project_root = tmp_path / "missing-repo"
+    shown = config_show_sync(ConfigShowInput(project_root=project_root.as_posix()))
     assert shown.warning is not None
     monkeypatch.setattr(
         diag,
@@ -205,7 +205,7 @@ def test_doctor_warning_surface_matches_config_show_for_missing_root(
         lambda *_args, **_kwargs: mars_ops.UpgradeAvailability(),
     )
 
-    result = doctor_sync(DoctorInput(repo_root=repo_root.as_posix()))
+    result = doctor_sync(DoctorInput(project_root=project_root.as_posix()))
 
     assert shown.warning in {warning.message for warning in result.warnings}
 
@@ -214,11 +214,11 @@ def test_doctor_text_output_prefixes_warning_code(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = _create_repo_root(tmp_path)
-    _create_agent_skill_dirs(repo_root)
+    project_root = _create_project_root(tmp_path)
+    _create_agent_skill_dirs(project_root)
     monkeypatch.setattr(diag, "check_upgrade_availability", lambda *_args, **_kwargs: None)
 
-    result = doctor_sync(DoctorInput(repo_root=repo_root.as_posix()))
+    result = doctor_sync(DoctorInput(project_root=project_root.as_posix()))
 
     text = result.format_text()
     assert "warning: updates_check_failed: Could not check for dependency updates" in text
@@ -228,24 +228,24 @@ def test_doctor_surfaces_workspace_invalid_warning(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = _create_repo_root(tmp_path)
-    _create_agent_skill_dirs(repo_root)
-    (repo_root / "workspace.local.toml").write_text("[[context-roots]]\n", encoding="utf-8")
+    project_root = _create_project_root(tmp_path)
+    _create_agent_skill_dirs(project_root)
+    (project_root / "workspace.local.toml").write_text("[[context-roots]]\n", encoding="utf-8")
 
-    result = _run_doctor_without_upgrade_noise(repo_root, monkeypatch)
+    result = _run_doctor_without_upgrade_noise(project_root, monkeypatch)
 
     warning = _warning_by_code(result, "workspace_invalid")
     assert "Invalid workspace schema" in warning.message
-    assert warning.payload == {"path": (repo_root / "workspace.local.toml").resolve().as_posix()}
+    assert warning.payload == {"path": (project_root / "workspace.local.toml").resolve().as_posix()}
 
 
 def test_doctor_surfaces_workspace_unknown_and_missing_root_warnings(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = _create_repo_root(tmp_path)
-    _create_agent_skill_dirs(repo_root)
-    (repo_root / "workspace.local.toml").write_text(
+    project_root = _create_project_root(tmp_path)
+    _create_agent_skill_dirs(project_root)
+    (project_root / "workspace.local.toml").write_text(
         'future = "value"\n'
         "[[context-roots]]\n"
         'path = "./missing-root"\n'
@@ -253,13 +253,13 @@ def test_doctor_surfaces_workspace_unknown_and_missing_root_warnings(
         encoding="utf-8",
     )
 
-    result = _run_doctor_without_upgrade_noise(repo_root, monkeypatch)
+    result = _run_doctor_without_upgrade_noise(project_root, monkeypatch)
 
     unknown = _warning_by_code(result, "workspace_unknown_key")
     assert unknown.payload == {"keys": ["future", "context-roots[1].note"]}
     missing = _warning_by_code(result, "workspace_missing_root")
     assert missing.payload == {
-        "roots": [(repo_root / "missing-root").resolve().as_posix()],
+        "roots": [(project_root / "missing-root").resolve().as_posix()],
     }
 
 
@@ -271,8 +271,8 @@ def test_doctor_skips_model_resolution_for_config_surface(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = _create_repo_root(tmp_path)
-    _create_agent_skill_dirs(repo_root)
+    project_root = _create_project_root(tmp_path)
+    _create_agent_skill_dirs(project_root)
     monkeypatch.setenv("MERIDIAN_DEFAULT_MODEL", "gpt-5.4")
     monkeypatch.setattr(
         diag,
@@ -285,6 +285,6 @@ def test_doctor_skips_model_resolution_for_config_surface(
 
     monkeypatch.setattr(catalog_models, "resolve_model", _unexpected_resolve_model)
 
-    result = doctor_sync(DoctorInput(repo_root=repo_root.as_posix()))
+    result = doctor_sync(DoctorInput(project_root=project_root.as_posix()))
 
-    assert result.repo_root == repo_root.as_posix()
+    assert result.project_root == project_root.as_posix()

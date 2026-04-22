@@ -146,19 +146,19 @@ def parse_agent_profile(path: Path) -> AgentProfile:
     )
 
 
-def _agent_search_dirs(repo_root: Path) -> list[Path]:
-    return [repo_root / ".agents" / "agents"]
+def _agent_search_dirs(project_root: Path) -> list[Path]:
+    return [project_root / ".agents" / "agents"]
 
 
 def scan_agent_profiles(
-    repo_root: Path | None = None,
+    project_root: Path | None = None,
     search_dirs: list[Path] | None = None,
     *,
     search_paths: object | None = None,
 ) -> list[AgentProfile]:
     """Parse all agent profiles from configured search directories."""
 
-    root = resolve_project_root(repo_root)
+    root = resolve_project_root(project_root)
     _ = search_paths
     directories = search_dirs if search_dirs is not None else _agent_search_dirs(root)
     profiles: list[AgentProfile] = []
@@ -189,7 +189,7 @@ def scan_agent_profiles(
 
 def load_agent_profile(
     name: str,
-    repo_root: Path | None = None,
+    project_root: Path | None = None,
     *,
     search_paths: object | None = None,
 ) -> AgentProfile:
@@ -199,9 +199,9 @@ def load_agent_profile(
     if not normalized:
         raise ValueError("Agent profile name must not be empty.")
 
-    root = resolve_project_root(repo_root)
+    root = resolve_project_root(project_root)
 
-    for profile in scan_agent_profiles(repo_root=root, search_paths=search_paths):
+    for profile in scan_agent_profiles(project_root=root, search_paths=search_paths):
         if profile.path.stem == normalized or profile.name == normalized:
             return profile
 

@@ -16,16 +16,16 @@ def test_spawn_create_validates_model_against_resolved_runtime_root(
     call_order: list[str] = []
     seen_validation_root: str | None = None
 
-    def _fake_resolve_repo_root_input(repo_root: str | None):
+    def _fake_resolve_project_root_input(project_root: str | None):
         nonlocal call_order
-        _ = repo_root
+        _ = project_root
         call_order.append("resolve")
         return resolved_root
 
     def _fake_validate_create_input(payload: SpawnCreateInput):
         nonlocal call_order, seen_validation_root
         call_order.append("validate")
-        seen_validation_root = payload.repo_root
+        seen_validation_root = payload.project_root
         return payload, "preflight warning"
 
     def _fake_build_create_payload(
@@ -51,7 +51,7 @@ def test_spawn_create_validates_model_against_resolved_runtime_root(
             cli_command=(),
         )
 
-    monkeypatch.setattr(spawn_api, "_resolve_repo_root_input", _fake_resolve_repo_root_input)
+    monkeypatch.setattr(spawn_api, "_resolve_project_root_input", _fake_resolve_project_root_input)
     monkeypatch.setattr(spawn_api, "validate_create_input", _fake_validate_create_input)
     monkeypatch.setattr(spawn_api, "build_create_payload", _fake_build_create_payload)
     monkeypatch.setattr(spawn_api, "load_config", lambda _: object())
@@ -60,7 +60,7 @@ def test_spawn_create_validates_model_against_resolved_runtime_root(
         SpawnCreateInput(
             prompt="run",
             model="gpt-5.3-codex",
-            repo_root=raw_root.as_posix(),
+            project_root=raw_root.as_posix(),
             dry_run=True,
         )
     )
@@ -73,9 +73,9 @@ def test_spawn_create_validates_model_against_resolved_runtime_root(
 
 def test_spawn_stats_includes_finalizing_bucket(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("MERIDIAN_DEPTH", "1")
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    state_root = resolve_project_runtime_root(repo_root)
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    state_root = resolve_project_runtime_root(project_root)
 
     running_id = spawn_store.start_spawn(
         state_root,
@@ -111,7 +111,7 @@ def test_spawn_stats_includes_finalizing_bucket(tmp_path: Path, monkeypatch) -> 
     )
 
     output = spawn_api.spawn_stats_sync(
-        SpawnStatsInput(repo_root=repo_root.as_posix())
+        SpawnStatsInput(project_root=project_root.as_posix())
     )
 
     assert output.total_runs == 3
@@ -128,9 +128,9 @@ def test_spawn_list_does_not_infer_running_star_from_exited_at(
     tmp_path: Path, monkeypatch
 ) -> None:
     monkeypatch.setenv("MERIDIAN_DEPTH", "1")
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    state_root = resolve_project_runtime_root(repo_root)
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    state_root = resolve_project_runtime_root(project_root)
 
     spawn_id = spawn_store.start_spawn(
         state_root,
@@ -148,7 +148,7 @@ def test_spawn_list_does_not_infer_running_star_from_exited_at(
     )
 
     output = spawn_api.spawn_list_sync(
-        SpawnListInput(repo_root=repo_root.as_posix(), statuses=("running",))
+        SpawnListInput(project_root=project_root.as_posix(), statuses=("running",))
     )
 
     assert len(output.spawns) == 1

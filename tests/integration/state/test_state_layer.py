@@ -9,8 +9,8 @@ from meridian.lib.state.paths import resolve_state_paths
 from meridian.lib.state.spawn_store import finalize_spawn, list_spawns, start_spawn
 
 
-def _write_start_and_finalize(repo_root: str, idx: int) -> None:
-    root = Path(repo_root)
+def _write_start_and_finalize(project_root: str, idx: int) -> None:
+    root = Path(project_root)
     state_root = resolve_state_paths(root).root_dir
     spawn_id = SpawnId(f"rlock{idx}")
     start_spawn(

@@ -73,14 +73,14 @@ class _ResolvedSessionTarget(BaseModel):
 
 def resolve_session_target(
     *,
-    repo_root: Path,
+    project_root: Path,
     continue_ref: str,
 ) -> _ResolvedSessionTarget:
     normalized = continue_ref.strip()
     if not normalized:
         raise ValueError("--continue requires a non-empty session reference.")
 
-    resolved = resolve_session_reference(repo_root, normalized)
+    resolved = resolve_session_reference(project_root, normalized)
     return _ResolvedSessionTarget(
         harness_session_id=resolved.harness_session_id,
         chat_id=resolved.source_chat_id,
@@ -117,7 +117,7 @@ def run_primary_launch(
             return None
         return "; ".join(parts)
 
-    repo_root = Path.cwd().resolve()
+    project_root = Path.cwd().resolve()
     harness_registry = get_default_harness_registry()
     normalized_continue_ref = continue_ref.strip() if continue_ref is not None else ""
     normalized_fork_ref = fork_ref.strip() if fork_ref is not None else ""
@@ -146,7 +146,9 @@ def run_primary_launch(
             raise ValueError("Cannot combine --continue with --model.")
         if agent is not None and agent.strip():
             raise ValueError("Cannot combine --continue with --agent.")
-        resolved_continue = resolve_session_target(repo_root=repo_root, continue_ref=resume_target)
+        resolved_continue = resolve_session_target(
+            project_root=project_root, continue_ref=resume_target
+        )
         source_harness = (
             resolved_continue.harness.strip()
             if resolved_continue.harness is not None and resolved_continue.harness.strip()
@@ -173,7 +175,7 @@ def run_primary_launch(
         continue_warning = resolved_continue.warning
         session_mode = SessionMode.RESUME
     elif fork_target is not None:
-        resolved_fork = resolve_session_target(repo_root=repo_root, continue_ref=fork_target)
+        resolved_fork = resolve_session_target(project_root=project_root, continue_ref=fork_target)
         if resolved_fork.missing_harness_session_id:
             raise ValueError(missing_fork_session_error(fork_target))
 
@@ -215,7 +217,7 @@ def run_primary_launch(
             requested_work_id = resolved_fork.source_work_id
 
     launch_result = launch_primary(
-        repo_root=repo_root,
+        project_root=project_root,
         request=LaunchRequest(
             model=requested_model,
             harness=(

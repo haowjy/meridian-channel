@@ -8,9 +8,9 @@ from meridian.lib.hooks.config import load_hooks_config
 
 
 def _repo(tmp_path: Path) -> Path:
-    repo_root = tmp_path / "remote"
-    repo_root.mkdir()
-    return repo_root
+    project_root = tmp_path / "remote"
+    project_root.mkdir()
+    return project_root
 
 
 def _empty_user_config(tmp_path: Path) -> Path:
@@ -21,7 +21,7 @@ def _empty_user_config(tmp_path: Path) -> Path:
 
 
 def test_load_hooks_config_parses_external_and_builtin_entries(tmp_path: Path) -> None:
-    repo_root = _repo(tmp_path)
+    project_root = _repo(tmp_path)
     user_config = tmp_path / "user.toml"
     user_config.write_text(
         "[[hooks]]\n"
@@ -35,7 +35,7 @@ def test_load_hooks_config_parses_external_and_builtin_entries(tmp_path: Path) -
         encoding="utf-8",
     )
 
-    config = load_hooks_config(repo_root, user_config=user_config)
+    config = load_hooks_config(project_root, user_config=user_config)
 
     # notify is 1 hook, git-autosync expands to 4 hooks (one per default event)
     notify_hooks = [h for h in config.hooks if h.name == "notify"]
@@ -100,18 +100,18 @@ def test_load_hooks_config_rejects_invalid_hook_definitions(
     payload: str,
     expected_message: str,
 ) -> None:
-    repo_root = _repo(tmp_path)
-    (repo_root / "meridian.toml").write_text(payload, encoding="utf-8")
+    project_root = _repo(tmp_path)
+    (project_root / "meridian.toml").write_text(payload, encoding="utf-8")
 
     with pytest.raises(ValueError, match=expected_message):
-        load_hooks_config(repo_root, user_config=_empty_user_config(tmp_path))
+        load_hooks_config(project_root, user_config=_empty_user_config(tmp_path))
 
 
 def test_load_hooks_config_supports_explicit_git_autosync_builtin(
     tmp_path: Path,
 ) -> None:
-    repo_root = _repo(tmp_path)
-    (repo_root / "meridian.toml").write_text(
+    project_root = _repo(tmp_path)
+    (project_root / "meridian.toml").write_text(
         "[[hooks]]\n"
         'builtin = "git-autosync"\n'
         'event = "spawn.finalized"\n'
@@ -120,7 +120,7 @@ def test_load_hooks_config_supports_explicit_git_autosync_builtin(
         encoding="utf-8",
     )
 
-    config = load_hooks_config(repo_root, user_config=_empty_user_config(tmp_path))
+    config = load_hooks_config(project_root, user_config=_empty_user_config(tmp_path))
 
     assert len(config.hooks) == 1
     hook = config.hooks[0]
@@ -135,20 +135,20 @@ def test_load_hooks_config_supports_explicit_git_autosync_builtin(
 def test_load_hooks_config_does_not_auto_register_from_work_artifacts_sync(
     tmp_path: Path,
 ) -> None:
-    repo_root = _repo(tmp_path)
-    (repo_root / "meridian.toml").write_text(
+    project_root = _repo(tmp_path)
+    (project_root / "meridian.toml").write_text(
         "[work.artifacts]\n"
         'sync = "git"\n',
         encoding="utf-8",
     )
 
-    config = load_hooks_config(repo_root, user_config=_empty_user_config(tmp_path))
+    config = load_hooks_config(project_root, user_config=_empty_user_config(tmp_path))
 
     assert len(config.hooks) == 0
 
 
 def test_load_hooks_config_applies_name_override_across_sources(tmp_path: Path) -> None:
-    repo_root = _repo(tmp_path)
+    project_root = _repo(tmp_path)
     user_config = tmp_path / "user.toml"
     user_config.write_text(
         "[[hooks]]\n"
@@ -157,14 +157,14 @@ def test_load_hooks_config_applies_name_override_across_sources(tmp_path: Path) 
         'command = "./user-sync.sh"\n',
         encoding="utf-8",
     )
-    (repo_root / "meridian.toml").write_text(
+    (project_root / "meridian.toml").write_text(
         "[[hooks]]\n"
         'name = "sync"\n'
         'event = "spawn.finalized"\n'
         'command = "./project-sync.sh"\n',
         encoding="utf-8",
     )
-    (repo_root / "meridian.local.toml").write_text(
+    (project_root / "meridian.local.toml").write_text(
         "[[hooks]]\n"
         'name = "sync"\n'
         'event = "spawn.finalized"\n'
@@ -172,7 +172,7 @@ def test_load_hooks_config_applies_name_override_across_sources(tmp_path: Path) 
         encoding="utf-8",
     )
 
-    config = load_hooks_config(repo_root, user_config=user_config)
+    config = load_hooks_config(project_root, user_config=user_config)
 
     assert len(config.hooks) == 1
     assert config.hooks[0].name == "sync"
@@ -183,7 +183,7 @@ def test_load_hooks_config_applies_name_override_across_sources(tmp_path: Path) 
 def test_load_hooks_config_does_not_auto_register_from_context_work_source(
     tmp_path: Path,
 ) -> None:
-    repo_root = _repo(tmp_path)
+    project_root = _repo(tmp_path)
     user_config = tmp_path / "user.toml"
     user_config.write_text(
         "[context.work]\n"
@@ -192,7 +192,7 @@ def test_load_hooks_config_does_not_auto_register_from_context_work_source(
         encoding="utf-8",
     )
 
-    config = load_hooks_config(repo_root, user_config=user_config)
+    config = load_hooks_config(project_root, user_config=user_config)
 
     assert len(config.hooks) == 0
 
@@ -201,7 +201,7 @@ def test_load_hooks_config_does_not_auto_register_for_kb_source_git(
     tmp_path: Path,
 ) -> None:
     """KB source=git does NOT auto-register git-autosync (hook only syncs work_dir)."""
-    repo_root = _repo(tmp_path)
+    project_root = _repo(tmp_path)
     user_config = tmp_path / "user.toml"
     user_config.write_text(
         "[context.kb]\n"
@@ -210,7 +210,7 @@ def test_load_hooks_config_does_not_auto_register_for_kb_source_git(
         encoding="utf-8",
     )
 
-    config = load_hooks_config(repo_root, user_config=user_config)
+    config = load_hooks_config(project_root, user_config=user_config)
 
     assert len(config.hooks) == 0
 
@@ -218,7 +218,7 @@ def test_load_hooks_config_does_not_auto_register_for_kb_source_git(
 def test_load_hooks_config_explicit_builtin_works_with_context_settings_present(
     tmp_path: Path,
 ) -> None:
-    repo_root = _repo(tmp_path)
+    project_root = _repo(tmp_path)
     user_config = tmp_path / "user.toml"
     user_config.write_text(
         "[context.work]\n"
@@ -233,7 +233,7 @@ def test_load_hooks_config_explicit_builtin_works_with_context_settings_present(
         encoding="utf-8",
     )
 
-    config = load_hooks_config(repo_root, user_config=user_config)
+    config = load_hooks_config(project_root, user_config=user_config)
 
     assert len(config.hooks) == 1
     hook = config.hooks[0]

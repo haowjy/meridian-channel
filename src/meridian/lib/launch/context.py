@@ -85,7 +85,7 @@ class ChildEnvContext:
     """Sole producer for child `MERIDIAN_*` environment overrides."""
 
     parent_spawn_id: str | None
-    repo_root: Path
+    project_root: Path
     state_root: Path
     parent_chat_id: str | None
     parent_depth: int
@@ -105,7 +105,7 @@ class ChildEnvContext:
         parent_chat_id = parent_ctx.chat_id.strip() or None
         parent_depth = parent_ctx.depth
 
-        work_id = (os.getenv("MERIDIAN_WORK_ID", "").strip() or None)
+        work_id = os.getenv("MERIDIAN_WORK_ID", "").strip() or None
         resolved_state_root = state_root.resolve()
         if work_id is None and parent_chat_id:
             # Keep launch semantics: runtime state_root decides active work lookup.
@@ -114,8 +114,8 @@ class ChildEnvContext:
             except Exception:
                 work_id = None
 
-        resolved_repo_root = project_paths.execution_cwd.resolve()
-        repo_paths = resolve_repo_paths(resolved_repo_root)
+        resolved_project_root = project_paths.execution_cwd.resolve()
+        repo_paths = resolve_repo_paths(resolved_project_root)
         repo_state_root = repo_paths.root_dir
         work_dir = (
             resolve_work_scratch_dir(repo_state_root, work_id) if work_id is not None else None
@@ -123,10 +123,10 @@ class ChildEnvContext:
         kb_dir = repo_paths.kb_dir
 
         return cls(
-            # Keep launch semantics unchanged: runtime repo_root follows the
+            # Keep launch semantics unchanged: runtime project_root follows the
             # execution cwd used by the child process.
             parent_spawn_id=parent_spawn_id,
-            repo_root=resolved_repo_root,
+            project_root=resolved_project_root,
             state_root=resolved_state_root,
             parent_chat_id=parent_chat_id,
             parent_depth=parent_depth,
@@ -138,7 +138,7 @@ class ChildEnvContext:
     def child_context(self) -> dict[str, str]:
         overrides = build_child_env_overrides(
             parent_spawn_id=self.parent_spawn_id,
-            repo_root=self.repo_root,
+            project_root=self.project_root,
             state_root=self.state_root,
             parent_chat_id=self.parent_chat_id,
             parent_depth=self.parent_depth,
@@ -154,7 +154,7 @@ class ChildEnvContext:
 class LaunchContext:
     request: SpawnRequest
     runtime: LaunchRuntime
-    repo_root: Path
+    project_root: Path
     execution_cwd: Path
     state_root: Path
     work_id: str | None
@@ -217,13 +217,9 @@ def _missing_continue_session_error(source_ref: str | None) -> str:
     normalized_source = (source_ref or "").strip()
     if normalized_source:
         if normalized_source.startswith("p") and normalized_source[1:].isdigit():
-            return (
-                f"Spawn '{normalized_source}' has no recorded session - "
-                "cannot continue/fork."
-            )
+            return f"Spawn '{normalized_source}' has no recorded session - cannot continue/fork."
         return (
-            f"Session '{normalized_source}' has no recorded harness session - "
-            "cannot continue/fork."
+            f"Session '{normalized_source}' has no recorded harness session - cannot continue/fork."
         )
     return "Source reference has no recorded harness session - cannot continue/fork."
 
@@ -278,7 +274,7 @@ def _resolve_report_output_path(
     report_path_raw = (runtime.report_output_path or "").strip()
     if report_path_raw:
         return Path(report_path_raw).expanduser()
-    return resolve_spawn_log_dir(project_paths.repo_root, spawn_id) / "report.md"
+    return resolve_spawn_log_dir(project_paths.project_root, spawn_id) / "report.md"
 
 
 def _build_bypass_context(
@@ -315,7 +311,7 @@ def _resolve_surface_request(
     config = (
         MeridianConfig.model_validate(runtime.config_snapshot)
         if runtime.config_snapshot
-        else load_config(project_paths.repo_root)
+        else load_config(project_paths.project_root)
     )
     cli_overrides = _spawn_request_overrides(request)
     env_overrides = RuntimeOverrides.from_env()
@@ -327,7 +323,7 @@ def _resolve_surface_request(
         configured_default_harness = config.default_harness
 
     policies = resolve_policies(
-        repo_root=project_paths.repo_root,
+        project_root=project_paths.project_root,
         layers=(cli_overrides, env_overrides),
         config_overrides=config_overrides,
         config=config,
@@ -343,7 +339,7 @@ def _resolve_surface_request(
         merged_skill_names = dedupe_skill_names((*resolved_skills.skill_names, *request.skills))
         resolved_skills = resolve_skills_from_profile(
             profile_skills=merged_skill_names,
-            repo_root=project_paths.repo_root,
+            project_root=project_paths.project_root,
             readonly=dry_run,
         )
 
@@ -359,7 +355,7 @@ def _resolve_surface_request(
     ):
         loaded_references = load_reference_items(
             request.reference_files,
-            base_dir=project_paths.repo_root,
+            base_dir=project_paths.project_root,
         )
         prior_output: str | None = None
         if request.context_from:
@@ -370,7 +366,7 @@ def _resolve_surface_request(
             )
 
             resolved_context_refs = tuple(
-                resolve_context_ref(project_paths.repo_root, ref) for ref in request.context_from
+                resolve_context_ref(project_paths.project_root, ref) for ref in request.context_from
             )
             resolved_context_from = tuple(
                 resolved_context_ref_value(ref) for ref in resolved_context_refs
@@ -417,8 +413,8 @@ def _resolve_surface_request(
         )
 
     requested_harness_session_id = (
-        (request.session.requested_harness_session_id or "").strip() or None
-    )
+        request.session.requested_harness_session_id or ""
+    ).strip() or None
     requested_continue_fork = request.session.continue_fork
     requested_harness = (request.session.continue_harness or "").strip()
     if request.session.continue_source_tracked and requested_harness_session_id is None:
@@ -443,8 +439,7 @@ def _resolve_surface_request(
                     resolved_continue_fork = True
                 else:
                     continuation_warning = (
-                        f"Harness '{harness.id}' does not support session fork; "
-                        "resuming in-place."
+                        f"Harness '{harness.id}' does not support session fork; resuming in-place."
                     )
 
     final_prompt = prompt
@@ -459,7 +454,9 @@ def _resolve_surface_request(
         ) or "fresh"
         inventory_prompt: str | None = None
         if session_mode != "resume":
-            inventory_prompt = build_primary_inventory_prompt(repo_root=project_paths.repo_root)
+            inventory_prompt = build_primary_inventory_prompt(
+                project_root=project_paths.project_root
+            )
 
         seed = harness.seed_session(
             is_resume=session_mode == "resume",
@@ -572,9 +569,7 @@ def _resolve_surface_request(
             "approval": resolved.approval,
             "allowed_tools": profile.tools if profile is not None else request.allowed_tools,
             "disallowed_tools": (
-                profile.disallowed_tools
-                if profile is not None
-                else request.disallowed_tools
+                profile.disallowed_tools if profile is not None else request.disallowed_tools
             ),
             "autocompact": resolved.autocompact,
             "effort": resolved.effort,
@@ -613,18 +608,16 @@ def build_launch_context(
     """Build deterministic launch context from raw request/runtime inputs."""
 
     project_paths = ProjectConfigPaths(
-        repo_root=Path(runtime.project_paths_repo_root).expanduser().resolve(),
+        project_root=Path(runtime.project_paths_project_root).expanduser().resolve(),
         execution_cwd=Path(runtime.project_paths_execution_cwd).expanduser().resolve(),
     )
-    workspace_snapshot = resolve_workspace_snapshot_for_launch(project_paths.repo_root)
+    workspace_snapshot = resolve_workspace_snapshot_for_launch(project_paths.project_root)
     workspace_roots = get_projectable_roots(workspace_snapshot)
     runtime_root = Path(runtime.state_root).expanduser().resolve()
     resolved_request = request
     composition_warnings: tuple[CompositionWarning, ...] = ()
     projected_content: ProjectedContent | None = None
-    seed_harness_session_id = (
-        (request.session.requested_harness_session_id or "").strip() or None
-    )
+    seed_harness_session_id = (request.session.requested_harness_session_id or "").strip() or None
     if runtime.composition_surface != LaunchCompositionSurface.DIRECT:
         (
             resolved_request,
@@ -652,7 +645,7 @@ def build_launch_context(
         )
         loaded_references = load_reference_items(
             resolved_request.reference_files,
-            base_dir=project_paths.repo_root,
+            base_dir=project_paths.project_root,
         )
 
     report_output_path = _resolve_report_output_path(
@@ -662,7 +655,7 @@ def build_launch_context(
     )
     execution_cwd = project_paths.execution_cwd
     child_cwd = resolve_child_execution_cwd(
-        repo_root=execution_cwd,
+        project_root=execution_cwd,
         spawn_id=spawn_id,
         harness_id=harness.id.value,
     )
@@ -705,18 +698,16 @@ def build_launch_context(
     resolved_agent_metadata = resolved_request.agent_metadata
     model = (resolved_request.model or "").strip()
     requested_harness_session_id = (
-        (resolved_request.session.requested_harness_session_id or "").strip() or None
-    )
+        resolved_request.session.requested_harness_session_id or ""
+    ).strip() or None
     if projected_content is not None:
         appended_system_prompt = projected_content.system_prompt.strip() or None
         user_turn_content = projected_content.user_turn_content.strip() or None
     else:
         appended_system_prompt = (
-            (resolved_agent_metadata.get("appended_system_prompt") or "").strip() or None
-        )
-        user_turn_content = (
-            (resolved_agent_metadata.get("user_turn_content") or "").strip() or None
-        )
+            resolved_agent_metadata.get("appended_system_prompt") or ""
+        ).strip() or None
+        user_turn_content = (resolved_agent_metadata.get("user_turn_content") or "").strip() or None
     is_primary_launch = runtime.composition_surface == LaunchCompositionSurface.PRIMARY
     run_params = ResolvedRunInputs(
         prompt=resolved_request.prompt,
@@ -726,7 +717,7 @@ def build_launch_context(
         agent=resolved_request.agent,
         adhoc_agent_payload=(resolved_agent_metadata.get("adhoc_agent_payload") or "").strip(),
         extra_args=projected_extra_args,
-        repo_root=child_cwd.as_posix(),
+        project_root=child_cwd.as_posix(),
         mcp_tools=resolved_request.mcp_tools,
         interactive=is_primary_launch,
         continue_harness_session_id=requested_harness_session_id,
@@ -791,7 +782,7 @@ def build_launch_context(
     return LaunchContext(
         request=request,
         runtime=runtime,
-        repo_root=project_paths.repo_root,
+        project_root=project_paths.project_root,
         execution_cwd=execution_cwd,
         state_root=runtime_root,
         work_id=effective_work_id,

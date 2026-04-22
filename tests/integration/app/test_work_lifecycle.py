@@ -25,9 +25,9 @@ from meridian.lib.state.paths import resolve_state_paths
 
 
 class FakeManager:
-    def __init__(self, *, repo_root: Path) -> None:
-        self.repo_root = repo_root
-        self.state_root = resolve_state_paths(repo_root).root_dir
+    def __init__(self, *, project_root: Path) -> None:
+        self.project_root = project_root
+        self.state_root = resolve_state_paths(project_root).root_dir
 
     async def shutdown(self) -> None:
         return None
@@ -42,11 +42,11 @@ class FakeManager:
 
 @pytest.fixture
 def app_client(tmp_path: Path) -> Iterator[tuple[TestClient, Path]]:
-    repo_root = tmp_path
-    manager = FakeManager(repo_root=repo_root)
+    project_root = tmp_path
+    manager = FakeManager(project_root=project_root)
     app = create_app(cast("Any", manager), allow_unsafe_no_permissions=True)
     with TestClient(app) as client:
-        yield client, repo_root
+        yield client, project_root
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +58,7 @@ def test_create_then_set_active_then_archive(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """Create → set active → archive: each step produces the correct state."""
-    client, _repo_root = app_client
+    client, _project_root = app_client
 
     # 1. Create
     create_resp = client.post("/api/work", json={"name": "task-1", "description": "my task"})
@@ -86,7 +86,7 @@ def test_archived_work_excluded_from_default_listing(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """Archived (done) work items must not appear in the open work listing."""
-    client, _repo_root = app_client
+    client, _project_root = app_client
 
     client.post("/api/work", json={"name": "open-task"})
     client.post("/api/work", json={"name": "done-task"})
@@ -103,7 +103,7 @@ def test_archived_work_appears_with_done_filter(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """Archived work items appear when filtering by status=done."""
-    client, _repo_root = app_client
+    client, _project_root = app_client
 
     client.post("/api/work", json={"name": "archived-task"})
     client.post("/api/work/archived-task/archive")
@@ -123,7 +123,7 @@ def test_set_nonexistent_work_as_active_returns_404(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """Attempting to activate a work item that does not exist must return 404."""
-    client, _repo_root = app_client
+    client, _project_root = app_client
 
     resp = client.put("/api/work/active", json={"work_id": "ghost-task"})
     assert resp.status_code == 404
@@ -133,7 +133,7 @@ def test_set_archived_work_as_active_returns_409(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """Attempting to activate a done work item must return 409."""
-    client, _repo_root = app_client
+    client, _project_root = app_client
 
     client.post("/api/work", json={"name": "done-task"})
     client.post("/api/work/done-task/archive")
@@ -146,7 +146,7 @@ def test_archive_already_archived_work_returns_409(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """Archiving a work item that is already done must return 409."""
-    client, _repo_root = app_client
+    client, _project_root = app_client
 
     client.post("/api/work", json={"name": "task-x"})
     client.post("/api/work/task-x/archive")
@@ -159,7 +159,7 @@ def test_archive_nonexistent_work_returns_404(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """Archiving a work item that doesn't exist must return 404."""
-    client, _repo_root = app_client
+    client, _project_root = app_client
 
     resp = client.post("/api/work/nonexistent/archive")
     assert resp.status_code == 404
@@ -169,7 +169,7 @@ def test_create_duplicate_work_item_returns_409(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """Creating a work item with a name that already exists must return 409."""
-    client, _repo_root = app_client
+    client, _project_root = app_client
 
     client.post("/api/work", json={"name": "dup-task"})
     resp = client.post("/api/work", json={"name": "dup-task"})
@@ -180,7 +180,7 @@ def test_create_work_item_with_empty_name_returns_400(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """Empty work item name must be rejected with 400."""
-    client, _repo_root = app_client
+    client, _project_root = app_client
 
     resp = client.post("/api/work", json={"name": "   "})
     assert resp.status_code == 400
@@ -190,7 +190,7 @@ def test_get_nonexistent_work_item_returns_404(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """GET /api/work/{work_id} for an unknown item returns 404."""
-    client, _repo_root = app_client
+    client, _project_root = app_client
 
     resp = client.get("/api/work/no-such-item")
     assert resp.status_code == 404
@@ -205,7 +205,7 @@ def test_clear_active_work_by_setting_null(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """PUT /api/work/active with work_id=null clears the active selection."""
-    client, _repo_root = app_client
+    client, _project_root = app_client
 
     client.post("/api/work", json={"name": "clearable"})
     client.put("/api/work/active", json={"work_id": "clearable"})
@@ -224,7 +224,7 @@ def test_active_work_returns_none_when_no_work_items(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """GET /api/work/active returns {work_id: null} when no work items exist."""
-    client, _repo_root = app_client
+    client, _project_root = app_client
 
     resp = client.get("/api/work/active")
     assert resp.status_code == 200
@@ -235,7 +235,7 @@ def test_active_work_falls_back_to_most_recent_open_item(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """When no active work is persisted, fallback uses the newest open item."""
-    client, _repo_root = app_client
+    client, _project_root = app_client
 
     client.post("/api/work", json={"name": "alpha"})
     client.post("/api/work", json={"name": "beta"})

@@ -70,12 +70,12 @@ def _active_work_attachment_warning(state_root: Path, work_id: str) -> str | Non
 def _dispatch_work_hook_event(
     *,
     event_name: Literal["work.started", "work.done"],
-    repo_root: Path,
+    project_root: Path,
     state_root: Path,
     repo_state_root: Path,
     work_id: str,
 ) -> None:
-    dispatcher = get_hook_dispatcher(repo_root, state_root)
+    dispatcher = get_hook_dispatcher(project_root, state_root)
     if dispatcher is None:
         return
 
@@ -87,7 +87,7 @@ def _dispatch_work_hook_event(
                 event_name=event_name,
                 event_id=generate_lifecycle_event_id(work_id, event_name, 0),
                 timestamp=datetime.now(tz=UTC).isoformat(),
-                repo_root=str(repo_root),
+                project_root=str(project_root),
                 state_root=str(state_root),
                 work_id=work_id,
                 work_dir=str(work_store.work_scratch_dir(repo_state_root, work_id)),
@@ -107,7 +107,7 @@ class WorkStartInput(BaseModel):
     label: str
     description: str = ""
     chat_id: str = ""
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class WorkStartOutput(BaseModel):
@@ -132,7 +132,7 @@ class WorkUpdateInput(BaseModel):
     work_id: str
     status: str | None = None
     description: str | None = None
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class WorkUpdateOutput(BaseModel):
@@ -151,7 +151,7 @@ class WorkDoneInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     work_id: str
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class WorkDeleteInput(BaseModel):
@@ -159,7 +159,7 @@ class WorkDeleteInput(BaseModel):
 
     work_id: str
     force: bool = False
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class WorkDeleteOutput(BaseModel):
@@ -189,7 +189,7 @@ class WorkSwitchInput(BaseModel):
 
     work_id: str
     chat_id: str = ""
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class WorkSwitchOutput(BaseModel):
@@ -208,7 +208,7 @@ class WorkReopenInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     work_id: str
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class WorkReopenOutput(BaseModel):
@@ -229,7 +229,7 @@ class WorkRenameInput(BaseModel):
     work_id: str
     new_name: str
     chat_id: str = ""
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class WorkRenameOutput(BaseModel):
@@ -249,7 +249,7 @@ class WorkClearInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     chat_id: str = ""
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class WorkClearOutput(BaseModel):
@@ -268,8 +268,8 @@ def work_start_sync(
     ctx: RuntimeContext | None = None,
 ) -> WorkStartOutput:
     warning = _work_warning(ctx)
-    roots = resolve_roots(payload.repo_root)
-    repo_root = roots.repo_root
+    roots = resolve_roots(payload.project_root)
+    project_root = roots.project_root
     repo_state_root = roots.repo_state_root
     runtime_state_root = roots.runtime_root
     chat_id = resolve_chat_id(payload_chat_id=payload.chat_id, ctx=runtime_context(ctx))
@@ -293,7 +293,7 @@ def work_start_sync(
     set_session_work_attachment(runtime_state_root, chat_id=chat_id, work_id=item.name)
     _dispatch_work_hook_event(
         event_name="work.started",
-        repo_root=repo_root,
+        project_root=project_root,
         state_root=runtime_state_root,
         repo_state_root=repo_state_root,
         work_id=item.name,
@@ -303,7 +303,7 @@ def work_start_sync(
         status=item.status,
         description=item.description,
         created_at=item.created_at,
-        work_dir=work_dir_display(repo_root, repo_state_root, item.name),
+        work_dir=work_dir_display(project_root, repo_state_root, item.name),
         created=created,
         warning=warning,
     )
@@ -316,7 +316,7 @@ def work_update_sync(
     warning = _work_warning(ctx)
     if payload.status is None and payload.description is None:
         raise ValueError("Nothing to update. Pass --status and/or --description.")
-    roots = resolve_roots(payload.repo_root)
+    roots = resolve_roots(payload.project_root)
     repo_state_root = roots.repo_state_root
     runtime_state_root = roots.runtime_root
     current = _require_work_item(repo_state_root, payload.work_id)
@@ -331,7 +331,7 @@ def work_update_sync(
             )
         _dispatch_work_hook_event(
             event_name="work.done",
-            repo_root=roots.repo_root,
+            project_root=roots.project_root,
             state_root=runtime_state_root,
             repo_state_root=repo_state_root,
             work_id=item.name,
@@ -360,14 +360,14 @@ def work_done_sync(
     ctx: RuntimeContext | None = None,
 ) -> WorkUpdateOutput:
     nested_warning = _work_warning(ctx)
-    roots = resolve_roots(payload.repo_root)
+    roots = resolve_roots(payload.project_root)
     repo_state_root = roots.repo_state_root
     runtime_state_root = roots.runtime_root
     attachment_warning = _active_work_attachment_warning(runtime_state_root, payload.work_id)
     item = work_store.archive_work_item(repo_state_root, payload.work_id)
     _dispatch_work_hook_event(
         event_name="work.done",
-        repo_root=roots.repo_root,
+        project_root=roots.project_root,
         state_root=runtime_state_root,
         repo_state_root=repo_state_root,
         work_id=item.name,
@@ -384,7 +384,7 @@ def work_delete_sync(
     ctx: RuntimeContext | None = None,
 ) -> WorkDeleteOutput:
     nested_warning = _work_warning(ctx)
-    roots = resolve_roots(payload.repo_root)
+    roots = resolve_roots(payload.project_root)
     repo_state_root = roots.repo_state_root
     try:
         item, had_artifacts = work_store.delete_work_item(
@@ -414,7 +414,7 @@ def work_reopen_sync(
     ctx: RuntimeContext | None = None,
 ) -> WorkReopenOutput:
     warning = _work_warning(ctx)
-    repo_state_root = resolve_roots(payload.repo_root).repo_state_root
+    repo_state_root = resolve_roots(payload.project_root).repo_state_root
     item = work_store.reopen_work_item(repo_state_root, payload.work_id)
     return WorkReopenOutput(name=item.name, status=item.status, warning=warning)
 
@@ -424,7 +424,7 @@ def work_switch_sync(
     ctx: RuntimeContext | None = None,
 ) -> WorkSwitchOutput:
     warning = _work_warning(ctx)
-    roots = resolve_roots(payload.repo_root)
+    roots = resolve_roots(payload.project_root)
     repo_state_root = roots.repo_state_root
     runtime_state_root = roots.runtime_root
     item = _require_work_item(repo_state_root, payload.work_id)
@@ -443,7 +443,7 @@ def work_rename_sync(
     ctx: RuntimeContext | None = None,
 ) -> WorkRenameOutput:
     warning = _work_warning(ctx)
-    roots = resolve_roots(payload.repo_root)
+    roots = resolve_roots(payload.project_root)
     repo_state_root = roots.repo_state_root
     runtime_state_root = roots.runtime_root
     old_name = payload.work_id
@@ -472,7 +472,7 @@ def work_clear_sync(
     ctx: RuntimeContext | None = None,
 ) -> WorkClearOutput:
     warning = _work_warning(ctx)
-    state_root = resolve_roots(payload.repo_root).runtime_root
+    state_root = resolve_roots(payload.project_root).runtime_root
     chat_id = resolve_chat_id(payload_chat_id=payload.chat_id, ctx=runtime_context(ctx))
     updated = set_session_work_attachment(
         state_root,

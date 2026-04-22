@@ -26,7 +26,7 @@ def test_hook_context_to_env_includes_required_and_present_optional_fields() -> 
         event_name="spawn.finalized",
         event_id=uuid4(),
         timestamp="2026-04-19T12:00:00+00:00",
-        repo_root="/repo",
+        project_root="/repo",
         state_root="/repo/.meridian",
         spawn_id="p123",
         spawn_status="cancelled",
@@ -44,7 +44,7 @@ def test_hook_context_to_env_includes_required_and_present_optional_fields() -> 
     assert env["MERIDIAN_HOOK_EVENT"] == "spawn.finalized"
     assert env["MERIDIAN_HOOK_EVENT_ID"] == str(context.event_id)
     assert env["MERIDIAN_HOOK_SCHEMA_VERSION"] == "1"
-    assert env["MERIDIAN_REPO_ROOT"] == "/repo"
+    assert env["MERIDIAN_PROJECT_DIR"] == "/repo"
     assert env["MERIDIAN_PROJECT_ROOT"] == "/repo/.meridian"
     assert env["MERIDIAN_SPAWN_ID"] == "p123"
     assert env["MERIDIAN_SPAWN_STATUS"] == "cancelled"
@@ -58,7 +58,7 @@ def test_hook_context_to_json_serializes_spawn_and_work_payloads() -> None:
         event_name="work.started",
         event_id=event_id,
         timestamp="2026-04-19T12:00:00+00:00",
-        repo_root="/repo",
+        project_root="/repo",
         state_root="/repo/.meridian",
         work_id="hook-system-design",
         work_dir="/repo/.meridian/work/hook-system-design",

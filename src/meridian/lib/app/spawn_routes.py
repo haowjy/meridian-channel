@@ -361,7 +361,7 @@ def register_spawn_routes(
             spawn_id=spawn_id,
             harness_id=harness_id,
             prompt=prompt,
-            repo_root=project_paths.execution_cwd,
+            project_root=project_paths.execution_cwd,
             env_overrides={},
         )
         spawn_req = SpawnRequest(
@@ -376,7 +376,7 @@ def register_spawn_routes(
             argv_intent=LaunchArgvIntent.SPEC_ONLY,
             unsafe_no_permissions=unsafe_no_permissions,
             state_root=state_root.as_posix(),
-            project_paths_repo_root=project_paths.repo_root.as_posix(),
+            project_paths_project_root=project_paths.project_root.as_posix(),
             project_paths_execution_cwd=project_paths.execution_cwd.as_posix(),
         )
         launch_ctx = build_launch_context(

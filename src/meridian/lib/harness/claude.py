@@ -71,21 +71,21 @@ def build_claude_adhoc_agent_json(
     return json.dumps(payload, separators=(",", ":"), sort_keys=True)
 
 
-def project_slug(repo_root: Path) -> str:
-    return re.sub(r"[^a-zA-Z0-9]", "-", str(repo_root.resolve()))
+def project_slug(project_root: Path) -> str:
+    return re.sub(r"[^a-zA-Z0-9]", "-", str(project_root.resolve()))
 
 
 def _claude_projects_root() -> Path:
     return get_home_path() / ".claude" / "projects"
 
 
-def _claude_project_dir(repo_root: Path) -> Path:
-    return _claude_projects_root() / project_slug(repo_root)
+def _claude_project_dir(project_root: Path) -> Path:
+    return _claude_projects_root() / project_slug(project_root)
 
 
-def _candidate_claude_project_dirs(repo_root: Path) -> list[Path]:
+def _candidate_claude_project_dirs(project_root: Path) -> list[Path]:
     projects_root = _claude_projects_root()
-    root_slug = project_slug(repo_root)
+    root_slug = project_slug(project_root)
     candidates: list[Path] = [projects_root / root_slug]
 
     if not projects_root.is_dir():
@@ -133,8 +133,8 @@ def _read_claude_session_id(path: Path) -> str | None:
     return path.stem.strip() or None
 
 
-def _detect_primary_session_id(repo_root: Path, started_at_epoch: float) -> str | None:
-    project_dir = _claude_project_dir(repo_root)
+def _detect_primary_session_id(project_root: Path, started_at_epoch: float) -> str | None:
+    project_dir = _claude_project_dir(project_root)
     if not project_dir.is_dir():
         return None
 
@@ -222,7 +222,7 @@ class ClaudeAdapter(BaseHarnessAdapter[ClaudeLaunchSpec]):
             "agent",
             "adhoc_agent_payload",
             "extra_args",
-            "repo_root",
+            "project_root",
             "interactive",
             "continue_harness_session_id",
             "continue_fork",
@@ -281,7 +281,7 @@ class ClaudeAdapter(BaseHarnessAdapter[ClaudeLaunchSpec]):
             }.get(normalized_value, normalized_value)
         continue_session_id = (run.continue_harness_session_id or "").strip() or None
         # Prefer the spawn log directory (from report_output_path) for system-prompt.md.
-        # Keep repo_root fallback for compatibility with contexts that do not set
+        # Keep project_root fallback for compatibility with contexts that do not set
         # report_output_path.
         prompt_file_path: str | None = None
         report_output_path = (run.report_output_path or "").strip()
@@ -289,8 +289,8 @@ class ClaudeAdapter(BaseHarnessAdapter[ClaudeLaunchSpec]):
             prompt_file_path = str(
                 Path(report_output_path).expanduser().parent / "system-prompt.md"
             )
-        elif run.repo_root:
-            prompt_file_path = str(Path(run.repo_root) / "system-prompt.md")
+        elif run.project_root:
+            prompt_file_path = str(Path(run.project_root) / "system-prompt.md")
         # Extract user_turn_content from run params if available
         user_turn_content = getattr(run, "user_turn_content", None)
         return ClaudeLaunchSpec(
@@ -501,28 +501,28 @@ class ClaudeAdapter(BaseHarnessAdapter[ClaudeLaunchSpec]):
     def detect_primary_session_id(
         self,
         *,
-        repo_root: Path,
+        project_root: Path,
         started_at_epoch: float,
         started_at_local_iso: str | None,
     ) -> str | None:
         _ = started_at_local_iso
-        return _detect_primary_session_id(repo_root, started_at_epoch)
+        return _detect_primary_session_id(project_root, started_at_epoch)
 
-    def resolve_session_file(self, *, repo_root: Path, session_id: str) -> Path | None:
+    def resolve_session_file(self, *, project_root: Path, session_id: str) -> Path | None:
         normalized_session_id = session_id.strip()
         if not normalized_session_id:
             return None
-        for project_dir in _candidate_claude_project_dirs(repo_root):
+        for project_dir in _candidate_claude_project_dirs(project_root):
             candidate = project_dir / f"{normalized_session_id}.jsonl"
             if candidate.is_file():
                 return candidate
         return None
 
-    def owns_untracked_session(self, *, repo_root: Path, session_ref: str) -> bool:
+    def owns_untracked_session(self, *, project_root: Path, session_ref: str) -> bool:
         normalized_session_ref = session_ref.strip()
         if not normalized_session_ref:
             return False
-        for project_dir in _candidate_claude_project_dirs(repo_root):
+        for project_dir in _candidate_claude_project_dirs(project_root):
             session_file = project_dir / f"{normalized_session_ref}.jsonl"
             if session_file.is_file():
                 return True

@@ -15,9 +15,9 @@ from meridian.lib.state.paths import resolve_state_paths
 
 
 class FakeManager:
-    def __init__(self, *, repo_root: Path) -> None:
-        self.repo_root = repo_root
-        self.state_root = resolve_state_paths(repo_root).root_dir
+    def __init__(self, *, project_root: Path) -> None:
+        self.project_root = project_root
+        self.state_root = resolve_state_paths(project_root).root_dir
 
     async def shutdown(self) -> None:
         return None
@@ -32,11 +32,11 @@ class FakeManager:
 
 @pytest.fixture
 def app_client(tmp_path: Path) -> Iterator[tuple[TestClient, Path]]:
-    repo_root = tmp_path
-    manager = FakeManager(repo_root=repo_root)
+    project_root = tmp_path
+    manager = FakeManager(project_root=project_root)
     app = create_app(cast("Any", manager), allow_unsafe_no_permissions=True)
     with TestClient(app) as client:
-        yield client, repo_root
+        yield client, project_root
 
 
 # ---------------------------------------------------------------------------
@@ -48,7 +48,7 @@ def test_models_returns_valid_structure(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """APP-CAT-01: /api/models returns a JSON object with a 'models' list."""
-    client, _repo_root = app_client
+    client, _project_root = app_client
 
     response = client.get("/api/models")
 
@@ -62,7 +62,7 @@ def test_models_items_have_required_fields(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """APP-CAT-01: Each model entry has at least model_id and harness fields."""
-    client, _repo_root = app_client
+    client, _project_root = app_client
 
     response = client.get("/api/models")
 
@@ -76,7 +76,7 @@ def test_models_field_names_stable_across_calls(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """APP-CAT-01: Repeated calls return the same top-level JSON field names."""
-    client, _repo_root = app_client
+    client, _project_root = app_client
 
     first = client.get("/api/models").json()
     second = client.get("/api/models").json()
@@ -95,9 +95,9 @@ def test_agents_empty_when_no_agents_dir(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """APP-CAT-02: /api/agents returns empty list when .agents/agents/ doesn't exist."""
-    client, repo_root = app_client
+    client, project_root = app_client
     # Ensure agents directory does not exist.
-    agents_dir = repo_root / ".agents" / "agents"
+    agents_dir = project_root / ".agents" / "agents"
     assert not agents_dir.exists()
 
     response = client.get("/api/agents")
@@ -112,8 +112,8 @@ def test_agents_returns_discovered_profiles(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """APP-CAT-02: /api/agents returns summaries for agents found in .agents/agents/."""
-    client, repo_root = app_client
-    agents_dir = repo_root / ".agents" / "agents"
+    client, project_root = app_client
+    agents_dir = project_root / ".agents" / "agents"
     agents_dir.mkdir(parents=True, exist_ok=True)
     (agents_dir / "coder.md").write_text(
         "---\nname: coder\ndescription: Writes code\nmodel: claude-opus-4-5\n---\n\nAgent body.\n",
@@ -136,8 +136,8 @@ def test_agents_summary_has_stable_fields(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """APP-CAT-02: Agent summaries always include the expected top-level fields."""
-    client, repo_root = app_client
-    agents_dir = repo_root / ".agents" / "agents"
+    client, project_root = app_client
+    agents_dir = project_root / ".agents" / "agents"
     agents_dir.mkdir(parents=True, exist_ok=True)
     (agents_dir / "reviewer.md").write_text(
         "---\nname: reviewer\ndescription: Reviews code\n---\n\nBody.\n",
@@ -159,8 +159,8 @@ def test_agents_multiple_profiles(
     app_client: tuple[TestClient, Path],
 ) -> None:
     """APP-CAT-02: Multiple agent profiles are all returned."""
-    client, repo_root = app_client
-    agents_dir = repo_root / ".agents" / "agents"
+    client, project_root = app_client
+    agents_dir = project_root / ".agents" / "agents"
     agents_dir.mkdir(parents=True, exist_ok=True)
     (agents_dir / "alpha.md").write_text(
         "---\nname: alpha\ndescription: Alpha agent\n---\n\nBody.\n",

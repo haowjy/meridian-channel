@@ -38,7 +38,7 @@ def _context(work_dir: Path) -> HookContext:
         event_name="work.done",
         event_id=uuid4(),
         timestamp="2026-04-20T00:00:00+00:00",
-        repo_root=str(work_dir),
+        project_root=str(work_dir),
         state_root=str(work_dir / ".meridian"),
         work_id="w123",
         work_dir=str(work_dir),

@@ -39,10 +39,10 @@ def _write_hook_recorder(path: Path) -> None:
 def test_work_lifecycle_dispatches_started_and_done_hooks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    (repo_root / ".git").mkdir()
-    state_root = repo_root / ".meridian"
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    (project_root / ".git").mkdir()
+    state_root = project_root / ".meridian"
 
     user_config = tmp_path / "user-config.toml"
     user_config.write_text("", encoding="utf-8")
@@ -55,7 +55,7 @@ def test_work_lifecycle_dispatches_started_and_done_hooks(
     _write_hook_recorder(recorder)
     command = _python_command(recorder, marker.as_posix())
 
-    (repo_root / "meridian.toml").write_text(
+    (project_root / "meridian.toml").write_text(
         f"[[hooks]]\n"
         f"name = 'record-work-started'\n"
         f"event = 'work.started'\n"
@@ -72,13 +72,13 @@ def test_work_lifecycle_dispatches_started_and_done_hooks(
             label="phase-four-hooks",
             description="hook dispatch check",
             chat_id="chat-1",
-            repo_root=repo_root.as_posix(),
+            project_root=project_root.as_posix(),
         )
     )
     work_done_sync(
         WorkDoneInput(
             work_id=started.name,
-            repo_root=repo_root.as_posix(),
+            project_root=project_root.as_posix(),
         )
     )
 
@@ -90,7 +90,7 @@ def test_work_lifecycle_dispatches_started_and_done_hooks(
     assert started_payload["event_id"] == str(
         generate_lifecycle_event_id(started.name, "work.started", 0)
     )
-    assert started_payload["repo_root"] == repo_root.resolve().as_posix()
+    assert started_payload["project_root"] == project_root.resolve().as_posix()
     assert started_payload["state_root"] == state_root.resolve().as_posix()
     assert started_payload["spawn"] is None
     assert started_payload["work"]["id"] == started.name

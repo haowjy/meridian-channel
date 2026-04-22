@@ -29,8 +29,8 @@ from meridian.lib.launch.request import (
 from meridian.lib.launch.types import SessionMode
 
 
-def _write_minimal_mars_config(repo_root: Path) -> None:
-    (repo_root / "mars.toml").write_text(
+def _write_minimal_mars_config(project_root: Path) -> None:
+    (project_root / "mars.toml").write_text(
         "[settings]\n"
         'targets = [".agents"]\n',
         encoding="utf-8",
@@ -65,10 +65,10 @@ def test_run_harness_process_fork_uses_new_chat_and_materialized_session(
     tmp_path: Path,
 ) -> None:
     monkeypatch.delenv("MERIDIAN_CHAT_ID", raising=False)
-    repo_root = tmp_path
-    _write_minimal_mars_config(repo_root)
+    project_root = tmp_path
+    _write_minimal_mars_config(project_root)
     harness_registry = get_default_harness_registry()
-    config = load_config(repo_root)
+    config = load_config(project_root)
     codex_adapter = harness_registry.get_subprocess_harness(HarnessId.CODEX)
     launch_context = build_launch_context(
         spawn_id="dry-run-primary",
@@ -90,8 +90,8 @@ def test_run_harness_process_fork_uses_new_chat_and_materialized_session(
             composition_surface=LaunchCompositionSurface.PRIMARY,
             config_snapshot=config.model_dump(mode="json", exclude_none=True),
             state_root=(tmp_path / ".meridian").as_posix(),
-            project_paths_repo_root=repo_root.as_posix(),
-            project_paths_execution_cwd=repo_root.as_posix(),
+            project_paths_project_root=project_root.as_posix(),
+            project_paths_execution_cwd=project_root.as_posix(),
         ),
         harness_registry=harness_registry,
         dry_run=True,
@@ -179,10 +179,10 @@ def test_run_harness_process_writes_prompt_file_before_primary_launch(
     tmp_path: Path,
 ) -> None:
     monkeypatch.delenv("MERIDIAN_CHAT_ID", raising=False)
-    repo_root = tmp_path
-    _write_minimal_mars_config(repo_root)
+    project_root = tmp_path
+    _write_minimal_mars_config(project_root)
     harness_registry = get_default_harness_registry()
-    config = load_config(repo_root)
+    config = load_config(project_root)
     launch_context = build_launch_context(
         spawn_id="dry-run-primary",
         request=SpawnRequest(
@@ -197,8 +197,8 @@ def test_run_harness_process_writes_prompt_file_before_primary_launch(
             composition_surface=LaunchCompositionSurface.PRIMARY,
             config_snapshot=config.model_dump(mode="json", exclude_none=True),
             state_root=(tmp_path / ".meridian").as_posix(),
-            project_paths_repo_root=repo_root.as_posix(),
-            project_paths_execution_cwd=repo_root.as_posix(),
+            project_paths_project_root=project_root.as_posix(),
+            project_paths_execution_cwd=project_root.as_posix(),
         ),
         harness_registry=harness_registry,
         dry_run=True,
@@ -292,11 +292,11 @@ def test_run_harness_process_writes_inline_primary_projection_manifest(
     )
 
     for harness_id, model in cases:
-        repo_root = tmp_path / harness_id.value
-        repo_root.mkdir()
-        _write_minimal_mars_config(repo_root)
+        project_root = tmp_path / harness_id.value
+        project_root.mkdir()
+        _write_minimal_mars_config(project_root)
         harness_registry = get_default_harness_registry()
-        config = load_config(repo_root)
+        config = load_config(project_root)
         launch_context = build_launch_context(
             spawn_id=f"dry-run-primary-{harness_id.value}",
             request=SpawnRequest(
@@ -312,9 +312,9 @@ def test_run_harness_process_writes_inline_primary_projection_manifest(
                 argv_intent=LaunchArgvIntent.REQUIRED,
                 composition_surface=LaunchCompositionSurface.PRIMARY,
                 config_snapshot=config.model_dump(mode="json", exclude_none=True),
-                state_root=(repo_root / ".meridian").as_posix(),
-                project_paths_repo_root=repo_root.as_posix(),
-                project_paths_execution_cwd=repo_root.as_posix(),
+                state_root=(project_root / ".meridian").as_posix(),
+                project_paths_project_root=project_root.as_posix(),
+                project_paths_execution_cwd=project_root.as_posix(),
             ),
             harness_registry=harness_registry,
             dry_run=True,

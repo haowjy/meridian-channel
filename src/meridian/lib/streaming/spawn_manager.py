@@ -105,14 +105,14 @@ class SpawnManager:
     def __init__(
         self,
         state_root: Path,
-        repo_root: Path,
+        project_root: Path,
         *,
         debug: bool = False,
         heartbeat_interval_secs: float = 30.0,
         heartbeat_touch: Callable[[Path, SpawnId], None] | None = None,
     ):
         self._state_root = state_root
-        self._repo_root = repo_root
+        self._project_root = project_root
         self._debug = debug
         self._heartbeat_interval_secs = heartbeat_interval_secs
         self._heartbeat_touch = heartbeat_touch
@@ -128,10 +128,10 @@ class SpawnManager:
         return self._state_root
 
     @property
-    def repo_root(self) -> Path:
+    def project_root(self) -> Path:
         """Return the repository root used for managed spawns."""
 
-        return self._repo_root
+        return self._project_root
 
     async def _start_heartbeat(self, spawn_id: SpawnId) -> None:
         """Start heartbeat ownership for one spawn; idempotent."""

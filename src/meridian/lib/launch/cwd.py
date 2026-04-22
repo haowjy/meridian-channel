@@ -8,7 +8,7 @@ from meridian.lib.state.paths import resolve_spawn_log_dir
 
 
 def resolve_child_execution_cwd(
-    repo_root: Path,
+    project_root: Path,
     spawn_id: str,
     harness_id: str,
 ) -> Path:
@@ -22,5 +22,5 @@ def resolve_child_execution_cwd(
     value before session_scope entry. Both sites MUST stay in sync.
     """
     if os.environ.get("CLAUDECODE") and harness_id == HarnessId.CLAUDE.value:
-        return resolve_spawn_log_dir(repo_root, spawn_id)
-    return repo_root
+        return resolve_spawn_log_dir(project_root, spawn_id)
+    return project_root

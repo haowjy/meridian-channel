@@ -500,7 +500,7 @@ def test_spawn_cancel_passes_resolved_spawn_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(spawn_cli, "resolve_runtime_root_and_config", lambda _: (Path("."), None))
-    monkeypatch.setattr(spawn_cli, "resolve_spawn_reference", lambda _repo_root, _ref: "p1")
+    monkeypatch.setattr(spawn_cli, "resolve_spawn_reference", lambda _project_root, _ref: "p1")
     monkeypatch.setattr(spawn_cli, "current_output_sink", lambda: None)
 
     captured: dict[str, SpawnCancelInput] = {}

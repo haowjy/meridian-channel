@@ -225,7 +225,7 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
         ws_url = f"ws://{host}:{port}"
 
         env = inherit_child_env(os.environ, config.env_overrides)
-        spawn_dir = resolve_spawn_log_dir(config.repo_root, config.spawn_id)
+        spawn_dir = resolve_spawn_log_dir(config.project_root, config.spawn_id)
         spawn_dir.mkdir(parents=True, exist_ok=True)
         self._stderr_handle = (spawn_dir / "stderr.log").open("ab")
 
@@ -238,7 +238,7 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
             try:
                 self._process = await asyncio.create_subprocess_exec(
                     *appserver_command,
-                    cwd=str(config.repo_root),
+                    cwd=str(config.project_root),
                     env=env,
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=self._stderr_handle,
@@ -734,7 +734,7 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
         config = self._config
         if config is None:
             raise RuntimeError("Codex connection config is unavailable for thread bootstrap")
-        return project_codex_spec_to_thread_request(spec, cwd=str(config.repo_root))
+        return project_codex_spec_to_thread_request(spec, cwd=str(config.project_root))
 
     def _update_turn_state(self, *, method: str, payload: dict[str, object]) -> None:
         if method == "turn/completed":

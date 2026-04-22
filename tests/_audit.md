@@ -69,7 +69,7 @@
 | ops/test_reference.py | GOOD | — | Behavior-focused test with scope matching directory intent. |
 | ops/test_runtime.py | GOOD | — | Behavior-focused test with scope matching directory intent. |
 | ops/test_session_log.py | GOOD | — | Behavior-focused test with scope matching directory intent. |
-| ops/test_spawn_api.py | REWRITE | G | Monkeypatches private API helper `_resolve_repo_root_input`. |
+| ops/test_spawn_api.py | REWRITE | G | Monkeypatches private API helper `_resolve_project_root_input`. |
 | ops/test_spawn_context_ref.py | GOOD | — | Behavior-focused test with scope matching directory intent. |
 | ops/test_spawn_continue.py | GOOD | — | Behavior-focused test with scope matching directory intent. |
 | ops/test_spawn_prepare_fork.py | GOOD | — | Behavior-focused test with scope matching directory intent. |

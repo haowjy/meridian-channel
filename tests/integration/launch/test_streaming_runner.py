@@ -43,7 +43,7 @@ class _ReportThenHangConnection:
     def __init__(self) -> None:
         self.state = "created"
         self._spawn_id = SpawnId("")
-        self._repo_root: Path | None = None
+        self._project_root: Path | None = None
         self._session_id = "thread-watchdog"
         self.capabilities = ConnectionCapabilities(
             mid_turn_injection="interrupt_restart",
@@ -73,7 +73,7 @@ class _ReportThenHangConnection:
     async def start(self, config: ConnectionConfig, spec: ResolvedLaunchSpec) -> None:
         _ = spec
         self._spawn_id = config.spawn_id
-        self._repo_root = config.repo_root
+        self._project_root = config.project_root
         self.state = "connected"
 
     async def stop(self) -> None:
@@ -92,9 +92,9 @@ class _ReportThenHangConnection:
         return None
 
     async def events(self):  # type: ignore[no-untyped-def]
-        repo_root = self._repo_root
-        assert repo_root is not None
-        spawn_dir = resolve_spawn_log_dir(repo_root, self._spawn_id)
+        project_root = self._project_root
+        assert project_root is not None
+        spawn_dir = resolve_spawn_log_dir(project_root, self._spawn_id)
         spawn_dir.mkdir(parents=True, exist_ok=True)
         (spawn_dir / "report.md").write_text(
             "# Done\n\nWatchdog fallback completed.\n",
@@ -125,7 +125,7 @@ async def _execute_with_context(
     run: Spawn,
     *,
     request: SpawnRequest,
-    repo_root: Path,
+    project_root: Path,
     state_root: Path,
     artifacts: LocalStore,
     registry: HarnessRegistry,
@@ -137,8 +137,8 @@ async def _execute_with_context(
         runtime=LaunchRuntime(
             argv_intent=LaunchArgvIntent.SPEC_ONLY,
             state_root=state_root.as_posix(),
-            project_paths_repo_root=repo_root.as_posix(),
-            project_paths_execution_cwd=repo_root.resolve().as_posix(),
+            project_paths_project_root=project_root.as_posix(),
+            project_paths_execution_cwd=project_root.resolve().as_posix(),
         ),
         harness_registry=registry,
     )
@@ -146,7 +146,7 @@ async def _execute_with_context(
         run,
         request=request,
         launch_context=launch_context,
-        repo_root=repo_root,
+        project_root=project_root,
         state_root=state_root,
         artifacts=artifacts,
         **kwargs,
@@ -197,7 +197,7 @@ async def test_execute_with_streaming_succeeds_after_report_watchdog_cleanup(
         _execute_with_context(
             run,
             request=_build_request(),
-            repo_root=tmp_path,
+            project_root=tmp_path,
             state_root=state_root,
             artifacts=artifacts,
             registry=registry,

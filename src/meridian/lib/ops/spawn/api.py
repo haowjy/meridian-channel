@@ -88,8 +88,8 @@ def _build_wait_timeout_message(pending_spawn_ids: set[str], elapsed_secs: float
     return "\n".join(lines)
 
 
-def _resolve_repo_root_input(repo_root: str | None) -> Path:
-    resolved_root, _ = resolve_runtime_root_and_config_for_read(repo_root)
+def _resolve_project_root_input(project_root: str | None) -> Path:
+    resolved_root, _ = resolve_runtime_root_and_config_for_read(project_root)
     return resolved_root
 
 
@@ -114,11 +114,11 @@ def spawn_create_sync(
 ) -> SpawnActionOutput:
     resolved_context = runtime_context(ctx)
     if payload.dry_run:
-        resolved_root = _resolve_repo_root_input(payload.repo_root)
+        resolved_root = _resolve_project_root_input(payload.project_root)
         config = load_config(resolved_root)
     else:
-        resolved_root, config = resolve_runtime_root_and_config(payload.repo_root)
-    payload = payload.model_copy(update={"repo_root": resolved_root.as_posix()})
+        resolved_root, config = resolve_runtime_root_and_config(payload.project_root)
+    payload = payload.model_copy(update={"project_root": resolved_root.as_posix()})
     payload, preflight_warning = validate_create_input(payload)
     if payload.dry_run and payload.work.strip():
         repo_state_root = resolve_repo_paths(resolved_root).root_dir
@@ -196,10 +196,10 @@ def spawn_list_sync(
     sink: OutputSink | None = None,
 ) -> SpawnListOutput:
     _ = (ctx, sink)
-    repo_root = _resolve_repo_root_input(payload.repo_root)
+    project_root = _resolve_project_root_input(payload.project_root)
     from meridian.lib.state.reaper import reconcile_spawns
 
-    state_root = resolve_runtime_root_for_read(repo_root)
+    state_root = resolve_runtime_root_for_read(project_root)
     spawns = list(reversed(reconcile_spawns(state_root, spawn_store.list_spawns(state_root))))
 
     # When statuses is empty tuple, show all statuses but cap intelligently:
@@ -293,10 +293,10 @@ def spawn_stats_sync(
     sink: OutputSink | None = None,
 ) -> SpawnStatsOutput:
     _ = (ctx, sink)
-    repo_root = _resolve_repo_root_input(payload.repo_root)
+    project_root = _resolve_project_root_input(payload.project_root)
     from meridian.lib.state.reaper import reconcile_spawns
 
-    state_root = resolve_runtime_root_for_read(repo_root)
+    state_root = resolve_runtime_root_for_read(project_root)
     all_spawns = reconcile_spawns(state_root, spawn_store.list_spawns(state_root))
 
     if payload.session is not None and payload.session.strip():
@@ -408,13 +408,13 @@ def spawn_show_sync(
     sink: OutputSink | None = None,
 ) -> SpawnDetailOutput:
     _ = (ctx, sink)
-    repo_root = _resolve_repo_root_input(payload.repo_root)
-    spawn_id = resolve_spawn_reference(repo_root, payload.spawn_id)
-    row = read_spawn_row(repo_root, spawn_id)
+    project_root = _resolve_project_root_input(payload.project_root)
+    spawn_id = resolve_spawn_reference(project_root, payload.spawn_id)
+    row = read_spawn_row(project_root, spawn_id)
     if row is None:
         raise ValueError(f"Spawn '{spawn_id}' not found")
     return detail_from_row(
-        repo_root=repo_root,
+        project_root=project_root,
         row=row,
         include_report_body=payload.include_report_body,
     )
@@ -436,12 +436,12 @@ def spawn_files_sync(
     sink: OutputSink | None = None,
 ) -> SpawnWrittenFilesOutput:
     _ = (ctx, sink)
-    repo_root = _resolve_repo_root_input(payload.repo_root)
-    spawn_id = resolve_spawn_reference(repo_root, payload.spawn_id)
-    row = read_spawn_row(repo_root, spawn_id)
+    project_root = _resolve_project_root_input(payload.project_root)
+    spawn_id = resolve_spawn_reference(project_root, payload.spawn_id)
+    row = read_spawn_row(project_root, spawn_id)
     if row is None:
         raise ValueError(f"Spawn '{spawn_id}' not found")
-    written_files = read_written_files(repo_root, spawn_id)
+    written_files = read_written_files(project_root, spawn_id)
     return SpawnWrittenFilesOutput(
         spawn_id=spawn_id,
         written_files=written_files,
@@ -493,9 +493,9 @@ async def _spawn_cancel_impl(
     sink: OutputSink | None = None,
 ) -> SpawnActionOutput:
     _ = sink
-    repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
-    spawn_id = resolve_spawn_reference(repo_root, payload.spawn_id)
-    state_root = resolve_runtime_root(repo_root)
+    project_root, _ = resolve_runtime_root_and_config(payload.project_root)
+    spawn_id = resolve_spawn_reference(project_root, payload.spawn_id)
+    state_root = resolve_runtime_root(project_root)
     row = spawn_store.get_spawn(state_root, spawn_id)
     if row is None:
         raise ValueError(f"Spawn '{spawn_id}' not found")
@@ -628,8 +628,8 @@ def spawn_wait_sync(
     sink: OutputSink | None = None,
 ) -> SpawnWaitMultiOutput:
     active_sink = sink or NullSink()
-    repo_root, config = resolve_runtime_root_and_config_for_read(payload.repo_root)
-    spawn_ids = resolve_spawn_references(repo_root, _normalize_wait_spawn_ids(payload))
+    project_root, config = resolve_runtime_root_and_config_for_read(payload.project_root)
+    spawn_ids = resolve_spawn_references(project_root, _normalize_wait_spawn_ids(payload))
     timeout_minutes = (
         payload.timeout if payload.timeout is not None else config.wait_timeout_minutes
     )
@@ -656,7 +656,7 @@ def spawn_wait_sync(
 
     while True:
         for spawn_id in tuple(pending):
-            row = read_spawn_row(repo_root, spawn_id)
+            row = read_spawn_row(project_root, spawn_id)
             if row is None:
                 raise ValueError(f"Spawn '{spawn_id}' not found")
 
@@ -667,7 +667,7 @@ def spawn_wait_sync(
         if not pending:
             details = tuple(
                 detail_from_row(
-                    repo_root=repo_root,
+                    project_root=project_root,
                     row=completed_rows[spawn_id],
                     include_report_body=payload.include_report_body,
                 )
@@ -702,13 +702,13 @@ async def spawn_wait(
 
 def _source_spawn_for_follow_up(
     payload_spawn_id: str,
-    repo_root: Path,
+    project_root: Path,
 ) -> tuple[str, spawn_store.SpawnRecord, ResolvedSessionReference]:
-    resolved_spawn_id = resolve_spawn_reference(repo_root, payload_spawn_id)
-    row = read_spawn_row(repo_root, resolved_spawn_id)
+    resolved_spawn_id = resolve_spawn_reference(project_root, payload_spawn_id)
+    row = read_spawn_row(project_root, resolved_spawn_id)
     if row is None:
         raise ValueError(f"Spawn '{resolved_spawn_id}' not found")
-    resolved_reference = resolve_session_reference(repo_root, resolved_spawn_id)
+    resolved_reference = resolve_session_reference(project_root, resolved_spawn_id)
     return resolved_spawn_id, row, resolved_reference
 
 
@@ -740,9 +740,9 @@ def spawn_continue_sync(
     *,
     sink: OutputSink | None = None,
 ) -> SpawnActionOutput:
-    repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
+    project_root, _ = resolve_runtime_root_and_config(payload.project_root)
     resolved_spawn_id, source_spawn, resolved_reference = _source_spawn_for_follow_up(
-        payload.spawn_id, repo_root
+        payload.spawn_id, project_root
     )
     if resolved_reference.missing_harness_session_id:
         raise ValueError(
@@ -768,7 +768,7 @@ def spawn_continue_sync(
         harness=requested_harness,
         agent=payload.agent,
         skills=payload.skills,
-        repo_root=payload.repo_root,
+        project_root=payload.project_root,
         dry_run=payload.dry_run,
         timeout=payload.timeout,
         background=payload.background,

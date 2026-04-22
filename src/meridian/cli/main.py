@@ -265,10 +265,7 @@ def root(
         str | None,
         Parameter(
             name="--sandbox",
-            help=(
-                "Sandbox mode: default, read-only, workspace-write, "
-                "danger-full-access."
-            ),
+            help=("Sandbox mode: default, read-only, workspace-write, danger-full-access."),
         ),
     ] = None,
     approval: Annotated[
@@ -438,13 +435,15 @@ def _run_primary_launch(
 
 def _resolve_session_target(
     *,
-    repo_root: Path,
+    project_root: Path,
     continue_ref: str,
 ) -> _ResolvedSessionTarget:
-    return primary_launch.resolve_session_target(repo_root=repo_root, continue_ref=continue_ref)
+    return primary_launch.resolve_session_target(
+        project_root=project_root, continue_ref=continue_ref
+    )
 
 
-_resolve_init_repo_root = mars_passthrough.resolve_init_repo_root
+_resolve_init_project_root = mars_passthrough.resolve_init_project_root
 _resolve_init_link_mars_command = mars_passthrough.resolve_init_link_mars_command
 
 
@@ -487,13 +486,13 @@ def init_alias(
 
     from meridian.lib.ops.config import ConfigInitInput, config_init_sync
 
-    repo_root = _resolve_init_repo_root(path)
-    result = config_init_sync(ConfigInitInput(repo_root=repo_root.as_posix()))
+    project_root = _resolve_init_project_root(path)
+    result = config_init_sync(ConfigInitInput(project_root=project_root.as_posix()))
     if link is None:
         emit(result)
         return
 
-    mars_mode, mars_args = _resolve_init_link_mars_command(repo_root, link)
+    mars_mode, mars_args = _resolve_init_link_mars_command(project_root, link)
     output_format = get_global_options().output.format
     if output_format == "json":
         executable = _resolve_mars_executable()

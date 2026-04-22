@@ -15,15 +15,15 @@ def _clear_state_root_override(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _repo(tmp_path: Path) -> Path:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    return repo_root
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    return project_root
 
 
 def test_resolve_workspace_snapshot_is_none_when_workspace_file_absent(tmp_path: Path) -> None:
-    repo_root = _repo(tmp_path)
+    project_root = _repo(tmp_path)
 
-    snapshot = resolve_workspace_snapshot(repo_root)
+    snapshot = resolve_workspace_snapshot(project_root)
 
     assert snapshot.status == "none"
     assert snapshot.path is None
@@ -32,10 +32,10 @@ def test_resolve_workspace_snapshot_is_none_when_workspace_file_absent(tmp_path:
 
 
 def test_workspace_snapshot_resolves_paths_relative_to_workspace_file(tmp_path: Path) -> None:
-    repo_root = _repo(tmp_path)
+    project_root = _repo(tmp_path)
     sibling_root = tmp_path / "sibling"
     sibling_root.mkdir()
-    workspace_path = repo_root / "workspace.local.toml"
+    workspace_path = project_root / "workspace.local.toml"
     workspace_path.write_text(
         "[[context-roots]]\n"
         'path = "../sibling"\n'
@@ -46,7 +46,7 @@ def test_workspace_snapshot_resolves_paths_relative_to_workspace_file(tmp_path: 
         encoding="utf-8",
     )
 
-    snapshot = resolve_workspace_snapshot(repo_root)
+    snapshot = resolve_workspace_snapshot(project_root)
 
     assert snapshot.status == "present"
     assert snapshot.path == workspace_path.resolve()
@@ -57,17 +57,17 @@ def test_workspace_snapshot_resolves_paths_relative_to_workspace_file(tmp_path: 
     assert snapshot.roots[0].resolved_path == sibling_root.resolve()
     assert snapshot.roots[0].enabled is True
     assert snapshot.roots[0].exists is True
-    assert snapshot.roots[1].resolved_path == (repo_root / "disabled-missing").resolve()
+    assert snapshot.roots[1].resolved_path == (project_root / "disabled-missing").resolve()
     assert snapshot.roots[1].enabled is False
     assert snapshot.roots[1].exists is False
     assert snapshot.missing_roots_count == 0
 
 
 def test_get_projectable_roots_returns_only_enabled_existing_entries(tmp_path: Path) -> None:
-    repo_root = _repo(tmp_path)
-    existing = repo_root / "existing"
+    project_root = _repo(tmp_path)
+    existing = project_root / "existing"
     existing.mkdir()
-    (repo_root / "workspace.local.toml").write_text(
+    (project_root / "workspace.local.toml").write_text(
         "[[context-roots]]\n"
         'path = "./existing"\n'
         "\n"
@@ -80,14 +80,14 @@ def test_get_projectable_roots_returns_only_enabled_existing_entries(tmp_path: P
         encoding="utf-8",
     )
 
-    snapshot = resolve_workspace_snapshot(repo_root)
+    snapshot = resolve_workspace_snapshot(project_root)
 
     assert get_projectable_roots(snapshot) == (existing.resolve(),)
 
 
 def test_workspace_snapshot_surfaces_unknown_keys_and_missing_enabled_roots(tmp_path: Path) -> None:
-    repo_root = _repo(tmp_path)
-    workspace_path = repo_root / "workspace.local.toml"
+    project_root = _repo(tmp_path)
+    workspace_path = project_root / "workspace.local.toml"
     workspace_path.write_text(
         'future = "value"\n'
         "[[context-roots]]\n"
@@ -96,7 +96,7 @@ def test_workspace_snapshot_surfaces_unknown_keys_and_missing_enabled_roots(tmp_
         encoding="utf-8",
     )
 
-    snapshot = resolve_workspace_snapshot(repo_root)
+    snapshot = resolve_workspace_snapshot(project_root)
 
     assert snapshot.status == "present"
     finding_codes = {finding.code for finding in snapshot.findings}
@@ -104,14 +104,14 @@ def test_workspace_snapshot_surfaces_unknown_keys_and_missing_enabled_roots(tmp_
     unknown = next(f for f in snapshot.findings if f.code == "workspace_unknown_key")
     assert unknown.payload == {"keys": ["future", "context-roots[1].comment"]}
     missing = next(f for f in snapshot.findings if f.code == "workspace_missing_root")
-    assert missing.payload == {"roots": [(repo_root / "missing-root").resolve().as_posix()]}
+    assert missing.payload == {"roots": [(project_root / "missing-root").resolve().as_posix()]}
 
 
 def test_workspace_snapshot_uses_state_root_parent_override(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = _repo(tmp_path)
+    project_root = _repo(tmp_path)
     override_root = tmp_path / "state-root" / ".meridian"
     override_root.parent.mkdir(parents=True)
     workspace_path = override_root.parent / "workspace.local.toml"
@@ -123,7 +123,7 @@ def test_workspace_snapshot_uses_state_root_parent_override(
         encoding="utf-8",
     )
 
-    snapshot = resolve_workspace_snapshot(repo_root)
+    snapshot = resolve_workspace_snapshot(project_root)
 
     assert snapshot.status == "present"
     assert snapshot.path == workspace_path.resolve()
@@ -160,11 +160,11 @@ def test_workspace_snapshot_marks_invalid_schema_cases(
     content: str,
     expected_message: str,
 ) -> None:
-    repo_root = _repo(tmp_path)
-    workspace_path = repo_root / "workspace.local.toml"
+    project_root = _repo(tmp_path)
+    workspace_path = project_root / "workspace.local.toml"
     workspace_path.write_text(content, encoding="utf-8")
 
-    snapshot = resolve_workspace_snapshot(repo_root)
+    snapshot = resolve_workspace_snapshot(project_root)
 
     assert snapshot.status == "invalid"
     assert snapshot.path == workspace_path.resolve()
@@ -174,22 +174,22 @@ def test_workspace_snapshot_marks_invalid_schema_cases(
 
 
 def test_workspace_launch_validation_raises_for_invalid_workspace(tmp_path: Path) -> None:
-    repo_root = _repo(tmp_path)
-    (repo_root / "workspace.local.toml").write_text("[[context-roots]]\n", encoding="utf-8")
+    project_root = _repo(tmp_path)
+    (project_root / "workspace.local.toml").write_text("[[context-roots]]\n", encoding="utf-8")
 
     with pytest.raises(ValueError, match="Invalid workspace file"):
-        ensure_workspace_valid_for_launch(repo_root)
+        ensure_workspace_valid_for_launch(project_root)
 
 
 def test_workspace_launch_validation_allows_absent_or_valid_workspace(tmp_path: Path) -> None:
-    repo_root = _repo(tmp_path)
+    project_root = _repo(tmp_path)
 
-    ensure_workspace_valid_for_launch(repo_root)
+    ensure_workspace_valid_for_launch(project_root)
 
-    (repo_root / "existing").mkdir()
-    (repo_root / "workspace.local.toml").write_text(
+    (project_root / "existing").mkdir()
+    (project_root / "workspace.local.toml").write_text(
         "[[context-roots]]\n"
         'path = "./existing"\n',
         encoding="utf-8",
     )
-    ensure_workspace_valid_for_launch(repo_root)
+    ensure_workspace_valid_for_launch(project_root)

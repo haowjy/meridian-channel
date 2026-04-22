@@ -29,81 +29,81 @@ def _clear_state_root_override(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _repo(tmp_path: Path) -> Path:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    return repo_root
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    return project_root
 
 
 def test_config_init_creates_meridian_toml_and_is_idempotent(
     tmp_path: Path,
 ) -> None:
-    repo_root = _repo(tmp_path)
-    config_path = repo_root / "meridian.toml"
+    project_root = _repo(tmp_path)
+    config_path = project_root / "meridian.toml"
 
-    first = config_init_sync(ConfigInitInput(repo_root=repo_root.as_posix()))
-    config_path.write_text("[defaults]\nharness = \"claude\"\n", encoding="utf-8")
-    second = config_init_sync(ConfigInitInput(repo_root=repo_root.as_posix()))
+    first = config_init_sync(ConfigInitInput(project_root=project_root.as_posix()))
+    config_path.write_text('[defaults]\nharness = "claude"\n', encoding="utf-8")
+    second = config_init_sync(ConfigInitInput(project_root=project_root.as_posix()))
 
     assert first.created is True
     assert second.created is False
     assert first.path == config_path.as_posix()
     assert second.path == config_path.as_posix()
     assert config_path.is_file()
-    assert config_path.read_text(encoding="utf-8") == "[defaults]\nharness = \"claude\"\n"
-    assert not (repo_root / "mars.toml").exists()
-    assert not (repo_root / ".mars").exists()
+    assert config_path.read_text(encoding="utf-8") == '[defaults]\nharness = "claude"\n'
+    assert not (project_root / "mars.toml").exists()
+    assert not (project_root / ".mars").exists()
 
 
 def test_runtime_bootstrap_does_not_create_meridian_toml(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = _repo(tmp_path)
+    project_root = _repo(tmp_path)
     user_state_root = tmp_path / "user-state"
     monkeypatch.setenv("MERIDIAN_HOME", user_state_root.as_posix())
 
-    ensure_runtime_state_bootstrap_sync(repo_root)
-    runtime_root = resolve_project_runtime_root(repo_root)
+    ensure_runtime_state_bootstrap_sync(project_root)
+    runtime_root = resolve_project_runtime_root(project_root)
 
-    assert (repo_root / ".meridian").is_dir()
-    assert (repo_root / ".meridian" / ".gitignore").is_file()
-    assert not (repo_root / ".meridian" / "artifacts").exists()
-    assert not (repo_root / ".meridian" / "cache").exists()
-    assert not (repo_root / ".meridian" / "spawns").exists()
-    project_uuid = (repo_root / ".meridian" / "id").read_text(encoding="utf-8").strip()
+    assert (project_root / ".meridian").is_dir()
+    assert (project_root / ".meridian" / ".gitignore").is_file()
+    assert not (project_root / ".meridian" / "artifacts").exists()
+    assert not (project_root / ".meridian" / "cache").exists()
+    assert not (project_root / ".meridian" / "spawns").exists()
+    project_uuid = (project_root / ".meridian" / "id").read_text(encoding="utf-8").strip()
     assert runtime_root == user_state_root / "projects" / project_uuid
     assert runtime_root.is_dir()
     assert (runtime_root / "spawns").is_dir()
-    assert not (repo_root / "meridian.toml").exists()
-    assert not (repo_root / ".mars").exists()
-    assert not (repo_root / "mars.toml").exists()
+    assert not (project_root / "meridian.toml").exists()
+    assert not (project_root / ".mars").exists()
+    assert not (project_root / "mars.toml").exists()
 
 
-def test_config_init_uses_env_repo_root_when_path_not_provided(
+def test_config_init_uses_env_project_root_when_path_not_provided(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    env_repo_root = _repo(tmp_path)
+    env_project_root = _repo(tmp_path)
     cwd = tmp_path / "cwd"
     cwd.mkdir()
-    monkeypatch.setenv("MERIDIAN_REPO_ROOT", env_repo_root.as_posix())
+    monkeypatch.setenv("MERIDIAN_PROJECT_DIR", env_project_root.as_posix())
     monkeypatch.chdir(cwd)
 
     result = config_init_sync(ConfigInitInput())
 
-    assert result.path == (env_repo_root / "meridian.toml").as_posix()
-    assert (env_repo_root / "meridian.toml").is_file()
+    assert result.path == (env_project_root / "meridian.toml").as_posix()
+    assert (env_project_root / "meridian.toml").is_file()
     assert not (cwd / "meridian.toml").exists()
-    assert not (env_repo_root / "mars.toml").exists()
+    assert not (env_project_root / "mars.toml").exists()
 
 
 def test_config_set_requires_project_config_file(tmp_path: Path) -> None:
-    repo_root = _repo(tmp_path)
+    project_root = _repo(tmp_path)
 
     with pytest.raises(ValueError, match="no project config; run `meridian config init`"):
         config_set_sync(
             ConfigSetInput(
-                repo_root=repo_root.as_posix(),
+                project_root=project_root.as_posix(),
                 key="defaults.model",
                 value="gpt-5.4",
             )
@@ -111,29 +111,29 @@ def test_config_set_requires_project_config_file(tmp_path: Path) -> None:
 
 
 def test_config_reset_requires_project_config_file(tmp_path: Path) -> None:
-    repo_root = _repo(tmp_path)
+    project_root = _repo(tmp_path)
 
     with pytest.raises(ValueError, match="no project config; run `meridian config init`"):
         config_reset_sync(
             ConfigResetInput(
-                repo_root=repo_root.as_posix(),
+                project_root=project_root.as_posix(),
                 key="defaults.model",
             )
         )
 
 
 def test_config_show_reports_meridian_toml_path_when_absent(tmp_path: Path) -> None:
-    repo_root = _repo(tmp_path)
+    project_root = _repo(tmp_path)
 
-    result = config_show_sync(ConfigShowInput(repo_root=repo_root.as_posix()))
+    result = config_show_sync(ConfigShowInput(project_root=project_root.as_posix()))
 
-    assert result.path == (repo_root / "meridian.toml").as_posix()
+    assert result.path == (project_root / "meridian.toml").as_posix()
 
 
 def test_config_show_reports_workspace_summary_when_workspace_is_absent(tmp_path: Path) -> None:
-    repo_root = _repo(tmp_path)
+    project_root = _repo(tmp_path)
 
-    result = config_show_sync(ConfigShowInput(repo_root=repo_root.as_posix()))
+    result = config_show_sync(ConfigShowInput(project_root=project_root.as_posix()))
 
     assert result.workspace.status == "none"
     assert result.workspace.path is None
@@ -155,19 +155,16 @@ def test_config_show_reports_workspace_summary_when_workspace_is_absent(tmp_path
 
 
 def test_config_show_surfaces_workspace_findings(tmp_path: Path) -> None:
-    repo_root = _repo(tmp_path)
-    (repo_root / "workspace.local.toml").write_text(
-        'future = "value"\n'
-        "[[context-roots]]\n"
-        'path = "./missing-root"\n'
-        'extra = "yes"\n',
+    project_root = _repo(tmp_path)
+    (project_root / "workspace.local.toml").write_text(
+        'future = "value"\n[[context-roots]]\npath = "./missing-root"\nextra = "yes"\n',
         encoding="utf-8",
     )
 
-    result = config_show_sync(ConfigShowInput(repo_root=repo_root.as_posix()))
+    result = config_show_sync(ConfigShowInput(project_root=project_root.as_posix()))
 
     assert result.workspace.status == "present"
-    assert result.workspace.path == (repo_root / "workspace.local.toml").resolve().as_posix()
+    assert result.workspace.path == (project_root / "workspace.local.toml").resolve().as_posix()
     assert result.workspace.roots.count == 1
     assert result.workspace.roots.enabled == 1
     assert result.workspace.roots.missing == 1
@@ -179,9 +176,9 @@ def test_config_show_surfaces_workspace_findings(tmp_path: Path) -> None:
 
 
 def test_config_show_json_workspace_omits_null_path_and_findings(tmp_path: Path) -> None:
-    repo_root = _repo(tmp_path)
+    project_root = _repo(tmp_path)
 
-    result = config_show_sync(ConfigShowInput(repo_root=repo_root.as_posix()))
+    result = config_show_sync(ConfigShowInput(project_root=project_root.as_posix()))
     payload = to_jsonable(result)
 
     assert "workspace_findings" not in payload
@@ -197,15 +194,14 @@ def test_config_show_json_workspace_omits_null_path_and_findings(tmp_path: Path)
 
 
 def test_config_show_json_workspace_includes_path_when_present(tmp_path: Path) -> None:
-    repo_root = _repo(tmp_path)
-    workspace_path = repo_root / "workspace.local.toml"
+    project_root = _repo(tmp_path)
+    workspace_path = project_root / "workspace.local.toml"
     workspace_path.write_text(
-        "[[context-roots]]\n"
-        'path = "./missing-root"\n',
+        '[[context-roots]]\npath = "./missing-root"\n',
         encoding="utf-8",
     )
 
-    result = config_show_sync(ConfigShowInput(repo_root=repo_root.as_posix()))
+    result = config_show_sync(ConfigShowInput(project_root=project_root.as_posix()))
     payload = to_jsonable(result)
 
     workspace = payload["workspace"]
@@ -221,16 +217,15 @@ def test_config_show_json_workspace_includes_path_when_present(tmp_path: Path) -
 def test_config_show_marks_codex_workspace_projection_as_unsupported_when_roots_exist(
     tmp_path: Path,
 ) -> None:
-    repo_root = _repo(tmp_path)
-    shared = repo_root / "shared"
+    project_root = _repo(tmp_path)
+    shared = project_root / "shared"
     shared.mkdir()
-    (repo_root / "workspace.local.toml").write_text(
-        "[[context-roots]]\n"
-        'path = "./shared"\n',
+    (project_root / "workspace.local.toml").write_text(
+        '[[context-roots]]\npath = "./shared"\n',
         encoding="utf-8",
     )
 
-    result = config_show_sync(ConfigShowInput(repo_root=repo_root.as_posix()))
+    result = config_show_sync(ConfigShowInput(project_root=project_root.as_posix()))
 
     assert result.workspace.applicability == {
         "claude": "active",
@@ -246,14 +241,14 @@ def test_config_show_and_loader_share_project_config_precedence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = _repo(tmp_path)
-    project_config = repo_root / "meridian.toml"
-    project_config.write_text("[defaults]\nharness = \"claude\"\n", encoding="utf-8")
+    project_root = _repo(tmp_path)
+    project_config = project_root / "meridian.toml"
+    project_config.write_text('[defaults]\nharness = "claude"\n', encoding="utf-8")
     user_config = tmp_path / "user-config.toml"
-    user_config.write_text("[defaults]\nharness = \"opencode\"\n", encoding="utf-8")
+    user_config.write_text('[defaults]\nharness = "opencode"\n', encoding="utf-8")
     monkeypatch.setenv("MERIDIAN_CONFIG", user_config.as_posix())
 
-    project_only = config_show_sync(ConfigShowInput(repo_root=repo_root.as_posix()))
+    project_only = config_show_sync(ConfigShowInput(project_root=project_root.as_posix()))
     project_only_value = next(
         item for item in project_only.values if item.key == "defaults.harness"
     )
@@ -261,51 +256,55 @@ def test_config_show_and_loader_share_project_config_precedence(
     assert project_only.path == project_config.as_posix()
     assert project_only_value.value == "claude"
     assert project_only_value.source == "file"
-    assert load_config(repo_root).default_harness == "claude"
+    assert load_config(project_root).default_harness == "claude"
 
     monkeypatch.setenv("MERIDIAN_DEFAULT_HARNESS", "codex")
 
-    resolved = config_show_sync(ConfigShowInput(repo_root=repo_root.as_posix()))
+    resolved = config_show_sync(ConfigShowInput(project_root=project_root.as_posix()))
     resolved_value = next(item for item in resolved.values if item.key == "defaults.harness")
 
     assert resolved.path == project_config.as_posix()
     assert resolved_value.value == "codex"
     assert resolved_value.source == "env var"
     assert resolved_value.env_var == "MERIDIAN_DEFAULT_HARNESS"
-    assert load_config(repo_root).default_harness == "codex"
+    assert load_config(project_root).default_harness == "codex"
 
 
 def test_config_show_and_get_share_default_user_config_resolution(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = _repo(tmp_path)
+    project_root = _repo(tmp_path)
     user_config = tmp_path / "default-user-config.toml"
-    user_config.write_text("[defaults]\nharness = \"opencode\"\n", encoding="utf-8")
+    user_config.write_text('[defaults]\nharness = "opencode"\n', encoding="utf-8")
     monkeypatch.delenv("MERIDIAN_CONFIG", raising=False)
     monkeypatch.setattr(settings_mod, "_DEFAULT_USER_CONFIG", user_config)
 
-    shown = config_show_sync(ConfigShowInput(repo_root=repo_root.as_posix()))
+    shown = config_show_sync(ConfigShowInput(project_root=project_root.as_posix()))
     shown_value = next(item for item in shown.values if item.key == "defaults.harness")
-    gotten = config_get_sync(ConfigGetInput(repo_root=repo_root.as_posix(), key="defaults.harness"))
+    gotten = config_get_sync(
+        ConfigGetInput(project_root=project_root.as_posix(), key="defaults.harness")
+    )
 
     assert shown_value.value == "opencode"
     assert shown_value.source == "user-config"
     assert gotten.value == "opencode"
     assert gotten.source == "user-config"
-    assert load_config(repo_root).default_harness == "opencode"
+    assert load_config(project_root).default_harness == "opencode"
 
 
 @pytest.mark.parametrize(
     ("runner", "expected_key"),
     [
         (
-            lambda repo_root: config_show_sync(ConfigShowInput(repo_root=repo_root.as_posix())),
+            lambda project_root: config_show_sync(
+                ConfigShowInput(project_root=project_root.as_posix())
+            ),
             None,
         ),
         (
-            lambda repo_root: config_get_sync(
-                ConfigGetInput(repo_root=repo_root.as_posix(), key="defaults.harness")
+            lambda project_root: config_get_sync(
+                ConfigGetInput(project_root=project_root.as_posix(), key="defaults.harness")
             ),
             "defaults.harness",
         ),
@@ -317,12 +316,12 @@ def test_config_show_and_get_resolve_env_selected_user_config_like_loader(
     runner: object,
     expected_key: str | None,
 ) -> None:
-    repo_root = _repo(tmp_path)
+    project_root = _repo(tmp_path)
     env_user_config = tmp_path / "env-user-config.toml"
-    env_user_config.write_text("[defaults]\nharness = \"opencode\"\n", encoding="utf-8")
+    env_user_config.write_text('[defaults]\nharness = "opencode"\n', encoding="utf-8")
     monkeypatch.setenv("MERIDIAN_CONFIG", env_user_config.as_posix())
 
-    result = runner(repo_root)
+    result = runner(project_root)
 
     if expected_key is None:
         value = next(item for item in result.values if item.key == "defaults.harness")
@@ -333,14 +332,14 @@ def test_config_show_and_get_resolve_env_selected_user_config_like_loader(
         assert result.value == "opencode"
         assert result.source == "user-config"
 
-    assert load_config(repo_root).default_harness == "opencode"
+    assert load_config(project_root).default_harness == "opencode"
 
 
 def test_config_show_uses_shared_config_surface_builder(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = _repo(tmp_path)
+    project_root = _repo(tmp_path)
     calls: list[Path] = []
     original_builder = config_ops.build_config_surface
 
@@ -350,16 +349,16 @@ def test_config_show_uses_shared_config_surface_builder(
 
     monkeypatch.setattr(config_ops, "build_config_surface", _tracked_builder)
 
-    config_show_sync(ConfigShowInput(repo_root=repo_root.as_posix()))
+    config_show_sync(ConfigShowInput(project_root=project_root.as_posix()))
 
-    assert calls == [repo_root]
+    assert calls == [project_root]
 
 
 def test_config_get_uses_shared_config_surface_builder(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = _repo(tmp_path)
+    project_root = _repo(tmp_path)
     calls: list[Path] = []
     original_builder = config_ops.build_config_surface
 
@@ -369,9 +368,9 @@ def test_config_get_uses_shared_config_surface_builder(
 
     monkeypatch.setattr(config_ops, "build_config_surface", _tracked_builder)
 
-    config_get_sync(ConfigGetInput(repo_root=repo_root.as_posix(), key="defaults.harness"))
+    config_get_sync(ConfigGetInput(project_root=project_root.as_posix(), key="defaults.harness"))
 
-    assert calls == [repo_root]
+    assert calls == [project_root]
 
 
 @pytest.mark.parametrize(
@@ -388,7 +387,7 @@ def test_config_inspection_skips_mars_model_resolution_for_defaults_model(
     source: str,
     expected_source: str,
 ) -> None:
-    repo_root = _repo(tmp_path)
+    project_root = _repo(tmp_path)
     model = "gpt-5.4"
     monkeypatch.delenv("MERIDIAN_DEFAULT_MODEL", raising=False)
     monkeypatch.delenv("MERIDIAN_CONFIG", raising=False)
@@ -397,14 +396,14 @@ def test_config_inspection_skips_mars_model_resolution_for_defaults_model(
     if source == "env":
         monkeypatch.setenv("MERIDIAN_DEFAULT_MODEL", model)
     elif source == "project":
-        (repo_root / "meridian.toml").write_text(
-            f"[defaults]\nmodel = \"{model}\"\n",
+        (project_root / "meridian.toml").write_text(
+            f'[defaults]\nmodel = "{model}"\n',
             encoding="utf-8",
         )
     else:
         user_config = tmp_path / "user-config.toml"
         user_config.write_text(
-            f"[defaults]\nmodel = \"{model}\"\n",
+            f'[defaults]\nmodel = "{model}"\n',
             encoding="utf-8",
         )
         monkeypatch.setenv("MERIDIAN_CONFIG", user_config.as_posix())
@@ -414,9 +413,11 @@ def test_config_inspection_skips_mars_model_resolution_for_defaults_model(
 
     monkeypatch.setattr(catalog_models, "resolve_model", _unexpected_resolve_model)
 
-    shown = config_show_sync(ConfigShowInput(repo_root=repo_root.as_posix()))
+    shown = config_show_sync(ConfigShowInput(project_root=project_root.as_posix()))
     shown_value = next(item for item in shown.values if item.key == "defaults.model")
-    gotten = config_get_sync(ConfigGetInput(repo_root=repo_root.as_posix(), key="defaults.model"))
+    gotten = config_get_sync(
+        ConfigGetInput(project_root=project_root.as_posix(), key="defaults.model")
+    )
 
     assert shown_value.value == model
     assert shown_value.source == expected_source

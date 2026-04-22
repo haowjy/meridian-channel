@@ -132,7 +132,7 @@ class LaunchRuntime(BaseModel):
     harness_command_override: str | None = None
     report_output_path: str | None = None
     state_root: str
-    project_paths_repo_root: str
+    project_paths_project_root: str
     project_paths_execution_cwd: str
 
 

@@ -8,8 +8,8 @@ from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_project_runtime_root
 
 
-def _state_root(repo_root: Path) -> Path:
-    state_root = resolve_project_runtime_root(repo_root)
+def _state_root(project_root: Path) -> Path:
+    state_root = resolve_project_runtime_root(project_root)
     state_root.mkdir(parents=True, exist_ok=True)
     return state_root
 
@@ -40,9 +40,9 @@ def _seed_spawn(
 def test_spawn_continue_errors_when_source_spawn_lacks_harness_session_id(
     tmp_path: Path,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    state_root = _state_root(repo_root)
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    state_root = _state_root(project_root)
     _seed_spawn(state_root, spawn_id="p11", harness_session_id=None)
 
     try:
@@ -50,7 +50,7 @@ def test_spawn_continue_errors_when_source_spawn_lacks_harness_session_id(
             SpawnContinueInput(
                 spawn_id="p11",
                 prompt="follow-up prompt",
-                repo_root=repo_root.as_posix(),
+                project_root=project_root.as_posix(),
             )
         )
     except ValueError as exc:
@@ -63,9 +63,9 @@ def test_spawn_continue_passes_resume_details_in_session_dto_fields(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    state_root = _state_root(repo_root)
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    state_root = _state_root(project_root)
     _seed_spawn(
         state_root,
         spawn_id="p21",
@@ -93,7 +93,7 @@ def test_spawn_continue_passes_resume_details_in_session_dto_fields(
             spawn_id="p21",
             prompt="follow-up prompt",
             fork=True,
-            repo_root=repo_root.as_posix(),
+            project_root=project_root.as_posix(),
         )
     )
 
@@ -117,9 +117,9 @@ def test_spawn_continue_respects_explicit_background_request(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    state_root = _state_root(repo_root)
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    state_root = _state_root(project_root)
     _seed_spawn(state_root, spawn_id="p22", harness_session_id="session-22")
 
     captured_input: SpawnCreateInput | None = None
@@ -142,7 +142,7 @@ def test_spawn_continue_respects_explicit_background_request(
             spawn_id="p22",
             prompt="follow-up prompt",
             background=True,
-            repo_root=repo_root.as_posix(),
+            project_root=project_root.as_posix(),
         )
     )
 
@@ -155,9 +155,9 @@ def test_spawn_continue_passes_explicit_harness_to_create_input(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    state_root = _state_root(repo_root)
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    state_root = _state_root(project_root)
     _seed_spawn(state_root, spawn_id="p23", harness_session_id="session-23")
 
     captured_input: SpawnCreateInput | None = None
@@ -180,7 +180,7 @@ def test_spawn_continue_passes_explicit_harness_to_create_input(
             spawn_id="p23",
             prompt="follow-up prompt",
             harness="codex",
-            repo_root=repo_root.as_posix(),
+            project_root=project_root.as_posix(),
         )
     )
 
@@ -192,9 +192,9 @@ def test_spawn_continue_passes_explicit_harness_to_create_input(
 def test_spawn_continue_errors_on_explicit_harness_conflict(
     tmp_path: Path,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    state_root = _state_root(repo_root)
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    state_root = _state_root(project_root)
     _seed_spawn(state_root, spawn_id="p24", harness_session_id="session-24")
 
     with pytest.raises(ValueError) as exc_info:
@@ -203,7 +203,7 @@ def test_spawn_continue_errors_on_explicit_harness_conflict(
                 spawn_id="p24",
                 prompt="follow-up prompt",
                 harness="claude",
-                repo_root=repo_root.as_posix(),
+                project_root=project_root.as_posix(),
             )
         )
 

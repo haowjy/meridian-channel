@@ -86,7 +86,7 @@ def _resolve_mars_binary() -> str | None:
     return shutil.which("mars")
 
 
-def _run_mars_models_list(repo_root: Path | None = None) -> list[dict[str, object]] | None:
+def _run_mars_models_list(project_root: Path | None = None) -> list[dict[str, object]] | None:
     """Call ``mars models list --json`` and return the alias entries.
 
     Returns *None* when the mars binary is unavailable or the command fails,
@@ -97,8 +97,8 @@ def _run_mars_models_list(repo_root: Path | None = None) -> list[dict[str, objec
         return None
 
     cmd = [mars_bin, "models", "list", "--json"]
-    if repo_root is not None:
-        cmd.extend(["--root", str(repo_root)])
+    if project_root is not None:
+        cmd.extend(["--root", str(project_root)])
 
     try:
         # mars may do a cold models.dev fetch in ensure_fresh(Auto); mars caps each HTTP
@@ -162,7 +162,7 @@ def _is_unknown_alias_error(message: str | None) -> bool:
 
 def run_mars_models_resolve(
     name: str,
-    repo_root: Path | None = None,
+    project_root: Path | None = None,
 ) -> dict[str, object] | None:
     """Call ``mars models resolve <name> --json`` and return the resolved entry.
 
@@ -177,8 +177,8 @@ def run_mars_models_resolve(
             "Run 'meridian doctor' to diagnose."
         )
     cmd = [mars_bin, "models", "resolve", name, "--json"]
-    if repo_root is not None:
-        cmd.extend(["--root", str(repo_root)])
+    if project_root is not None:
+        cmd.extend(["--root", str(project_root)])
     try:
         # mars may do a cold models.dev fetch in ensure_fresh(Auto); mars caps each HTTP
         # phase at 15s (connect + recv-response + recv-body), so worst-case cold fetch is
@@ -225,14 +225,14 @@ def run_mars_models_resolve(
     return cast("dict[str, object]", payload)
 
 
-def _read_mars_merged_file(repo_root: Path | None = None) -> dict[str, object]:
+def _read_mars_merged_file(project_root: Path | None = None) -> dict[str, object]:
     """Read ``.mars/models-merged.json`` directly (dep-only aliases).
 
     Falls back to empty dict if the file doesn't exist or is invalid.
     """
     search_dirs: list[Path] = []
-    if repo_root is not None:
-        search_dirs.append(repo_root)
+    if project_root is not None:
+        search_dirs.append(project_root)
     search_dirs.append(Path.cwd())
 
     for root in search_dirs:
@@ -303,7 +303,7 @@ def _mars_merged_to_entries(merged: dict[str, object]) -> list[AliasEntry]:
     return entries
 
 
-def load_mars_aliases(repo_root: Path | None = None) -> list[AliasEntry]:
+def load_mars_aliases(project_root: Path | None = None) -> list[AliasEntry]:
     """Load model aliases from mars.
 
     Prefers ``mars models list --json`` for the full resolved view
@@ -311,14 +311,14 @@ def load_mars_aliases(repo_root: Path | None = None) -> list[AliasEntry]:
     reading ``.mars/models-merged.json`` if the mars binary isn't available.
     """
     # Try mars CLI first — it returns fully resolved aliases
-    mars_list = _run_mars_models_list(repo_root)
+    mars_list = _run_mars_models_list(project_root)
     if mars_list is not None:
         entries = _mars_list_to_entries(mars_list)
         if entries:
             return sorted(entries, key=lambda e: e.alias)
 
     # Fallback: read the cached dependency file directly
-    merged = _read_mars_merged_file(repo_root)
+    merged = _read_mars_merged_file(project_root)
     if merged:
         entries = _mars_merged_to_entries(merged)
         if entries:
@@ -327,7 +327,7 @@ def load_mars_aliases(repo_root: Path | None = None) -> list[AliasEntry]:
     return []
 
 
-def load_mars_descriptions(repo_root: Path | None = None) -> dict[str, str]:
+def load_mars_descriptions(project_root: Path | None = None) -> dict[str, str]:
     """Load model descriptions from mars aliases.
 
     Returns a dict keyed by model_id with description values.
@@ -335,7 +335,7 @@ def load_mars_descriptions(repo_root: Path | None = None) -> dict[str, str]:
     descriptions: dict[str, str] = {}
 
     # Try mars CLI first
-    mars_list = _run_mars_models_list(repo_root)
+    mars_list = _run_mars_models_list(project_root)
     if mars_list is not None:
         for item in mars_list:
             resolved_model = item.get("model_id") or item.get("resolved_model")
@@ -350,7 +350,7 @@ def load_mars_descriptions(repo_root: Path | None = None) -> dict[str, str]:
         return descriptions
 
     # Fallback: read merged file
-    merged = _read_mars_merged_file(repo_root)
+    merged = _read_mars_merged_file(project_root)
     for alias_data in merged.values():
         if not isinstance(alias_data, dict):
             continue

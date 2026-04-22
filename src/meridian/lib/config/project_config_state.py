@@ -35,7 +35,7 @@ class ProjectConfigState(BaseModel):
         return cls(status="absent", write_path=write_path, path=None)
 
 
-def resolve_project_config_state(repo_root: Path) -> ProjectConfigState:
+def resolve_project_config_state(project_root: Path) -> ProjectConfigState:
     """Resolve canonical project-config state for one repo root."""
 
-    return ProjectConfigState.from_project_paths(resolve_project_config_paths(repo_root))
+    return ProjectConfigState.from_project_paths(resolve_project_config_paths(project_root))

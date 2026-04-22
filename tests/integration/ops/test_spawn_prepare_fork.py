@@ -9,8 +9,8 @@ from meridian.lib.ops.spawn.models import SpawnCreateInput
 from meridian.lib.ops.spawn.prepare import build_create_payload
 
 
-def _write_minimal_subagent(repo_root: Path) -> None:
-    agents_dir = repo_root / ".agents" / "agents"
+def _write_minimal_subagent(project_root: Path) -> None:
+    agents_dir = project_root / ".agents" / "agents"
     agents_dir.mkdir(parents=True, exist_ok=True)
     (agents_dir / "meridian-subagent.md").write_text(
         "---\n"
@@ -24,9 +24,9 @@ def _write_minimal_subagent(repo_root: Path) -> None:
     )
 
 
-def _prepare_codex_runtime(repo_root: Path):
-    _write_minimal_subagent(repo_root)
-    (repo_root / "mars.toml").write_text(
+def _prepare_codex_runtime(project_root: Path):
+    _write_minimal_subagent(project_root)
+    (project_root / "mars.toml").write_text(
         "[settings]\n"
         'targets = [".agents"]\n',
         encoding="utf-8",
@@ -34,7 +34,7 @@ def _prepare_codex_runtime(repo_root: Path):
     harness_registry = get_default_harness_registry()
     codex_adapter = harness_registry.get_subprocess_harness(HarnessId.CODEX)
     return codex_adapter, build_runtime_from_root_and_config(
-        repo_root, load_config(repo_root)
+        project_root, load_config(project_root)
     )
 
 
@@ -57,7 +57,7 @@ def test_fork_prepare_preserves_continue_fork_and_defers_materialization(
     prepared = build_create_payload(
         SpawnCreateInput(
             prompt="fork prompt",
-            repo_root=tmp_path.as_posix(),
+            project_root=tmp_path.as_posix(),
             session=SessionRequest(
                 requested_harness_session_id="source-session",
                 continue_harness="codex",
@@ -70,7 +70,7 @@ def test_fork_prepare_preserves_continue_fork_and_defers_materialization(
     dry_run_prepared = build_create_payload(
         SpawnCreateInput(
             prompt="fork prompt",
-            repo_root=tmp_path.as_posix(),
+            project_root=tmp_path.as_posix(),
             session=SessionRequest(
                 requested_harness_session_id="source-session",
                 continue_harness="codex",

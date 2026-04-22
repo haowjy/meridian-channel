@@ -29,7 +29,7 @@ export REPO_ROOT=/abs/path/to/meridian-channel
 export SMOKE_REPO="$(mktemp -d /tmp/meridian-smoke.XXXXXX)"
 git -C "$SMOKE_REPO" init --quiet
 for var in $(env | awk -F= '/^MERIDIAN_/ {print $1}'); do unset "$var"; done
-export MERIDIAN_REPO_ROOT="$SMOKE_REPO"
+export MERIDIAN_PROJECT_DIR="$SMOKE_REPO"
 export MERIDIAN_PROJECT_ROOT="$SMOKE_REPO/.meridian"
 test "$MERIDIAN_PROJECT_ROOT" = "$SMOKE_REPO/.meridian" && echo "PASS: scratch repo env is isolated" || echo "FAIL: scratch repo env is wrong"
 ```

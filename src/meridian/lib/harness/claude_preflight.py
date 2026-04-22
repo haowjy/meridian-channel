@@ -22,10 +22,10 @@ logger = structlog.get_logger(__name__)
 CLAUDE_PARENT_ALLOWED_TOOLS_FLAG = "--meridian-parent-allowed-tools"
 
 
-def project_slug(repo_root: Path) -> str:
+def project_slug(project_root: Path) -> str:
     """Map a repo path to Claude's on-disk project slug format."""
 
-    return re.sub(r"[^a-zA-Z0-9]", "-", str(repo_root.resolve()))
+    return re.sub(r"[^a-zA-Z0-9]", "-", str(project_root.resolve()))
 
 
 def ensure_claude_session_accessible(

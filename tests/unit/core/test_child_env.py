@@ -49,7 +49,7 @@ def test_validate_rejects_unexpected_key_mixed_with_allowed() -> None:
     """RuntimeError must be raised even when some allowed keys are present."""
     overrides = {
         "MERIDIAN_DEPTH": "1",
-        "MERIDIAN_REPO_ROOT": "/repo",
+        "MERIDIAN_PROJECT_DIR": "/repo",
         "MERIDIAN_NOVEL_KEY": "bad",
     }
     with pytest.raises(RuntimeError, match="MERIDIAN_NOVEL_KEY"):
@@ -65,7 +65,7 @@ def test_build_produces_depth_always() -> None:
     """MERIDIAN_DEPTH must always appear in the result."""
     result = build_child_env_overrides(
         parent_spawn_id=None,
-        repo_root=None,
+        project_root=None,
         state_root=None,
         parent_chat_id=None,
         parent_depth=0,
@@ -77,7 +77,7 @@ def test_build_increments_depth_by_default() -> None:
     """Default increment_depth=True must produce parent_depth + 1."""
     result = build_child_env_overrides(
         parent_spawn_id=None,
-        repo_root=None,
+        project_root=None,
         state_root=None,
         parent_chat_id=None,
         parent_depth=3,
@@ -89,7 +89,7 @@ def test_build_no_increment_keeps_depth() -> None:
     """increment_depth=False must keep the depth value unchanged."""
     result = build_child_env_overrides(
         parent_spawn_id=None,
-        repo_root=None,
+        project_root=None,
         state_root=None,
         parent_chat_id=None,
         parent_depth=2,
@@ -102,7 +102,7 @@ def test_build_omits_none_fields() -> None:
     """Fields that are None/empty must not appear in the result dict."""
     result = build_child_env_overrides(
         parent_spawn_id=None,
-        repo_root=None,
+        project_root=None,
         state_root=None,
         parent_chat_id=None,
         parent_depth=0,
@@ -110,7 +110,7 @@ def test_build_omits_none_fields() -> None:
         work_dir=None,
         kb_dir=None,
     )
-    assert "MERIDIAN_REPO_ROOT" not in result
+    assert "MERIDIAN_PROJECT_DIR" not in result
     assert "MERIDIAN_PROJECT_ROOT" not in result
     assert "MERIDIAN_CHAT_ID" not in result
     assert "MERIDIAN_WORK_ID" not in result
@@ -128,7 +128,7 @@ def test_build_full_overrides() -> None:
 
     result = build_child_env_overrides(
         parent_spawn_id=None,
-        repo_root=repo,
+        project_root=repo,
         state_root=state,
         parent_chat_id="c99",
         parent_depth=1,
@@ -139,7 +139,7 @@ def test_build_full_overrides() -> None:
 
     assert result == {
         "MERIDIAN_DEPTH": "2",
-        "MERIDIAN_REPO_ROOT": "/repo",
+        "MERIDIAN_PROJECT_DIR": "/repo",
         "MERIDIAN_PROJECT_ROOT": "/runtime/state",
         "MERIDIAN_CHAT_ID": "c99",
         "MERIDIAN_WORK_ID": "w1",
@@ -153,7 +153,7 @@ def test_build_result_keys_are_subset_of_allowed() -> None:
     """All keys produced by build_child_env_overrides must be in ALLOWED_CHILD_ENV_KEYS."""
     result = build_child_env_overrides(
         parent_spawn_id=None,
-        repo_root=Path("/r"),
+        project_root=Path("/r"),
         state_root=Path("/s"),
         parent_chat_id="c1",
         parent_depth=0,
@@ -180,7 +180,7 @@ def test_integration_matches_resolved_context_child_env_overrides() -> None:
 
     ctx = ResolvedContext(
         depth=2,
-        repo_root=repo,
+        project_root=repo,
         state_root=state,
         chat_id="c7",
         work_id="w42",
@@ -191,7 +191,7 @@ def test_integration_matches_resolved_context_child_env_overrides() -> None:
 
     result = build_child_env_overrides(
         parent_spawn_id=None,
-        repo_root=repo,
+        project_root=repo,
         state_root=state,
         parent_chat_id="c7",
         parent_depth=2,
@@ -207,7 +207,7 @@ def test_integration_increment_depth_false_matches_resolved_context() -> None:
     """increment_depth=False must match child_env_overrides(increment_depth=False)."""
     ctx = ResolvedContext(
         depth=5,
-        repo_root=Path("/r"),
+        project_root=Path("/r"),
         state_root=Path("/s"),
         chat_id="c5",
     )
@@ -215,7 +215,7 @@ def test_integration_increment_depth_false_matches_resolved_context() -> None:
 
     result = build_child_env_overrides(
         parent_spawn_id=None,
-        repo_root=Path("/r"),
+        project_root=Path("/r"),
         state_root=Path("/s"),
         parent_chat_id="c5",
         parent_depth=5,
@@ -234,7 +234,7 @@ def test_build_no_increment_at_depth_zero_stays_zero() -> None:
     """increment_depth=False at parent_depth=0 must produce MERIDIAN_DEPTH=0, not -1."""
     result = build_child_env_overrides(
         parent_spawn_id=None,
-        repo_root=None,
+        project_root=None,
         state_root=None,
         parent_chat_id=None,
         parent_depth=0,
@@ -247,7 +247,7 @@ def test_build_no_increment_preserves_large_depth() -> None:
     """increment_depth=False must keep an arbitrary depth value unchanged."""
     result = build_child_env_overrides(
         parent_spawn_id=None,
-        repo_root=None,
+        project_root=None,
         state_root=None,
         parent_chat_id=None,
         parent_depth=99,
@@ -293,7 +293,7 @@ def test_build_empty_string_chat_id_is_omitted() -> None:
     """An empty parent_chat_id string must not produce a MERIDIAN_CHAT_ID key."""
     result = build_child_env_overrides(
         parent_spawn_id=None,
-        repo_root=None,
+        project_root=None,
         state_root=None,
         parent_chat_id="",
         parent_depth=1,
@@ -305,7 +305,7 @@ def test_build_none_chat_id_is_omitted() -> None:
     """A None parent_chat_id must not produce a MERIDIAN_CHAT_ID key."""
     result = build_child_env_overrides(
         parent_spawn_id=None,
-        repo_root=None,
+        project_root=None,
         state_root=None,
         parent_chat_id=None,
         parent_depth=1,
@@ -323,7 +323,7 @@ def test_build_depth_is_always_numeric_string() -> None:
     for depth in (0, 1, 10, 100):
         result = build_child_env_overrides(
             parent_spawn_id=None,
-            repo_root=None,
+            project_root=None,
             state_root=None,
             parent_chat_id=None,
             parent_depth=depth,

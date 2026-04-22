@@ -57,7 +57,7 @@ class HookDispatcher(LifecycleHook):
 
     def __init__(
         self,
-        repo_root: Path,
+        project_root: Path,
         state_root: Path,
         *,
         registry: _HookRegistryLike | None = None,
@@ -65,11 +65,11 @@ class HookDispatcher(LifecycleHook):
         external_runner: _ExternalRunnerLike | None = None,
         builtin_hooks: Mapping[str, BuiltinHook] | None = None,
     ) -> None:
-        self._repo_root = repo_root.expanduser().resolve()
+        self._project_root = project_root.expanduser().resolve()
         self._state_root = state_root.expanduser().resolve()
-        self._registry = registry or HookRegistry(self._repo_root)
+        self._registry = registry or HookRegistry(self._project_root)
         self._interval_tracker = interval_tracker or IntervalTracker(self._state_root)
-        self._external_runner = external_runner or ExternalHookRunner(self._repo_root)
+        self._external_runner = external_runner or ExternalHookRunner(self._project_root)
         self._builtin_hooks = builtin_hooks or BUILTIN_HOOKS
 
     def on_event(self, event: LifecycleEvent) -> None:
@@ -297,7 +297,7 @@ class HookDispatcher(LifecycleHook):
             event_name=cast("HookEventName", event.event_type),
             event_id=event.event_id,
             timestamp=event.timestamp.isoformat(),
-            repo_root=str(self._repo_root),
+            project_root=str(self._project_root),
             state_root=str(self._state_root),
             spawn_id=event.spawn_id,
             spawn_status=_normalize_spawn_status(event.status),
@@ -341,7 +341,7 @@ def _to_plugin_context(context: HookContext) -> PluginHookContext:
         event_name=context.event_name,
         event_id=context.event_id,
         timestamp=context.timestamp,
-        repo_root=context.repo_root,
+        project_root=context.project_root,
         state_root=context.state_root,
         schema_version=context.schema_version,
         spawn_id=context.spawn_id,

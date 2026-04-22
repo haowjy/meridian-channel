@@ -28,16 +28,16 @@ def _write_agent(path: Path, *, sandbox: str) -> None:
     )
 
 
-def _write_minimal_mars_config(repo_root: Path) -> None:
-    (repo_root / "mars.toml").write_text(
+def _write_minimal_mars_config(project_root: Path) -> None:
+    (project_root / "mars.toml").write_text(
         "[settings]\n"
         'targets = [".agents"]\n',
         encoding="utf-8",
     )
 
 
-def _seed_session(repo_root: Path, chat_id: str) -> None:
-    state_root = resolve_project_runtime_root(repo_root)
+def _seed_session(project_root: Path, chat_id: str) -> None:
+    state_root = resolve_project_runtime_root(project_root)
     session_store.start_session(
         state_root,
         chat_id=chat_id,
@@ -51,7 +51,7 @@ def _seed_session(repo_root: Path, chat_id: str) -> None:
 
 
 def _seed_spawn(
-    repo_root: Path,
+    project_root: Path,
     *,
     chat_id: str,
     status: SpawnStatus,
@@ -60,7 +60,7 @@ def _seed_spawn(
     report_text: str | None = None,
     written_files: tuple[str, ...] = (),
 ) -> str:
-    state_root = resolve_project_runtime_root(repo_root)
+    state_root = resolve_project_runtime_root(project_root)
     spawn_id = str(
         spawn_store.start_spawn(
             state_root,
@@ -104,28 +104,28 @@ def _seed_spawn(
 
 
 def test_resolve_context_ref_session_uses_primary_spawn(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
 
     primary_id = _seed_spawn(
-        repo_root,
+        project_root,
         chat_id="c5",
         status="running",
         desc="Primary",
         kind="primary",
     )
-    _seed_spawn(repo_root, chat_id="c5", status="failed", desc="Phase 0")
+    _seed_spawn(project_root, chat_id="c5", status="failed", desc="Phase 0")
     _seed_spawn(
-        repo_root,
+        project_root,
         chat_id="c5",
         status="succeeded",
         desc="Phase 1: Data Model",
         report_text="# Report\n\nImplemented phase 1.",
         written_files=("src/auth/models.py", "src/auth/token_store.py"),
     )
-    _seed_spawn(repo_root, chat_id="c5", status="failed", desc="Phase 2")
+    _seed_spawn(project_root, chat_id="c5", status="failed", desc="Phase 2")
 
-    resolved = resolve_context_ref(repo_root, "c5")
+    resolved = resolve_context_ref(project_root, "c5")
 
     assert resolved.ref_kind == "session"
     assert resolved.primary_spawn_id == primary_id
@@ -141,13 +141,13 @@ def test_resolve_context_ref_session_uses_primary_spawn(tmp_path: Path) -> None:
 
 
 def test_resolve_context_ref_session_requires_primary_spawn(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
 
-    _seed_spawn(repo_root, chat_id="c8", status="failed", desc="Earlier")
+    _seed_spawn(project_root, chat_id="c8", status="failed", desc="Earlier")
 
     try:
-        resolve_context_ref(repo_root, "c8")
+        resolve_context_ref(project_root, "c8")
     except ValueError as exc:
         assert "No primary spawn found for session 'c8'" in str(exc)
     else:
@@ -155,24 +155,24 @@ def test_resolve_context_ref_session_requires_primary_spawn(tmp_path: Path) -> N
 
 
 def test_resolve_context_ref_accepts_tracked_arbitrary_chat_id(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _seed_session(repo_root, "chat-parent")
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    _seed_session(project_root, "chat-parent")
     primary_id = _seed_spawn(
-        repo_root,
+        project_root,
         chat_id="chat-parent",
         status="running",
         desc="Primary",
         kind="primary",
     )
     child_id = _seed_spawn(
-        repo_root,
+        project_root,
         chat_id="chat-parent",
         status="succeeded",
         desc="Child",
     )
 
-    resolved = resolve_context_ref(repo_root, "chat-parent")
+    resolved = resolve_context_ref(project_root, "chat-parent")
 
     assert resolved.ref_kind == "session"
     assert resolved.primary_spawn_id == primary_id
@@ -183,19 +183,19 @@ def test_resolve_context_ref_accepts_tracked_arbitrary_chat_id(tmp_path: Path) -
 
 
 def test_spawn_create_dry_run_injects_prior_context_from_session(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _write_minimal_mars_config(repo_root)
-    _write_agent(repo_root / ".agents" / "agents" / "coder.md", sandbox="workspace-write")
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    _write_minimal_mars_config(project_root)
+    _write_agent(project_root / ".agents" / "agents" / "coder.md", sandbox="workspace-write")
     primary_id = _seed_spawn(
-        repo_root,
+        project_root,
         chat_id="c11",
         status="running",
         desc="Primary",
         kind="primary",
     )
     _seed_spawn(
-        repo_root,
+        project_root,
         chat_id="c11",
         status="succeeded",
         desc="Phase 1: Data Model",
@@ -207,7 +207,7 @@ def test_spawn_create_dry_run_injects_prior_context_from_session(tmp_path: Path)
         SpawnCreateInput(
             prompt="Implement phase 2.",
             agent="coder",
-            repo_root=repo_root.as_posix(),
+            project_root=project_root.as_posix(),
             dry_run=True,
             context_from=("c11",),
         )

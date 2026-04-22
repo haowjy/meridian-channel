@@ -58,7 +58,7 @@ async def test_create_session_uses_spec_model_not_connection_config(tmp_path) ->
         spawn_id=SpawnId("p-open-1"),
         harness_id=HarnessId.OPENCODE,
         prompt="hello",
-        repo_root=tmp_path,
+        project_root=tmp_path,
         env_overrides={},
     )
 

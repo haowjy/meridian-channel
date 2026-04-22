@@ -295,13 +295,13 @@ def _apply_name_overrides(hooks: tuple[Hook, ...]) -> tuple[Hook, ...]:
     return tuple(effective.values())
 
 
-def load_hooks_config(repo_root: Path, *, user_config: Path | None = None) -> HooksConfig:
+def load_hooks_config(project_root: Path, *, user_config: Path | None = None) -> HooksConfig:
     """Load hook config with precedence: builtin < context < user < project < local."""
 
-    resolved_repo_root = repo_root.expanduser().resolve()
+    resolved_project_root = project_root.expanduser().resolve()
     resolved_user_config = resolve_user_config_path(user_config)
-    project_config = resolve_project_config_state(resolved_repo_root).path
-    local_config = resolved_repo_root / _LOCAL_CONFIG_FILENAME
+    project_config = resolve_project_config_state(resolved_project_root).path
+    local_config = resolved_project_root / _LOCAL_CONFIG_FILENAME
 
     hooks: list[Hook] = []
     hooks.extend(_hooks_from_payload({}, source="builtin"))

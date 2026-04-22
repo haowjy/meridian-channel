@@ -44,7 +44,7 @@ class ResolvedContext:
 
     spawn_id: SpawnId | None = None
     depth: int = 0
-    repo_root: Path | None = None
+    project_root: Path | None = None
     state_root: Path | None = None
     chat_id: str = ""
     work_id: str | None = None
@@ -68,7 +68,7 @@ class ResolvedContext:
 
         spawn_id_raw = os.getenv("MERIDIAN_SPAWN_ID", "").strip()
         depth_raw = os.getenv("MERIDIAN_DEPTH", "0").strip()
-        repo_root_raw = os.getenv("MERIDIAN_REPO_ROOT", "").strip()
+        project_root_raw = os.getenv("MERIDIAN_PROJECT_DIR", "").strip()
         state_root_raw = os.getenv("MERIDIAN_PROJECT_ROOT", "").strip()
         chat_id_raw = os.getenv("MERIDIAN_CHAT_ID", "").strip()
         work_id_raw = os.getenv("MERIDIAN_WORK_ID", "").strip()
@@ -78,7 +78,7 @@ class ResolvedContext:
         with suppress(ValueError, TypeError):
             depth = max(0, int(depth_raw))
 
-        repo_root = Path(repo_root_raw) if repo_root_raw else None
+        project_root = Path(project_root_raw) if project_root_raw else None
         state_root = Path(state_root_raw) if state_root_raw else None
 
         # Authoritative work-ID precedence:
@@ -93,16 +93,16 @@ class ResolvedContext:
 
         project_paths = (
             state_paths.resolve_repo_paths_from_context(
-                repo_root,
+                project_root,
                 context_config=context_config,
             )
-            if repo_root is not None
+            if project_root is not None
             else None
         )
 
         work_dir: Path | None = None
         if work_id:
-            # Repo-scoped state paths take precedence when repo_root is known.
+            # Repo-scoped state paths take precedence when project_root is known.
             if project_paths is not None:
                 work_dir = project_paths.work_dir / work_id
             elif state_root is not None:
@@ -111,12 +111,12 @@ class ResolvedContext:
         kb_dir = project_paths.kb_dir if project_paths is not None else None
 
         resolved_config = context_config
-        if resolved_config is None and repo_root is not None:
-            resolved_config = state_paths.load_context_config(repo_root)
+        if resolved_config is None and project_root is not None:
+            resolved_config = state_paths.load_context_config(project_root)
 
         context_dirs: tuple[tuple[str, Path], ...] = ()
-        if repo_root is not None and resolved_config is not None:
-            resolved_context_paths = resolve_context_paths(repo_root, resolved_config)
+        if project_root is not None and resolved_config is not None:
+            resolved_context_paths = resolve_context_paths(project_root, resolved_config)
             context_dirs = tuple(
                 sorted((name, path) for name, (path, _) in resolved_context_paths.extra.items())
             )
@@ -124,7 +124,7 @@ class ResolvedContext:
         return cls(
             spawn_id=SpawnId(spawn_id_raw) if spawn_id_raw else None,
             depth=depth,
-            repo_root=repo_root,
+            project_root=project_root,
             state_root=state_root,
             chat_id=chat_id_raw,
             work_id=work_id,
@@ -140,8 +140,8 @@ class ResolvedContext:
         overrides: dict[str, str] = {"MERIDIAN_DEPTH": str(next_depth)}
         if self.spawn_id is not None:
             overrides["MERIDIAN_SPAWN_ID"] = str(self.spawn_id)
-        if self.repo_root is not None:
-            overrides["MERIDIAN_REPO_ROOT"] = self.repo_root.as_posix()
+        if self.project_root is not None:
+            overrides["MERIDIAN_PROJECT_DIR"] = self.project_root.as_posix()
         if self.state_root is not None:
             overrides["MERIDIAN_PROJECT_ROOT"] = self.state_root.as_posix()
         if self.chat_id:

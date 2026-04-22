@@ -37,7 +37,7 @@ async def test_streaming_serve_shutdown_finalizes_once_as_cancelled(
     monkeypatch.setattr(
         streaming_serve_module,
         "resolve_runtime_root_and_config",
-        lambda repo_root=None, *, sink=None: (repo_root or tmp_path, None),
+        lambda project_root=None, *, sink=None: (project_root or tmp_path, None),
     )
 
     await streaming_serve_module.streaming_serve("codex", "hello")
@@ -68,7 +68,7 @@ async def test_streaming_serve_start_failure_finalizes_failed_once(
     monkeypatch.setattr(
         streaming_serve_module,
         "resolve_runtime_root_and_config",
-        lambda repo_root=None, *, sink=None: (repo_root or tmp_path, None),
+        lambda project_root=None, *, sink=None: (project_root or tmp_path, None),
     )
 
     with pytest.raises(RuntimeError, match="boom"):

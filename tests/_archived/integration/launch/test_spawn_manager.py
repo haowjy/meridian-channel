@@ -57,12 +57,12 @@ def _read_inbound_lines(state_root: Path, spawn_id: str) -> list[dict[str, objec
     ]
 
 
-def _build_config(spawn_id: str, repo_root: Path) -> ConnectionConfig:
+def _build_config(spawn_id: str, project_root: Path) -> ConnectionConfig:
     return ConnectionConfig(
         spawn_id=spawn_id,
         harness_id=HarnessId.CODEX,
         prompt="hello",
-        repo_root=repo_root,
+        project_root=project_root,
         env_overrides={},
     )
 
@@ -89,8 +89,8 @@ async def _start_recording_manager(
     user_message_gate: asyncio.Event | None = None,
     user_message_started: asyncio.Event | None = None,
 ) -> tuple[SpawnManager, Path, str, object]:
-    repo_root = tmp_path
-    state_root = resolve_state_paths(repo_root).root_dir
+    project_root = tmp_path
+    state_root = resolve_state_paths(project_root).root_dir
 
     class FakeControlSocketServer:
         def __init__(self, spawn_id: str, socket_path: Path, manager: SpawnManager) -> None:
@@ -181,9 +181,9 @@ async def _start_recording_manager(
             status="running",
         )
     )
-    manager = SpawnManager(state_root=state_root, repo_root=repo_root)
+    manager = SpawnManager(state_root=state_root, project_root=project_root)
     await manager.start_spawn(
-        _build_config(spawn_id, repo_root),
+        _build_config(spawn_id, project_root),
         _build_spec(),
     )
     connection = RecordingConnection.latest
@@ -347,8 +347,8 @@ async def test_spawn_manager_on_result_callback_runs_before_lock_is_released(
 
 @pytest.mark.asyncio
 async def test_spawn_manager_inject_rejects_when_spawn_is_not_active(tmp_path: Path) -> None:
-    repo_root = tmp_path
-    state_root = resolve_state_paths(repo_root).root_dir
+    project_root = tmp_path
+    state_root = resolve_state_paths(project_root).root_dir
     spawn_id = start_spawn(
         state_root,
         chat_id="c1",
@@ -360,7 +360,7 @@ async def test_spawn_manager_inject_rejects_when_spawn_is_not_active(tmp_path: P
         launch_mode="foreground",
         status="succeeded",
     )
-    manager = SpawnManager(state_root=state_root, repo_root=repo_root)
+    manager = SpawnManager(state_root=state_root, project_root=project_root)
 
     result = await manager.inject(spawn_id, "late message")
 
@@ -429,8 +429,8 @@ async def test_spawn_manager_interrupt_returns_noop_when_codex_has_no_turn(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path
-    state_root = resolve_state_paths(repo_root).root_dir
+    project_root = tmp_path
+    state_root = resolve_state_paths(project_root).root_dir
     send_interrupt_calls = 0
 
     class FakeControlSocketServer:
@@ -516,9 +516,9 @@ async def test_spawn_manager_interrupt_returns_noop_when_codex_has_no_turn(
             status="running",
         )
     )
-    manager = SpawnManager(state_root=state_root, repo_root=repo_root)
+    manager = SpawnManager(state_root=state_root, project_root=project_root)
     await manager.start_spawn(
-        _build_config(spawn_id, repo_root),
+        _build_config(spawn_id, project_root),
         CodexLaunchSpec(
             prompt="hello",
             permission_resolver=UnsafeNoOpPermissionResolver(_suppress_warning=True),
@@ -540,8 +540,8 @@ async def test_spawn_manager_missing_terminal_event_defaults_to_failed_completio
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path
-    state_root = resolve_state_paths(repo_root).root_dir
+    project_root = tmp_path
+    state_root = resolve_state_paths(project_root).root_dir
     release_completion = asyncio.Event()
     stop_called = asyncio.Event()
 
@@ -625,9 +625,9 @@ async def test_spawn_manager_missing_terminal_event_defaults_to_failed_completio
         launch_mode="foreground",
         status="running",
     )
-    manager = SpawnManager(state_root=state_root, repo_root=repo_root)
+    manager = SpawnManager(state_root=state_root, project_root=project_root)
     await manager.start_spawn(
-        _build_config(spawn_id, repo_root),
+        _build_config(spawn_id, project_root),
         CodexLaunchSpec(
             prompt="hello",
             permission_resolver=UnsafeNoOpPermissionResolver(_suppress_warning=True),
@@ -670,8 +670,8 @@ async def test_spawn_manager_wait_for_completion_after_missing_terminal_event_cl
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path
-    state_root = resolve_state_paths(repo_root).root_dir
+    project_root = tmp_path
+    state_root = resolve_state_paths(project_root).root_dir
     cleanup_finished = asyncio.Event()
 
     class FakeControlSocketServer:
@@ -753,7 +753,7 @@ async def test_spawn_manager_wait_for_completion_after_missing_terminal_event_cl
         launch_mode="foreground",
         status="running",
     )
-    manager = SpawnManager(state_root=state_root, repo_root=repo_root)
+    manager = SpawnManager(state_root=state_root, project_root=project_root)
     original_cleanup = manager._cleanup_completed_session
 
     async def tracked_cleanup(spawn_id: SpawnId) -> None:
@@ -761,7 +761,7 @@ async def test_spawn_manager_wait_for_completion_after_missing_terminal_event_cl
         cleanup_finished.set()
 
     monkeypatch.setattr(manager, "_cleanup_completed_session", tracked_cleanup)
-    await manager.start_spawn(_build_config(spawn_id, repo_root), _build_spec())
+    await manager.start_spawn(_build_config(spawn_id, project_root), _build_spec())
 
     await cleanup_finished.wait()
     assert manager.get_connection(spawn_id) is None
@@ -777,8 +777,8 @@ async def test_spawn_manager_stop_spawn_returns_cancelled_outcome_without_finali
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path
-    state_root = resolve_state_paths(repo_root).root_dir
+    project_root = tmp_path
+    state_root = resolve_state_paths(project_root).root_dir
 
     class FakeControlSocketServer:
         def __init__(self, spawn_id: str, socket_path: Path, manager: SpawnManager) -> None:
@@ -862,8 +862,8 @@ async def test_spawn_manager_stop_spawn_returns_cancelled_outcome_without_finali
         launch_mode="foreground",
         status="running",
     )
-    manager = SpawnManager(state_root=state_root, repo_root=repo_root)
-    await manager.start_spawn(_build_config(spawn_id, repo_root), _build_spec())
+    manager = SpawnManager(state_root=state_root, project_root=project_root)
+    await manager.start_spawn(_build_config(spawn_id, project_root), _build_spec())
     completion_task = asyncio.create_task(manager.wait_for_completion(spawn_id))
 
     outcome = await manager.stop_spawn(spawn_id, status="cancelled", exit_code=1)
@@ -891,8 +891,8 @@ async def test_spawn_manager_stop_spawn_cancel_emits_single_terminal_cancelled_e
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path
-    state_root = resolve_state_paths(repo_root).root_dir
+    project_root = tmp_path
+    state_root = resolve_state_paths(project_root).root_dir
 
     class FakeControlSocketServer:
         def __init__(self, spawn_id: str, socket_path: Path, manager: SpawnManager) -> None:
@@ -977,8 +977,8 @@ async def test_spawn_manager_stop_spawn_cancel_emits_single_terminal_cancelled_e
         launch_mode="foreground",
         status="running",
     )
-    manager = SpawnManager(state_root=state_root, repo_root=repo_root)
-    await manager.start_spawn(_build_config(spawn_id, repo_root), _build_spec())
+    manager = SpawnManager(state_root=state_root, project_root=project_root)
+    await manager.start_spawn(_build_config(spawn_id, project_root), _build_spec())
 
     await manager.stop_spawn(spawn_id, status="cancelled", exit_code=143, error="cancelled")
     await manager.stop_spawn(spawn_id, status="cancelled", exit_code=143, error="cancelled")
@@ -1004,8 +1004,8 @@ async def test_spawn_manager_cancel_vs_completion_race_emits_both_events_and_fir
     ordering: str,
     expected_terminal: str,
 ) -> None:
-    repo_root = tmp_path
-    state_root = resolve_state_paths(repo_root).root_dir
+    project_root = tmp_path
+    state_root = resolve_state_paths(project_root).root_dir
     release_completion = asyncio.Event()
     cleanup_started = asyncio.Event()
     release_cleanup = asyncio.Event()
@@ -1090,7 +1090,7 @@ async def test_spawn_manager_cancel_vs_completion_race_emits_both_events_and_fir
         launch_mode="foreground",
         status="running",
     )
-    manager = SpawnManager(state_root=state_root, repo_root=repo_root)
+    manager = SpawnManager(state_root=state_root, project_root=project_root)
     original_cleanup = manager._cleanup_completed_session
 
     async def gated_cleanup(spawn_id: SpawnId) -> None:
@@ -1100,7 +1100,7 @@ async def test_spawn_manager_cancel_vs_completion_race_emits_both_events_and_fir
 
     monkeypatch.setattr(manager, "_cleanup_completed_session", gated_cleanup)
 
-    await manager.start_spawn(_build_config(spawn_id, repo_root), _build_spec())
+    await manager.start_spawn(_build_config(spawn_id, project_root), _build_spec())
     completion_task = asyncio.create_task(manager.wait_for_completion(spawn_id))
     output_path = state_root / "spawns" / spawn_id / "output.jsonl"
 
@@ -1148,8 +1148,8 @@ async def test_spawn_manager_stop_spawn_race_uses_missing_terminal_outcome_once(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path
-    state_root = resolve_state_paths(repo_root).root_dir
+    project_root = tmp_path
+    state_root = resolve_state_paths(project_root).root_dir
     cleanup_started = asyncio.Event()
     release_cleanup = asyncio.Event()
 
@@ -1227,7 +1227,7 @@ async def test_spawn_manager_stop_spawn_race_uses_missing_terminal_outcome_once(
         launch_mode="foreground",
         status="running",
     )
-    manager = SpawnManager(state_root=state_root, repo_root=repo_root)
+    manager = SpawnManager(state_root=state_root, project_root=project_root)
     original_cleanup = manager._cleanup_completed_session
 
     async def gated_cleanup(spawn_id: SpawnId) -> None:
@@ -1237,7 +1237,7 @@ async def test_spawn_manager_stop_spawn_race_uses_missing_terminal_outcome_once(
 
     monkeypatch.setattr(manager, "_cleanup_completed_session", gated_cleanup)
 
-    await manager.start_spawn(_build_config(spawn_id, repo_root), _build_spec())
+    await manager.start_spawn(_build_config(spawn_id, project_root), _build_spec())
     await cleanup_started.wait()
 
     completion = await manager.wait_for_completion(spawn_id)
@@ -1261,15 +1261,15 @@ async def test_spawn_manager_stop_spawn_race_uses_missing_terminal_outcome_once(
 
 @pytest.mark.asyncio
 async def test_spawn_manager_dispatch_rejects_base_spec_for_claude(tmp_path: Path) -> None:
-    repo_root = tmp_path
-    state_root = resolve_state_paths(repo_root).root_dir
-    manager = SpawnManager(state_root=state_root, repo_root=repo_root)
+    project_root = tmp_path
+    state_root = resolve_state_paths(project_root).root_dir
+    manager = SpawnManager(state_root=state_root, project_root=project_root)
 
     config = ConnectionConfig(
         spawn_id=SpawnId("p-claude-mismatch"),
         harness_id=HarnessId.CLAUDE,
         prompt="hello",
-        repo_root=repo_root,
+        project_root=project_root,
         env_overrides={},
     )
     base_spec = ResolvedLaunchSpec(
@@ -1285,15 +1285,15 @@ async def test_spawn_manager_dispatch_rejects_base_spec_for_claude(tmp_path: Pat
 async def test_spawn_manager_dispatch_raises_keyerror_when_streaming_transport_missing(
     tmp_path: Path,
 ) -> None:
-    repo_root = tmp_path
-    state_root = resolve_state_paths(repo_root).root_dir
-    manager = SpawnManager(state_root=state_root, repo_root=repo_root)
+    project_root = tmp_path
+    state_root = resolve_state_paths(project_root).root_dir
+    manager = SpawnManager(state_root=state_root, project_root=project_root)
 
     config = ConnectionConfig(
         spawn_id=SpawnId("p-codex-missing-streaming"),
         harness_id=HarnessId.CODEX,
         prompt="hello",
-        repo_root=repo_root,
+        project_root=project_root,
         env_overrides={},
     )
     spec = CodexLaunchSpec(

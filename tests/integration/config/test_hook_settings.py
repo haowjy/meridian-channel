@@ -9,13 +9,13 @@ from meridian.lib.hooks.config import load_hooks_config
 
 
 def _repo(tmp_path: Path) -> Path:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    return repo_root
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    return project_root
 
 
 def test_load_hooks_config_layering_user_project_local(tmp_path: Path) -> None:
-    repo_root = _repo(tmp_path)
+    project_root = _repo(tmp_path)
     user_config = tmp_path / "user.toml"
     user_config.write_text(
         "[[hooks]]\n"
@@ -29,14 +29,14 @@ def test_load_hooks_config_layering_user_project_local(tmp_path: Path) -> None:
         'command = "./only-user.sh"\n',
         encoding="utf-8",
     )
-    (repo_root / "meridian.toml").write_text(
+    (project_root / "meridian.toml").write_text(
         "[[hooks]]\n"
         'name = "notify"\n'
         'event = "spawn.finalized"\n'
         'command = "./notify-project.sh"\n',
         encoding="utf-8",
     )
-    (repo_root / "meridian.local.toml").write_text(
+    (project_root / "meridian.local.toml").write_text(
         "[[hooks]]\n"
         'name = "notify"\n'
         'event = "spawn.finalized"\n'
@@ -44,7 +44,7 @@ def test_load_hooks_config_layering_user_project_local(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    hooks = load_hooks_config(repo_root, user_config=user_config)
+    hooks = load_hooks_config(project_root, user_config=user_config)
     by_name = {hook.name: hook for hook in hooks.hooks}
 
     assert by_name["notify"].source == "local"
@@ -55,21 +55,21 @@ def test_load_hooks_config_layering_user_project_local(tmp_path: Path) -> None:
 def test_load_hooks_config_does_not_auto_register_git_sync_from_local_config(
     tmp_path: Path,
 ) -> None:
-    repo_root = _repo(tmp_path)
-    (repo_root / "meridian.local.toml").write_text(
+    project_root = _repo(tmp_path)
+    (project_root / "meridian.local.toml").write_text(
         "[work.artifacts]\n"
         'sync = "git"\n',
         encoding="utf-8",
     )
 
-    hooks = load_hooks_config(repo_root)
+    hooks = load_hooks_config(project_root)
 
     assert len(hooks.hooks) == 0
 
 
 def test_load_config_uses_hook_normalization_for_type_validation(tmp_path: Path) -> None:
-    repo_root = _repo(tmp_path)
-    (repo_root / "meridian.toml").write_text(
+    project_root = _repo(tmp_path)
+    (project_root / "meridian.toml").write_text(
         "[[hooks]]\n"
         'name = "notify"\n'
         'event = "spawn.finalized"\n'
@@ -79,4 +79,4 @@ def test_load_config_uses_hook_normalization_for_type_validation(tmp_path: Path)
     )
 
     with pytest.raises(ValueError, match="hooks\\[1\\]\\.priority"):
-        load_config(repo_root)
+        load_config(project_root)

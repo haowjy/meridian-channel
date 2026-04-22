@@ -157,7 +157,7 @@ Optional — scope to a specific repo root:
 ```json
 {
   "event": "work.done",
-  "repo_root": "/path/to/repo"
+  "project_root": "/path/to/repo"
 }
 ```
 

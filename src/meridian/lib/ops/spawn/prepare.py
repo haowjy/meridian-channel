@@ -41,7 +41,7 @@ class _CreateRuntimeView(BaseModel):
 
     """Subset of runtime dependencies needed for payload composition."""
 
-    repo_root: Path
+    project_root: Path
     config: MeridianConfig
     harness_registry: HarnessRegistry
 
@@ -49,9 +49,9 @@ class _CreateRuntimeView(BaseModel):
 def _model_validation_context(
     requested_model: str,
     *,
-    repo_root: Path | None,
+    project_root: Path | None,
 ) -> str:
-    aliases = load_merged_aliases(repo_root=repo_root)
+    aliases = load_merged_aliases(project_root=project_root)
     discovered_models = load_discovered_models()
     if not aliases and not discovered_models:
         return ""
@@ -100,17 +100,17 @@ def _model_validation_context(
 def _validate_requested_model(
     requested_model: str,
     *,
-    repo_root: str | None,
+    project_root: str | None,
 ) -> tuple[str, str | None]:
     normalized = requested_model.strip()
     if not normalized:
         return "", None
 
-    explicit_root = Path(repo_root).expanduser().resolve() if repo_root else None
+    explicit_root = Path(project_root).expanduser().resolve() if project_root else None
     try:
-        resolved = resolve_model(normalized, repo_root=explicit_root)
+        resolved = resolve_model(normalized, project_root=explicit_root)
     except ValueError:
-        validation_context = _model_validation_context(normalized, repo_root=explicit_root)
+        validation_context = _model_validation_context(normalized, project_root=explicit_root)
         message = (
             f"Unknown model '{normalized}'. Spawn `meridian models list` "
             "to inspect supported models."
@@ -130,7 +130,7 @@ def validate_create_input(payload: SpawnCreateInput) -> tuple[SpawnCreateInput, 
 
     resolved_model, model_warning = _validate_requested_model(
         payload.model,
-        repo_root=payload.repo_root,
+        project_root=payload.project_root,
     )
     if resolved_model and resolved_model != payload.model:
         return payload.model_copy(update={"model": resolved_model}), model_warning
@@ -148,34 +148,34 @@ def build_create_payload(
     runtime_view: _CreateRuntimeView
     if runtime is not None:
         runtime_view = _CreateRuntimeView(
-            repo_root=runtime.repo_root,
+            project_root=runtime.project_root,
             config=runtime.config,
             harness_registry=runtime.harness_registry,
         )
-        state_root = resolve_runtime_root(runtime_view.repo_root)
+        state_root = resolve_runtime_root(runtime_view.project_root)
     elif payload.dry_run:
-        explicit_repo_root = (
-            Path(payload.repo_root).expanduser().resolve() if payload.repo_root else None
+        explicit_project_root = (
+            Path(payload.project_root).expanduser().resolve() if payload.project_root else None
         )
-        repo_root = resolve_project_root(explicit_repo_root)
-        config = load_config(repo_root)
+        project_root = resolve_project_root(explicit_project_root)
+        config = load_config(project_root)
         runtime_view = _CreateRuntimeView(
-            repo_root=repo_root,
+            project_root=project_root,
             config=config,
             harness_registry=get_default_harness_registry(),
         )
-        state_root = resolve_runtime_root_for_read(runtime_view.repo_root)
+        state_root = resolve_runtime_root_for_read(runtime_view.project_root)
     else:
-        runtime_bundle = build_runtime(payload.repo_root)
+        runtime_bundle = build_runtime(payload.project_root)
         runtime_view = _CreateRuntimeView(
-            repo_root=runtime_bundle.repo_root,
+            project_root=runtime_bundle.project_root,
             config=runtime_bundle.config,
             harness_registry=runtime_bundle.harness_registry,
         )
-        state_root = resolve_runtime_root(runtime_view.repo_root)
+        state_root = resolve_runtime_root(runtime_view.project_root)
     validated_paths = validate_reference_paths(
         payload.files,
-        base_dir=runtime_view.repo_root,
+        base_dir=runtime_view.project_root,
     )
     parsed_template_vars = parse_template_assignments(payload.template_vars)
     timeout_secs = minutes_to_seconds(payload.timeout)
@@ -229,8 +229,8 @@ def build_create_payload(
             config_snapshot=runtime_view.config.model_dump(mode="json", exclude_none=True),
             report_output_path=_DRY_RUN_REPORT_PATH,
             state_root=state_root.as_posix(),
-            project_paths_repo_root=runtime_view.repo_root.as_posix(),
-            project_paths_execution_cwd=runtime_view.repo_root.as_posix(),
+            project_paths_project_root=runtime_view.project_root.as_posix(),
+            project_paths_execution_cwd=runtime_view.project_root.as_posix(),
         ),
         harness_registry=runtime_view.harness_registry,
         dry_run=True,

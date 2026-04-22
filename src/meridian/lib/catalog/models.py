@@ -35,13 +35,13 @@ from meridian.lib.state.paths import resolve_cache_dir
 logger = logging.getLogger(__name__)
 
 
-def load_merged_aliases(repo_root: Path | None = None) -> list[AliasEntry]:
+def load_merged_aliases(project_root: Path | None = None) -> list[AliasEntry]:
     """Load model aliases from mars packages."""
-    resolved_root = resolve_project_root(repo_root) if repo_root is not None else None
+    resolved_root = resolve_project_root(project_root) if project_root is not None else None
     return load_mars_aliases(resolved_root)
 
 
-def resolve_model(name_or_alias: str, repo_root: Path | None = None) -> AliasEntry:
+def resolve_model(name_or_alias: str, project_root: Path | None = None) -> AliasEntry:
     """Resolve alias to model id, or pass through a direct model identifier.
 
     Resolution: mars resolve -> pattern fallback for raw model IDs -> hard error.
@@ -53,7 +53,7 @@ def resolve_model(name_or_alias: str, repo_root: Path | None = None) -> AliasEnt
         raise ValueError("Model identifier must not be empty.")
 
     # Step 1: Try mars resolve (alias + harness in one call)
-    mars_result = run_mars_models_resolve(normalized, repo_root)
+    mars_result = run_mars_models_resolve(normalized, project_root)
     if mars_result is not None:
         model_id = mars_result.get("model_id")
         harness = mars_result.get("harness")

@@ -320,13 +320,13 @@ class OpenCodeConnection(HarnessConnection[OpenCodeLaunchSpec]):
             port=port,
         )
         env = inherit_child_env(os.environ, config.env_overrides)
-        spawn_dir = resolve_spawn_log_dir(config.repo_root, config.spawn_id)
+        spawn_dir = resolve_spawn_log_dir(config.project_root, config.spawn_id)
         spawn_dir.mkdir(parents=True, exist_ok=True)
         self._stderr_handle = (spawn_dir / "stderr.log").open("ab")
         try:
             self._process = await asyncio.create_subprocess_exec(
                 *command,
-                cwd=str(config.repo_root),
+                cwd=str(config.project_root),
                 env=env,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=self._stderr_handle,

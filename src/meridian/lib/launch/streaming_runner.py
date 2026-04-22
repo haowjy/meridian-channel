@@ -323,7 +323,7 @@ async def run_streaming_spawn(
     config: ConnectionConfig,
     spec: ResolvedLaunchSpec,
     state_root: Path,
-    repo_root: Path,
+    project_root: Path,
     spawn_id: SpawnId,
     stream_to_terminal: bool = False,
     heartbeat_touch: HeartbeatTouch | None = None,
@@ -341,7 +341,7 @@ async def run_streaming_spawn(
     )
     manager = SpawnManager(
         state_root=state_root,
-        repo_root=repo_root,
+        project_root=project_root,
         heartbeat_interval_secs=heartbeat_interval_secs,
         heartbeat_touch=lambda _state_root, _spawn_id: resolved_heartbeat_touch(),
     )
@@ -363,7 +363,7 @@ async def run_streaming_spawn(
         spawn_id,
         runner_pid=os.getpid(),
     )
-    lifecycle_service = create_lifecycle_service(repo_root, state_root)
+    lifecycle_service = create_lifecycle_service(project_root, state_root)
     try:
         await manager.start_spawn(config, run_spec)
         await manager._start_heartbeat(spawn_id)  # pyright: ignore[reportPrivateUsage]
@@ -506,7 +506,7 @@ async def _run_streaming_attempt(
     timed_out = False
     terminated_by_report_watchdog = False
     terminal_outcome: TerminalEventOutcome | None = None
-    lifecycle_service = create_lifecycle_service(manager.repo_root, state_root)
+    lifecycle_service = create_lifecycle_service(manager.project_root, state_root)
 
     try:
         connection = await manager.start_spawn(config, run_spec)
@@ -683,7 +683,7 @@ async def execute_with_streaming(
     *,
     request: SpawnRequest,
     launch_context: LaunchContext,
-    repo_root: Path,
+    project_root: Path,
     state_root: Path,
     artifacts: ArtifactStore,
     budget: Budget | None = None,
@@ -715,7 +715,7 @@ async def execute_with_streaming(
             run.spawn_id,
         )
     )
-    log_dir = resolve_spawn_log_dir(repo_root, run.spawn_id)
+    log_dir = resolve_spawn_log_dir(project_root, run.spawn_id)
     output_log_path = log_dir / OUTPUT_FILENAME
     report_path = launch_context.report_output_path
 
@@ -768,7 +768,7 @@ async def execute_with_streaming(
         spawn_id=run.spawn_id,
         harness_id=resolved_harness_id,
         prompt=run.prompt,
-        repo_root=child_cwd,
+        project_root=child_cwd,
         env_overrides=child_env,
         timeout_seconds=timeout_seconds,
         debug_tracer=tracer,
@@ -817,11 +817,11 @@ async def execute_with_streaming(
     preflight_breach = budget_tracker.check() if budget_tracker is not None else None
     manager = SpawnManager(
         state_root=state_root,
-        repo_root=repo_root,
+        project_root=project_root,
         heartbeat_interval_secs=heartbeat_interval_secs,
         heartbeat_touch=lambda _state_root, _spawn_id: resolved_heartbeat_touch(),
     )
-    lifecycle_service = create_lifecycle_service(repo_root, state_root)
+    lifecycle_service = create_lifecycle_service(project_root, state_root)
     retries_attempted = 0
     started_at = resolved_clock.monotonic()
     started_at_epoch = resolved_clock.time()
@@ -937,7 +937,7 @@ async def execute_with_streaming(
                             if attempt.connection is not None
                             else None
                         ),
-                        repo_root=repo_root,
+                        project_root=project_root,
                         started_at_epoch=started_at_epoch,
                     )
                     or ""

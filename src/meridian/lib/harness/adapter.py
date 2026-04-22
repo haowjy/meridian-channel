@@ -78,7 +78,7 @@ class SpawnParams(BaseModel):
     # Pre-built ad-hoc native-agent payload. Empty string when not used.
     adhoc_agent_payload: str = ""
     extra_args: tuple[str, ...] = ()
-    repo_root: str | None = None
+    project_root: str | None = None
     mcp_tools: tuple[str, ...] = ()
     interactive: bool = False
     continue_harness_session_id: str | None = None
@@ -196,7 +196,7 @@ class SubprocessHarness(HarnessAdapter[ResolvedLaunchSpec], Protocol):
 
     def extract_report(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> str | None: ...
 
-    def resolve_session_file(self, *, repo_root: Path, session_id: str) -> Path | None: ...
+    def resolve_session_file(self, *, project_root: Path, session_id: str) -> Path | None: ...
 
     def seed_session(
         self,
@@ -226,7 +226,7 @@ class SubprocessHarness(HarnessAdapter[ResolvedLaunchSpec], Protocol):
     def detect_primary_session_id(
         self,
         *,
-        repo_root: Path,
+        project_root: Path,
         started_at_epoch: float,
         started_at_local_iso: str | None,
     ) -> str | None: ...
@@ -238,7 +238,7 @@ class SubprocessHarness(HarnessAdapter[ResolvedLaunchSpec], Protocol):
         spawn_id: SpawnId | None = None,
         current_session_id: str | None = None,
         connection_session_id: str | None = None,
-        repo_root: Path | None = None,
+        project_root: Path | None = None,
         started_at_epoch: float | None = None,
         started_at_local_iso: str | None = None,
     ) -> str | None:
@@ -250,7 +250,7 @@ class SubprocessHarness(HarnessAdapter[ResolvedLaunchSpec], Protocol):
            connection time).
         2. Artifact extraction via ``extract_session_id()``.
         3. Primary-session detection via ``detect_primary_session_id()``
-           (only when *repo_root* and *started_at_epoch* are supplied).
+           (only when *project_root* and *started_at_epoch* are supplied).
         4. *current_session_id* — previously known id, returned as
            fallback so callers can treat the result as authoritative.
 
@@ -262,7 +262,7 @@ class SubprocessHarness(HarnessAdapter[ResolvedLaunchSpec], Protocol):
 
     def fork_session(self, source_session_id: str) -> str: ...
 
-    def owns_untracked_session(self, *, repo_root: Path, session_ref: str) -> bool:
+    def owns_untracked_session(self, *, project_root: Path, session_ref: str) -> bool:
         """Return True if this harness owns the given untracked session reference."""
         ...
 
@@ -320,8 +320,8 @@ class BaseHarnessAdapter(Generic[SpecT], ABC):
         _ = source_session_id
         raise NotImplementedError
 
-    def owns_untracked_session(self, *, repo_root: Path, session_ref: str) -> bool:
-        _ = repo_root, session_ref
+    def owns_untracked_session(self, *, project_root: Path, session_ref: str) -> bool:
+        _ = project_root, session_ref
         return False
 
     def blocked_child_env_vars(self) -> frozenset[str]:
@@ -410,11 +410,11 @@ class BaseHarnessAdapter(Generic[SpecT], ABC):
     def detect_primary_session_id(
         self,
         *,
-        repo_root: Path,
+        project_root: Path,
         started_at_epoch: float,
         started_at_local_iso: str | None,
     ) -> str | None:
-        _ = repo_root, started_at_epoch, started_at_local_iso
+        _ = project_root, started_at_epoch, started_at_local_iso
         return None
 
     def observe_session_id(
@@ -424,7 +424,7 @@ class BaseHarnessAdapter(Generic[SpecT], ABC):
         spawn_id: SpawnId | None = None,
         current_session_id: str | None = None,
         connection_session_id: str | None = None,
-        repo_root: Path | None = None,
+        project_root: Path | None = None,
         started_at_epoch: float | None = None,
         started_at_local_iso: str | None = None,
     ) -> str | None:
@@ -451,10 +451,10 @@ class BaseHarnessAdapter(Generic[SpecT], ABC):
             if extracted:
                 return extracted
 
-        if repo_root is not None and started_at_epoch is not None:
+        if project_root is not None and started_at_epoch is not None:
             detected = _norm(
                 self.detect_primary_session_id(
-                    repo_root=repo_root,
+                    project_root=project_root,
                     started_at_epoch=started_at_epoch,
                     started_at_local_iso=started_at_local_iso,
                 )
@@ -481,8 +481,8 @@ class BaseHarnessAdapter(Generic[SpecT], ABC):
         _ = artifacts, spawn_id
         return None
 
-    def resolve_session_file(self, *, repo_root: Path, session_id: str) -> Path | None:
-        _ = repo_root, session_id
+    def resolve_session_file(self, *, project_root: Path, session_id: str) -> Path | None:
+        _ = project_root, session_id
         return None
 
 

@@ -26,7 +26,7 @@ class WorkspaceInitInput(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class WorkspaceInitOutput(BaseModel):
@@ -51,8 +51,8 @@ class WorkspaceInitOutput(BaseModel):
         return "\n".join(lines)
 
 
-def _resolve_git_dir(repo_root: Path) -> Path | None:
-    git_entry = repo_root / ".git"
+def _resolve_git_dir(project_root: Path) -> Path | None:
+    git_entry = project_root / ".git"
     if git_entry.is_dir():
         return git_entry.resolve()
     if not git_entry.is_file():
@@ -70,7 +70,7 @@ def _resolve_git_dir(repo_root: Path) -> Path | None:
             break
         target = Path(raw_target).expanduser()
         if not target.is_absolute():
-            target = (repo_root / target).resolve()
+            target = (project_root / target).resolve()
         if target.is_dir():
             return target
         break
@@ -79,18 +79,16 @@ def _resolve_git_dir(repo_root: Path) -> Path | None:
 
 def _ensure_local_gitignore_entries(
     *,
-    repo_root: Path,
+    project_root: Path,
     entries: tuple[str, ...],
 ) -> tuple[Path | None, bool]:
-    git_dir = _resolve_git_dir(repo_root)
+    git_dir = _resolve_git_dir(project_root)
     if git_dir is None:
         return None, False
 
     exclude_path = git_dir / "info" / "exclude"
     exclude_path.parent.mkdir(parents=True, exist_ok=True)
-    existing_text = (
-        exclude_path.read_text(encoding="utf-8") if exclude_path.exists() else ""
-    )
+    existing_text = exclude_path.read_text(encoding="utf-8") if exclude_path.exists() else ""
     existing_lines = existing_text.splitlines()
     present = {line.strip() for line in existing_lines}
     missing_entries = [entry for entry in entries if entry not in present]
@@ -108,9 +106,11 @@ def _ensure_local_gitignore_entries(
 
 
 def workspace_init_sync(payload: WorkspaceInitInput) -> WorkspaceInitOutput:
-    explicit_root = Path(payload.repo_root).expanduser().resolve() if payload.repo_root else None
-    repo_root = resolve_project_root(explicit_root)
-    project_paths = resolve_project_config_paths(repo_root=repo_root)
+    explicit_root = (
+        Path(payload.project_root).expanduser().resolve() if payload.project_root else None
+    )
+    project_root = resolve_project_root(explicit_root)
+    project_paths = resolve_project_config_paths(project_root=project_root)
 
     workspace_path = project_paths.workspace_local_toml
     created = False
@@ -118,12 +118,10 @@ def workspace_init_sync(payload: WorkspaceInitInput) -> WorkspaceInitOutput:
         atomic_write_text(workspace_path, _WORKSPACE_TEMPLATE)
         created = True
     elif not workspace_path.is_file():
-        raise ValueError(
-            f"Workspace path '{workspace_path.as_posix()}' exists but is not a file."
-        )
+        raise ValueError(f"Workspace path '{workspace_path.as_posix()}' exists but is not a file.")
 
     local_gitignore_path, local_gitignore_updated = _ensure_local_gitignore_entries(
-        repo_root=repo_root,
+        project_root=project_root,
         entries=project_paths.workspace_ignore_targets,
     )
 

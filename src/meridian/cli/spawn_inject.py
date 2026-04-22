@@ -76,8 +76,8 @@ async def inject_message(
     if not normalized_spawn_id:
         _fail("spawn id is required")
 
-    repo_root, _ = resolve_runtime_root_and_config(None)
-    state_root = resolve_runtime_root(repo_root)
+    project_root, _ = resolve_runtime_root_and_config(None)
+    state_root = resolve_runtime_root(project_root)
     spawn_dir = state_root / "spawns" / normalized_spawn_id
     socket_path = spawn_dir / "control.sock"
     port_file = spawn_dir / "control.port"

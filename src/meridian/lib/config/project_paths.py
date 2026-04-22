@@ -17,26 +17,26 @@ class ProjectConfigPaths(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    repo_root: Path
+    project_root: Path
     execution_cwd: Path
 
     @property
     def meridian_toml(self) -> Path:
         """Return canonical project config path `<project-root>/meridian.toml`."""
 
-        return self.repo_root / "meridian.toml"
+        return self.project_root / "meridian.toml"
 
     @property
     def workspace_local_toml(self) -> Path:
         """Return local workspace topology path `<state-root-parent>/workspace.local.toml`."""
 
-        return resolve_state_paths(self.repo_root).root_dir.parent / "workspace.local.toml"
+        return resolve_state_paths(self.project_root).root_dir.parent / "workspace.local.toml"
 
     @property
     def meridian_local_toml(self) -> Path:
         """Return local override path `<project-root>/meridian.local.toml`."""
 
-        return self.repo_root / "meridian.local.toml"
+        return self.project_root / "meridian.local.toml"
 
     @property
     def workspace_ignore_targets(self) -> tuple[str, ...]:
@@ -46,13 +46,13 @@ class ProjectConfigPaths(BaseModel):
 
 
 def resolve_project_config_paths(
-    repo_root: Path, execution_cwd: Path | None = None
+    project_root: Path, execution_cwd: Path | None = None
 ) -> ProjectConfigPaths:
     """Build project paths from repository root and optional execution cwd."""
 
-    resolved_repo_root = repo_root.resolve()
-    resolved_execution_cwd = (execution_cwd or repo_root).resolve()
+    resolved_project_root = project_root.resolve()
+    resolved_execution_cwd = (execution_cwd or project_root).resolve()
     return ProjectConfigPaths(
-        repo_root=resolved_repo_root,
+        project_root=resolved_project_root,
         execution_cwd=resolved_execution_cwd,
     )

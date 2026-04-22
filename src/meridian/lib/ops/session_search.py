@@ -27,7 +27,7 @@ class SessionSearchInput(BaseModel):
     query: str = ""
     ref: str = ""
     file_path: str | None = None
-    repo_root: str | None = None
+    project_root: str | None = None
 
 
 class SessionSearchMatch(BaseModel):
@@ -130,19 +130,19 @@ def session_search_sync(
     if not query:
         raise ValueError("query must not be empty")
 
-    explicit_repo_root = (
-        Path(payload.repo_root).expanduser().resolve() if payload.repo_root else None
+    explicit_project_root = (
+        Path(payload.project_root).expanduser().resolve() if payload.project_root else None
     )
-    repo_root = resolve_project_root(explicit_repo_root)
-    state_root = resolve_runtime_root_for_read(repo_root)
+    project_root = resolve_project_root(explicit_project_root)
+    state_root = resolve_runtime_root_for_read(project_root)
 
     target = resolve_target(
         SessionLogInput(
             ref=payload.ref,
             file_path=payload.file_path,
-            repo_root=payload.repo_root,
+            project_root=payload.project_root,
         ),
-        repo_root=repo_root,
+        project_root=project_root,
         state_root=state_root,
     )
     segments, total_compactions = parse_session_file(target.file_path)

@@ -267,16 +267,16 @@ def run_mars_passthrough(
     raise SystemExit(result.returncode)
 
 
-def resolve_init_repo_root(path: str | None) -> Path:
+def resolve_init_project_root(path: str | None) -> Path:
     if path:
         return Path(path).expanduser().resolve()
-    env_root = os.getenv("MERIDIAN_REPO_ROOT", "").strip()
+    env_root = os.getenv("MERIDIAN_PROJECT_DIR", "").strip()
     return Path(env_root).expanduser().resolve() if env_root else Path.cwd().resolve()
 
 
-def resolve_init_link_mars_command(repo_root: Path, link: str) -> tuple[str, list[str]]:
-    root_arg = repo_root.as_posix()
-    if (repo_root / "mars.toml").is_file():
+def resolve_init_link_mars_command(project_root: Path, link: str) -> tuple[str, list[str]]:
+    root_arg = project_root.as_posix()
+    if (project_root / "mars.toml").is_file():
         return "link", ["--root", root_arg, "link", link]
     return "init", ["--root", root_arg, "init", "--link", link]
 

@@ -134,7 +134,7 @@ def _context(
         event_name=event_name,
         event_id=uuid4(),
         timestamp="2026-04-20T00:00:00+00:00",
-        repo_root="/repo",
+        project_root="/repo",
         state_root="/repo/.meridian",
         spawn_id="p123",
         spawn_status=spawn_status,

@@ -16,7 +16,7 @@ from meridian.lib.ops.config import (
 @pytest.fixture(autouse=True)
 def _isolate_config_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("MERIDIAN_PROJECT_ROOT", raising=False)
-    monkeypatch.delenv("MERIDIAN_REPO_ROOT", raising=False)
+    monkeypatch.delenv("MERIDIAN_PROJECT_DIR", raising=False)
     monkeypatch.delenv("MERIDIAN_CONFIG", raising=False)
     monkeypatch.delenv("MERIDIAN_DEFAULT_HARNESS", raising=False)
     monkeypatch.delenv("MERIDIAN_DEFAULT_MODEL", raising=False)
@@ -24,15 +24,15 @@ def _isolate_config_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None
 
 
 def _repo(tmp_path: Path) -> Path:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    return repo_root
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    return project_root
 
 
 def test_config_show_reports_workspace_summary_when_workspace_is_absent(tmp_path: Path) -> None:
-    repo_root = _repo(tmp_path)
+    project_root = _repo(tmp_path)
 
-    result = config_show_sync(ConfigShowInput(repo_root=repo_root.as_posix()))
+    result = config_show_sync(ConfigShowInput(project_root=project_root.as_posix()))
 
     assert result.workspace.status == "none"
     assert result.workspace.path is None
@@ -54,9 +54,9 @@ def test_config_show_reports_workspace_summary_when_workspace_is_absent(tmp_path
 
 
 def test_config_show_json_workspace_omits_null_path_and_findings(tmp_path: Path) -> None:
-    repo_root = _repo(tmp_path)
+    project_root = _repo(tmp_path)
 
-    result = config_show_sync(ConfigShowInput(repo_root=repo_root.as_posix()))
+    result = config_show_sync(ConfigShowInput(project_root=project_root.as_posix()))
     payload = to_jsonable(result)
 
     assert "workspace_findings" not in payload
@@ -72,15 +72,14 @@ def test_config_show_json_workspace_omits_null_path_and_findings(tmp_path: Path)
 
 
 def test_config_show_json_workspace_includes_path_when_present(tmp_path: Path) -> None:
-    repo_root = _repo(tmp_path)
-    workspace_path = repo_root / "workspace.local.toml"
+    project_root = _repo(tmp_path)
+    workspace_path = project_root / "workspace.local.toml"
     workspace_path.write_text(
-        "[[context-roots]]\n"
-        'path = "./missing-root"\n',
+        '[[context-roots]]\npath = "./missing-root"\n',
         encoding="utf-8",
     )
 
-    result = config_show_sync(ConfigShowInput(repo_root=repo_root.as_posix()))
+    result = config_show_sync(ConfigShowInput(project_root=project_root.as_posix()))
     payload = to_jsonable(result)
 
     workspace = payload["workspace"]
@@ -107,7 +106,7 @@ def test_config_inspection_skips_model_resolution_for_defaults_model(
     source: str,
     expected_source: str,
 ) -> None:
-    repo_root = _repo(tmp_path)
+    project_root = _repo(tmp_path)
     model = "gpt-5.4"
     monkeypatch.delenv("MERIDIAN_DEFAULT_MODEL", raising=False)
     monkeypatch.delenv("MERIDIAN_CONFIG", raising=False)
@@ -115,14 +114,14 @@ def test_config_inspection_skips_model_resolution_for_defaults_model(
     if source == "env":
         monkeypatch.setenv("MERIDIAN_DEFAULT_MODEL", model)
     elif source == "project":
-        (repo_root / "meridian.toml").write_text(
-            f"[defaults]\nmodel = \"{model}\"\n",
+        (project_root / "meridian.toml").write_text(
+            f'[defaults]\nmodel = "{model}"\n',
             encoding="utf-8",
         )
     else:
         user_config = tmp_path / "user-config.toml"
         user_config.write_text(
-            f"[defaults]\nmodel = \"{model}\"\n",
+            f'[defaults]\nmodel = "{model}"\n',
             encoding="utf-8",
         )
         monkeypatch.setenv("MERIDIAN_CONFIG", user_config.as_posix())
@@ -132,9 +131,11 @@ def test_config_inspection_skips_model_resolution_for_defaults_model(
 
     monkeypatch.setattr(catalog_models, "resolve_model", _unexpected_resolve_model)
 
-    shown = config_show_sync(ConfigShowInput(repo_root=repo_root.as_posix()))
+    shown = config_show_sync(ConfigShowInput(project_root=project_root.as_posix()))
     shown_value = next(item for item in shown.values if item.key == "defaults.model")
-    gotten = config_get_sync(ConfigGetInput(repo_root=repo_root.as_posix(), key="defaults.model"))
+    gotten = config_get_sync(
+        ConfigGetInput(project_root=project_root.as_posix(), key="defaults.model")
+    )
 
     assert shown_value.value == model
     assert shown_value.source == expected_source
@@ -149,14 +150,14 @@ def test_config_inspection_skips_model_resolution_for_defaults_model(
 
 
 def test_load_config_prefers_meridian_local_toml_over_meridian_toml(tmp_path: Path) -> None:
-    repo_root = _repo(tmp_path)
-    (repo_root / "meridian.toml").write_text(
-        "[defaults]\nharness = \"claude\"\n",
+    project_root = _repo(tmp_path)
+    (project_root / "meridian.toml").write_text(
+        '[defaults]\nharness = "claude"\n',
         encoding="utf-8",
     )
-    (repo_root / "meridian.local.toml").write_text(
-        "[defaults]\nharness = \"opencode\"\n",
+    (project_root / "meridian.local.toml").write_text(
+        '[defaults]\nharness = "opencode"\n',
         encoding="utf-8",
     )
 
-    assert load_config(repo_root).default_harness == "opencode"
+    assert load_config(project_root).default_harness == "opencode"

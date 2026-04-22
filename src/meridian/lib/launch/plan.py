@@ -63,12 +63,12 @@ def build_primary_spawn_request(
 
 def build_primary_launch_runtime(
     *,
-    repo_root: Path,
+    project_root: Path,
     config: MeridianConfig | None = None,
 ) -> LaunchRuntime:
     """Build primary-launch runtime inputs for the shared launch factory."""
 
-    resolved_root = resolve_project_root(repo_root)
+    resolved_root = resolve_project_root(project_root)
     resolved_config = config if config is not None else load_config(resolved_root)
     state_root = resolve_project_runtime_root_for_write(resolved_root)
 
@@ -79,7 +79,7 @@ def build_primary_launch_runtime(
         harness_command_override=os.getenv("MERIDIAN_HARNESS_COMMAND", "").strip() or None,
         report_output_path=_DRY_RUN_REPORT_PATH,
         state_root=state_root.as_posix(),
-        project_paths_repo_root=resolved_root.as_posix(),
+        project_paths_project_root=resolved_root.as_posix(),
         project_paths_execution_cwd=resolved_root.as_posix(),
     )
 

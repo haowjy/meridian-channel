@@ -71,7 +71,7 @@ def _normalize_opencode_model(model: str) -> str:
 
 
 def _detect_primary_session_id(
-    repo_root: Path,
+    project_root: Path,
     started_at_epoch: float,
     started_at_local_iso: str,
 ) -> str | None:
@@ -79,7 +79,7 @@ def _detect_primary_session_id(
     if not logs_root.is_dir():
         return None
 
-    resolved_repo = repo_root.resolve()
+    resolved_repo = project_root.resolve()
     matches: list[tuple[str, str]] = []
     for candidate in logs_root.glob("*.log"):
         try:
@@ -117,12 +117,12 @@ def _detect_primary_session_id(
     return matches[0][1]
 
 
-def _owns_session(repo_root: Path, session_ref: str) -> bool:
+def _owns_session(project_root: Path, session_ref: str) -> bool:
     normalized = session_ref.strip()
     if not normalized:
         return False
 
-    resolved_repo = repo_root.resolve()
+    resolved_repo = project_root.resolve()
     opencode_logs = get_home_path() / ".local" / "share" / "opencode" / "log"
     if not opencode_logs.is_dir():
         return False
@@ -174,7 +174,7 @@ class OpenCodeAdapter(BaseHarnessAdapter[OpenCodeLaunchSpec]):
             "agent",
             "adhoc_agent_payload",
             "extra_args",
-            "repo_root",
+            "project_root",
             "interactive",
             "continue_harness_session_id",
             "continue_fork",
@@ -350,7 +350,7 @@ class OpenCodeAdapter(BaseHarnessAdapter[OpenCodeLaunchSpec]):
     def detect_primary_session_id(
         self,
         *,
-        repo_root: Path,
+        project_root: Path,
         started_at_epoch: float,
         started_at_local_iso: str | None,
     ) -> str | None:
@@ -359,10 +359,10 @@ class OpenCodeAdapter(BaseHarnessAdapter[OpenCodeLaunchSpec]):
             if started_at_local_iso is not None
             else datetime.fromtimestamp(started_at_epoch).strftime("%Y-%m-%dT%H:%M:%S")
         )
-        return _detect_primary_session_id(repo_root, started_at_epoch, local_iso)
+        return _detect_primary_session_id(project_root, started_at_epoch, local_iso)
 
-    def resolve_session_file(self, *, repo_root: Path, session_id: str) -> Path | None:
-        _ = repo_root
+    def resolve_session_file(self, *, project_root: Path, session_id: str) -> Path | None:
+        _ = project_root
         return resolve_opencode_session_file(session_id=session_id)
 
     def extract_session_id(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> str | None:
@@ -373,8 +373,8 @@ class OpenCodeAdapter(BaseHarnessAdapter[OpenCodeLaunchSpec]):
             text_patterns=self.SESSION_ID_TEXT_PATTERNS,
         )
 
-    def owns_untracked_session(self, *, repo_root: Path, session_ref: str) -> bool:
-        return _owns_session(repo_root, session_ref)
+    def owns_untracked_session(self, *, project_root: Path, session_ref: str) -> bool:
+        return _owns_session(project_root, session_ref)
 
     def extract_report(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> str | None:
         return extract_opencode_report(artifacts, spawn_id)

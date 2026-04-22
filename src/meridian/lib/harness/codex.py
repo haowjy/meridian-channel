@@ -189,12 +189,12 @@ def _resolve_rollout_session_id(path: Path, resolved_repo: Path) -> str | None:
     return session_id
 
 
-def _detect_primary_session_id(repo_root: Path, started_at_epoch: float) -> str | None:
+def _detect_primary_session_id(project_root: Path, started_at_epoch: float) -> str | None:
     sessions_root = get_home_path() / ".codex" / "sessions"
     if not sessions_root.is_dir():
         return None
 
-    resolved_repo = repo_root.resolve()
+    resolved_repo = project_root.resolve()
     candidates: list[tuple[float, Path]] = []
     for candidate in sessions_root.rglob("rollout-*.jsonl"):
         if CODEX_ROLLOUT_FILENAME_RE.match(candidate.name) is None:
@@ -229,12 +229,12 @@ def _compose_inline_launch_prompt(*, prompt: str, skill_injection: str | None) -
     return "\n\n".join(sections)
 
 
-def _owns_session(repo_root: Path, session_ref: str) -> bool:
+def _owns_session(project_root: Path, session_ref: str) -> bool:
     normalized = session_ref.strip()
     if not normalized:
         return False
 
-    resolved_repo = repo_root.resolve()
+    resolved_repo = project_root.resolve()
     codex_root = get_home_path() / ".codex" / "sessions"
     if not codex_root.is_dir():
         return False
@@ -305,7 +305,7 @@ class CodexAdapter(BaseHarnessAdapter[CodexLaunchSpec]):
             "interactive",
             "mcp_tools",
             "report_output_path",
-            "repo_root",
+            "project_root",
         }
     )
     _EXPLICITLY_IGNORED_FIELDS: ClassVar[frozenset[str]] = frozenset(
@@ -449,15 +449,15 @@ class CodexAdapter(BaseHarnessAdapter[CodexLaunchSpec]):
     def detect_primary_session_id(
         self,
         *,
-        repo_root: Path,
+        project_root: Path,
         started_at_epoch: float,
         started_at_local_iso: str | None,
     ) -> str | None:
         _ = started_at_local_iso
-        return _detect_primary_session_id(repo_root, started_at_epoch)
+        return _detect_primary_session_id(project_root, started_at_epoch)
 
-    def resolve_session_file(self, *, repo_root: Path, session_id: str) -> Path | None:
-        _ = repo_root
+    def resolve_session_file(self, *, project_root: Path, session_id: str) -> Path | None:
+        _ = project_root
         normalized_session_id = session_id.strip()
         if not normalized_session_id:
             return None
@@ -558,8 +558,8 @@ class CodexAdapter(BaseHarnessAdapter[CodexLaunchSpec]):
             if connection is not None:
                 connection.close()
 
-    def owns_untracked_session(self, *, repo_root: Path, session_ref: str) -> bool:
-        return _owns_session(repo_root, session_ref)
+    def owns_untracked_session(self, *, project_root: Path, session_ref: str) -> bool:
+        return _owns_session(project_root, session_ref)
 
     def extract_report(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> str | None:
         return extract_codex_report(artifacts, spawn_id)

@@ -69,10 +69,10 @@ def _latest_harness_session_id(record: session_store.SessionRecord) -> str | Non
     return _normalize_optional(record.harness_session_id)
 
 
-def _resolve_untracked_reference(repo_root: Path, ref: str) -> ResolvedSessionReference:
+def _resolve_untracked_reference(project_root: Path, ref: str) -> ResolvedSessionReference:
     registry = get_default_harness_registry()
     inferred_harness = infer_harness_from_untracked_session_ref(
-        repo_root,
+        project_root,
         ref,
         registry=registry,
     )
@@ -102,12 +102,12 @@ def _build_tracked_reference(
     source_skills: tuple[str, ...],
     source_work_id: str | None,
     source_execution_cwd: str | None = None,
-    repo_root: Path,
+    project_root: Path,
 ) -> ResolvedSessionReference:
     registry = get_default_harness_registry()
     verified_harness = (
         infer_harness_from_untracked_session_ref(
-            repo_root,
+            project_root,
             harness_session_id,
             registry=registry,
         )
@@ -128,20 +128,20 @@ def _build_tracked_reference(
 
 
 def _resolve_spawn_reference(
-    state_root: Path, ref: str, repo_root: Path
+    state_root: Path, ref: str, project_root: Path
 ) -> ResolvedSessionReference:
     row = spawn_store.get_spawn(state_root, ref)
     if row is None:
-        return _resolve_untracked_reference(repo_root, ref)
+        return _resolve_untracked_reference(project_root, ref)
 
     harness_session_id = _normalize_optional(row.harness_session_id)
     stored_harness = _normalize_optional(row.harness)
     source_execution_cwd = row.execution_cwd
     if source_execution_cwd is None and row.harness == "claude" and row.kind == "child":
         # Legacy Claude child spawns executed from the spawn log directory.
-        source_execution_cwd = str(resolve_spawn_log_dir(repo_root, ref))
+        source_execution_cwd = str(resolve_spawn_log_dir(project_root, ref))
     elif source_execution_cwd is None:
-        source_execution_cwd = str(repo_root)
+        source_execution_cwd = str(project_root)
     return _build_tracked_reference(
         harness_session_id=harness_session_id,
         stored_harness=stored_harness,
@@ -151,16 +151,16 @@ def _resolve_spawn_reference(
         source_skills=row.skills,
         source_work_id=_normalize_optional(row.work_id),
         source_execution_cwd=source_execution_cwd,
-        repo_root=repo_root,
+        project_root=project_root,
     )
 
 
 def _resolve_chat_reference(
-    state_root: Path, ref: str, repo_root: Path
+    state_root: Path, ref: str, project_root: Path
 ) -> ResolvedSessionReference:
     records = session_store.get_session_records(state_root, {ref})
     if not records:
-        return _resolve_untracked_reference(repo_root, ref)
+        return _resolve_untracked_reference(project_root, ref)
 
     session = records[0]
     harness_session_id = _latest_harness_session_id(session)
@@ -173,17 +173,17 @@ def _resolve_chat_reference(
         source_agent=_normalize_optional(session.agent),
         source_skills=session.skills,
         source_work_id=_normalize_optional(session.active_work_id),
-        source_execution_cwd=session.execution_cwd or str(repo_root),
-        repo_root=repo_root,
+        source_execution_cwd=session.execution_cwd or str(project_root),
+        project_root=project_root,
     )
 
 
 def _resolve_harness_session_reference(
-    state_root: Path, ref: str, repo_root: Path
+    state_root: Path, ref: str, project_root: Path
 ) -> ResolvedSessionReference:
     session = session_store.resolve_session_ref(state_root, ref)
     if session is None:
-        return _resolve_untracked_reference(repo_root, ref)
+        return _resolve_untracked_reference(project_root, ref)
 
     stored_harness_session_id = _normalize_optional(session.harness_session_id)
     harness_session_id = stored_harness_session_id or ref
@@ -196,24 +196,24 @@ def _resolve_harness_session_reference(
         source_agent=_normalize_optional(session.agent),
         source_skills=session.skills,
         source_work_id=_normalize_optional(session.active_work_id),
-        source_execution_cwd=session.execution_cwd or str(repo_root),
-        repo_root=repo_root,
+        source_execution_cwd=session.execution_cwd or str(project_root),
+        project_root=project_root,
     )
 
 
-def resolve_session_reference(repo_root: Path, ref: str) -> ResolvedSessionReference:
+def resolve_session_reference(project_root: Path, ref: str) -> ResolvedSessionReference:
     """Resolve a session/spawn reference to harness session ID and source metadata."""
 
     normalized = ref.strip()
     if not normalized:
         raise ValueError("Session reference is required.")
 
-    state_root = resolve_runtime_root_for_read(repo_root)
+    state_root = resolve_runtime_root_for_read(project_root)
     if _SPAWN_REF_RE.fullmatch(normalized):
-        return _resolve_spawn_reference(state_root, normalized, repo_root)
+        return _resolve_spawn_reference(state_root, normalized, project_root)
     if _CHAT_REF_RE.fullmatch(normalized):
-        return _resolve_chat_reference(state_root, normalized, repo_root)
-    return _resolve_harness_session_reference(state_root, normalized, repo_root)
+        return _resolve_chat_reference(state_root, normalized, project_root)
+    return _resolve_harness_session_reference(state_root, normalized, project_root)
 
 
 __all__ = [
