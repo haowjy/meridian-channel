@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Protocol, cast
 from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.app.api_models import CursorEnvelope, WorkProjection
-from meridian.lib.app.spawn_routes import HTTPExceptionCallable
+from meridian.lib.app.http_types import HTTPExceptionCallable
 from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.event_store import lock_file
 

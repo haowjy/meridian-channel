@@ -18,6 +18,7 @@ from uuid import uuid4
 from pydantic import BaseModel, model_validator
 
 from meridian.lib.app.api_models import CursorEnvelope, SpawnProjection, SpawnStatsProjection
+from meridian.lib.app.http_types import HTTPExceptionCallable
 from meridian.lib.config.project_paths import ProjectConfigPaths
 from meridian.lib.core.lifecycle import SpawnLifecycleService
 from meridian.lib.core.spawn_lifecycle import TERMINAL_SPAWN_STATUSES
@@ -26,9 +27,12 @@ from meridian.lib.harness.connections.base import ConnectionConfig
 from meridian.lib.harness.registry import get_default_harness_registry
 from meridian.lib.launch.context import build_launch_context
 from meridian.lib.launch.request import LaunchArgvIntent, LaunchRuntime, SpawnRequest
+from meridian.lib.spawn.archive import (
+    _archive_spawn,  # pyright: ignore[reportPrivateUsage]
+    _is_spawn_archived,  # pyright: ignore[reportPrivateUsage]
+    _read_archived_spawns,  # pyright: ignore[reportPrivateUsage]
+)
 from meridian.lib.state import spawn_store
-from meridian.lib.state.atomic import atomic_write_text
-from meridian.lib.state.event_store import lock_file
 from meridian.lib.streaming.signal_canceller import SignalCanceller
 from meridian.lib.streaming.spawn_manager import SpawnManager
 
@@ -45,17 +49,6 @@ class _FastAPIApp(Protocol):
 
     def post(self, path: str, **kwargs: object) -> Callable[[Callable[..., object]], object]: ...
     def get(self, path: str, **kwargs: object) -> Callable[[Callable[..., object]], object]: ...
-
-
-class HTTPExceptionCallable(Protocol):
-    """Protocol for HTTPException constructor."""
-
-    def __call__(
-        self,
-        status_code: int,
-        detail: str | None = None,
-        headers: dict[str, str] | None = None,
-    ) -> Exception: ...
 
 
 class PermissionRequest(BaseModel):
@@ -95,66 +88,6 @@ class ForkRequest(BaseModel):
     """REST payload for forking a spawn."""
 
     from_message_id: str | None = None
-
-
-# ---- Archive State Helpers ----
-
-
-def _archived_spawns_path(runtime_root: Path) -> Path:
-    """Path to the archived spawns JSON file."""
-    return runtime_root / "app" / "archived_spawns.json"
-
-
-def _archived_spawns_lock_path(runtime_root: Path) -> Path:
-    """Lock path for archived spawns file."""
-    return runtime_root / "app" / "archived_spawns.flock"
-
-
-def _read_archived_spawns(runtime_root: Path) -> set[str]:
-    """Read the set of archived spawn IDs."""
-    path = _archived_spawns_path(runtime_root)
-    lock_path = _archived_spawns_lock_path(runtime_root)
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    with lock_file(lock_path):
-        if not path.exists():
-            return set()
-        try:
-            data = json_module.loads(path.read_text(encoding="utf-8"))
-            if isinstance(data, list):
-                return set(data)
-            return set()
-        except (json_module.JSONDecodeError, OSError):
-            return set()
-
-
-def _write_archived_spawns(runtime_root: Path, archived: set[str]) -> None:
-    """Write the set of archived spawn IDs atomically."""
-    path = _archived_spawns_path(runtime_root)
-    lock_path = _archived_spawns_lock_path(runtime_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    
-    with lock_file(lock_path):
-        atomic_write_text(path, json_module.dumps(sorted(archived), indent=2) + "\n")
-
-
-def _archive_spawn(runtime_root: Path, spawn_id: str) -> None:
-    """Add a spawn ID to the archived set."""
-    archived = _read_archived_spawns(runtime_root)
-    archived.add(spawn_id)
-    _write_archived_spawns(runtime_root, archived)
-
-
-def _unarchive_spawn(runtime_root: Path, spawn_id: str) -> None:
-    """Remove a spawn ID from the archived set."""
-    archived = _read_archived_spawns(runtime_root)
-    archived.discard(spawn_id)
-    _write_archived_spawns(runtime_root, archived)
-
-
-def _is_spawn_archived(runtime_root: Path, spawn_id: str) -> bool:
-    """Check if a spawn is archived."""
-    return spawn_id in _read_archived_spawns(runtime_root)
 
 
 # ---- Validation Helpers ----

@@ -11,8 +11,8 @@ commit = "c2ed24b3e5d412cd0c25197b2bc9af587621fd99"
 
 [dependencies.meridian-base]
 url = "https://github.com/meridian-flow/meridian-base"
-version = "v0.0.26"
-commit = "8d13c0c42077c264e1a59faf6c5f756f4df5e9e2"
+version = "v0.0.27"
+commit = "20fb03ff99b62085d2e4d54a33b01060c62c84a4"
 
 [dependencies.meridian-dev-workflow]
 url = "https://github.com/meridian-flow/meridian-dev-workflow"
@@ -20,8 +20,8 @@ commit = "5655d4b5c75662f685abebc71a4ce7a3d0f75668"
 
 [dependencies.meridian-prompter]
 url = "https://github.com/meridian-flow/meridian-prompter"
-version = "v0.0.4"
-commit = "cc0ba458f86238b79ca1d77c04482627ed7b4288"
+version = "v0.0.6"
+commit = "75984010c91bf29900ff2e9ddc5a56785f2214dd"
 
 [items."agents/architect.md"]
 source = "meridian-dev-workflow"
@@ -167,9 +167,9 @@ dest_path = "agents/prompt-tester.md"
 [items."agents/prompter-orchestrator.md"]
 source = "meridian-prompter"
 kind = "agent"
-version = "v0.0.4"
-source_checksum = "sha256:2804e74c8c53758bdcc248b9df98a31c82660ca22d11ec2b5f469e38af2f0da3"
-installed_checksum = "sha256:2804e74c8c53758bdcc248b9df98a31c82660ca22d11ec2b5f469e38af2f0da3"
+version = "v0.0.6"
+source_checksum = "sha256:449d87482ad674fc9ed78d6bcb0b5f04f4a33e83b8270aab4583517dfe631a52"
+installed_checksum = "sha256:449d87482ad674fc9ed78d6bcb0b5f04f4a33e83b8270aab4583517dfe631a52"
 dest_path = "agents/prompter-orchestrator.md"
 
 [items."agents/python-tool-writer.md"]
@@ -372,9 +372,9 @@ dest_path = "skills/issues"
 [items."skills/meridian-cli"]
 source = "meridian-base"
 kind = "skill"
-version = "v0.0.26"
-source_checksum = "sha256:31ed292c35ff1606ebdaff8e1adc80426a4f5227ed3241ce54eee21e3a24291f"
-installed_checksum = "sha256:31ed292c35ff1606ebdaff8e1adc80426a4f5227ed3241ce54eee21e3a24291f"
+version = "v0.0.27"
+source_checksum = "sha256:be427c4b9d61befb6bea80713ec281407bdd124982c0c99eb83a7a12e8b325a2"
+installed_checksum = "sha256:be427c4b9d61befb6bea80713ec281407bdd124982c0c99eb83a7a12e8b325a2"
 dest_path = "skills/meridian-cli"
 
 [items."skills/meridian-privilege-escalation"]
@@ -427,9 +427,9 @@ dest_path = "skills/planning"
 [items."skills/prompt-principles"]
 source = "meridian-prompter"
 kind = "skill"
-version = "v0.0.4"
-source_checksum = "sha256:000dd16223d10524ad976d1f7146be283594b66dca9e59e36529ee294528b207"
-installed_checksum = "sha256:000dd16223d10524ad976d1f7146be283594b66dca9e59e36529ee294528b207"
+version = "v0.0.6"
+source_checksum = "sha256:2dbc08c381b9bae15668631594b81d72d031601d6fe525e22fbfca3a84b2581d"
+installed_checksum = "sha256:2dbc08c381b9bae15668631594b81d72d031601d6fe525e22fbfca3a84b2581d"
 dest_path = "skills/prompt-principles"
 
 [items."skills/prompt-review"]

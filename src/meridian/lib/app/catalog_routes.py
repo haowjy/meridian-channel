@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Protocol, cast
 
 from meridian.lib.app.api_models import AgentSummary
-from meridian.lib.app.spawn_routes import HTTPExceptionCallable
+from meridian.lib.app.http_types import HTTPExceptionCallable
 from meridian.lib.catalog.agent import scan_agent_profiles
 from meridian.lib.ops.catalog import ModelsListInput, models_list_sync
 

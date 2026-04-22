@@ -16,6 +16,7 @@ from typing import Protocol, cast
 from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.app.file_service import FileEntry, FileMeta, FileService
+from meridian.lib.app.http_types import HTTPExceptionCallable
 from meridian.lib.app.path_security import PathSecurityError
 
 
@@ -23,17 +24,6 @@ class _FastAPIApp(Protocol):
     """Minimal FastAPI app surface consumed by this module."""
 
     def get(self, path: str, **kwargs: object) -> Callable[[Callable[..., object]], object]: ...
-
-
-class HTTPExceptionCallable(Protocol):
-    """Protocol for HTTPException constructor."""
-
-    def __call__(
-        self,
-        status_code: int,
-        detail: str | None = None,
-        headers: dict[str, str] | None = None,
-    ) -> Exception: ...
 
 
 # ---- Response Models ----

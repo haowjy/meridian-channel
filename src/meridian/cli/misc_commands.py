@@ -50,6 +50,13 @@ def register_misc_commands(
                 ),
             ),
         ] = None,
+        host: Annotated[
+            str,
+            Parameter(
+                name="--host",
+                help="Host/IP to bind for TCP mode (default: 127.0.0.1).",
+            ),
+        ] = "127.0.0.1",
         proxy: Annotated[
             str | None,
             Parameter(
@@ -79,6 +86,7 @@ def register_misc_commands(
         run_app(
             uds=uds,
             port=port,
+            host=host,
             proxy=proxy,
             debug=debug,
             allow_unsafe_no_permissions=allow_unsafe_no_permissions,

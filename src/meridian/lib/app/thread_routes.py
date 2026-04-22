@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Protocol, cast
 
 from meridian.lib.app.api_models import EventRecord, TokenUsageResponse, ToolCallRecord
+from meridian.lib.app.http_types import HTTPExceptionCallable
 from meridian.lib.app.inspector import (
     get_event_by_line,
     get_token_usage,
@@ -27,7 +28,6 @@ from meridian.lib.app.inspector import (
     get_tool_calls,
     parse_event_id,
 )
-from meridian.lib.app.spawn_routes import HTTPExceptionCallable
 from meridian.lib.state import spawn_store
 
 

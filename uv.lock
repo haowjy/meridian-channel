@@ -722,6 +722,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+app = [
+    { name = "httpx" },
+]
 dev = [
     { name = "pyright" },
     { name = "pytest" },
@@ -739,6 +742,7 @@ requires-dist = [
     { name = "coolname", specifier = ">=4.0.0" },
     { name = "cyclopts", specifier = ">=3.0" },
     { name = "fastapi", specifier = ">=0.115" },
+    { name = "httpx", marker = "extra == 'app'", specifier = ">=0.28" },
     { name = "jinja2", marker = "extra == 'templates'", specifier = ">=3.1" },
     { name = "mars-agents", specifier = "==0.1.8" },
     { name = "mcp", specifier = ">=1.0" },
@@ -754,7 +758,7 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34" },
     { name = "websockets", specifier = ">=14.0" },
 ]
-provides-extras = ["dev", "templates"]
+provides-extras = ["app", "dev", "templates"]
 
 [[package]]
 name = "multidict"
