@@ -17,6 +17,7 @@ from meridian.lib.launch.request import (
     SpawnRequest,
 )
 from meridian.lib.launch.types import LaunchRequest
+from meridian.plugin_api import resolve_clone_path
 from tests.support.fixtures import write_agent, write_skill
 
 
@@ -136,6 +137,79 @@ def test_workspace_roots_append_after_claude_preflight_projection(
         "--add-dir",
         runtime_root.as_posix(),
     )
+
+
+def test_git_backed_context_remote_projects_clone_root_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_minimal_mars_config(tmp_path)
+    remote = "git@github.com:meridian-flow/docs.git"
+    monkeypatch.setenv("MERIDIAN_HOME", (tmp_path / "user-home").as_posix())
+    (tmp_path / "meridian.toml").write_text(
+        "[context.work]\n"
+        'source = "git"\n'
+        f'remote = "{remote}"\n'
+        'path = "work"\n'
+        "\n"
+        "[context.kb]\n"
+        'source = "git"\n'
+        f'remote = "{remote}"\n'
+        'path = "kb"\n',
+        encoding="utf-8",
+    )
+
+    registry = get_default_harness_registry()
+
+    preview = build_launch_context(
+        spawn_id="dry-run-codex-git-context-root",
+        request=SpawnRequest(
+            prompt="workspace projection",
+            model="gpt-5.4",
+            harness="codex",
+        ),
+        runtime=LaunchRuntime(
+            argv_intent=LaunchArgvIntent.REQUIRED,
+            runtime_root=(tmp_path / ".meridian").as_posix(),
+            project_paths_project_root=tmp_path.as_posix(),
+            project_paths_execution_cwd=tmp_path.as_posix(),
+        ),
+        harness_registry=registry,
+        dry_run=True,
+    )
+
+    clone_root = resolve_clone_path(remote)
+    runtime_root = tmp_path / ".meridian"
+    assert preview.run_params.extra_args == (
+        "--add-dir",
+        clone_root.as_posix(),
+        "--add-dir",
+        runtime_root.as_posix(),
+    )
+
+    monkeypatch.setenv("CLAUDECODE", "1")
+    claude_preview = build_launch_context(
+        spawn_id="dry-run-claude-git-context-root",
+        request=SpawnRequest(
+            prompt="workspace projection",
+            model="claude-sonnet-4-5",
+            harness="claude",
+        ),
+        runtime=LaunchRuntime(
+            argv_intent=LaunchArgvIntent.REQUIRED,
+            runtime_root=runtime_root.as_posix(),
+            project_paths_project_root=tmp_path.as_posix(),
+            project_paths_execution_cwd=tmp_path.as_posix(),
+        ),
+        harness_registry=registry,
+        dry_run=True,
+    )
+    claude_clone_root_pairs = sum(
+        1
+        for index, token in enumerate(claude_preview.argv[:-1])
+        if token == "--add-dir" and claude_preview.argv[index + 1] == clone_root.as_posix()
+    )
+    assert claude_clone_root_pairs == 1
 
 
 @pytest.mark.parametrize(

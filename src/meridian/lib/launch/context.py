@@ -8,8 +8,15 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
+from pydantic import ValidationError
+
+from meridian.lib.config.context_config import (
+    ArbitraryContextConfig,
+    ContextConfig,
+    ContextSourceType,
+)
 from meridian.lib.config.project_paths import ProjectConfigPaths
 from meridian.lib.config.settings import MeridianConfig, load_config
 from meridian.lib.config.workspace import get_projectable_roots
@@ -30,11 +37,13 @@ from meridian.lib.launch.launch_types import (
     summarize_composition_warnings,
 )
 from meridian.lib.state.paths import (
+    load_context_config,
     resolve_project_paths,
     resolve_spawn_log_dir,
     resolve_work_scratch_dir,
 )
 from meridian.lib.state.session_store import get_session_active_work_id
+from meridian.plugin_api import resolve_clone_path
 
 from .command import (
     build_launch_argv,
@@ -238,6 +247,55 @@ def _spawn_request_overrides(request: SpawnRequest) -> RuntimeOverrides:
         approval=(request.approval or "").strip() or None,
         autocompact=request.autocompact,
     )
+
+
+def _collect_git_context_clone_roots(config: ContextConfig | None) -> tuple[Path, ...]:
+    """Return configured clone roots for git-backed context entries."""
+
+    if config is None:
+        return ()
+
+    roots: list[Path] = []
+
+    def add_root(*, source: ContextSourceType, remote: str | None) -> None:
+        if source != ContextSourceType.GIT:
+            return
+        normalized_remote = (remote or "").strip()
+        if not normalized_remote:
+            return
+        roots.append(resolve_clone_path(normalized_remote))
+
+    add_root(source=config.work.source, remote=config.work.remote)
+    add_root(source=config.kb.source, remote=config.kb.remote)
+
+    extras_raw = getattr(config, "__pydantic_extra__", None)
+    extras = cast("dict[str, object]", extras_raw) if isinstance(extras_raw, dict) else {}
+    for value in extras.values():
+        try:
+            parsed = (
+                value
+                if isinstance(value, ArbitraryContextConfig)
+                else ArbitraryContextConfig.model_validate(value)
+            )
+        except ValidationError:
+            continue
+        add_root(source=parsed.source, remote=parsed.remote)
+
+    return tuple(roots)
+
+
+def _dedupe_roots_in_order(roots: tuple[Path, ...]) -> tuple[Path, ...]:
+    """Deduplicate root paths while preserving the first-seen order."""
+
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for root in roots:
+        key = root.as_posix()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(root)
+    return tuple(deduped)
 
 
 def _resolve_harness_id(
@@ -617,6 +675,8 @@ def build_launch_context(
     )
     workspace_snapshot = resolve_workspace_snapshot_for_launch(project_paths.project_root)
     workspace_roots = get_projectable_roots(workspace_snapshot)
+    context_config = load_context_config(project_paths.project_root)
+    git_context_roots = _collect_git_context_clone_roots(context_config)
     runtime_root = Path(runtime.runtime_root).expanduser().resolve()
     resolved_request = request
     composition_warnings: tuple[CompositionWarning, ...] = ()
@@ -680,7 +740,7 @@ def build_launch_context(
 
     workspace_projection = project_workspace_roots(
         harness_id=harness.id,
-        roots=(*workspace_roots, runtime_root),
+        roots=_dedupe_roots_in_order((*workspace_roots, *git_context_roots, runtime_root)),
         parent_opencode_config_content=os.getenv(OPENCODE_CONFIG_CONTENT_ENV),
     )
     projected_extra_args = (
