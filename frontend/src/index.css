@@ -18,7 +18,7 @@
 :root {
     /* Background + foreground */
     --background: oklch(0.960 0.008 85);          /* Paper #F6F2EA */
-    --foreground: oklch(0.190 0.018 75);           /* Near-black #1F1A12 */
+    --foreground: oklch(0.190 0.018 75);          /* Near-black #1F1A12 */
 
     /* Card */
     --card: oklch(0.970 0.006 85);
@@ -47,8 +47,8 @@
     /* Jade-Teal accent variants
        accent-fill: for icons, borders, fills — NOT text
        accent-text: darker variant, WCAG AA 4.5:1+ on paper */
-    --accent-fill: oklch(0.555 0.100 175);         /* #1A8B7A */
-    --accent-text: oklch(0.420 0.090 175);         /* ~#0E6A5A — passes AA on paper */
+    --accent-fill: oklch(0.555 0.100 175);        /* #1A8B7A */
+    --accent-text: oklch(0.420 0.090 175);        /* ~#0E6A5A — passes AA on paper */
 
     /* Destructive — warm vermillion, harmonizes with paper */
     --destructive: oklch(0.540 0.140 25);
@@ -60,7 +60,7 @@
     /* Borders + inputs */
     --border: oklch(0.895 0.008 85);
     --input: oklch(0.895 0.008 85);
-    --ring: oklch(0.555 0.100 175);                /* Jade-teal ring */
+    --ring: oklch(0.555 0.100 175);               /* Jade-teal ring */
 
     /* Radius */
     --radius: 0.5rem;
@@ -74,14 +74,29 @@
     --sidebar-accent-foreground: oklch(0.190 0.018 75);
     --sidebar-border: oklch(0.895 0.008 85);
     --sidebar-ring: oklch(0.555 0.100 175);
+
+    /* Status colors — semantic state indicators */
+    --status-running: oklch(0.520 0.130 155);     /* Active green */
+    --status-queued: oklch(0.600 0.140 85);       /* Amber/yellow */
+    --status-succeeded: oklch(0.520 0.100 150);   /* Same as success */
+    --status-failed: oklch(0.540 0.140 25);       /* Same as destructive */
+    --status-cancelled: oklch(0.550 0.010 75);    /* Neutral gray */
+    --status-finalizing: oklch(0.520 0.120 260);  /* Blue-purple */
+
+    /* Animation timing */
+    --duration-fast: 100ms;
+    --duration-default: 150ms;
+    --duration-slow: 250ms;
+    --ease-default: cubic-bezier(0.2, 0, 0, 1);
+    --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 /* ------------------------------------------------------------------ */
 /* Meridian Brand Tokens — Dark (Espresso)                            */
 /* ------------------------------------------------------------------ */
 .dark {
-    --background: oklch(0.175 0.006 55);           /* Espresso #1C1917 */
-    --foreground: oklch(0.940 0.010 80);           /* Warm cream #F0EBE3 */
+    --background: oklch(0.175 0.006 55);          /* Espresso #1C1917 */
+    --foreground: oklch(0.940 0.010 80);          /* Warm cream #F0EBE3 */
 
     --card: oklch(0.215 0.008 55);
     --card-foreground: oklch(0.940 0.010 80);
@@ -101,8 +116,8 @@
     --accent: oklch(0.250 0.008 55);
     --accent-foreground: oklch(0.940 0.010 80);
 
-    --accent-fill: oklch(0.745 0.115 175);         /* Light teal #40C8B0 */
-    --accent-text: oklch(0.745 0.115 175);         /* Same — 7.4:1 on espresso, passes AA */
+    --accent-fill: oklch(0.745 0.115 175);        /* Light teal #40C8B0 */
+    --accent-text: oklch(0.745 0.115 175);        /* Same — 7.4:1 on espresso, passes AA */
 
     /* Destructive — warm vermillion for dark mode */
     --destructive: oklch(0.620 0.140 25);
@@ -123,6 +138,32 @@
     --sidebar-accent-foreground: oklch(0.940 0.010 80);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.745 0.115 175);
+
+    /* Status colors — semantic state indicators */
+    --status-running: oklch(0.680 0.140 155);     /* Active green */
+    --status-queued: oklch(0.720 0.150 85);       /* Amber/yellow */
+    --status-succeeded: oklch(0.600 0.110 150);   /* Same as success */
+    --status-failed: oklch(0.620 0.140 25);       /* Same as destructive */
+    --status-cancelled: oklch(0.550 0.008 65);    /* Neutral gray */
+    --status-finalizing: oklch(0.650 0.130 260);  /* Blue-purple */
+}
+
+/* ------------------------------------------------------------------ */
+/* Keyframe Animations                                                */
+/* ------------------------------------------------------------------ */
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+@keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
 }
 
 /* ------------------------------------------------------------------ */
@@ -195,6 +236,14 @@
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-ring: var(--sidebar-ring);
+
+    /* Status colors */
+    --color-status-running: var(--status-running);
+    --color-status-queued: var(--status-queued);
+    --color-status-succeeded: var(--status-succeeded);
+    --color-status-failed: var(--status-failed);
+    --color-status-cancelled: var(--status-cancelled);
+    --color-status-finalizing: var(--status-finalizing);
 
     /* Radius */
     --radius-sm: calc(var(--radius) * 0.6);
