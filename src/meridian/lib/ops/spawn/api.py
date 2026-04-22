@@ -13,15 +13,15 @@ from meridian.lib.launch.request import SessionRequest
 from meridian.lib.ops.reference import ResolvedSessionReference, resolve_session_reference
 from meridian.lib.ops.runtime import (
     build_runtime_from_root_and_config,
+    resolve_runtime_root,
     resolve_runtime_root_and_config,
     resolve_runtime_root_and_config_for_read,
-    resolve_state_root,
-    resolve_state_root_for_read,
+    resolve_runtime_root_for_read,
     runtime_context,
 )
 from meridian.lib.ops.work_attachment import ensure_explicit_work_item
 from meridian.lib.state import spawn_store
-from meridian.lib.state.paths import resolve_repo_state_paths
+from meridian.lib.state.paths import resolve_repo_paths
 from meridian.lib.streaming.signal_canceller import CancelOutcome, SignalCanceller
 from meridian.lib.utils.time import minutes_to_seconds
 
@@ -121,7 +121,7 @@ def spawn_create_sync(
     payload = payload.model_copy(update={"repo_root": resolved_root.as_posix()})
     payload, preflight_warning = validate_create_input(payload)
     if payload.dry_run and payload.work.strip():
-        repo_state_root = resolve_repo_state_paths(resolved_root).root_dir
+        repo_state_root = resolve_repo_paths(resolved_root).root_dir
         resolved_work_id = ensure_explicit_work_item(repo_state_root, payload.work)
         payload = payload.model_copy(update={"work": resolved_work_id})
 
@@ -199,7 +199,7 @@ def spawn_list_sync(
     repo_root = _resolve_repo_root_input(payload.repo_root)
     from meridian.lib.state.reaper import reconcile_spawns
 
-    state_root = resolve_state_root_for_read(repo_root)
+    state_root = resolve_runtime_root_for_read(repo_root)
     spawns = list(reversed(reconcile_spawns(state_root, spawn_store.list_spawns(state_root))))
 
     # When statuses is empty tuple, show all statuses but cap intelligently:
@@ -296,7 +296,7 @@ def spawn_stats_sync(
     repo_root = _resolve_repo_root_input(payload.repo_root)
     from meridian.lib.state.reaper import reconcile_spawns
 
-    state_root = resolve_state_root_for_read(repo_root)
+    state_root = resolve_runtime_root_for_read(repo_root)
     all_spawns = reconcile_spawns(state_root, spawn_store.list_spawns(state_root))
 
     if payload.session is not None and payload.session.strip():
@@ -495,7 +495,7 @@ async def _spawn_cancel_impl(
     _ = sink
     repo_root, _ = resolve_runtime_root_and_config(payload.repo_root)
     spawn_id = resolve_spawn_reference(repo_root, payload.spawn_id)
-    state_root = resolve_state_root(repo_root)
+    state_root = resolve_runtime_root(repo_root)
     row = spawn_store.get_spawn(state_root, spawn_id)
     if row is None:
         raise ValueError(f"Spawn '{spawn_id}' not found")

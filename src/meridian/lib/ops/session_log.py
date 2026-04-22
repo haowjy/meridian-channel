@@ -20,7 +20,7 @@ from meridian.lib.harness.transcript import TranscriptMessage, text_from_value
 from meridian.lib.ops.reference import resolve_session_reference
 from meridian.lib.ops.runtime import (
     async_from_sync,
-    resolve_state_root_for_read,
+    resolve_runtime_root_for_read,
 )
 from meridian.lib.ops.spawn.query import read_spawn_row
 from meridian.lib.state import session_store, spawn_store
@@ -727,7 +727,7 @@ def session_log_sync(
         Path(payload.repo_root).expanduser().resolve() if payload.repo_root else None
     )
     repo_root = resolve_project_root(explicit_repo_root)
-    state_root = resolve_state_root_for_read(repo_root)
+    state_root = resolve_runtime_root_for_read(repo_root)
 
     target = resolve_target(payload, repo_root=repo_root, state_root=state_root)
     segments, total_compactions = parse_session_file(target.file_path)

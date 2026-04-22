@@ -9,10 +9,13 @@ import sys
 from typing import cast
 
 from meridian.lib.ops.runtime import (
+    resolve_runtime_root,
     resolve_runtime_root_and_config,
-    resolve_state_root,
 )
 from meridian.lib.platform import IS_WINDOWS
+
+# Transitional alias for tests and callers still patching pre-rename symbol names.
+resolve_runtime_root = resolve_runtime_root
 
 
 def _fail(message: str) -> None:
@@ -77,7 +80,7 @@ async def inject_message(
         _fail("spawn id is required")
 
     repo_root, _ = resolve_runtime_root_and_config(None)
-    state_root = resolve_state_root(repo_root)
+    state_root = resolve_runtime_root(repo_root)
     spawn_dir = state_root / "spawns" / normalized_spawn_id
     socket_path = spawn_dir / "control.sock"
     port_file = spawn_dir / "control.port"

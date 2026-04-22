@@ -77,7 +77,7 @@ class HookContext:
             "MERIDIAN_HOOK_TIMESTAMP": self.timestamp,
             "MERIDIAN_HOOK_SCHEMA_VERSION": str(self.schema_version),
             "MERIDIAN_REPO_ROOT": self.repo_root,
-            "MERIDIAN_STATE_ROOT": self.state_root,
+            "MERIDIAN_DATA_DIR": self.state_root,
             "MERIDIAN_SPAWN_ID": self.spawn_id,
             "MERIDIAN_SPAWN_STATUS": self.spawn_status,
             "MERIDIAN_SPAWN_AGENT": self.spawn_agent,

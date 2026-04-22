@@ -20,11 +20,11 @@ def run_app(
     uvicorn_module = importlib.import_module("uvicorn")
 
     from meridian.lib.app.server import create_app
-    from meridian.lib.ops.runtime import resolve_runtime_root_and_config, resolve_state_root
+    from meridian.lib.ops.runtime import resolve_runtime_root, resolve_runtime_root_and_config
     from meridian.lib.streaming.spawn_manager import SpawnManager
 
     repo_root, _ = resolve_runtime_root_and_config(None)
-    state_root = resolve_state_root(repo_root)
+    state_root = resolve_runtime_root(repo_root)
 
     manager = SpawnManager(state_root=state_root, repo_root=repo_root, debug=debug)
     app = create_app(

@@ -12,7 +12,7 @@ from meridian.lib.platform import IS_WINDOWS, fcntl
 from meridian.lib.platform.locking import lock_file
 from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.event_store import append_event, read_events, utc_now_iso
-from meridian.lib.state.paths import StateRootPaths
+from meridian.lib.state.paths import RuntimePaths
 
 _SESSION_LOCK_HANDLES: dict[tuple[Path, str], tuple[BinaryIO, str]] = {}
 
@@ -126,7 +126,7 @@ def _record_from_start_event(event: SessionStartEvent) -> SessionRecord:
     )
 
 
-def _session_lease_path(paths: StateRootPaths, chat_id: str) -> Path:
+def _session_lease_path(paths: RuntimePaths, chat_id: str) -> Path:
     return paths.sessions_dir / f"{chat_id}.lease.json"
 
 
@@ -142,7 +142,7 @@ def _generation_matches(expected: str, actual: str) -> bool:
     return normalized_expected == normalized_actual
 
 
-def _read_session_lease(paths: StateRootPaths, chat_id: str) -> tuple[bool, str]:
+def _read_session_lease(paths: RuntimePaths, chat_id: str) -> tuple[bool, str]:
     lease_path = _session_lease_path(paths, chat_id)
     if not lease_path.is_file():
         return (False, "")
@@ -159,7 +159,7 @@ def _read_session_lease(paths: StateRootPaths, chat_id: str) -> tuple[bool, str]
     return (True, "")
 
 
-def _write_session_lease(paths: StateRootPaths, chat_id: str, session_instance_id: str) -> None:
+def _write_session_lease(paths: RuntimePaths, chat_id: str, session_instance_id: str) -> None:
     payload = {
         "chat_id": chat_id,
         "owner_pid": os.getpid(),
@@ -171,7 +171,7 @@ def _write_session_lease(paths: StateRootPaths, chat_id: str, session_instance_i
     )
 
 
-def _session_instance_for_event(paths: StateRootPaths, state_root: Path, chat_id: str) -> str:
+def _session_instance_for_event(paths: RuntimePaths, state_root: Path, chat_id: str) -> str:
     held = _SESSION_LOCK_HANDLES.get(_session_lock_key(state_root, chat_id))
     if held is not None:
         _, session_instance_id = held
@@ -187,7 +187,7 @@ def _session_instance_for_event(paths: StateRootPaths, state_root: Path, chat_id
     return record.session_instance_id
 
 
-def _read_session_counter(paths: StateRootPaths) -> int:
+def _read_session_counter(paths: RuntimePaths) -> int:
     if not paths.session_id_counter.is_file():
         return 0
     try:
@@ -196,7 +196,7 @@ def _read_session_counter(paths: StateRootPaths) -> int:
         return 0
 
 
-def _seed_counter_from_events(paths: StateRootPaths) -> int:
+def _seed_counter_from_events(paths: RuntimePaths) -> int:
     """Scan sessions.jsonl for the highest c<N> chat ID to seed the counter on upgrade."""
 
     max_id = 0
@@ -212,7 +212,7 @@ def _seed_counter_from_events(paths: StateRootPaths) -> int:
 
 
 def reserve_chat_id(state_root: Path) -> str:
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
     with lock_file(paths.session_id_counter_flock):
         current = _read_session_counter(paths)
         if current == 0 and not paths.session_id_counter.is_file():
@@ -223,7 +223,7 @@ def reserve_chat_id(state_root: Path) -> str:
 
 
 def _records_by_session(state_root: Path) -> dict[str, SessionRecord]:
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
     records: dict[str, SessionRecord] = {}
 
     for event in read_events(paths.sessions_jsonl, _parse_event):
@@ -413,7 +413,7 @@ def start_session(
 ) -> str:
     """Append a session start event and acquire a lifetime session lock."""
 
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
     started_at = utc_now_iso()
     resolved_chat_id = chat_id.strip() if chat_id is not None else ""
     if not resolved_chat_id:
@@ -457,7 +457,7 @@ def start_session(
 def stop_session(state_root: Path, chat_id: str) -> None:
     """Append a session stop event and release the lifetime session lock."""
 
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
     session_instance_id = _session_instance_for_event(paths, state_root, chat_id)
     event = SessionStopEvent(
         chat_id=chat_id,
@@ -478,7 +478,7 @@ def stop_session(state_root: Path, chat_id: str) -> None:
 def update_session_harness_id(state_root: Path, chat_id: str, harness_session_id: str) -> None:
     """Append a session update event carrying the resolved harness session ID."""
 
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
     event = SessionUpdateEvent(
         chat_id=chat_id,
         harness_session_id=harness_session_id,
@@ -495,7 +495,7 @@ def update_session_harness_id(state_root: Path, chat_id: str, harness_session_id
 def update_session_work_id(state_root: Path, chat_id: str, work_id: str | None) -> None:
     """Set or clear the active work item for a session."""
 
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
     normalized_work_id = work_id.strip() if work_id is not None else ""
     event = SessionUpdateEvent(
         chat_id=chat_id,
@@ -514,7 +514,7 @@ def update_session_work_id(state_root: Path, chat_id: str, work_id: str | None) 
 def list_active_sessions(state_root: Path) -> list[str]:
     """Return session IDs with currently held `sessions/<id>.lock` locks."""
 
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
     if not paths.sessions_dir.exists():
         return []
 
@@ -560,7 +560,7 @@ def chat_ids_ever_attached_to_work(state_root: Path, work_id: str) -> set[str]:
     if not normalized_work_id:
         return set()
 
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
 
     def _parse_work_attachment(payload: dict[str, Any]) -> str | None:
         event_type = payload.get("event")
@@ -598,7 +598,7 @@ def get_session_records(state_root: Path, chat_ids: set[str]) -> list[SessionRec
 def get_last_session(state_root: Path) -> SessionRecord | None:
     """Return the most recently started session record in a state root."""
 
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
     last_session_id: str | None = None
     for event in read_events(paths.sessions_jsonl, _parse_event):
         if not isinstance(event, SessionStartEvent):
@@ -654,10 +654,10 @@ def get_session_harness_ids(state_root: Path, chat_id: str) -> tuple[str, ...]:
 def collect_active_chat_ids(repo_root: Path) -> frozenset[str] | None:
     """Collect chat IDs with start events that lack a stop event."""
 
-    from meridian.lib.state.paths import resolve_runtime_state_root_or_none
+    from meridian.lib.state.paths import resolve_project_runtime_root_or_none
 
     try:
-        state_root = resolve_runtime_state_root_or_none(repo_root)
+        state_root = resolve_project_runtime_root_or_none(repo_root)
         if state_root is None:
             return frozenset()
         sessions_file = state_root / "sessions.jsonl"
@@ -679,7 +679,7 @@ def collect_active_chat_ids(repo_root: Path) -> frozenset[str] | None:
 def cleanup_stale_sessions(state_root: Path) -> StaleSessionCleanup:
     """Stop and remove dead session locks left behind by crashed harnesses."""
 
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
     if not paths.sessions_dir.exists():
         return StaleSessionCleanup(cleaned_ids=(), materialized_scopes=())
 

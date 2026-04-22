@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from meridian.lib.ops.runtime import resolve_state_root_for_read
+from meridian.lib.ops.runtime import resolve_runtime_root_for_read
 from meridian.lib.state import session_store, spawn_store
 
 from .query import (
@@ -60,7 +60,7 @@ type ContextRef = SpawnContextRef | SessionContextRef
 def _select_primary_spawn_for_session(repo_root: Path, chat_id: str) -> spawn_store.SpawnRecord:
     from meridian.lib.state.reaper import reconcile_spawns
 
-    state_root = resolve_state_root_for_read(repo_root)
+    state_root = resolve_runtime_root_for_read(repo_root)
     spawns = reconcile_spawns(
         state_root,
         spawn_store.list_spawns(state_root, filters={"chat_id": chat_id}),
@@ -73,7 +73,7 @@ def _select_primary_spawn_for_session(repo_root: Path, chat_id: str) -> spawn_st
 
 
 def _is_tracked_session(repo_root: Path, chat_id: str) -> bool:
-    state_root = resolve_state_root_for_read(repo_root)
+    state_root = resolve_runtime_root_for_read(repo_root)
     return bool(session_store.get_session_records(state_root, {chat_id}))
 
 

@@ -69,7 +69,10 @@ class ResolvedContext:
         spawn_id_raw = os.getenv("MERIDIAN_SPAWN_ID", "").strip()
         depth_raw = os.getenv("MERIDIAN_DEPTH", "0").strip()
         repo_root_raw = os.getenv("MERIDIAN_REPO_ROOT", "").strip()
-        state_root_raw = os.getenv("MERIDIAN_STATE_ROOT", "").strip()
+        state_root_raw = os.getenv("MERIDIAN_PROJECT_ROOT", "").strip()
+        if not state_root_raw:
+            # Transitional fallback while child-env callers migrate key names.
+            state_root_raw = os.getenv("MERIDIAN_DATA_DIR", "").strip()
         chat_id_raw = os.getenv("MERIDIAN_CHAT_ID", "").strip()
         work_id_raw = os.getenv("MERIDIAN_WORK_ID", "").strip()
         explicit_work_id_raw = (explicit_work_id or "").strip()
@@ -143,7 +146,7 @@ class ResolvedContext:
         if self.repo_root is not None:
             overrides["MERIDIAN_REPO_ROOT"] = self.repo_root.as_posix()
         if self.state_root is not None:
-            overrides["MERIDIAN_STATE_ROOT"] = self.state_root.as_posix()
+            overrides["MERIDIAN_DATA_DIR"] = self.state_root.as_posix()
         if self.chat_id:
             overrides["MERIDIAN_CHAT_ID"] = self.chat_id
         if self.work_id:

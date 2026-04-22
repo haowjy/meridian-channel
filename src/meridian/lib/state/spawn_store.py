@@ -28,7 +28,7 @@ from meridian.lib.core.spawn_lifecycle import (
 )
 from meridian.lib.core.types import SpawnId
 from meridian.lib.state.event_store import lock_file
-from meridian.lib.state.paths import StateRootPaths
+from meridian.lib.state.paths import RuntimePaths
 from meridian.lib.state.spawn.events import reduce_events
 
 logger = structlog.get_logger(__name__)
@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 
 
 def _resolve_repository(
-    paths: StateRootPaths,
+    paths: RuntimePaths,
     *,
     repository: SpawnRepository | None = None,
 ) -> SpawnRepository:
@@ -66,7 +66,7 @@ def next_spawn_id(
 ) -> SpawnId:
     """Return the next spawn ID (`p1`, `p2`, ...) for a state root."""
 
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
     resolved_repository = _resolve_repository(paths, repository=repository)
     with lock_file(paths.spawns_flock):
         return _next_spawn_id_from_events(resolved_repository.read_events())
@@ -273,7 +273,7 @@ def start_spawn(
     """Append a spawn start event under `spawns.jsonl.flock` and return the spawn ID."""
 
     resolved_clock = clock or RealClock()
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
     resolved_repository = _resolve_repository(
         paths,
         repository=repository,
@@ -328,7 +328,7 @@ def update_spawn(
 ) -> None:
     """Append a metadata update event under `spawns.jsonl.flock`."""
 
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
     resolved_repository = _resolve_repository(paths, repository=repository)
     event = SpawnUpdateEvent(
         id=str(spawn_id),
@@ -356,7 +356,7 @@ def record_spawn_exited(
     """Append an exited event — the harness process has exited."""
 
     resolved_clock = clock or RealClock()
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
     resolved_repository = _resolve_repository(
         paths,
         repository=repository,
@@ -395,7 +395,7 @@ def finalize_spawn(
     or does not exist.
     """
     resolved_clock = clock or RealClock()
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
     resolved_repository = _resolve_repository(
         paths,
         repository=repository,
@@ -445,7 +445,7 @@ def mark_finalizing(
 ) -> bool:
     """CAS transition `running -> finalizing` under the spawn-store flock."""
 
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
     resolved_repository = _resolve_repository(paths, repository=repository)
     with lock_file(paths.spawns_flock):
         records = reduce_events(resolved_repository.read_events())
@@ -467,7 +467,7 @@ def mark_spawn_running(
     runner_pid: int | None = None,
     repository: SpawnRepository | None = None,
 ) -> None:
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
     resolved_repository = _resolve_repository(paths, repository=repository)
     with lock_file(paths.spawns_flock):
         records = reduce_events(resolved_repository.read_events())
@@ -498,7 +498,7 @@ def list_spawns(
 ) -> list[SpawnRecord]:
     """List derived spawn records with optional equality filters."""
 
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
     resolved_repository = _resolve_repository(paths, repository=repository)
     spawns = list(reduce_events(resolved_repository.read_events()).values())
 

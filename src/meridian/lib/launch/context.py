@@ -30,7 +30,7 @@ from meridian.lib.launch.launch_types import (
     summarize_composition_warnings,
 )
 from meridian.lib.state.paths import (
-    resolve_repo_state_paths,
+    resolve_repo_paths,
     resolve_spawn_log_dir,
     resolve_work_scratch_dir,
 )
@@ -115,7 +115,7 @@ class ChildEnvContext:
                 work_id = None
 
         resolved_repo_root = project_paths.execution_cwd.resolve()
-        repo_state_paths = resolve_repo_state_paths(resolved_repo_root)
+        repo_state_paths = resolve_repo_paths(resolved_repo_root)
         repo_state_root = repo_state_paths.root_dir
         work_dir = (
             resolve_work_scratch_dir(repo_state_root, work_id) if work_id is not None else None

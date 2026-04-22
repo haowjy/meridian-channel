@@ -18,7 +18,7 @@ from meridian.lib.core.domain import SpawnStatus
 from meridian.lib.core.spawn_lifecycle import ACTIVE_SPAWN_STATUSES
 from meridian.lib.launch.request import SessionRequest
 from meridian.lib.ops.reference import resolve_session_reference
-from meridian.lib.ops.runtime import resolve_runtime_root_and_config, resolve_state_root_for_read
+from meridian.lib.ops.runtime import resolve_runtime_root_and_config, resolve_runtime_root_for_read
 from meridian.lib.ops.spawn.api import (
     SpawnActionOutput,
     SpawnCancelInput,
@@ -54,6 +54,9 @@ _SPAWN_STATUS_VALUES: tuple[SpawnStatus, ...] = cast(
 _ACTIVE_VIEW_STATUSES: tuple[SpawnStatus, ...] = tuple(
     status for status in _SPAWN_STATUS_VALUES if status in ACTIVE_SPAWN_STATUSES
 )
+
+# Transitional alias for tests and callers still patching pre-rename symbol names.
+resolve_runtime_root_for_read = resolve_runtime_root_for_read
 
 
 def _spawn_create_exit_code(result: SpawnActionOutput) -> int:
@@ -513,7 +516,7 @@ def _spawn_children(
         raise ValueError("spawn_id is required")
     repo_root = resolve_project_root()
     normalized_spawn_id = resolve_spawn_reference(repo_root, normalized_ref)
-    state_root = resolve_state_root_for_read(repo_root)
+    state_root = resolve_runtime_root_for_read(repo_root)
     from meridian.lib.state.reaper import reconcile_spawns
 
     children = list(

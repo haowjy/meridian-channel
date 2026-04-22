@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.event_store import lock_file, utc_now_iso
-from meridian.lib.state.paths import StateRootPaths
+from meridian.lib.state.paths import RuntimePaths
 
 _MAX_SLUG_LENGTH = 64
 _NON_ALNUM_HYPHEN = re.compile(r"[^a-z0-9-]+")
@@ -57,18 +57,18 @@ def slugify(label: str) -> str:
 
 
 def _work_item_path(state_root: Path, work_id: str) -> Path:
-    return StateRootPaths.from_root_dir(state_root).work_items_dir / f"{work_id}.json"
+    return RuntimePaths.from_root_dir(state_root).work_items_dir / f"{work_id}.json"
 
 
-def _work_scratch_dir(paths: StateRootPaths, work_id: str) -> Path:
+def _work_scratch_dir(paths: RuntimePaths, work_id: str) -> Path:
     return paths.work_dir / work_id
 
 
-def _archived_work_scratch_dir(paths: StateRootPaths, work_id: str) -> Path:
+def _archived_work_scratch_dir(paths: RuntimePaths, work_id: str) -> Path:
     return paths.work_archive_dir / work_id
 
 
-def _locate_work_scratch_dir(paths: StateRootPaths, work_id: str) -> Path | None:
+def _locate_work_scratch_dir(paths: RuntimePaths, work_id: str) -> Path | None:
     active_dir = _work_scratch_dir(paths, work_id)
     archived_dir = _archived_work_scratch_dir(paths, work_id)
     if active_dir.exists() and archived_dir.exists():
@@ -93,7 +93,7 @@ def _read_work_item(path: Path) -> WorkItem | None:
         return None
 
 
-def _reconcile_interrupted_archives_locked(paths: StateRootPaths) -> None:
+def _reconcile_interrupted_archives_locked(paths: RuntimePaths) -> None:
     """Repair archive operations interrupted after moving scratch but before metadata write."""
 
     if not paths.work_items_dir.is_dir():
@@ -112,7 +112,7 @@ def _reconcile_interrupted_archives_locked(paths: StateRootPaths) -> None:
 
 def _ensure_work_item_metadata_locked(
     *,
-    paths: StateRootPaths,
+    paths: RuntimePaths,
     work_id: str,
     description: str = "",
     status: str = "open",
@@ -136,7 +136,7 @@ def _ensure_work_item_metadata_locked(
 def reconcile_work_store(state_root: Path) -> None:
     """Complete or clear an interrupted work-item rename operation."""
 
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
     intent_path = paths.work_items_rename_intent
     if intent_path.is_file():
         try:
@@ -178,7 +178,7 @@ def reconcile_work_store(state_root: Path) -> None:
 def create_work_item(state_root: Path, label: str, description: str = "") -> WorkItem:
     """Create a new work item metadata record under `.meridian/work-items/`."""
 
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
     with lock_file(paths.work_items_flock):
         reconcile_work_store(state_root)
         paths.work_items_dir.mkdir(parents=True, exist_ok=True)
@@ -216,7 +216,7 @@ def ensure_work_item_metadata(
             f"Use a slug (lowercase, hyphens, no spaces) — e.g. '{normalized or 'my-feature'}'."
         )
 
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
     with lock_file(paths.work_items_flock):
         reconcile_work_store(state_root)
         return _ensure_work_item_metadata_locked(
@@ -239,14 +239,14 @@ def get_work_item(state_root: Path, work_id: str) -> WorkItem | None:
 def work_scratch_dir(state_root: Path, work_id: str) -> Path:
     """Return the current scratch location for a work item."""
 
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
     return _locate_work_scratch_dir(paths, work_id) or _work_scratch_dir(paths, work_id)
 
 
 def list_work_items(state_root: Path) -> list[WorkItem]:
     """Return all work items sorted by creation time then slug."""
 
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
     with lock_file(paths.work_items_flock):
         reconcile_work_store(state_root)
         if not paths.work_items_dir.is_dir():
@@ -263,7 +263,7 @@ def list_work_items(state_root: Path) -> list[WorkItem]:
 def rename_work_item(state_root: Path, old_work_id: str, new_name: str) -> WorkItem:
     """Rename work metadata and move scratch dir if it exists."""
 
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
     with lock_file(paths.work_items_flock):
         reconcile_work_store(state_root)
 
@@ -329,7 +329,7 @@ def update_work_item(
 ) -> WorkItem:
     """Update mutable work-item fields and rewrite metadata atomically."""
 
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
     with lock_file(paths.work_items_flock):
         reconcile_work_store(state_root)
         current = get_work_item(state_root, work_id)
@@ -349,7 +349,7 @@ def update_work_item(
 def archive_work_item(state_root: Path, work_id: str) -> WorkItem:
     """Mark a work item done and move its scratch dir into the configured archive path."""
 
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
     with lock_file(paths.work_items_flock):
         reconcile_work_store(state_root)
         current = get_work_item(state_root, work_id)
@@ -383,7 +383,7 @@ def delete_work_item(
     exist and ``force`` is ``False``.
     """
 
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
     with lock_file(paths.work_items_flock):
         reconcile_work_store(state_root)
         current = get_work_item(state_root, work_id)
@@ -411,7 +411,7 @@ def delete_work_item(
 def reopen_work_item(state_root: Path, work_id: str, *, status: str = "open") -> WorkItem:
     """Reopen a work item and restore its scratch dir to the configured work path."""
 
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
     with lock_file(paths.work_items_flock):
         reconcile_work_store(state_root)
         current = get_work_item(state_root, work_id)

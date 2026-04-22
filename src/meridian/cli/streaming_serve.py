@@ -13,7 +13,7 @@ from meridian.lib.harness.registry import get_default_harness_registry
 from meridian.lib.launch.context import build_launch_context
 from meridian.lib.launch.request import LaunchArgvIntent, LaunchRuntime, SpawnRequest
 from meridian.lib.launch.streaming_runner import run_streaming_spawn, signal_coordinator
-from meridian.lib.ops.runtime import resolve_runtime_root_and_config, resolve_state_root
+from meridian.lib.ops.runtime import resolve_runtime_root, resolve_runtime_root_and_config
 
 
 async def streaming_serve(
@@ -43,7 +43,7 @@ async def streaming_serve(
         raise ValueError(f"unsupported harness '{harness}'. Supported: {supported}") from exc
 
     repo_root, _ = resolve_runtime_root_and_config(None)
-    state_root = resolve_state_root(repo_root)
+    state_root = resolve_runtime_root(repo_root)
     start_monotonic = time.monotonic()
     lifecycle = create_lifecycle_service(repo_root, state_root)
     spawn_id = SpawnId(

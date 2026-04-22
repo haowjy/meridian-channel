@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from meridian.lib.launch.launch_types import summarize_composition_warnings
-from meridian.lib.state.paths import resolve_repo_state_paths
+from meridian.lib.state.paths import resolve_repo_paths
 
 if TYPE_CHECKING:
     from meridian.lib.harness.registry import HarnessRegistry
@@ -40,7 +40,7 @@ def _resolve_work_id_for_launch(repo_root: Path, request: LaunchRequest) -> str 
 
     explicit_work_id = (request.work_id or "").strip() or None
     if explicit_work_id is not None:
-        repo_state_root = resolve_repo_state_paths(repo_root).root_dir
+        repo_state_root = resolve_repo_paths(repo_root).root_dir
         return ensure_explicit_work_item(repo_state_root, explicit_work_id)
     return None
 

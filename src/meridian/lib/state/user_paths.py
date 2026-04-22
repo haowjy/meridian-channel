@@ -88,10 +88,3 @@ def get_project_data_root(project_uuid: str) -> Path:
     """
 
     return get_meridian_home() / "projects" / project_uuid
-
-
-# Transitional aliases for callers still on pre-rename symbols.
-get_user_home = get_meridian_home
-get_project_home = get_project_data_root
-get_user_state_root = get_meridian_home
-get_project_state_root = get_project_data_root

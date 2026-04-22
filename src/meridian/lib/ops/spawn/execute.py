@@ -39,7 +39,7 @@ from meridian.lib.platform import IS_WINDOWS
 from meridian.lib.state import spawn_store
 from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.paths import (
-    resolve_repo_state_paths,
+    resolve_repo_paths,
     resolve_spawn_log_dir,
     resolve_work_scratch_dir,
 )
@@ -54,7 +54,7 @@ from ..runtime import (
     OperationRuntime,
     build_runtime,
     resolve_chat_id,
-    resolve_state_root,
+    resolve_runtime_root,
     runtime_context,
 )
 from .models import SpawnActionOutput, SpawnCreateInput
@@ -180,7 +180,7 @@ def _spawn_background_worker_env(
     work_dir: Path | None = None
     if normalized_work_id:
         work_dir = resolve_work_scratch_dir(
-            resolve_repo_state_paths(repo_root).root_dir,
+            resolve_repo_paths(repo_root).root_dir,
             normalized_work_id,
         )
 
@@ -249,8 +249,8 @@ def _init_spawn(
 ) -> _SpawnContext:
     resolved_context = runtime_context(ctx)
     project_paths = resolve_project_paths(repo_root=runtime.repo_root)
-    repo_state_root = resolve_repo_state_paths(project_paths.repo_root).root_dir
-    state_root = resolve_state_root(project_paths.repo_root)
+    repo_state_root = resolve_repo_paths(project_paths.repo_root).root_dir
+    state_root = resolve_runtime_root(project_paths.repo_root)
     resolved_work_id = _resolve_work_id(
         payload=payload,
         runtime_context=resolved_context,
@@ -456,7 +456,7 @@ async def _execute_existing_spawn(
 ) -> int:
     resolved_context = runtime_context(ctx)
     runtime = build_runtime(str(project_paths.repo_root), sink=sink)
-    state_root = resolve_state_root(project_paths.repo_root)
+    state_root = resolve_runtime_root(project_paths.repo_root)
     spawn_record = spawn_store.get_spawn(state_root, spawn_id)
     if spawn_record is None:
         logger.error("Spawn not found for background execution.", spawn_id=str(spawn_id))
@@ -1014,7 +1014,7 @@ def _background_worker_main(
     repo_root = Path(parsed.repo_root).expanduser().resolve()
     project_paths = resolve_project_paths(repo_root=repo_root)
     spawn_id = SpawnId(parsed.spawn_id)
-    state_root = resolve_state_root(project_paths.repo_root)
+    state_root = resolve_runtime_root(project_paths.repo_root)
     log_dir = resolve_spawn_log_dir(project_paths.repo_root, spawn_id)
     try:
         try:

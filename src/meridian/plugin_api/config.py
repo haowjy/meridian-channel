@@ -6,7 +6,7 @@ import tomllib
 from collections.abc import Mapping
 from typing import Any, cast
 
-from meridian.plugin_api.state import get_user_state_root
+from meridian.plugin_api.state import get_user_home
 
 
 def get_user_config() -> dict[str, Any]:
@@ -16,7 +16,7 @@ def get_user_config() -> dict[str, Any]:
     Raises ``tomllib.TOMLDecodeError`` when config content is invalid.
     """
 
-    config_path = get_user_state_root() / "config.toml"
+    config_path = get_user_home() / "config.toml"
     if not config_path.is_file():
         return {}
     return tomllib.loads(config_path.read_text(encoding="utf-8"))

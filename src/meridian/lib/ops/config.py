@@ -31,11 +31,11 @@ from meridian.lib.ops.config_surface import (
 from meridian.lib.ops.runtime import async_from_sync
 from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.paths import (
-    StateRootPaths,
+    RuntimePaths,
     ensure_gitignore,
     load_context_config,
-    resolve_repo_state_paths_for_write,
-    resolve_runtime_state_root_for_write,
+    resolve_project_runtime_root_for_write,
+    resolve_project_paths_for_write,
 )
 
 _SECTION_ORDER: tuple[str, ...] = ("defaults", "timeouts", "harness", "primary", "output")
@@ -751,7 +751,7 @@ def ensure_runtime_state_bootstrap_sync(repo_root: Path) -> None:
     """
     context_config = load_context_config(repo_root)
 
-    repo_state = resolve_repo_state_paths_for_write(repo_root)
+    repo_state = resolve_project_paths_for_write(repo_root)
     auto_migrate_contexts(repo_state.root_dir)
 
     # Always create the root .meridian directory
@@ -791,8 +791,8 @@ def ensure_runtime_state_bootstrap_sync(repo_root: Path) -> None:
             repo_state.work_dir.mkdir(parents=True, exist_ok=True)
             repo_state.work_archive_dir.mkdir(parents=True, exist_ok=True)
 
-    runtime_root = resolve_runtime_state_root_for_write(repo_root)
-    runtime_state = StateRootPaths.from_root_dir(runtime_root)
+    runtime_root = resolve_project_runtime_root_for_write(repo_root)
+    runtime_state = RuntimePaths.from_root_dir(runtime_root)
     runtime_dirs = (
         runtime_state.root_dir,
         runtime_state.spawns_dir,

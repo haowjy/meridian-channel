@@ -15,7 +15,7 @@ from meridian.lib.config.settings import resolve_project_root
 from meridian.lib.context.resolver import resolve_context_paths
 from meridian.lib.core.resolved_context import ResolvedContext
 from meridian.lib.core.util import FormatContext
-from meridian.lib.ops.runtime import resolve_state_root_for_read
+from meridian.lib.ops.runtime import resolve_runtime_root_for_read
 from meridian.lib.state.paths import load_context_config
 
 
@@ -103,12 +103,12 @@ def _resolved_context_env_defaults(repo_root: Path, state_root: Path) -> Iterato
     """Provide repo/state env defaults so `ResolvedContext` can resolve fully."""
 
     original_repo_root = os.environ.get("MERIDIAN_REPO_ROOT")
-    original_state_root = os.environ.get("MERIDIAN_STATE_ROOT")
+    original_state_root = os.environ.get("MERIDIAN_DATA_DIR")
 
     if not (original_repo_root or "").strip():
         os.environ["MERIDIAN_REPO_ROOT"] = repo_root.as_posix()
     if not (original_state_root or "").strip():
-        os.environ["MERIDIAN_STATE_ROOT"] = state_root.as_posix()
+        os.environ["MERIDIAN_DATA_DIR"] = state_root.as_posix()
 
     try:
         yield
@@ -119,9 +119,9 @@ def _resolved_context_env_defaults(repo_root: Path, state_root: Path) -> Iterato
             os.environ["MERIDIAN_REPO_ROOT"] = original_repo_root
 
         if original_state_root is None:
-            os.environ.pop("MERIDIAN_STATE_ROOT", None)
+            os.environ.pop("MERIDIAN_DATA_DIR", None)
         else:
-            os.environ["MERIDIAN_STATE_ROOT"] = original_state_root
+            os.environ["MERIDIAN_DATA_DIR"] = original_state_root
 
 
 def _resolve_runtime_context(repo_root: Path, state_root: Path) -> ResolvedContext:
@@ -162,7 +162,7 @@ def work_current_sync(input: WorkCurrentInput) -> WorkCurrentOutput:
 
     _ = input
     repo_root = resolve_project_root()
-    state_root = resolve_state_root_for_read(repo_root)
+    state_root = resolve_runtime_root_for_read(repo_root)
     resolved = _resolve_runtime_context(repo_root, state_root)
 
     return WorkCurrentOutput(

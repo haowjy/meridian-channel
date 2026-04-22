@@ -18,7 +18,7 @@ from meridian.lib.app.spawn_routes import (
 )
 from meridian.lib.config.project_paths import resolve_project_paths
 from meridian.lib.core.lifecycle import create_lifecycle_service
-from meridian.lib.state.paths import resolve_repo_state_paths
+from meridian.lib.state.paths import resolve_repo_paths
 from meridian.lib.streaming.spawn_manager import SpawnManager
 
 logger = logging.getLogger(__name__)
@@ -151,7 +151,7 @@ def create_app(
 
     state_root = spawn_manager.state_root
     project_paths = resolve_project_paths(repo_root=spawn_manager.repo_root)
-    repo_state_root = resolve_repo_state_paths(project_paths.repo_root).root_dir
+    repo_state_root = resolve_repo_paths(project_paths.repo_root).root_dir
     lifecycle_service = create_lifecycle_service(project_paths.repo_root, state_root)
     spawn_id_lock = asyncio.Lock()
 

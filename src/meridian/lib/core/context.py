@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.core.resolved_context import ResolvedContext
 from meridian.lib.core.types import SpawnId
-from meridian.lib.state.paths import resolve_repo_state_paths, resolve_work_scratch_dir
+from meridian.lib.state.paths import resolve_repo_paths, resolve_work_scratch_dir
 
 
 class RuntimeContext(BaseModel):
@@ -43,14 +43,14 @@ class RuntimeContext(BaseModel):
         if self.repo_root is not None:
             overrides["MERIDIAN_REPO_ROOT"] = self.repo_root.as_posix()
         if self.state_root is not None:
-            overrides["MERIDIAN_STATE_ROOT"] = self.state_root.as_posix()
+            overrides["MERIDIAN_DATA_DIR"] = self.state_root.as_posix()
         if self.chat_id:
             overrides["MERIDIAN_CHAT_ID"] = self.chat_id
         if self.work_id:
             overrides["MERIDIAN_WORK_ID"] = self.work_id
             if self.repo_root is not None:
                 overrides["MERIDIAN_WORK_DIR"] = resolve_work_scratch_dir(
-                    resolve_repo_state_paths(self.repo_root).root_dir,
+                    resolve_repo_paths(self.repo_root).root_dir,
                     self.work_id,
                 ).as_posix()
             elif self.state_root is not None:

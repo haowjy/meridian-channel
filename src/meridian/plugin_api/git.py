@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from meridian.plugin_api.config import get_git_overrides
-from meridian.plugin_api.state import get_user_state_root
+from meridian.plugin_api.state import get_user_home
 
 _SSH_URL_RE = re.compile(r"^git@([^:]+):(.+?)(?:\.git)?$")
 _NON_SLUG_CHAR_RE = re.compile(r"[^a-zA-Z0-9-]")
@@ -53,4 +53,4 @@ def resolve_clone_path(repo_url: str) -> Path:
         if override_path:
             return Path(override_path).expanduser().resolve()
 
-    return (get_user_state_root() / "git" / generate_repo_slug(repo_url)).resolve()
+    return (get_user_home() / "git" / generate_repo_slug(repo_url)).resolve()

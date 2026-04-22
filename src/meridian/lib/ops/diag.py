@@ -13,7 +13,7 @@ from meridian.lib.harness.ids import HarnessId
 from meridian.lib.ops.config import ensure_runtime_state_bootstrap_sync
 from meridian.lib.ops.config_surface import build_config_surface
 from meridian.lib.ops.mars import check_upgrade_availability, format_upgrade_availability
-from meridian.lib.ops.runtime import resolve_state_root
+from meridian.lib.ops.runtime import resolve_runtime_root
 from meridian.lib.state import spawn_store
 from meridian.lib.state.session_store import cleanup_stale_sessions
 
@@ -63,18 +63,18 @@ class DoctorWarning(BaseModel):
 
 
 def _count_runs(repo_root: Path) -> int:
-    return len(spawn_store.list_spawns(resolve_state_root(repo_root)))
+    return len(spawn_store.list_spawns(resolve_runtime_root(repo_root)))
 
 
 def _repair_stale_session_locks(repo_root: Path) -> int:
-    cleanup = cleanup_stale_sessions(resolve_state_root(repo_root))
+    cleanup = cleanup_stale_sessions(resolve_runtime_root(repo_root))
     return len(cleanup.cleaned_ids)
 
 
 def _repair_orphan_runs(repo_root: Path) -> int:
     from meridian.lib.state.reaper import reconcile_spawns
 
-    state_root = resolve_state_root(repo_root)
+    state_root = resolve_runtime_root(repo_root)
     spawns = spawn_store.list_spawns(state_root)
     running_before = sum(1 for s in spawns if is_active_spawn_status(s.status))
     reconciled = reconcile_spawns(state_root, spawns)
@@ -172,7 +172,7 @@ def doctor_sync(payload: DoctorInput) -> DoctorOutput:
 
     running = [
         row.id
-        for row in spawn_store.list_spawns(resolve_state_root(repo_root))
+        for row in spawn_store.list_spawns(resolve_runtime_root(repo_root))
         if is_active_spawn_status(row.status)
     ]
     if running:

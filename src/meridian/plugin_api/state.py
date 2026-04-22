@@ -5,14 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from meridian.lib.state.user_paths import (
-    get_project_state_root as _get_project_state_root,
+    get_project_home as _get_project_home,
 )
 from meridian.lib.state.user_paths import (
-    get_user_state_root as _get_user_state_root,
+    get_user_home as _get_user_home,
 )
 
 
-def get_user_state_root() -> Path:
+def get_user_home() -> Path:
     """Return the user-level state root directory.
 
     Resolution order:
@@ -20,11 +20,15 @@ def get_user_state_root() -> Path:
     2. Platform default
     """
 
-    return _get_user_state_root()
+    return _get_user_home()
 
 
-def get_project_state_root(project_uuid: str) -> Path:
+def get_project_home(project_uuid: str) -> Path:
     """Return the project-level state root path."""
 
-    return _get_project_state_root(project_uuid)
+    return _get_project_home(project_uuid)
 
+
+# Transitional aliases for callers still on pre-rename symbols.
+get_meridian_home = get_user_home
+get_project_data_root = get_project_home

@@ -15,7 +15,7 @@ from meridian.lib.core.overrides import (
     KNOWN_APPROVAL_VALUES,
     KNOWN_EFFORT_VALUES,
 )
-from meridian.lib.state.user_paths import get_user_state_root
+from meridian.lib.state.user_paths import get_user_home
 
 logger = logging.getLogger(__name__)
 
@@ -227,7 +227,7 @@ def resolve_user_config_path(user_config: Path | None) -> Path | None:
             resolved = Path(raw_env).expanduser()
 
     if resolved is None:
-        default_user_config = get_user_state_root() / "config.toml"
+        default_user_config = get_user_home() / "config.toml"
         if default_user_config.is_file():
             return default_user_config
         return None

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Protocol
 from meridian.lib.state import spawn_store
 from meridian.lib.state.event_store import append_event as _append_event
 from meridian.lib.state.event_store import read_events as _read_events
-from meridian.lib.state.paths import StateRootPaths
+from meridian.lib.state.paths import RuntimePaths
 
 if TYPE_CHECKING:
     from meridian.lib.state.spawn_store import SpawnEvent
@@ -28,7 +28,7 @@ class SpawnRepository(Protocol):
 class FileSpawnRepository:
     """Filesystem-backed spawn event repository."""
 
-    def __init__(self, paths: StateRootPaths):
+    def __init__(self, paths: RuntimePaths):
         self._paths = paths
 
     def append_event(self, event: SpawnEvent) -> None:

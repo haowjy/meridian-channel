@@ -26,8 +26,8 @@ from meridian.lib.utils.time import minutes_to_seconds
 from ..runtime import (
     OperationRuntime,
     build_runtime,
-    resolve_state_root,
-    resolve_state_root_for_read,
+    resolve_runtime_root,
+    resolve_runtime_root_for_read,
 )
 from .models import SpawnCreateInput
 
@@ -152,7 +152,7 @@ def build_create_payload(
             config=runtime.config,
             harness_registry=runtime.harness_registry,
         )
-        state_root = resolve_state_root(runtime_view.repo_root)
+        state_root = resolve_runtime_root(runtime_view.repo_root)
     elif payload.dry_run:
         explicit_repo_root = (
             Path(payload.repo_root).expanduser().resolve() if payload.repo_root else None
@@ -164,7 +164,7 @@ def build_create_payload(
             config=config,
             harness_registry=get_default_harness_registry(),
         )
-        state_root = resolve_state_root_for_read(runtime_view.repo_root)
+        state_root = resolve_runtime_root_for_read(runtime_view.repo_root)
     else:
         runtime_bundle = build_runtime(payload.repo_root)
         runtime_view = _CreateRuntimeView(
@@ -172,7 +172,7 @@ def build_create_payload(
             config=runtime_bundle.config,
             harness_registry=runtime_bundle.harness_registry,
         )
-        state_root = resolve_state_root(runtime_view.repo_root)
+        state_root = resolve_runtime_root(runtime_view.repo_root)
     validated_paths = validate_reference_paths(
         payload.files,
         base_dir=runtime_view.repo_root,

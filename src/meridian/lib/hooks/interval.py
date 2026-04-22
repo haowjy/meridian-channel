@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import cast
 
 from meridian.lib.state.atomic import atomic_write_text
-from meridian.lib.state.paths import StateRootPaths
+from meridian.lib.state.paths import RuntimePaths
 
 _INTERVAL_PATTERN = re.compile(r"^(\d+)([smhd])$")
 _INTERVAL_UNITS = {
@@ -36,7 +36,7 @@ class IntervalTracker:
     """Track and persist last successful hook execution timestamps."""
 
     def __init__(self, state_root: Path) -> None:
-        self._state_path = StateRootPaths.from_root_dir(state_root).hook_state_json
+        self._state_path = RuntimePaths.from_root_dir(state_root).hook_state_json
         self._state = self._load_state()
 
     @property
