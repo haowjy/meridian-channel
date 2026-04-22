@@ -32,6 +32,10 @@ from meridian.lib.harness.opencode_storage import resolve_opencode_session_file
 from meridian.lib.harness.projections.project_opencode_subprocess import (
     project_opencode_spec_to_cli_args,
 )
+from meridian.lib.launch.composition import (
+    ComposedLaunchContent,
+    ProjectedContent,
+)
 from meridian.lib.launch.constants import (
     BASE_COMMAND_OPENCODE_SUBPROCESS,
     PRIMARY_BASE_COMMAND_OPENCODE,
@@ -261,6 +265,35 @@ class OpenCodeAdapter(BaseHarnessAdapter[OpenCodeLaunchSpec]):
             return SessionSeed()
         # Resume and fork both seed from an existing harness session id.
         return SessionSeed(session_id=normalized_harness_session_id)
+
+    def project_content(self, content: ComposedLaunchContent) -> ProjectedContent:
+        """OpenCode projection: inline content with optional native file injection.
+        
+        OpenCode supports --file injection for reference files.
+        """
+        # Build inline prompt: SYSTEM_INSTRUCTION blocks first
+        system_blocks = [
+            content.skill_injection,
+            content.inventory_prompt,
+            content.report_instruction,
+            *content.passthrough_system_fragments,
+        ]
+        system_text = "\n\n".join(b.strip() for b in system_blocks if b.strip())
+        
+        # OpenCode supports native file injection, so refs may not be inline
+        # For now, reference_blocks are rendered inline; native injection
+        # requires actual ReferenceItem objects, which Phase 4 will implement
+        context_blocks = [*content.reference_blocks, content.prior_output]
+        context_text = "\n\n".join(b.strip() for b in context_blocks if b.strip())
+        
+        user_blocks = [system_text, content.user_task_prompt, context_text]
+        user_turn = "\n\n".join(b.strip() for b in user_blocks if b.strip())
+        
+        return ProjectedContent(
+            system_prompt="",  # OpenCode has no system-prompt channel
+            user_turn_content=user_turn,
+            reference_routing=(),  # Phase 4 will implement native file injection routing
+        )
 
     def filter_launch_content(
         self,

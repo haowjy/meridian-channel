@@ -37,6 +37,10 @@ from meridian.lib.harness.launch_types import PromptPolicy
 from meridian.lib.harness.projections.project_codex_subprocess import (
     project_codex_spec_to_cli_args,
 )
+from meridian.lib.launch.composition import (
+    ComposedLaunchContent,
+    ProjectedContent,
+)
 from meridian.lib.launch.constants import (
     BASE_COMMAND_CODEX_SUBPROCESS,
     PRIMARY_BASE_COMMAND_CODEX,
@@ -363,6 +367,37 @@ class CodexAdapter(BaseHarnessAdapter[CodexLaunchSpec]):
 
     def extract_usage(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> TokenUsage:
         return extract_usage_from_artifacts(artifacts, spawn_id)
+
+    def project_content(self, content: ComposedLaunchContent) -> ProjectedContent:
+        """Codex projection: all content goes inline, no separate system-prompt channel.
+        
+        Ordering: SYSTEM_INSTRUCTION -> USER_TASK_PROMPT -> TASK_CONTEXT
+        """
+        # Build inline prompt: SYSTEM_INSTRUCTION blocks first
+        system_blocks = [
+            content.skill_injection,
+            content.agent_profile_body,
+            content.inventory_prompt,
+            content.report_instruction,
+            *content.passthrough_system_fragments,
+        ]
+        system_text = "\n\n".join(b.strip() for b in system_blocks if b.strip())
+        
+        # Then USER_TASK_PROMPT
+        user_task = content.user_task_prompt.strip()
+        
+        # Then TASK_CONTEXT
+        context_blocks = [*content.reference_blocks, content.prior_output]
+        context_text = "\n\n".join(b.strip() for b in context_blocks if b.strip())
+        
+        user_blocks = [system_text, user_task, context_text]
+        user_turn = "\n\n".join(b.strip() for b in user_blocks if b.strip())
+        
+        return ProjectedContent(
+            system_prompt="",  # Codex has no system-prompt channel
+            user_turn_content=user_turn,
+            reference_routing=(),  # Codex does not support native file injection
+        )
 
     def filter_launch_content(
         self,

@@ -32,6 +32,11 @@ from meridian.lib.harness.ids import HarnessId, TransportId
 from meridian.lib.harness.launch_spec import ClaudeLaunchSpec
 from meridian.lib.harness.launch_types import PromptPolicy, SessionSeed
 from meridian.lib.harness.projections.project_claude import project_claude_spec_to_cli_args
+from meridian.lib.launch.composition import (
+    ComposedLaunchContent,
+    ProjectedContent,
+    ReferenceRouting,
+)
 from meridian.lib.launch.constants import (
     BASE_COMMAND_CLAUDE_SUBPROCESS,
     PRIMARY_BASE_COMMAND_CLAUDE,
@@ -409,6 +414,49 @@ class ClaudeAdapter(BaseHarnessAdapter[ClaudeLaunchSpec]):
         return SessionSeed(
             session_id=session_id,
             session_args=("--session-id", session_id),
+        )
+
+    def project_content(self, content: ComposedLaunchContent) -> ProjectedContent:
+        """Claude projection: route system content to append-system-prompt.
+        
+        - SYSTEM_INSTRUCTION (skills, profile, report, inventory, passthrough)
+          → --append-system-prompt channel
+        - USER_TASK_PROMPT + TASK_CONTEXT → positional prompt argument (user turn)
+        """
+        # Build system prompt: all SYSTEM_INSTRUCTION blocks, passthrough last
+        system_blocks = [
+            content.skill_injection,
+            content.agent_profile_body,
+            content.report_instruction,
+            content.inventory_prompt,
+            *content.passthrough_system_fragments,
+        ]
+        system_prompt = "\n\n".join(b.strip() for b in system_blocks if b.strip())
+        
+        # Build user turn: TASK_CONTEXT + USER_TASK_PROMPT
+        user_blocks = [
+            *content.reference_blocks,
+            content.prior_output,
+            content.user_task_prompt,
+        ]
+        user_turn = "\n\n".join(b.strip() for b in user_blocks if b.strip())
+        
+        # Claude does not support native file injection
+        reference_routing = tuple(
+            ReferenceRouting(
+                path=ref.strip(),
+                type="file",
+                routing="inline",
+                native_flag=None,
+            )
+            for ref in content.reference_blocks
+            if ref.strip()
+        )
+        
+        return ProjectedContent(
+            system_prompt=system_prompt,
+            user_turn_content=user_turn,
+            reference_routing=reference_routing,
         )
 
     def filter_launch_content(
