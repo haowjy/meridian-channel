@@ -144,7 +144,7 @@ Bare `meridian` launches a primary harness session. `meridian --continue` resume
 
 ### Content Channel Routing
 
-Primary launches classify composed content into three semantic categories before passing to the harness adapter:
+Both primary and spawn launches classify composed content into three semantic categories before passing to the harness adapter via `project_content()`:
 
 | Category | What's in it |
 |---|---|
@@ -181,20 +181,23 @@ Resume launches keep the existing behavior and do not receive a newly composed s
 
 ### Observability Artifacts
 
-After every primary launch, Meridian writes artifacts to the spawn log directory (`.meridian/spawns/<id>/`) that expose how content was routed:
+After every launch (primary and spawn), Meridian writes artifacts to the spawn log directory (`.meridian/spawns/<id>/`) that expose how content was routed. The same `write_projection_artifacts()` path is shared; the `surface` field distinguishes primary vs. spawn in the manifest.
 
 | Artifact | Content | Written when |
 |---|---|---|
-| `system-prompt.md` | `SYSTEM_INSTRUCTION` content as sent to the system-prompt channel | System-prompt content exists (Claude only) |
+| `system-prompt.md` | `SYSTEM_INSTRUCTION` content as sent to the system-prompt channel | System-prompt content exists (Claude composed launches) |
 | `starting-prompt.md` | Full user-turn content (`USER_TASK_PROMPT` + prepended `TASK_CONTEXT`) | User-turn content exists |
-| `projection-manifest.json` | Harness ID, surface, and per-category channel routing decisions | Every primary launch |
+| `references.json` | Per-reference routing decisions (inline / native-injection / omitted) | References exist |
+| `projection-manifest.json` | Harness ID, surface, and per-category channel routing decisions | Every launch |
+
+`references.json` is adapter-owned: OpenCode decides per reference whether to pass `--file` (native-injection) or inline the body. Claude and Codex mark all references as inline.
 
 `projection-manifest.json` schema:
 
 ```json
 {
   "harness": "claude" | "codex" | "opencode",
-  "surface": "primary",
+  "surface": "primary" | "spawn",
   "channels": {
     "system_instruction": "append-system-prompt" | "inline" | "none",
     "user_task_prompt": "user-turn" | "inline",
@@ -203,7 +206,7 @@ After every primary launch, Meridian writes artifacts to the spawn log directory
 }
 ```
 
-Spawn (non-primary) artifact writing uses `prompt.md` via the legacy `filter_launch_content()` path, which remains unchanged for backward compatibility.
+`prompt.md` (the legacy spawn artifact) is no longer written. Any existing `prompt.md` files are deleted when the spawn executes.
 
 ## Session Continuation Fields
 
