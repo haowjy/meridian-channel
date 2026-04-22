@@ -40,7 +40,6 @@ from meridian.lib.ops.spawn.api import (
     spawn_stats_sync,
     spawn_wait_sync,
 )
-from meridian.lib.ops.spawn.log import SpawnLogInput, spawn_log_sync
 from meridian.lib.ops.spawn.query import resolve_spawn_reference
 from meridian.lib.state import spawn_store
 
@@ -686,35 +685,6 @@ def _spawn_files(
         emit(result)
 
 
-def _spawn_log(
-    emit: Any,
-    spawn_id: Annotated[
-        str,
-        Parameter(help="Spawn id or reference (e.g. @latest, @last-failed)."),
-    ],
-    last_n: Annotated[
-        int,
-        Parameter(name=["--last", "-n"], help="Number of assistant messages to show."),
-    ] = 3,
-    offset: Annotated[
-        int,
-        Parameter(
-            name="--offset",
-            help="Skip this many assistant messages from the end.",
-        ),
-    ] = 0,
-) -> None:
-    emit(
-        spawn_log_sync(
-            SpawnLogInput(
-                spawn_id=spawn_id,
-                last_n=last_n,
-                offset=offset,
-            )
-        )
-    )
-
-
 def _spawn_inject(
     spawn_id: Annotated[
         str,
@@ -738,13 +708,24 @@ def _spawn_inject(
     )
 
 
+def _spawn_log_removed(
+    spawn_id: Annotated[
+        str,
+        Parameter(help="Spawn id."),
+    ],
+) -> None:
+    raise ValueError(
+        "`meridian spawn log` was removed. Use "
+        f"`meridian session log {spawn_id}` for spawn progress or transcript output."
+    )
+
+
 def register_spawn_commands(app: App, emit: Emitter) -> tuple[set[str], dict[str, str]]:
     """Register spawn CLI commands using registry metadata as source of truth."""
 
     handlers: dict[str, Callable[[], Callable[..., None]]] = {
         "spawn.children": lambda: partial(_spawn_children, emit),
         "spawn.files": lambda: partial(_spawn_files, emit),
-        "spawn.log": lambda: partial(_spawn_log, emit),
         "spawn.list": lambda: partial(_spawn_list, emit),
         "spawn.stats": lambda: partial(_spawn_stats, emit),
         "spawn.show": lambda: partial(_spawn_show, emit),
@@ -766,5 +747,11 @@ def register_spawn_commands(app: App, emit: Emitter) -> tuple[set[str], dict[str
     registered.add("spawn.inject")
     descriptions["spawn.inject"] = (
         "Inject a message or interrupt request into a running streaming spawn."
+    )
+    app.command(
+        _spawn_log_removed,
+        name="log",
+        help="Removed. Use `meridian session log ID`.",
+        show=False,
     )
     return registered, descriptions

@@ -135,7 +135,7 @@ Each spawn writes to `.meridian/spawns/<spawn_id>/`:
 | File | Contents |
 | ---- | -------- |
 | `report.md` | Agent's final report |
-| `output.jsonl` | Raw harness output (use `meridian spawn log`) |
+| `output.jsonl` | Raw harness output (surfaced through `meridian session log <spawn_id>`) |
 | `stderr.log` | Harness stderr, warnings, errors |
 | `prompt.md` | Materialized prompt sent to the harness |
 

@@ -120,12 +120,6 @@ from meridian.lib.ops.spawn.api import (
     spawn_wait,
     spawn_wait_sync,
 )
-from meridian.lib.ops.spawn.log import (
-    SpawnLogInput,
-    SpawnLogOutput,
-    spawn_log,
-    spawn_log_sync,
-)
 from meridian.lib.ops.work_dashboard import (
     WorkListInput,
     WorkListOutput,
@@ -476,18 +470,6 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
         cli_group="spawn",
         cli_name="files",
         mcp_name="spawn_files",
-        surfaces=frozenset({"cli"}),
-    ),
-    _spec(
-        name="spawn.log",
-        description="Show recent assistant messages extracted from a spawn's output.jsonl.",
-        handler=spawn_log,
-        sync_handler=spawn_log_sync,
-        input_type=SpawnLogInput,
-        output_type=SpawnLogOutput,
-        cli_group="spawn",
-        cli_name="log",
-        mcp_name="spawn_log",
         surfaces=frozenset({"cli"}),
     ),
     _spec(

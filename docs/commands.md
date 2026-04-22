@@ -11,7 +11,6 @@ Full command surface. Use `--help` on any command for flags and options.
 | `meridian spawn list` | See running and recent spawns |
 | `meridian spawn wait ID` | Block until a spawn completes |
 | `meridian spawn show ID` | Read a spawn's report and status |
-| `meridian spawn log ID` | Stream raw spawn output |
 | `meridian spawn --continue ID -p "more"` | Resume a prior spawn with new input |
 | `meridian spawn --from REF -p "next"` | Start a new spawn with prior spawn or chat/session context |
 | `meridian spawn cancel ID` | Cancel a running spawn |
@@ -38,7 +37,7 @@ Common `spawn` flags:
 | Command | Description |
 | ------- | ----------- |
 | `meridian report search "query"` | Search across all spawn reports |
-| `meridian session log REF` | Read a session transcript |
+| `meridian session log REF` | Read conversation/progress logs for a chat, spawn, or harness session |
 | `meridian session search "query" REF` | Search session transcripts |
 
 ## Work Items

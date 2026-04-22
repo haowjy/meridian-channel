@@ -439,8 +439,16 @@ class SpawnDetailOutput(BaseModel):
             ("Cost", cost_value),
             ("Report", self.report_path),
             ("Last message", self.last_message),
-            ("Log", self.log_path),
-            ("Hint", f"tail -f {self.log_path}" if self.log_path else None),
+            (
+                "Progress",
+                f"meridian session log {self.spawn_id}" if self.log_path else None,
+            ),
+            (
+                "Transcript",
+                f"meridian session log {self.spawn_id}"
+                if self.harness_session_id and self.harness_session_id.strip()
+                else None,
+            ),
         ]
         return kv_block(pairs) + self._report_suffix()
 

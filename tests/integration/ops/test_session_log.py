@@ -16,6 +16,12 @@ from meridian.lib.state import session_store, spawn_store
 from meridian.lib.state.paths import resolve_runtime_state_root
 
 
+def _write_spawn_output(state_root: Path, spawn_id: str, *events: dict[str, object]) -> None:
+    output_path = state_root / "spawns" / spawn_id / "output.jsonl"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("\n".join(json.dumps(event) for event in events) + "\n")
+
+
 def test_parse_session_file_splits_segments_on_compaction_boundary(tmp_path) -> None:
     session_file = tmp_path / "session.jsonl"
     lines = [
@@ -167,8 +173,101 @@ def test_resolve_target_chat_missing_harness_session_id_reports_unavailable_tran
             )
         assert str(exc.value) == (
             "Session 'c1' exists but no transcript is available yet "
-            "(no harness session id recorded)"
+            "(no harness session id recorded)."
         )
+    finally:
+        session_store.stop_session(state_root, chat_id)
+
+
+def test_session_log_spawn_missing_harness_session_id_reads_live_output(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    state_root = resolve_runtime_state_root(repo_root)
+    state_root.mkdir(parents=True, exist_ok=True)
+
+    spawn_store.start_spawn(
+        state_root,
+        spawn_id="p42",
+        chat_id="c42",
+        model="gpt-5.4",
+        agent="coder",
+        harness="codex",
+        prompt="do thing",
+        harness_session_id="",
+    )
+    _write_spawn_output(
+        state_root,
+        "p42",
+        {
+            "event_type": "item/completed",
+            "harness_id": "codex",
+            "payload": {
+                "item": {"type": "agentMessage", "text": "live progress"},
+            },
+        },
+    )
+
+    output = session_log_sync(
+        SessionLogInput(ref="p42", repo_root=repo_root.as_posix(), last_n=5)
+    )
+
+    assert output.session_id == "p42"
+    assert output.source == "spawn p42 output"
+    assert [(message.role, message.content) for message in output.messages] == [
+        ("assistant", "live progress")
+    ]
+
+
+def test_session_log_chat_missing_harness_session_id_reads_primary_spawn_output(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    state_root = resolve_runtime_state_root(repo_root)
+    state_root.mkdir(parents=True, exist_ok=True)
+
+    chat_id = session_store.start_session(
+        state_root,
+        harness="codex",
+        harness_session_id="",
+        model="gpt-5.4",
+        chat_id="c42",
+    )
+    try:
+        spawn_store.start_spawn(
+            state_root,
+            spawn_id="p42",
+            chat_id=chat_id,
+            model="gpt-5.4",
+            agent="dev-orchestrator",
+            harness="codex",
+            kind="primary",
+            prompt="do thing",
+            harness_session_id="",
+        )
+        _write_spawn_output(
+            state_root,
+            "p42",
+            {
+                "event_type": "item/completed",
+                "harness_id": "codex",
+                "payload": {
+                    "item": {"type": "agentMessage", "text": "primary live progress"},
+                },
+            },
+        )
+
+        output = session_log_sync(
+            SessionLogInput(ref=chat_id, repo_root=repo_root.as_posix(), last_n=5)
+        )
+
+        assert output.session_id == chat_id
+        assert output.source == "spawn p42 output"
+        assert [(message.role, message.content) for message in output.messages] == [
+            ("assistant", "primary live progress")
+        ]
     finally:
         session_store.stop_session(state_root, chat_id)
 

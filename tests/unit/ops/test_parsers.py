@@ -1,15 +1,22 @@
-"""Parser regressions for running-spawn query and spawn-log extraction."""
+"""Parser regressions for running-spawn query and session-log extraction."""
 
 from __future__ import annotations
 
 import json
 
-from meridian.lib.ops.spawn.log import _extract_assistant_messages
+from meridian.lib.ops.session_log import parse_session_file
 from meridian.lib.ops.spawn.query import extract_last_assistant_message
 
 
 def _jsonl(*events: dict[str, object]) -> str:
     return "\n".join(json.dumps(event) for event in events)
+
+
+def _parse_messages(tmp_path, raw: str) -> list[tuple[str, str]]:
+    output_path = tmp_path / "output.jsonl"
+    output_path.write_text(raw + "\n", encoding="utf-8")
+    segments, _ = parse_session_file(output_path)
+    return [(item.role, item.content) for item in segments[0]]
 
 
 def test_extract_last_assistant_message_handles_markers_and_json_events() -> None:
@@ -47,8 +54,9 @@ def test_extract_last_assistant_message_handles_markers_and_json_events() -> Non
     assert extract_last_assistant_message(json_event_text) == "json assistant message"
 
 
-def test_extract_assistant_messages_parses_structured_harness_events() -> None:
-    output = _extract_assistant_messages(
+def test_session_log_parser_handles_structured_harness_events(tmp_path) -> None:
+    output_path = tmp_path / "output.jsonl"
+    output_path.write_text(
         _jsonl(
             {
                 "type": "assistant",
@@ -58,10 +66,12 @@ def test_extract_assistant_messages_parses_structured_harness_events() -> None:
                 "type": "assistant",
                 "content": [{"type": "text", "text": "assistant fallback"}],
             },
-            {"type": "assistant", "message": "assistant fallback"},
             {
-                "type": "item.completed",
-                "item": {"type": "agent_message", "text": "codex message"},
+                "event_type": "item/completed",
+                "harness_id": "codex",
+                "payload": {
+                    "item": {"type": "agentMessage", "text": "codex message"},
+                },
             },
             {
                 "type": "progress",
@@ -74,13 +84,24 @@ def test_extract_assistant_messages_parses_structured_harness_events() -> None:
             },
             {"type": "rate_limit_event", "message": "ignored"},
         )
+        + "\n",
+        encoding="utf-8",
     )
 
-    assert output == ["nested message", "assistant fallback", "codex message", "wrapped"]
+    segments, total_compactions = parse_session_file(output_path)
+
+    assert total_compactions == 0
+    assert [(item.role, item.content) for item in segments[0]] == [
+        ("assistant", "nested message"),
+        ("assistant", "assistant fallback"),
+        ("assistant", "codex message"),
+        ("assistant", "wrapped"),
+    ]
 
 
-def test_extract_assistant_messages_parses_streaming_codex_event_shapes() -> None:
-    output = _extract_assistant_messages(
+def test_session_log_parser_handles_streaming_codex_event_shapes(tmp_path) -> None:
+    output = _parse_messages(
+        tmp_path,
         _jsonl(
             {
                 "event_type": "item/completed",
@@ -89,26 +110,30 @@ def test_extract_assistant_messages_parses_streaming_codex_event_shapes() -> Non
         )
     )
 
-    assert output == ["streamed codex message"]
+    assert output == [("assistant", "streamed codex message")]
 
 
-def test_extract_assistant_messages_parses_unstructured_assistant_fallbacks() -> None:
-    output = _extract_assistant_messages(
+def test_session_log_parser_handles_unstructured_assistant_fallbacks(tmp_path) -> None:
+    output = _parse_messages(
+        tmp_path,
         _jsonl(
             {"role": "assistant", "content": "generic fallback"},
             {"type": "assistant", "text": "json assistant message"},
         )
     )
 
-    assert output == ["generic fallback", "json assistant message"]
+    assert output == [
+        ("assistant", "generic fallback"),
+        ("assistant", "json assistant message"),
+    ]
 
 
-def test_extract_assistant_messages_returns_empty_for_empty_or_whitespace_input() -> None:
-    assert _extract_assistant_messages("") == []
-    assert _extract_assistant_messages("\n \n\t\n") == []
+def test_session_log_parser_returns_empty_for_empty_or_whitespace_input(tmp_path) -> None:
+    assert _parse_messages(tmp_path, "") == []
+    assert _parse_messages(tmp_path, "\n \n\t\n") == []
 
 
-def test_extract_assistant_messages_skips_malformed_or_non_assistant_payloads() -> None:
+def test_session_log_parser_skips_malformed_or_non_assistant_payloads(tmp_path) -> None:
     raw = "\n".join(
         [
             "{not-json}",
@@ -118,4 +143,4 @@ def test_extract_assistant_messages_skips_malformed_or_non_assistant_payloads() 
         ]
     )
 
-    assert _extract_assistant_messages(raw) == ["kept"]
+    assert _parse_messages(tmp_path, raw) == [("assistant", "kept")]

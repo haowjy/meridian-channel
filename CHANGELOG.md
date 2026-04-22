@@ -10,9 +10,11 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 - Launch artifacts now write from one shared projection path. Primary uses adapter `ProjectedContent` as authority for `system-prompt.md`, `starting-prompt.md`, and `projection-manifest.json`.
 - Spawn prepare now excludes OpenCode native-injected files from inline prompt content, so `--file` delivery is single path, not duplicated inline+native.
+- `session log` now reads active spawn `output.jsonl` when harness transcript missing, with source shown in output.
 
 ### Removed
 - Spawn execute path no longer writes legacy `prompt.md` or `delivery-manifest.json` artifacts.
+- `spawn log` command removed. Use `session log <spawn_id>`.
 
 ### Fixed
 - Projection manifest routing for Codex/OpenCode primary launches now reflects adapter-declared inline channels instead of Claude-only defaults.

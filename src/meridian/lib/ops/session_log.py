@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.config.settings import resolve_project_root
 from meridian.lib.core.context import RuntimeContext
+from meridian.lib.core.spawn_lifecycle import is_active_spawn_status
 from meridian.lib.core.types import HarnessId
 from meridian.lib.core.util import FormatContext
 from meridian.lib.harness.registry import get_default_harness_registry
@@ -61,12 +62,14 @@ class SessionLogOutput(BaseModel):
     has_newer: bool = False
     has_older: bool = False
     has_earlier_segments: bool = False
+    source: str | None = None
 
     def format_text(self, ctx: FormatContext | None = None) -> str:
         _ = ctx
         message_label = "message" if self.segment_messages == 1 else "messages"
+        source = f" ({self.source})" if self.source else ""
         lines = [
-            f"Session {self.session_id} — segment {self.segment}, "
+            f"Session {self.session_id}{source} — segment {self.segment}, "
             f"{self.segment_messages} {message_label} (showing {self.showing})"
         ]
         for message in self.messages:
@@ -90,6 +93,7 @@ class _ResolvedTarget(NamedTuple):
     session_id: str
     harness: str | None
     file_path: Path
+    source: str
 
 
 def _normalize_text(value: str) -> str:
@@ -220,15 +224,15 @@ def _extract_codex_response_item(payload: dict[str, object]) -> list[TranscriptM
 
 
 def _extract_codex_exec_item(item: dict[str, object]) -> list[TranscriptMessage]:
-    item_type = str(item.get("type", "")).strip().lower()
-    if item_type == "agent_message":
+    item_type = str(item.get("type", "")).strip().lower().replace("_", "").replace("-", "")
+    if item_type == "agentmessage":
         text = text_from_value(item.get("text"))
         if not text:
             return []
         return [TranscriptMessage(role="assistant", content=text)]
 
-    if item_type == "command_execution":
-        output = text_from_value(item.get("aggregated_output"))
+    if item_type == "commandexecution":
+        output = text_from_value(item.get("aggregated_output") or item.get("aggregatedOutput"))
         command = text_from_value(item.get("command"))
         if output:
             return [TranscriptMessage(role="user", content=f"[tool_result] {output}")]
@@ -241,7 +245,15 @@ def _extract_codex_exec_item(item: dict[str, object]) -> list[TranscriptMessage]
 
 
 def _extract_from_event(payload: dict[str, object]) -> tuple[list[TranscriptMessage], bool]:
-    event_type = str(payload.get("type", "")).strip().lower()
+    raw_event_type = str(
+        payload.get("event_type", payload.get("event", payload.get("type", "")))
+    )
+    event_type = raw_event_type.strip().lower().replace("/", ".")
+
+    if "event_type" in payload and isinstance(payload.get("payload"), dict):
+        nested = dict(cast("dict[str, object]", payload["payload"]))
+        nested.setdefault("event_type", payload["event_type"])
+        return _extract_from_event(nested)
 
     # Claude compaction boundary.
     is_boundary = (
@@ -269,6 +281,13 @@ def _extract_from_event(payload: dict[str, object]) -> tuple[list[TranscriptMess
             extracted = _extract_claude_content(role, content)
             if extracted:
                 return extracted, is_boundary
+        extracted = _extract_claude_content(role, payload.get("content"))
+        if extracted:
+            return extracted, is_boundary
+        raw_text = message if isinstance(message, str) else payload.get("text")
+        text = text_from_value(raw_text)
+        if text:
+            return ([TranscriptMessage(role=role, content=text)], is_boundary)
         fallback_text = text_from_value(payload.get("tool_use_result"))
         if role == "user" and fallback_text:
             return (
@@ -354,6 +373,7 @@ def _resolve_file_target(file_path: str) -> _ResolvedTarget:
         session_id=_extract_session_id_from_path(resolved),
         harness=harness,
         file_path=resolved,
+        source="file",
     )
 
 
@@ -388,6 +408,7 @@ def _resolve_harness_session_file(
                 session_id=normalized_session_id,
                 harness=str(harness_id),
                 file_path=candidate,
+                source=f"{harness_id} transcript",
             )
         raise FileNotFoundError(
             f"Session file for '{normalized_session_id}' (harness={normalized_harness}) not found"
@@ -409,6 +430,7 @@ def _resolve_harness_session_file(
                 session_id=normalized_session_id,
                 harness=str(harness_id),
                 file_path=candidate,
+                source=f"{harness_id} transcript",
             )
 
     checked = ", ".join(checked_harnesses) if checked_harnesses else "<none>"
@@ -417,17 +439,76 @@ def _resolve_harness_session_file(
     )
 
 
+def _spawn_output_path(state_root: Path, spawn_id: str, *, live_first: bool) -> Path | None:
+    live_path = state_root / "spawns" / spawn_id / "output.jsonl"
+    artifact_path = state_root / "artifacts" / spawn_id / "output.jsonl"
+    candidates = (
+        (live_path, artifact_path) if live_first else (artifact_path, live_path)
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _target_from_spawn_output(
+    state_root: Path,
+    *,
+    display_id: str,
+    spawn_id: str,
+    live_first: bool,
+) -> _ResolvedTarget | None:
+    output_path = _spawn_output_path(state_root, spawn_id, live_first=live_first)
+    if output_path is None:
+        return None
+    return _ResolvedTarget(
+        session_id=display_id,
+        harness=None,
+        file_path=output_path,
+        source=f"spawn {spawn_id} output",
+    )
+
+
+def _primary_spawn_for_chat(state_root: Path, chat_id: str) -> spawn_store.SpawnRecord | None:
+    from meridian.lib.state.reaper import reconcile_spawns
+
+    spawns = reconcile_spawns(
+        state_root,
+        spawn_store.list_spawns(state_root, filters={"chat_id": chat_id}),
+    )
+    primary_spawns = [row for row in spawns if row.kind == "primary"]
+    if not primary_spawns:
+        return None
+    return primary_spawns[-1]
+
+
 def _resolve_from_chat_id(
     *,
     repo_root: Path,
+    state_root: Path,
     chat_id: str,
 ) -> _ResolvedTarget:
     resolved = resolve_session_reference(repo_root, chat_id)
     if not resolved.tracked:
         raise ValueError(f"Chat '{chat_id}' not found")
+    primary_spawn = _primary_spawn_for_chat(state_root, chat_id)
+    if (
+        primary_spawn is not None
+        and is_active_spawn_status(primary_spawn.status)
+        and (
+            output_target := _target_from_spawn_output(
+                state_root,
+                display_id=chat_id,
+                spawn_id=primary_spawn.id,
+                live_first=True,
+            )
+        )
+        is not None
+    ):
+        return output_target
+
     if resolved.missing_harness_session_id:
         # Fallback: check if the primary spawn for this chat has a harness session id
-        state_root = resolve_state_root_for_read(repo_root)
         spawns = spawn_store.list_spawns(state_root, filters={"chat_id": chat_id})
         fallback_session_id: str | None = None
         fallback_harness: str | None = resolved.harness
@@ -444,20 +525,46 @@ def _resolve_from_chat_id(
                 session_id=fallback_session_id,
                 harness=fallback_harness,
             )
+        if primary_spawn is not None and (
+            output_target := _target_from_spawn_output(
+                state_root,
+                display_id=chat_id,
+                spawn_id=primary_spawn.id,
+                live_first=True,
+            )
+        ):
+            return output_target
+        if spawns:
+            raise ValueError(
+                f"Session '{chat_id}' exists but no transcript is available yet "
+                "(no harness session id recorded and no spawn output found)."
+            )
         raise ValueError(
             f"Session '{chat_id}' exists but no transcript is available yet "
-            "(no harness session id recorded)"
+            "(no harness session id recorded)."
         )
 
     normalized_session_id = resolved.harness_session_id
     if normalized_session_id is None:
         raise ValueError(f"Chat '{chat_id}' not found")
 
-    return _resolve_harness_session_file(
-        repo_root=repo_root,
-        session_id=normalized_session_id,
-        harness=resolved.harness,
-    )
+    try:
+        return _resolve_harness_session_file(
+            repo_root=repo_root,
+            session_id=normalized_session_id,
+            harness=resolved.harness,
+        )
+    except FileNotFoundError:
+        if primary_spawn is not None and (
+            output_target := _target_from_spawn_output(
+                state_root,
+                display_id=chat_id,
+                spawn_id=primary_spawn.id,
+                live_first=True,
+            )
+        ):
+            return output_target
+        raise
 
 
 def _resolve_from_spawn_id(
@@ -470,6 +577,16 @@ def _resolve_from_spawn_id(
     if row is None:
         raise ValueError(f"Spawn '{spawn_id}' not found")
 
+    if is_active_spawn_status(row.status) and (
+        output_target := _target_from_spawn_output(
+            state_root,
+            display_id=spawn_id,
+            spawn_id=spawn_id,
+            live_first=True,
+        )
+    ):
+        return output_target
+
     session_id = (row.harness_session_id or "").strip()
     harness = (row.harness or "").strip() or None
 
@@ -478,18 +595,40 @@ def _resolve_from_spawn_id(
         session_id = (by_chat or "").strip()
 
     if not session_id:
-        raise ValueError(f"Spawn '{spawn_id}' has no associated harness session id")
+        output_target = _target_from_spawn_output(
+            state_root,
+            display_id=spawn_id,
+            spawn_id=spawn_id,
+            live_first=True,
+        )
+        if output_target is not None:
+            return output_target
+        raise ValueError(
+            f"Spawn '{spawn_id}' has no transcript available yet "
+            "(no harness session id recorded and no spawn output found)."
+        )
 
     if harness is None:
         record = session_store.resolve_session_ref(state_root, session_id)
         if record is not None and record.harness.strip():
             harness = record.harness.strip()
 
-    return _resolve_harness_session_file(
-        repo_root=repo_root,
-        session_id=session_id,
-        harness=harness,
-    )
+    try:
+        return _resolve_harness_session_file(
+            repo_root=repo_root,
+            session_id=session_id,
+            harness=harness,
+        )
+    except FileNotFoundError:
+        output_target = _target_from_spawn_output(
+            state_root,
+            display_id=spawn_id,
+            spawn_id=spawn_id,
+            live_first=False,
+        )
+        if output_target is not None:
+            return output_target
+        raise
 
 
 def _resolve_from_session_ref(
@@ -528,9 +667,9 @@ def resolve_target(
         raise ValueError("Session reference is required unless --file is provided")
 
     if ref.startswith("c") and ref[1:].isdigit():
-        return _resolve_from_chat_id(repo_root=repo_root, chat_id=ref)
+        return _resolve_from_chat_id(repo_root=repo_root, state_root=state_root, chat_id=ref)
 
-    if ref.startswith("p"):
+    if ref.startswith("p") and ref[1:].isdigit():
         return _resolve_from_spawn_id(repo_root=repo_root, state_root=state_root, spawn_id=ref)
 
     return _resolve_from_session_ref(repo_root=repo_root, state_root=state_root, session_ref=ref)
@@ -615,6 +754,7 @@ def session_log_sync(
         has_newer=payload.offset > 0,
         has_older=start_index > 0,
         has_earlier_segments=total_compactions > payload.compaction,
+        source=target.source,
     )
 
 
