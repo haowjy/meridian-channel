@@ -163,7 +163,7 @@ def _runtime_root_override_value() -> str:
     if override:
         return override
     # Transitional fallback while callers migrate env var naming.
-    return os.getenv("MERIDIAN_STATE_ROOT", "").strip()
+    return os.getenv("MERIDIAN_DATA_DIR", "").strip()
 
 
 def _resolve_project_runtime_root(project_root: Path) -> Path:
