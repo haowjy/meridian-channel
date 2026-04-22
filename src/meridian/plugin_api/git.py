@@ -40,7 +40,7 @@ def resolve_clone_path(repo_url: str) -> Path:
 
     Priority:
     1. ``[git."<url>"].path`` override from user config
-    2. ``<user_state_root>/git/<generated-slug>``
+    2. ``<meridian_home>/git/<generated-slug>``
     """
 
     normalized_repo_url = normalize_repo_url(repo_url)

@@ -10,7 +10,7 @@ from meridian.plugin_api.state import get_user_home
 
 
 def get_user_config() -> dict[str, Any]:
-    """Load user config from ``<user_state_root>/config.toml``.
+    """Load user config from ``<meridian_home>/config.toml``.
 
     Returns an empty mapping if the config file is missing.
     Raises ``tomllib.TOMLDecodeError`` when config content is invalid.
