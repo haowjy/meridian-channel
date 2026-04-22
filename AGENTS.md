@@ -26,6 +26,7 @@ No real users, no real user data. No backwards compatibility needed — complete
 5. **Idempotent Operations**: `meridian sync` twice = same result. Re-running after a crash converges to correct state, never doubles side effects.
 6. **Windows Is First-Class**: Windows support is a product requirement, not cleanup work. Do not ship path logic, process behavior, filesystem assumptions, or tests that only work on POSIX unless the limitation is explicitly accepted and documented. Design root discovery, env handling, locking, signals, shell invocation, and smoke-test coverage with Windows semantics in mind from the start.
 7. **Prefer Cross-Platform Abstractions**: In Rust, default to `std` and mature cross-platform crates over handwritten OS-specific branches. Use direct platform-specific APIs only behind narrow adapter boundaries and only when a cross-platform abstraction is insufficient. A dependency that deletes platform-specific code and test matrix burden is a simplification, not bloat.
+8. **No VCS Dependency for Core Functionality**: Meridian must work in plain directories without git. Git metadata (remotes, commit history, worktree structure) may be used as optional hints or heuristics, but core operations — project identity, state resolution, spawn coordination, session tracking — must not require a git repository.
 
 ### Architecture
 
@@ -123,7 +124,7 @@ scripts/release.sh 0.2.0 --push   # explicit version, push tag
 
 All three repos maintain a `CHANGELOG.md` at their root: `meridian-channel`, `meridian-base`, and `meridian-dev-workflow`. Format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), written in **caveman style** — terse, fragment-friendly, filler-free. Technical terms, agent names, file paths, and code blocks stay exact; only prose fluff gets compressed. See the `caveman` skill for the full ruleset.
 
-Write entries at commit time in an `[Unreleased]` section, not retroactively — reasoning flattens the longer you wait. When cutting a release, rename `[Unreleased]` to `[X.Y.Z] - YYYY-MM-DD` and open a fresh empty `[Unreleased]` above it. Entry style: focus on behavioral changes downstream users will notice. For agent/skill repos the "API" is the prompt shape, so describe what agents now do differently, not which lines moved.
+Write entries at commit time in an `[Unreleased]` section, not retroactively — reasoning flattens the longer you wait. Proactive update this CHANGELOG. When cutting a release, rename `[Unreleased]` to `[X.Y.Z] - YYYY-MM-DD` and open a fresh empty `[Unreleased]` above it. Entry style: focus on behavioral changes downstream users will notice. For agent/skill repos the "API" is the prompt shape, so describe what agents now do differently, not which lines moved.
 
 Standard shape at any tagged commit:
 
@@ -163,7 +164,7 @@ Commit after each step that passes tests. Don't accumulate changes across multip
 
 ## Related Repos
 
-- **mars-agents** (`../mars-agents/`): Standalone agent package manager for `.agents/`. Rust CLI, binary name `mars`. Meridian invokes it via `meridian mars ...` for project package setup and sync. Design spec in `.meridian/work/agent-package-management/design/`. Repo: `meridian-flow/mars-agents`.
+- **mars-agents** (`../mars-agents/`): Standalone agent package manager for `.agents/`. Rust CLI, binary name `mars`. Meridian invokes it via `meridian mars ...` for project package setup and sync. Repo: `meridian-flow/mars-agents`.
 
 ### Cross-Platform Paths
 
