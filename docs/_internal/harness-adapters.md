@@ -142,15 +142,35 @@ Those are currently runner hooks, not normal `meridian spawn` user features:
 
 Bare `meridian` launches a primary harness session. `meridian --continue` resumes from prior session context when supported.
 
-If the selected primary profile is an on-disk user profile, Meridian uses Claude native profile passthrough:
+### Content Channel Routing
 
-- `claude --agent <profile> --append-system-prompt <primary prompt> --model <model>`
+Primary launches classify composed content into three semantic categories before passing to the harness adapter:
 
-Otherwise Meridian composes the prompt and passes it via `--system-prompt`.
+| Category | What's in it |
+|---|---|
+| `SYSTEM_INSTRUCTION` | Skills, agent profile body, report instruction, agent inventory, passthrough `--append-system-prompt` fragments |
+| `USER_TASK_PROMPT` | User-supplied request text (`-p` / `--prompt-file`) |
+| `TASK_CONTEXT` | Reference files (`-f`), prior-run output (`--from`) |
 
-Fresh and forked primary launches now also inject an installed agent catalog:
+Each harness adapter decides how to route these categories to its native CLI channels:
 
-- Claude: agent inventory is included in the `--append-system-prompt` payload
+| Category | Claude | Codex | OpenCode |
+|---|---|---|---|
+| `SYSTEM_INSTRUCTION` | `--append-system-prompt-file` | inline (top) | inline |
+| `USER_TASK_PROMPT` | positional argument | inline (after system) | inline |
+| `TASK_CONTEXT` | user-turn (prepended to prompt) | inline (after prompt) | native `--file` or inline |
+
+For Claude native profile passthrough, Meridian uses:
+
+```
+claude --agent <profile> --append-system-prompt <inventory> --model <model>
+```
+
+For composed (non-native) launches, Meridian routes system content to `--append-system-prompt-file` and user task content as a positional argument.
+
+Fresh and forked primary launches inject an installed agent catalog as `SYSTEM_INSTRUCTION`:
+
+- Claude: agent inventory is included in the `--append-system-prompt-file` payload
 - Codex: agent inventory is flattened into the inline primary prompt
 - OpenCode: agent inventory is flattened into the inline primary prompt
 
@@ -158,6 +178,32 @@ This startup inventory is additive. It does not replace the harness-specific
 loading/injection path for the selected agent profile body or its skills.
 
 Resume launches keep the existing behavior and do not receive a newly composed startup inventory block.
+
+### Observability Artifacts
+
+After every primary launch, Meridian writes artifacts to the spawn log directory (`.meridian/spawns/<id>/`) that expose how content was routed:
+
+| Artifact | Content | Written when |
+|---|---|---|
+| `system-prompt.md` | `SYSTEM_INSTRUCTION` content as sent to the system-prompt channel | System-prompt content exists (Claude only) |
+| `starting-prompt.md` | Full user-turn content (`USER_TASK_PROMPT` + prepended `TASK_CONTEXT`) | User-turn content exists |
+| `projection-manifest.json` | Harness ID, surface, and per-category channel routing decisions | Every primary launch |
+
+`projection-manifest.json` schema:
+
+```json
+{
+  "harness": "claude" | "codex" | "opencode",
+  "surface": "primary",
+  "channels": {
+    "system_instruction": "append-system-prompt" | "inline" | "none",
+    "user_task_prompt": "user-turn" | "inline",
+    "task_context": "user-turn" | "inline" | "native-injection"
+  }
+}
+```
+
+Spawn (non-primary) artifact writing uses `prompt.md` via the legacy `filter_launch_content()` path, which remains unchanged for backward compatibility.
 
 ## Session Continuation Fields
 

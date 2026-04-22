@@ -258,6 +258,10 @@ graph TD
     Sp1 --> Err["stderr.log"]
     Sp1 --> Tok["tokens.json"]
     Sp1 --> Rep["report.md"]
+    Sp1 --> SysP["system-prompt.md (primary only)"]
+    Sp1 --> StartP["starting-prompt.md (primary only)"]
+    Sp1 --> ProjM["projection-manifest.json (primary only)"]
+    Sp1 --> PrompMD["prompt.md (spawn only)"]
 ```
 
 `work-items/` is the authoritative store for repo-scoped work coordination metadata.
@@ -309,7 +313,8 @@ graph TD
     Proto --- PS["parse_stream_event()<br/>stdout line -> StreamEvent"]
     Proto --- EU["extract_usage()<br/>artifacts -> TokenUsage"]
     Proto --- SS["seed_session()<br/>resume/fork control"]
-    Proto --- FC["filter_launch_content()<br/>prompt policy"]
+    Proto --- FC["filter_launch_content()<br/>prompt policy (spawn resume/fork)"]
+    Proto --- PC["project_content()<br/>semantic channel routing (primary)"]
 ```
 
 Each adapter translates `SpawnParams` into native CLI args:
