@@ -124,7 +124,7 @@ class ChildEnvContext:
             except Exception:
                 work_id = None
 
-        resolved_project_root = project_paths.execution_cwd.resolve()
+        resolved_project_root = project_paths.project_root.resolve()
         repo_paths = resolve_project_paths(resolved_project_root)
         project_state_dir = repo_paths.root_dir
         work_dir = (
@@ -133,8 +133,10 @@ class ChildEnvContext:
         kb_dir = repo_paths.kb_dir
 
         return cls(
-            # Keep launch semantics unchanged: runtime project_root follows the
-            # execution cwd used by the child process.
+            # Keep MERIDIAN_PROJECT_DIR anchored to the repo/config root. The
+            # harness process may run from a spawn artifact directory for
+            # Claude-in-Claude isolation, but nested meridian commands still
+            # need repo-local profiles, skills, and config.
             parent_spawn_id=parent_spawn_id,
             project_root=resolved_project_root,
             runtime_root=resolved_runtime_root,

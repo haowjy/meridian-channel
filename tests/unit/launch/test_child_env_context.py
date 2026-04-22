@@ -41,13 +41,13 @@ def test_child_env_context_from_environment_uses_resolved_context_parent_fields(
 
     assert resolved == ChildEnvContext(
         parent_spawn_id=None,
-        project_root=project_paths.execution_cwd.resolve(),
+        project_root=project_paths.project_root.resolve(),
         runtime_root=runtime_state_root.resolve(),
         parent_chat_id="parent-chat",
         parent_depth=3,
         work_id="work-explicit",
-        work_dir=(project_paths.execution_cwd / ".meridian" / "work" / "work-explicit").resolve(),
-        kb_dir=(project_paths.execution_cwd / ".meridian" / "kb").resolve(),
+        work_dir=(project_paths.project_root / ".meridian" / "work" / "work-explicit").resolve(),
+        kb_dir=(project_paths.project_root / ".meridian" / "kb").resolve(),
         context_dirs=(),
     )
 
@@ -85,9 +85,9 @@ def test_child_env_context_from_environment_falls_back_to_session_lookup(
     assert seen_lookup == [(runtime_state_root.resolve(), "chat-lookup")]
     assert resolved.work_id == "work-session"
     assert resolved.work_dir == (
-        project_paths.execution_cwd / ".meridian" / "work" / "work-session"
+        project_paths.project_root / ".meridian" / "work" / "work-session"
     ).resolve()
-    assert resolved.kb_dir == (project_paths.execution_cwd / ".meridian" / "kb").resolve()
+    assert resolved.kb_dir == (project_paths.project_root / ".meridian" / "kb").resolve()
 
 
 def test_child_env_context_from_environment_ignores_session_lookup_failures(
@@ -120,7 +120,40 @@ def test_child_env_context_from_environment_ignores_session_lookup_failures(
 
     assert resolved.work_id is None
     assert resolved.work_dir is None
-    assert resolved.kb_dir == (project_paths.execution_cwd / ".meridian" / "kb").resolve()
+    assert resolved.kb_dir == (project_paths.project_root / ".meridian" / "kb").resolve()
+
+
+def test_child_env_context_keeps_repo_root_when_execution_cwd_is_spawn_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "repo"
+    execution_cwd = tmp_path / "runtime" / "spawns" / "p123"
+    project_root.mkdir()
+    execution_cwd.mkdir(parents=True)
+    project_paths = ProjectConfigPaths(project_root=project_root, execution_cwd=execution_cwd)
+    runtime_state_root = tmp_path / "runtime"
+    monkeypatch.setenv("MERIDIAN_WORK_ID", "nested-spawn")
+
+    def fake_from_environment(cls) -> ResolvedContext:
+        _ = cls
+        return ResolvedContext(depth=2, chat_id="parent-chat")
+
+    monkeypatch.setattr(ResolvedContext, "from_environment", classmethod(fake_from_environment))
+
+    resolved = ChildEnvContext.from_environment(
+        project_paths=project_paths,
+        runtime_root=runtime_state_root,
+    )
+    env = resolved.child_context(child_spawn_id="p124")
+
+    assert resolved.project_root == project_root.resolve()
+    assert resolved.work_dir == (project_root / ".meridian" / "work" / "nested-spawn").resolve()
+    assert resolved.kb_dir == (project_root / ".meridian" / "kb").resolve()
+    assert env["MERIDIAN_PROJECT_DIR"] == project_root.resolve().as_posix()
+    assert env["MERIDIAN_WORK_DIR"] == (
+        project_root / ".meridian" / "work" / "nested-spawn"
+    ).resolve().as_posix()
 
 
 def test_child_env_context_child_context_routes_through_contract_helpers(

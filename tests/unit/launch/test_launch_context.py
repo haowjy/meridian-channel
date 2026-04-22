@@ -32,14 +32,16 @@ def _build_launch_runtime(
     tmp_path: Path,
     override: str | None = None,
     argv_intent: LaunchArgvIntent = LaunchArgvIntent.REQUIRED,
+    execution_cwd: Path | None = None,
 ) -> LaunchRuntime:
+    resolved_execution_cwd = execution_cwd or tmp_path
     return LaunchRuntime(
         argv_intent=argv_intent,
         harness_command_override=override,
         report_output_path=(tmp_path / "report.md").as_posix(),
         runtime_root=(tmp_path / ".meridian").as_posix(),
         project_paths_project_root=tmp_path.as_posix(),
-        project_paths_execution_cwd=tmp_path.as_posix(),
+        project_paths_execution_cwd=resolved_execution_cwd.as_posix(),
     )
 
 
@@ -179,6 +181,32 @@ def test_build_launch_context_projects_runtime_child_env_paths(
         tmp_path / ".meridian" / "kb"
     ).as_posix()
     assert set(runtime_ctx.env_overrides) <= ALLOWED_CHILD_ENV_KEYS
+
+
+def test_build_launch_context_env_keeps_project_root_when_execution_cwd_differs(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("MERIDIAN_HARNESS_COMMAND", raising=False)
+    monkeypatch.setenv("MERIDIAN_DEPTH", "1")
+    execution_cwd = tmp_path / ".meridian" / "spawns" / "p-parent"
+    execution_cwd.mkdir(parents=True)
+    request = _build_spawn_request()
+    runtime = _build_launch_runtime(tmp_path=tmp_path, execution_cwd=execution_cwd)
+
+    runtime_ctx = build_launch_context(
+        spawn_id="p-child-env",
+        request=request,
+        runtime=runtime,
+        harness_registry=get_default_harness_registry(),
+        dry_run=True,
+    )
+
+    assert runtime_ctx.execution_cwd == execution_cwd
+    assert runtime_ctx.env_overrides["MERIDIAN_PROJECT_DIR"] == tmp_path.as_posix()
+    assert runtime_ctx.env_overrides["MERIDIAN_KB_DIR"] == (
+        tmp_path / ".meridian" / "kb"
+    ).as_posix()
 
 
 def test_build_launch_context_emits_child_spawn_id(

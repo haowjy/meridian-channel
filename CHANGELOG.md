@@ -3,6 +3,9 @@
 Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [SemVer](https://semver.org/). Versions `0.0.6` through `0.0.25` in git history only — changelog fell stale, resumed at `[Unreleased]`.
 ## [Unreleased]
 
+### Fixed
+- Nested spawns keep `MERIDIAN_PROJECT_DIR` on project root when harness cwd moves to spawn artifact dir. Agent profile lookup no longer searches `.agents/` under artifact dirs.
+
 ## [0.0.42] - 2026-04-22
 
 ### Changed

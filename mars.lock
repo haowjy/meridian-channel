@@ -16,8 +16,7 @@ commit = "8d13c0c42077c264e1a59faf6c5f756f4df5e9e2"
 
 [dependencies.meridian-dev-workflow]
 url = "https://github.com/meridian-flow/meridian-dev-workflow"
-version = "v0.1.2"
-commit = "24ec4de1814bb03f63ce8595fbbbc365b1621674"
+commit = "5655d4b5c75662f685abebc71a4ce7a3d0f75668"
 
 [dependencies.meridian-prompter]
 url = "https://github.com/meridian-flow/meridian-prompter"
@@ -51,9 +50,8 @@ dest_path = "agents/code-documenter.md"
 [items."agents/coder.md"]
 source = "meridian-dev-workflow"
 kind = "agent"
-version = "v0.0.28"
-source_checksum = "sha256:1274a956f46c0473802abef3d8a13226f4b5fdd1a85ca218212533967b3fe14d"
-installed_checksum = "sha256:1274a956f46c0473802abef3d8a13226f4b5fdd1a85ca218212533967b3fe14d"
+source_checksum = "sha256:118fb4744461c3f00eb1fa9d287a8ea71de76055949fd777640d13cad6000b9a"
+installed_checksum = "sha256:118fb4744461c3f00eb1fa9d287a8ea71de76055949fd777640d13cad6000b9a"
 dest_path = "agents/coder.md"
 
 [items."agents/design-orchestrator.md"]
@@ -91,9 +89,8 @@ dest_path = "agents/explorer.md"
 [items."agents/frontend-coder.md"]
 source = "meridian-dev-workflow"
 kind = "agent"
-version = "v0.0.28"
-source_checksum = "sha256:c7bcdf3b9570ca0854724aff8baa097c4fb3557b9a48930e52b18e6f7cc4dae0"
-installed_checksum = "sha256:c7bcdf3b9570ca0854724aff8baa097c4fb3557b9a48930e52b18e6f7cc4dae0"
+source_checksum = "sha256:12d1c4f710f863ee9d74c7545713ae59428470be3e09bb4c7e261cd8282fcc3f"
+installed_checksum = "sha256:12d1c4f710f863ee9d74c7545713ae59428470be3e09bb4c7e261cd8282fcc3f"
 dest_path = "agents/frontend-coder.md"
 
 [items."agents/frontend-designer.md"]
@@ -107,9 +104,8 @@ dest_path = "agents/frontend-designer.md"
 [items."agents/impl-orchestrator.md"]
 source = "meridian-dev-workflow"
 kind = "agent"
-version = "v0.1.2"
-source_checksum = "sha256:8b6e229a217079c6c63f4ad7e3eb512a908d3fd38962fbe17ad3380c01b40a59"
-installed_checksum = "sha256:8b6e229a217079c6c63f4ad7e3eb512a908d3fd38962fbe17ad3380c01b40a59"
+source_checksum = "sha256:f1ce25c4a0f2df0c960c67d8453c553be87c34454c9fe9c3254725c26a82dfc7"
+installed_checksum = "sha256:f1ce25c4a0f2df0c960c67d8453c553be87c34454c9fe9c3254725c26a82dfc7"
 dest_path = "agents/impl-orchestrator.md"
 
 [items."agents/integration-tester.md"]
