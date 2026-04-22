@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -8,7 +9,7 @@ from meridian.lib.state.work_store import (
     archive_work_item,
     create_work_item,
     get_work_item,
-    list_work_items,
+    list_archived_work_items,
     rename_work_item,
     reopen_work_item,
     slugify,
@@ -50,26 +51,29 @@ def test_work_item_archive_and_reopen_preserves_metadata(tmp_path: Path) -> None
     item = create_work_item(state_root, "My feature")
 
     assert get_work_item(state_root, item.name) is not None
-    assert (state_root / "work-items" / f"{item.name}.json").exists()
     active_dir = state_root / "work" / item.name
-    assert not active_dir.exists()
-
-    active_dir.mkdir(parents=True, exist_ok=True)
+    active_status = active_dir / "__status.json"
+    assert active_status.exists()
     (active_dir / "notes.md").write_text("hello", encoding="utf-8")
 
     archived = archive_work_item(state_root, item.name)
     archived_dir = state_root / "archive" / "work" / item.name
+    archived_status = archived_dir / "__status.json"
     assert archived.status == "done"
+    assert archived.archived_at is not None
     assert not active_dir.exists()
+    assert archived_status.exists()
     assert (archived_dir / "notes.md").read_text(encoding="utf-8") == "hello"
 
     reopened = reopen_work_item(state_root, item.name)
     assert reopened.status == "open"
+    assert reopened.archived_at is None
     assert not archived_dir.exists()
+    assert active_status.exists()
     assert (active_dir / "notes.md").read_text(encoding="utf-8") == "hello"
 
 
-def test_list_work_items_repairs_interrupted_archive_status(
+def test_list_archived_work_items_repairs_interrupted_archive_status(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     state_root = _state_root(tmp_path)
@@ -78,16 +82,15 @@ def test_list_work_items_repairs_interrupted_archive_status(
     update_work_item(state_root, item.name, status="blocked")
 
     active_dir = paths.work_dir / item.name
-    active_dir.mkdir(parents=True, exist_ok=True)
     (active_dir / "notes.md").write_text("hello", encoding="utf-8")
-    item_path = paths.work_items_dir / f"{item.name}.json"
+    archived_status_path = paths.work_archive_dir / item.name / "__status.json"
 
     original_atomic_write = work_store_module.atomic_write_text
     failed_once = False
 
     def crash_during_status_write(path: Path, content: str) -> None:
         nonlocal failed_once
-        if path == item_path and not failed_once:
+        if path == archived_status_path and not failed_once:
             failed_once = True
             raise OSError("simulated crash after archive move")
         original_atomic_write(path, content)
@@ -99,18 +102,19 @@ def test_list_work_items_repairs_interrupted_archive_status(
     archived_dir = paths.work_archive_dir / item.name
     assert archived_dir.exists()
     assert not active_dir.exists()
-    stale = get_work_item(state_root, item.name)
-    assert stale is not None
-    assert stale.status == "blocked"
+    stale_payload = json.loads(archived_status_path.read_text(encoding="utf-8"))
+    assert stale_payload["status"] == "blocked"
+    assert stale_payload["archived_at"] is None
 
-    repaired = [
-        candidate for candidate in list_work_items(state_root) if candidate.name == item.name
-    ]
+    repaired = list_archived_work_items(state_root, all_archived=True)
     assert len(repaired) == 1
     assert repaired[0].status == "done"
+    assert repaired[0].archived_at is not None
+
     persisted = get_work_item(state_root, item.name)
     assert persisted is not None
     assert persisted.status == "done"
+    assert persisted.archived_at is not None
 
 
 def test_archive_and_reopen_use_context_archive_path(

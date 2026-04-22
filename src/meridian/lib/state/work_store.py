@@ -1,11 +1,10 @@
-"""Metadata-backed work item store under `.meridian/work-items/`.
+"""Directory-authoritative work item store.
 
-Work items use per-file JSON rather than the JSONL event store pattern used by
-spawns and sessions.  This is intentional: work items are mutable records
-(status updates, description changes) tightly coupled to a scratch directory
-that moves on rename.  Per-file JSON gives atomic whole-record updates and
-directory-correlated naming, whereas append-only JSONL is better suited for
-the immutable event streams in spawn_store and session_store.
+Work items exist if and only if a work directory exists under:
+- active: ``work/<work-id>/``
+- archived: ``archive/work/<work-id>/``
+
+Each work directory stores mutable metadata in ``__status.json``.
 """
 
 from __future__ import annotations
@@ -13,35 +12,31 @@ from __future__ import annotations
 import json
 import re
 import shutil
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.state.atomic import atomic_write_text
-from meridian.lib.state.event_store import lock_file, utc_now_iso
+from meridian.lib.state.event_store import utc_now_iso
 from meridian.lib.state.paths import RuntimePaths
 
 _MAX_SLUG_LENGTH = 64
 _NON_ALNUM_HYPHEN = re.compile(r"[^a-z0-9-]+")
 _WHITESPACE_OR_UNDERSCORE = re.compile(r"[\s_]+")
 _REPEATED_HYPHENS = re.compile(r"-+")
+_STATUS_FILENAME = "__status.json"
 
 
 class WorkItem(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     name: str
-    description: str
+    description: str = ""
     status: str
     created_at: str
-
-
-class WorkRenameIntent(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    old_work_id: str
-    new_work_id: str
-    started_at: str
+    archived_at: str | None = None
 
 
 def slugify(label: str) -> str:
@@ -56,148 +51,285 @@ def slugify(label: str) -> str:
     return normalized
 
 
-def _work_item_path(state_root: Path, work_id: str) -> Path:
-    return RuntimePaths.from_root_dir(state_root).work_items_dir / f"{work_id}.json"
+def _status_path(work_dir: Path) -> Path:
+    return work_dir / _STATUS_FILENAME
 
 
-def _work_scratch_dir(paths: RuntimePaths, work_id: str) -> Path:
+def _active_dir(paths: RuntimePaths, work_id: str) -> Path:
     return paths.work_dir / work_id
 
 
-def _archived_work_scratch_dir(paths: RuntimePaths, work_id: str) -> Path:
+def _archived_dir(paths: RuntimePaths, work_id: str) -> Path:
     return paths.work_archive_dir / work_id
 
 
-def _locate_work_scratch_dir(paths: RuntimePaths, work_id: str) -> Path | None:
-    active_dir = _work_scratch_dir(paths, work_id)
-    archived_dir = _archived_work_scratch_dir(paths, work_id)
-    if active_dir.exists() and archived_dir.exists():
-        raise ValueError(
-            f"Work item '{work_id}' has scratch dirs in both active and archive locations."
-        )
-    if active_dir.exists():
-        return active_dir
-    if archived_dir.exists():
-        return archived_dir
-    return None
+def _format_ts(timestamp: float) -> str:
+    return datetime.fromtimestamp(timestamp, tz=UTC).isoformat().replace("+00:00", "Z")
 
 
-def _serialize_work_item(item: WorkItem) -> str:
-    return json.dumps(item.model_dump(), indent=2, sort_keys=True) + "\n"
+def _dir_mtime_iso(work_dir: Path) -> str:
+    return _format_ts(work_dir.stat().st_mtime)
 
 
-def _read_work_item(path: Path) -> WorkItem | None:
+def _serialize_status(payload: dict[str, Any]) -> str:
+    return json.dumps(payload, indent=2, sort_keys=True) + "\n"
+
+
+def _read_json_object(path: Path) -> dict[str, Any] | None:
     try:
-        return WorkItem.model_validate_json(path.read_text(encoding="utf-8"))
-    except (OSError, ValidationError, json.JSONDecodeError):
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
         return None
+    return loaded if isinstance(loaded, dict) else None
 
 
-def _reconcile_interrupted_archives_locked(paths: RuntimePaths) -> None:
-    """Repair archive operations interrupted after moving scratch but before metadata write."""
-
-    if not paths.work_items_dir.is_dir():
-        return
-    for item_path in paths.work_items_dir.glob("*.json"):
-        item = _read_work_item(item_path)
-        if item is None or item.status == "done":
-            continue
-        active_dir = _work_scratch_dir(paths, item.name)
-        archived_dir = _archived_work_scratch_dir(paths, item.name)
-        if active_dir.exists() or not archived_dir.exists():
-            continue
-        repaired = item.model_copy(update={"status": "done"})
-        atomic_write_text(item_path, _serialize_work_item(repaired))
-
-
-def _ensure_work_item_metadata_locked(
+def _read_or_initialize_status(
+    work_dir: Path,
     *,
-    paths: RuntimePaths,
-    work_id: str,
-    description: str = "",
-    status: str = "open",
-) -> WorkItem:
-    item_path = paths.work_items_dir / f"{work_id}.json"
-    existing = _read_work_item(item_path)
-    if existing is not None:
-        return existing
-
-    paths.work_items_dir.mkdir(parents=True, exist_ok=True)
-    item = WorkItem(
-        name=work_id,
-        description=description,
-        status=status,
-        created_at=utc_now_iso(),
+    archived: bool,
+    default_status: str = "open",
+    default_description: str = "",
+    default_created_at: str | None = None,
+    default_archived_at: str | None = None,
+) -> dict[str, Any]:
+    status_file = _status_path(work_dir)
+    created_fallback = default_created_at or _dir_mtime_iso(work_dir)
+    archived_fallback = (
+        default_archived_at
+        if default_archived_at is not None
+        else (_dir_mtime_iso(work_dir) if archived else None)
     )
-    atomic_write_text(item_path, _serialize_work_item(item))
-    return item
+    default_payload: dict[str, Any] = {
+        "status": "done" if archived else default_status,
+        "description": default_description,
+        "created_at": created_fallback,
+        "archived_at": archived_fallback if archived else None,
+    }
 
+    raw = _read_json_object(status_file)
+    if raw is None:
+        atomic_write_text(status_file, _serialize_status(default_payload))
+        return default_payload
 
-def reconcile_work_store(state_root: Path) -> None:
-    """Complete or clear an interrupted work-item rename operation."""
+    changed = False
+    payload = dict(default_payload)
 
-    paths = RuntimePaths.from_root_dir(state_root)
-    intent_path = paths.work_items_rename_intent
-    if intent_path.is_file():
-        try:
-            intent = WorkRenameIntent.model_validate_json(intent_path.read_text(encoding="utf-8"))
-        except (OSError, ValidationError, json.JSONDecodeError):
-            intent_path.unlink(missing_ok=True)
+    status_value = raw.get("status")
+    if isinstance(status_value, str) and status_value:
+        payload["status"] = status_value
+    else:
+        changed = True
+
+    description_value = raw.get("description")
+    if isinstance(description_value, str):
+        payload["description"] = description_value
+    else:
+        payload["description"] = ""
+        changed = True
+
+    created_value = raw.get("created_at")
+    if isinstance(created_value, str) and created_value:
+        payload["created_at"] = created_value
+    else:
+        changed = True
+
+    archived_value = raw.get("archived_at")
+    if archived:
+        if isinstance(archived_value, str) and archived_value:
+            payload["archived_at"] = archived_value
         else:
-            old_item_path = paths.work_items_dir / f"{intent.old_work_id}.json"
-            new_item_path = paths.work_items_dir / f"{intent.new_work_id}.json"
-            old_scratch_dir = _work_scratch_dir(paths, intent.old_work_id)
-            new_scratch_dir = _work_scratch_dir(paths, intent.new_work_id)
-            old_archived_dir = _archived_work_scratch_dir(paths, intent.old_work_id)
-            new_archived_dir = _archived_work_scratch_dir(paths, intent.new_work_id)
+            payload["archived_at"] = _dir_mtime_iso(work_dir)
+            changed = True
+        if payload["status"] != "done":
+            payload["status"] = "done"
+            changed = True
+    else:
+        if archived_value is not None:
+            changed = True
+        payload["archived_at"] = None
+        if payload["status"] == "done":
+            payload["status"] = default_status
+            changed = True
 
-            if old_item_path.exists() and not new_item_path.exists():
-                new_item_path.parent.mkdir(parents=True, exist_ok=True)
-                old_item_path.rename(new_item_path)
+    if changed:
+        atomic_write_text(status_file, _serialize_status(payload))
+    return payload
 
-            if new_item_path.exists():
-                # Repair metadata if a crash happened after renaming the file but before
-                # rewriting the payload with the new slug.
-                item = _read_work_item(new_item_path)
-                if item is not None and item.name != intent.new_work_id:
-                    updated = item.model_copy(update={"name": intent.new_work_id})
-                    atomic_write_text(new_item_path, _serialize_work_item(updated))
 
-                if old_scratch_dir.exists() and not new_scratch_dir.exists():
-                    new_scratch_dir.parent.mkdir(parents=True, exist_ok=True)
-                    old_scratch_dir.rename(new_scratch_dir)
-                if old_archived_dir.exists() and not new_archived_dir.exists():
-                    new_archived_dir.parent.mkdir(parents=True, exist_ok=True)
-                    old_archived_dir.rename(new_archived_dir)
+def _work_item_from_dir(
+    work_dir: Path,
+    *,
+    archived: bool,
+    default_status: str = "open",
+    default_description: str = "",
+    default_created_at: str | None = None,
+    default_archived_at: str | None = None,
+) -> WorkItem:
+    payload = _read_or_initialize_status(
+        work_dir,
+        archived=archived,
+        default_status=default_status,
+        default_description=default_description,
+        default_created_at=default_created_at,
+        default_archived_at=default_archived_at,
+    )
+    return WorkItem(
+        name=work_dir.name,
+        description=str(payload["description"]),
+        status=str(payload["status"]),
+        created_at=str(payload["created_at"]),
+        archived_at=payload["archived_at"] if isinstance(payload["archived_at"], str) else None,
+    )
 
-            intent_path.unlink(missing_ok=True)
 
-    _reconcile_interrupted_archives_locked(paths)
+def _locate_dirs(paths: RuntimePaths, work_id: str) -> tuple[Path | None, Path | None]:
+    active = _active_dir(paths, work_id)
+    archived = _archived_dir(paths, work_id)
+    active_dir = active if active.is_dir() else None
+    archived_dir = archived if archived.is_dir() else None
+    return active_dir, archived_dir
+
+
+def _ensure_not_both_locations(
+    work_id: str,
+    active_dir: Path | None,
+    archived_dir: Path | None,
+) -> None:
+    if active_dir is not None and archived_dir is not None:
+        raise ValueError(
+            f"Work item '{work_id}' exists in both active and archive directories."
+        )
+
+
+def _status_payload(
+    *,
+    status: str,
+    description: str,
+    created_at: str,
+    archived_at: str | None,
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "description": description,
+        "created_at": created_at,
+        "archived_at": archived_at,
+    }
+
+
+def _has_artifacts(work_dir: Path) -> bool:
+    if not work_dir.is_dir():
+        return False
+    return any(child.name != _STATUS_FILENAME for child in work_dir.iterdir())
+
+
+def _validate_exact_slug(raw_name: str) -> str:
+    normalized = slugify(raw_name)
+    if not normalized or normalized != raw_name:
+        raise ValueError(
+            f"Invalid work item name '{raw_name}'. "
+            f"Use a slug (lowercase, hyphens, no spaces) — e.g. '{normalized or 'my-feature'}'."
+        )
+    return normalized
+
+
+def _read_legacy_metadata(metadata_path: Path) -> tuple[str, str, str | None]:
+    payload = _read_json_object(metadata_path)
+    if payload is None:
+        return "open", "", None
+    status = payload.get("status")
+    description = payload.get("description")
+    created_at = payload.get("created_at")
+    return (
+        status if isinstance(status, str) and status else "open",
+        description if isinstance(description, str) else "",
+        created_at if isinstance(created_at, str) and created_at else None,
+    )
+
+
+def _migrate_legacy_work_items(state_root: Path) -> None:
+    paths = RuntimePaths.from_root_dir(state_root)
+    legacy_dir = paths.work_items_dir
+    if not legacy_dir.is_dir():
+        return
+
+    for metadata_path in legacy_dir.glob("*.json"):
+        work_id = metadata_path.stem
+        legacy_status, legacy_description, legacy_created_at = _read_legacy_metadata(metadata_path)
+
+        active = _active_dir(paths, work_id)
+        archived = _archived_dir(paths, work_id)
+        active_exists = active.is_dir()
+        archived_exists = archived.is_dir()
+        if not active_exists and not archived_exists:
+            continue
+
+        if legacy_status == "done" and active_exists and not archived_exists:
+            archived.parent.mkdir(parents=True, exist_ok=True)
+            active.rename(archived)
+            active_exists = False
+            archived_exists = True
+
+        if active_exists and not _status_path(active).exists():
+            created_at = legacy_created_at or _dir_mtime_iso(active)
+            migrated_status = legacy_status if legacy_status != "done" else "open"
+            atomic_write_text(
+                _status_path(active),
+                _serialize_status(
+                    _status_payload(
+                        status=migrated_status,
+                        description=legacy_description,
+                        created_at=created_at,
+                        archived_at=None,
+                    )
+                ),
+            )
+
+        if archived_exists and not _status_path(archived).exists():
+            created_at = legacy_created_at or _dir_mtime_iso(archived)
+            archived_at = _dir_mtime_iso(archived)
+            atomic_write_text(
+                _status_path(archived),
+                _serialize_status(
+                    _status_payload(
+                        status="done",
+                        description=legacy_description,
+                        created_at=created_at,
+                        archived_at=archived_at,
+                    )
+                ),
+            )
 
 
 def create_work_item(state_root: Path, label: str, description: str = "") -> WorkItem:
-    """Create a new work item metadata record under `.meridian/work-items/`."""
+    """Create a new active work item directory with ``__status.json`` metadata."""
 
+    _migrate_legacy_work_items(state_root)
     paths = RuntimePaths.from_root_dir(state_root)
-    with lock_file(paths.work_items_flock):
-        reconcile_work_store(state_root)
-        paths.work_items_dir.mkdir(parents=True, exist_ok=True)
-        slug = slugify(label)
-        if not slug:
-            raise ValueError("Work item label must contain at least one letter or number.")
-        if get_work_item(state_root, slug) is not None:
-            raise ValueError(
-                f"Work item '{slug}' already exists. Use `meridian work switch {slug}`."
-            )
+    slug = slugify(label)
+    if not slug:
+        raise ValueError("Work item label must contain at least one letter or number.")
 
-        item = WorkItem(
-            name=slug,
-            description=description,
-            status="open",
-            created_at=utc_now_iso(),
-        )
-        atomic_write_text(paths.work_items_dir / f"{slug}.json", _serialize_work_item(item))
-        return item
+    active = _active_dir(paths, slug)
+    archived = _archived_dir(paths, slug)
+    if active.exists() or archived.exists():
+        raise ValueError(f"Work item '{slug}' already exists. Use `meridian work switch {slug}`.")
+
+    active.mkdir(parents=True, exist_ok=False)
+    created_at = utc_now_iso()
+    payload = _status_payload(
+        status="open",
+        description=description,
+        created_at=created_at,
+        archived_at=None,
+    )
+    atomic_write_text(_status_path(active), _serialize_status(payload))
+    return WorkItem(
+        name=slug,
+        description=description,
+        status="open",
+        created_at=created_at,
+        archived_at=None,
+    )
 
 
 def ensure_work_item_metadata(
@@ -209,115 +341,114 @@ def ensure_work_item_metadata(
 ) -> WorkItem:
     """Ensure an exact work item slug exists on disk and return its metadata."""
 
-    normalized = slugify(work_id)
-    if not normalized or normalized != work_id:
-        raise ValueError(
-            f"Invalid work item name '{work_id}'. "
-            f"Use a slug (lowercase, hyphens, no spaces) — e.g. '{normalized or 'my-feature'}'."
+    normalized = _validate_exact_slug(work_id)
+    if status == "done":
+        raise ValueError("'done' is reserved for archived work items.")
+
+    _migrate_legacy_work_items(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
+    active_dir, archived_dir = _locate_dirs(paths, normalized)
+    _ensure_not_both_locations(normalized, active_dir, archived_dir)
+
+    if active_dir is not None:
+        return _work_item_from_dir(
+            active_dir,
+            archived=False,
+            default_status=status,
+            default_description=description,
+        )
+    if archived_dir is not None:
+        return _work_item_from_dir(
+            archived_dir,
+            archived=True,
+            default_description=description,
         )
 
-    paths = RuntimePaths.from_root_dir(state_root)
-    with lock_file(paths.work_items_flock):
-        reconcile_work_store(state_root)
-        return _ensure_work_item_metadata_locked(
-            paths=paths,
-            work_id=normalized,
-            description=description,
-            status=status,
-        )
+    created_dir = _active_dir(paths, normalized)
+    created_dir.mkdir(parents=True, exist_ok=True)
+    return _work_item_from_dir(
+        created_dir,
+        archived=False,
+        default_status=status,
+        default_description=description,
+    )
 
 
 def get_work_item(state_root: Path, work_id: str) -> WorkItem | None:
-    """Load one work item from `.meridian/work-items/<id>.json`."""
+    """Load one work item from active or archived directories."""
 
-    path = _work_item_path(state_root, work_id)
-    if not path.is_file():
-        return None
-    return _read_work_item(path)
+    _migrate_legacy_work_items(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
+    active_dir, archived_dir = _locate_dirs(paths, work_id)
+    _ensure_not_both_locations(work_id, active_dir, archived_dir)
+    if active_dir is not None:
+        return _work_item_from_dir(active_dir, archived=False)
+    if archived_dir is not None:
+        return _work_item_from_dir(archived_dir, archived=True)
+    return None
 
 
 def work_scratch_dir(state_root: Path, work_id: str) -> Path:
-    """Return the current scratch location for a work item."""
+    """Return current active/archive work directory if present, otherwise active path."""
 
+    _migrate_legacy_work_items(state_root)
     paths = RuntimePaths.from_root_dir(state_root)
-    return _locate_work_scratch_dir(paths, work_id) or _work_scratch_dir(paths, work_id)
+    active_dir, archived_dir = _locate_dirs(paths, work_id)
+    _ensure_not_both_locations(work_id, active_dir, archived_dir)
+    if active_dir is not None:
+        return active_dir
+    if archived_dir is not None:
+        return archived_dir
+    return _active_dir(paths, work_id)
 
 
 def list_work_items(state_root: Path) -> list[WorkItem]:
-    """Return all work items sorted by creation time then slug."""
+    """Return active work items sorted by (created_at, name)."""
 
+    _migrate_legacy_work_items(state_root)
     paths = RuntimePaths.from_root_dir(state_root)
-    with lock_file(paths.work_items_flock):
-        reconcile_work_store(state_root)
-        if not paths.work_items_dir.is_dir():
-            return []
+    if not paths.work_dir.is_dir():
+        return []
 
-        items: list[WorkItem] = []
-        for child in paths.work_items_dir.glob("*.json"):
-            item = _read_work_item(child)
-            if item is not None:
-                items.append(item)
-        return sorted(items, key=lambda item: (item.created_at, item.name))
+    items: list[WorkItem] = []
+    for child in paths.work_dir.iterdir():
+        if child.is_dir():
+            items.append(_work_item_from_dir(child, archived=False))
+    return sorted(items, key=lambda item: (item.created_at, item.name))
 
 
-def rename_work_item(state_root: Path, old_work_id: str, new_name: str) -> WorkItem:
-    """Rename work metadata and move scratch dir if it exists."""
+def list_archived_work_items(
+    state_root: Path,
+    *,
+    limit: int = 10,
+    all_archived: bool = False,
+) -> list[WorkItem]:
+    """Return archived work items sorted by archived_at descending."""
 
+    _migrate_legacy_work_items(state_root)
     paths = RuntimePaths.from_root_dir(state_root)
-    with lock_file(paths.work_items_flock):
-        reconcile_work_store(state_root)
+    if not paths.work_archive_dir.is_dir():
+        return []
 
-        old_item = get_work_item(state_root, old_work_id)
-        if old_item is None:
-            raise ValueError(f"Work item '{old_work_id}' not found")
+    if limit < 0:
+        raise ValueError("limit must be non-negative.")
 
-        normalized = slugify(new_name)
-        if not normalized or normalized != new_name:
-            raise ValueError(
-                f"Invalid work item name '{new_name}'. "
-                f"Use a slug (lowercase, hyphens, no spaces) — e.g. '{normalized or 'my-feature'}'."
-            )
-        if normalized == old_work_id:
-            return old_item
+    items: list[WorkItem] = []
+    for child in paths.work_archive_dir.iterdir():
+        if child.is_dir():
+            items.append(_work_item_from_dir(child, archived=True))
 
-        old_item_path = paths.work_items_dir / f"{old_work_id}.json"
-        new_item_path = paths.work_items_dir / f"{normalized}.json"
-        if new_item_path.exists():
-            raise ValueError(f"Work item '{normalized}' already exists.")
-
-        old_scratch_dir = _work_scratch_dir(paths, old_work_id)
-        new_scratch_dir = _work_scratch_dir(paths, normalized)
-        old_archived_dir = _archived_work_scratch_dir(paths, old_work_id)
-        new_archived_dir = _archived_work_scratch_dir(paths, normalized)
-        if old_scratch_dir.exists() and new_scratch_dir.exists():
-            raise ValueError(
-                f"Cannot rename work item '{old_work_id}' to '{normalized}': "
-                f"scratch dir '{new_scratch_dir.as_posix()}' already exists."
-            )
-        if old_archived_dir.exists() and new_archived_dir.exists():
-            raise ValueError(
-                f"Cannot rename work item '{old_work_id}' to '{normalized}': "
-                f"archived scratch dir '{new_archived_dir.as_posix()}' already exists."
-            )
-
-        intent = WorkRenameIntent(
-            old_work_id=old_work_id,
-            new_work_id=normalized,
-            started_at=utc_now_iso(),
-        )
-        atomic_write_text(paths.work_items_rename_intent, intent.model_dump_json(indent=2) + "\n")
-
-        old_item_path.rename(new_item_path)
-        if old_scratch_dir.exists():
-            new_scratch_dir.parent.mkdir(parents=True, exist_ok=True)
-            old_scratch_dir.rename(new_scratch_dir)
-        if old_archived_dir.exists():
-            new_archived_dir.parent.mkdir(parents=True, exist_ok=True)
-            old_archived_dir.rename(new_archived_dir)
-        updated = old_item.model_copy(update={"name": normalized})
-        atomic_write_text(new_item_path, _serialize_work_item(updated))
-        paths.work_items_rename_intent.unlink(missing_ok=True)
-        return updated
+    items.sort(
+        key=lambda item: (
+            item.archived_at is not None,
+            item.archived_at or "",
+            item.name,
+        ),
+        reverse=True,
+    )
+    if all_archived:
+        return items
+    return items[:limit]
 
 
 def update_work_item(
@@ -327,48 +458,156 @@ def update_work_item(
     status: str | None = None,
     description: str | None = None,
 ) -> WorkItem:
-    """Update mutable work-item fields and rewrite metadata atomically."""
+    """Update active work item metadata and rewrite ``__status.json`` atomically."""
 
+    _migrate_legacy_work_items(state_root)
     paths = RuntimePaths.from_root_dir(state_root)
-    with lock_file(paths.work_items_flock):
-        reconcile_work_store(state_root)
-        current = get_work_item(state_root, work_id)
-        if current is None:
-            raise ValueError(f"Work item '{work_id}' not found")
+    active_dir, archived_dir = _locate_dirs(paths, work_id)
+    _ensure_not_both_locations(work_id, active_dir, archived_dir)
+    if active_dir is None:
+        if archived_dir is not None:
+            raise ValueError(
+                f"Work item '{work_id}' is archived and cannot be updated. Reopen it first."
+            )
+        raise ValueError(f"Work item '{work_id}' not found")
 
-        updated = current.model_copy(
-            update={
-                "status": current.status if status is None else status,
-                "description": current.description if description is None else description,
-            }
-        )
-        atomic_write_text(_work_item_path(state_root, work_id), _serialize_work_item(updated))
-        return updated
+    current = _work_item_from_dir(active_dir, archived=False)
+    next_status = current.status if status is None else status
+    if next_status == "done":
+        raise ValueError("'done' is reserved for archived work items.")
+    next_description = current.description if description is None else description
+    updated = WorkItem(
+        name=current.name,
+        description=next_description,
+        status=next_status,
+        created_at=current.created_at,
+        archived_at=None,
+    )
+    atomic_write_text(
+        _status_path(active_dir),
+        _serialize_status(
+            _status_payload(
+                status=updated.status,
+                description=updated.description,
+                created_at=updated.created_at,
+                archived_at=None,
+            )
+        ),
+    )
+    return updated
 
 
 def archive_work_item(state_root: Path, work_id: str) -> WorkItem:
-    """Mark a work item done and move its scratch dir into the configured archive path."""
+    """Archive active work by moving directory first, then setting done status."""
 
+    _migrate_legacy_work_items(state_root)
     paths = RuntimePaths.from_root_dir(state_root)
-    with lock_file(paths.work_items_flock):
-        reconcile_work_store(state_root)
-        current = get_work_item(state_root, work_id)
-        if current is None:
-            raise ValueError(f"Work item '{work_id}' not found")
+    active_dir, archived_dir = _locate_dirs(paths, work_id)
+    _ensure_not_both_locations(work_id, active_dir, archived_dir)
 
-        active_dir = _work_scratch_dir(paths, work_id)
-        archived_dir = _archived_work_scratch_dir(paths, work_id)
-        if active_dir.exists() and archived_dir.exists():
-            raise ValueError(
-                f"Work item '{work_id}' has scratch dirs in both active and archive locations."
+    if active_dir is None:
+        if archived_dir is not None:
+            raise ValueError(f"Work item '{work_id}' is already archived.")
+        raise ValueError(f"Work item '{work_id}' not found")
+
+    destination = _archived_dir(paths, work_id)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    active_dir.rename(destination)
+
+    current = _work_item_from_dir(destination, archived=True)
+    archived_at = utc_now_iso()
+    archived_item = WorkItem(
+        name=current.name,
+        description=current.description,
+        status="done",
+        created_at=current.created_at,
+        archived_at=archived_at,
+    )
+    atomic_write_text(
+        _status_path(destination),
+        _serialize_status(
+            _status_payload(
+                status="done",
+                description=archived_item.description,
+                created_at=archived_item.created_at,
+                archived_at=archived_item.archived_at,
             )
-        if active_dir.exists():
-            archived_dir.parent.mkdir(parents=True, exist_ok=True)
-            active_dir.rename(archived_dir)
+        ),
+    )
+    return archived_item
 
-        updated = current.model_copy(update={"status": "done"})
-        atomic_write_text(_work_item_path(state_root, work_id), _serialize_work_item(updated))
-        return updated
+
+def reopen_work_item(state_root: Path, work_id: str, *, status: str = "open") -> WorkItem:
+    """Reopen archived work by clearing archive metadata before moving to active."""
+
+    if status == "done":
+        raise ValueError("'done' is reserved for archived work items.")
+
+    _migrate_legacy_work_items(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
+    active_dir, archived_dir = _locate_dirs(paths, work_id)
+    _ensure_not_both_locations(work_id, active_dir, archived_dir)
+    if archived_dir is None:
+        if active_dir is not None:
+            raise ValueError(f"Work item '{work_id}' is already active.")
+        raise ValueError(f"Work item '{work_id}' not found")
+
+    current = _work_item_from_dir(archived_dir, archived=True)
+    atomic_write_text(
+        _status_path(archived_dir),
+        _serialize_status(
+            _status_payload(
+                status=status,
+                description=current.description,
+                created_at=current.created_at,
+                archived_at=None,
+            )
+        ),
+    )
+
+    target = _active_dir(paths, work_id)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    archived_dir.rename(target)
+    return _work_item_from_dir(target, archived=False, default_status=status)
+
+
+def rename_work_item(state_root: Path, old_work_id: str, new_name: str) -> WorkItem:
+    """Rename active or archived work directory in one atomic directory rename."""
+
+    _migrate_legacy_work_items(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
+    active_dir, archived_dir = _locate_dirs(paths, old_work_id)
+    _ensure_not_both_locations(old_work_id, active_dir, archived_dir)
+    if active_dir is None and archived_dir is None:
+        raise ValueError(f"Work item '{old_work_id}' not found")
+
+    normalized = _validate_exact_slug(new_name)
+    if normalized == old_work_id:
+        existing = get_work_item(state_root, old_work_id)
+        if existing is None:
+            raise ValueError(f"Work item '{old_work_id}' not found")
+        return existing
+
+    target_active = _active_dir(paths, normalized)
+    target_archived = _archived_dir(paths, normalized)
+    if target_active.exists() or target_archived.exists():
+        raise ValueError(f"Work item '{normalized}' already exists.")
+
+    if active_dir is not None:
+        source = active_dir
+        target = _active_dir(paths, normalized)
+        archived = False
+    else:
+        source = archived_dir
+        target = _archived_dir(paths, normalized)
+        archived = True
+
+    if source is None:
+        raise ValueError(f"Work item '{old_work_id}' not found")
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    source.rename(target)
+    return _work_item_from_dir(target, archived=archived)
 
 
 def delete_work_item(
@@ -377,57 +616,34 @@ def delete_work_item(
     *,
     force: bool = False,
 ) -> tuple[WorkItem, bool]:
-    """Delete a work item and optionally its scratch directories.
+    """Delete active/archive work directories.
 
-    Returns ``(deleted_item, had_artifacts)``. Raises ``ValueError`` if artifacts
-    exist and ``force`` is ``False``.
+    Returns ``(deleted_item, had_artifacts)`` where ``had_artifacts`` indicates
+    files beyond ``__status.json``.
     """
 
+    _migrate_legacy_work_items(state_root)
     paths = RuntimePaths.from_root_dir(state_root)
-    with lock_file(paths.work_items_flock):
-        reconcile_work_store(state_root)
-        current = get_work_item(state_root, work_id)
-        if current is None:
-            raise ValueError(f"Work item '{work_id}' not found")
+    active_dir, archived_dir = _locate_dirs(paths, work_id)
+    if active_dir is None and archived_dir is None:
+        raise ValueError(f"Work item '{work_id}' not found")
 
-        active_dir = _work_scratch_dir(paths, work_id)
-        archived_dir = _archived_work_scratch_dir(paths, work_id)
-        has_artifacts = active_dir.exists() or archived_dir.exists()
+    primary_dir = active_dir or archived_dir
+    if primary_dir is None:
+        raise ValueError(f"Work item '{work_id}' not found")
 
-        if has_artifacts and not force:
-            raise ValueError(f"Work item '{work_id}' has artifacts. Use --force to delete.")
+    deleted_item = (
+        _work_item_from_dir(primary_dir, archived=False)
+        if active_dir is not None
+        else _work_item_from_dir(primary_dir, archived=True)
+    )
 
-        if active_dir.exists():
-            shutil.rmtree(active_dir)
-        if archived_dir.exists():
-            shutil.rmtree(archived_dir)
+    existing_dirs = [candidate for candidate in (active_dir, archived_dir) if candidate is not None]
+    had_artifacts = any(_has_artifacts(candidate) for candidate in existing_dirs)
+    if had_artifacts and not force:
+        raise ValueError(f"Work item '{work_id}' has artifacts. Use --force to delete.")
 
-        item_path = _work_item_path(state_root, work_id)
-        item_path.unlink(missing_ok=True)
+    for work_dir in existing_dirs:
+        shutil.rmtree(work_dir)
 
-        return current, has_artifacts
-
-
-def reopen_work_item(state_root: Path, work_id: str, *, status: str = "open") -> WorkItem:
-    """Reopen a work item and restore its scratch dir to the configured work path."""
-
-    paths = RuntimePaths.from_root_dir(state_root)
-    with lock_file(paths.work_items_flock):
-        reconcile_work_store(state_root)
-        current = get_work_item(state_root, work_id)
-        if current is None:
-            raise ValueError(f"Work item '{work_id}' not found")
-
-        active_dir = _work_scratch_dir(paths, work_id)
-        archived_dir = _archived_work_scratch_dir(paths, work_id)
-        if active_dir.exists() and archived_dir.exists():
-            raise ValueError(
-                f"Work item '{work_id}' has scratch dirs in both active and archive locations."
-            )
-        if archived_dir.exists():
-            active_dir.parent.mkdir(parents=True, exist_ok=True)
-            archived_dir.rename(active_dir)
-
-        updated = current.model_copy(update={"status": status})
-        atomic_write_text(_work_item_path(state_root, work_id), _serialize_work_item(updated))
-        return updated
+    return deleted_item, had_artifacts
