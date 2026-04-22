@@ -3,6 +3,8 @@
 Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [SemVer](https://semver.org/). Versions `0.0.6` through `0.0.25` in git history only — changelog fell stale, resumed at `[Unreleased]`.
 ## [Unreleased]
 
+## [0.0.40-rc.2] - 2026-04-22
+
 ### Changed
 - Default app server port changed from `8420` to `7676`. Vite proxy config updated to match.
 - **Work items: directory is the work item.** Eliminated `work-items/` metadata index. Work item exists iff its directory exists in `work/` (active) or `archive/work/` (done). `__status.json` inside each dir holds mutable metadata. `meridian work list` scans the actual work directory — no separate index to drift. Auto-heals missing/malformed status files. Fixes #69, #70.
@@ -14,6 +16,9 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 - Background spawns use `--project-root` for worker launch. No stale `--repo-root` crash after rename.
+- `MERIDIAN_SPAWN_ID` now set to current spawn's own ID; `MERIDIAN_PARENT_SPAWN_ID` set to parent. Previously both were swapped.
+- `spawn children` agent-mode output uses children view instead of raw spawn list.
+- Integration tests no longer crash on structlog writes to stale capsys buffers (reset moved to integration conftest).
 
 ### Removed
 - `work-items/` directory, `work-items.flock`, `work-items.rename.intent.json` — all replaced by directory-as-work-item model.
