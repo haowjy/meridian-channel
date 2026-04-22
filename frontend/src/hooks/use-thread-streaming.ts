@@ -215,6 +215,12 @@ export function useThreadStreaming(spawnId: string | null) {
             content: event.content,
           })
           break
+        case EventType.STEP_FINISHED:
+          // Codex emits STEP_FINISHED at turn completion. In single-spawn mode,
+          // this signals the activity is done, so dispatch RUN_FINISHED to clear
+          // isStreaming state.
+          mappedEvents.push({ type: "RUN_FINISHED" })
+          break
         default:
           break
       }
