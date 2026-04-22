@@ -4,3 +4,4 @@ pnpm-lock.yaml
 *.local
 .env
 .env.*
+storybook-static/

@@ -164,7 +164,7 @@ function App() {
               </div>
 
               <div className="min-h-0 flex-1">
-                <ThreadView items={state.items} error={state.error} />
+                <ThreadView activity={state} />
               </div>
 
               {state.isStreaming ? <StreamingIndicator /> : null}
@@ -172,7 +172,7 @@ function App() {
               <Composer
                 channel={channel}
                 capabilities={capabilities}
-                isStreaming={state.isStreaming}
+                isStreaming={Boolean(state.isStreaming)}
                 disabled={composerDisabled}
                 onCancel={cancel}
               />

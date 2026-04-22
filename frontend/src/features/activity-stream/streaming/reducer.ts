@@ -1,299 +1,308 @@
-import { EventType, type StreamEvent } from "@/lib/ws/types"
+/**
+ * Activity stream reducer — processes AG-UI events into ActivityBlockData.
+ *
+ * This is the bridge between the SSE event stream and the component tree.
+ * Each event updates the state immutably; React re-renders on every dispatch.
+ *
+ * Key behaviors:
+ * - Items appear in items[] as soon as their START event arrives
+ * - Text/thinking items update in-place on CONTENT events (progressive rendering)
+ * - Tool args accumulate and are partially parsed on each ARGS delta
+ * - Pending text buffer flushes when a tool starts (text → tool transition)
+ * - Parallel tools work naturally — each keyed by toolCallId
+ */
 
-export type ActivityItem =
-  | { type: "text"; messageId: string; content: string }
-  | { type: "reasoning"; messageId: string; content: string }
-  | {
-      type: "tool_call"
-      toolCallId: string
-      name: string
-      args: string
-      status: "running" | "complete"
+import { parse as parsePartialJson, STR, OBJ, ARR, NUM } from "partial-json"
+
+import type { ActivityBlockData, ActivityItem, ContentItem, ThinkingItem, ToolItem } from "../types"
+
+import type { StreamEvent } from "./events"
+
+// ═══════════════════════════════════════════════════════════════════
+// State
+// ═══════════════════════════════════════════════════════════════════
+
+export type StreamState = {
+  /** The activity block data consumed by the component tree. */
+  activity: ActivityBlockData
+  /** JSON buffers per tool call (accumulated TOOL_CALL_ARGS deltas). */
+  toolArgsBuffers: Record<string, string>
+}
+
+export function createInitialState(id: string): StreamState {
+  return {
+    activity: { id, items: [], isStreaming: false },
+    toolArgsBuffers: {},
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Helpers
+// ═══════════════════════════════════════════════════════════════════
+
+/** Best-effort partial JSON parse. Returns undefined if nothing parseable yet. */
+function tryParseArgs(text: string): Record<string, unknown> | undefined {
+  if (!text) return undefined
+
+  try {
+    const result = parsePartialJson(text, STR | OBJ | ARR | NUM)
+
+    if (result && typeof result === "object" && !Array.isArray(result)) {
+      return result as Record<string, unknown>
     }
-  | { type: "tool_result"; toolCallId: string; content: string }
-  | { type: "error"; message: string }
 
-export interface StreamState {
-  items: ActivityItem[]
-  isStreaming: boolean
-  error: string | null
-  isCancelled: boolean
+    return undefined
+  } catch {
+    return undefined
+  }
 }
 
-type StreamAction =
-  | StreamEvent
-  | { type: "SET_CANCELLED" }
-  | { type: "RESET" }
+/**
+ * Parse TOOL_CALL_RESULT content.
+ *
+ * Backend sends `content` as stringified JSON:
+ *   { "is_error": false, "result": "..." }
+ *   { "is_error": true, "error": "..." }
+ *
+ * Falls back to treating content as plain text if it's not valid JSON
+ * or doesn't have the expected shape (e.g., mock/Storybook scenarios).
+ */
+function parseToolResult(content: string, eventIsError?: boolean): { resultText: string; isError: boolean } {
+  try {
+    const parsed = JSON.parse(content) as Record<string, unknown>
 
-export const initialState: StreamState = {
-  items: [],
-  isStreaming: false,
-  error: null,
-  isCancelled: false,
+    if (typeof parsed === "object" && parsed !== null && "is_error" in parsed) {
+      const isError = Boolean(parsed.is_error)
+      const resultText = isError
+        ? String(parsed.error ?? parsed.result ?? content)
+        : String(parsed.result ?? content)
+      return { resultText, isError }
+    }
+  } catch {
+    // Not JSON — treat as plain text
+  }
+
+  return { resultText: content, isError: eventIsError ?? false }
 }
 
-export function reducer(state: StreamState, action: StreamAction): StreamState {
-  switch (action.type) {
+/** Replace an item in the items array by id. Returns new array. */
+function updateItemById<T extends ActivityItem>(
+  items: ActivityItem[],
+  id: string,
+  updater: (item: T) => T,
+): ActivityItem[] {
+  return items.map((item) => (item.id === id ? updater(item as T) : item))
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Reducer
+// ═══════════════════════════════════════════════════════════════════
+
+export function reduceStreamEvent(state: StreamState, event: StreamEvent): StreamState {
+  switch (event.type) {
+    // ---------------------------------------------------------------
+    // Lifecycle
+    // ---------------------------------------------------------------
+
     case "RESET":
-      return initialState
+      return createInitialState(state.activity.id)
 
-    case "SET_CANCELLED":
+    case "RUN_STARTED":
       return {
         ...state,
-        isCancelled: true,
+        activity: { ...state.activity, isStreaming: true },
       }
 
-    case EventType.RUN_STARTED:
+    case "RUN_FINISHED":
       return {
         ...state,
-        isStreaming: true,
-        error: null,
-        isCancelled: false,
+        activity: { ...state.activity, isStreaming: false, pendingText: undefined },
       }
 
-    case EventType.RUN_FINISHED:
+    case "RUN_ERROR":
       return {
         ...state,
-        isStreaming: false,
+        activity: {
+          ...state.activity,
+          isStreaming: false,
+          pendingText: undefined,
+          error: event.message,
+          isCancelled: event.isCancelled ?? false,
+        },
       }
 
-    case EventType.RUN_ERROR:
+    // ---------------------------------------------------------------
+    // Text messages
+    //
+    // START: insert empty ContentItem into items[]
+    // CONTENT: update that ContentItem's text + set pendingText (collapsed view)
+    // END: clear pendingText (text is finalized in items[])
+    // ---------------------------------------------------------------
+
+    case "TEXT_MESSAGE_START": {
+      const textItem: ContentItem = { kind: "content", id: event.messageId, text: "" }
       return {
         ...state,
-        isStreaming: false,
-        error: action.message,
-      }
-
-    case EventType.TEXT_MESSAGE_START:
-      return {
-        ...state,
-        items: [...state.items, { type: "text", messageId: action.message_id, content: "" }],
-      }
-
-    case EventType.TEXT_MESSAGE_CONTENT:
-      return {
-        ...state,
-        items: state.items.map((item) => {
-          if (item.type !== "text" || item.messageId !== action.message_id) {
-            return item
-          }
-
-          return {
-            ...item,
-            content: item.content + (action.delta ?? ""),
-          }
-        }),
-      }
-
-    case EventType.TEXT_MESSAGE_END:
-      return state
-
-    case EventType.TEXT_MESSAGE_CHUNK: {
-      const messageId = action.message_id
-      const delta = action.delta ?? ""
-
-      if (!messageId) {
-        return state
-      }
-
-      const matched = state.items.some(
-        (item) => item.type === "text" && item.messageId === messageId,
-      )
-
-      if (matched) {
-        return {
-          ...state,
-          items: state.items.map((item) => {
-            if (item.type !== "text" || item.messageId !== messageId) {
-              return item
-            }
-
-            return {
-              ...item,
-              content: item.content + delta,
-            }
-          }),
-        }
-      }
-
-      if (!action.role) {
-        return state
-      }
-
-      return {
-        ...state,
-        items: [...state.items, { type: "text", messageId, content: delta }],
+        activity: {
+          ...state.activity,
+          items: [...state.activity.items, textItem],
+        },
       }
     }
 
-    case EventType.REASONING_MESSAGE_START:
+    case "TEXT_MESSAGE_CONTENT": {
+      const items = updateItemById<ContentItem>(state.activity.items, event.messageId, (item) => ({
+        ...item,
+        text: item.text + event.delta,
+      }))
+      // Text lives in items[] (rendered by TextRow inside the block).
+      // Also set pendingText so consumers can show it outside the block
+      // (e.g., as a streaming response below the activity).
+      const updatedText = items.find((i) => i.id === event.messageId) as ContentItem | undefined
       return {
         ...state,
-        items: [
-          ...state.items,
-          { type: "reasoning", messageId: action.message_id, content: "" },
-        ],
-      }
-
-    case EventType.REASONING_MESSAGE_CONTENT:
-      return {
-        ...state,
-        items: state.items.map((item) => {
-          if (item.type !== "reasoning" || item.messageId !== action.message_id) {
-            return item
-          }
-
-          return {
-            ...item,
-            content: item.content + (action.delta ?? ""),
-          }
-        }),
-      }
-
-    case EventType.REASONING_MESSAGE_END:
-      return state
-
-    case EventType.REASONING_MESSAGE_CHUNK: {
-      const messageId = action.message_id
-      const delta = action.delta ?? ""
-
-      if (!messageId) {
-        return state
-      }
-
-      const matched = state.items.some(
-        (item) => item.type === "reasoning" && item.messageId === messageId,
-      )
-
-      if (matched) {
-        return {
-          ...state,
-          items: state.items.map((item) => {
-            if (item.type !== "reasoning" || item.messageId !== messageId) {
-              return item
-            }
-
-            return {
-              ...item,
-              content: item.content + delta,
-            }
-          }),
-        }
-      }
-
-      return {
-        ...state,
-        items: [...state.items, { type: "reasoning", messageId, content: delta }],
+        activity: {
+          ...state.activity,
+          items,
+          pendingText: updatedText?.text,
+        },
       }
     }
 
-    case EventType.TOOL_CALL_START:
+    case "TEXT_MESSAGE_END":
       return {
         ...state,
-        items: [
-          ...state.items,
-          {
-            type: "tool_call",
-            toolCallId: action.tool_call_id,
-            name: action.tool_call_name,
-            args: "",
-            status: "running",
-          },
-        ],
+        activity: { ...state.activity, pendingText: undefined },
       }
 
-    case EventType.TOOL_CALL_ARGS:
+    // ---------------------------------------------------------------
+    // Thinking
+    //
+    // AG-UI thinking lifecycle:
+    //   THINKING_START → THINKING_TEXT_MESSAGE_START →
+    //   THINKING_TEXT_MESSAGE_CONTENT (deltas) →
+    //   THINKING_TEXT_MESSAGE_END
+    //
+    // THINKING_START creates the ThinkingItem.
+    // THINKING_TEXT_MESSAGE_START is a no-op (item already exists).
+    // THINKING_TEXT_MESSAGE_CONTENT updates text.
+    // THINKING_TEXT_MESSAGE_END finalizes.
+    // ---------------------------------------------------------------
+
+    case "THINKING_START": {
+      const thinkingItem: ThinkingItem = { kind: "thinking", id: event.thinkingId, text: "" }
       return {
         ...state,
-        items: state.items.map((item) => {
-          if (item.type !== "tool_call" || item.toolCallId !== action.tool_call_id) {
-            return item
-          }
-
-          return {
-            ...item,
-            args: item.args + (action.delta ?? ""),
-          }
-        }),
-      }
-
-    case EventType.TOOL_CALL_END:
-      return {
-        ...state,
-        items: state.items.map((item) => {
-          if (item.type !== "tool_call" || item.toolCallId !== action.tool_call_id) {
-            return item
-          }
-
-          return {
-            ...item,
-            status: "complete",
-          }
-        }),
-      }
-
-    case EventType.TOOL_CALL_CHUNK: {
-      const toolCallId = action.tool_call_id
-      const delta = action.delta ?? ""
-
-      if (!toolCallId) {
-        return state
-      }
-
-      const matched = state.items.some(
-        (item) => item.type === "tool_call" && item.toolCallId === toolCallId,
-      )
-
-      if (matched) {
-        return {
-          ...state,
-          items: state.items.map((item) => {
-            if (item.type !== "tool_call" || item.toolCallId !== toolCallId) {
-              return item
-            }
-
-            return {
-              ...item,
-              args: item.args + delta,
-            }
-          }),
-        }
-      }
-
-      if (!action.tool_call_name) {
-        return state
-      }
-
-      return {
-        ...state,
-        items: [
-          ...state.items,
-          {
-            type: "tool_call",
-            toolCallId,
-            name: action.tool_call_name,
-            args: delta,
-            status: "running",
-          },
-        ],
+        activity: {
+          ...state.activity,
+          items: [...state.activity.items, thinkingItem],
+        },
       }
     }
 
-    case EventType.TOOL_CALL_RESULT:
+    case "THINKING_TEXT_MESSAGE_START":
+      // Item already created by THINKING_START. No-op.
+      return state
+
+    case "THINKING_TEXT_MESSAGE_CONTENT": {
+      const items = updateItemById<ThinkingItem>(state.activity.items, event.thinkingId, (item) => ({
+        ...item,
+        text: item.text + event.delta,
+      }))
       return {
         ...state,
-        items: [
-          ...state.items,
-          {
-            type: "tool_result",
-            toolCallId: action.tool_call_id,
-            content: action.content,
-          },
-        ],
+        activity: { ...state.activity, items },
+      }
+    }
+
+    case "THINKING_TEXT_MESSAGE_END":
+      // Thinking item is already in items[] with full text. Nothing to do.
+      return state
+
+    // ---------------------------------------------------------------
+    // Tool calls
+    //
+    // START: insert ToolItem with status "streaming-args"
+    // ARGS: accumulate JSON, partial-parse for progressive summary
+    // END: status → "executing"
+    // RESULT: status → "done"/"error", set resultText
+    //
+    // Parallel tools work because each is keyed by toolCallId.
+    // ---------------------------------------------------------------
+
+    case "TOOL_CALL_START": {
+      const tool: ToolItem = {
+        kind: "tool",
+        id: event.toolCallId,
+        toolName: event.toolCallName,
+        status: "streaming-args",
+        argsText: "",
+      }
+      return {
+        ...state,
+        toolArgsBuffers: { ...state.toolArgsBuffers, [event.toolCallId]: "" },
+        activity: {
+          ...state.activity,
+          items: [...state.activity.items, tool],
+          // Clear pendingText — tool starts a new "section"
+          pendingText: undefined,
+        },
+      }
+    }
+
+    case "TOOL_CALL_ARGS": {
+      const buffer = (state.toolArgsBuffers[event.toolCallId] ?? "") + event.delta
+      const parsedArgs = tryParseArgs(buffer)
+      const items = updateItemById<ToolItem>(state.activity.items, event.toolCallId, (item) => ({
+        ...item,
+        argsText: buffer,
+        ...(parsedArgs ? { parsedArgs } : {}),
+      }))
+      return {
+        ...state,
+        toolArgsBuffers: { ...state.toolArgsBuffers, [event.toolCallId]: buffer },
+        activity: { ...state.activity, items },
+      }
+    }
+
+    case "TOOL_CALL_END": {
+      // Final parse of complete JSON
+      const buffer = state.toolArgsBuffers[event.toolCallId] ?? ""
+      let parsedArgs: Record<string, unknown> | undefined
+      try {
+        parsedArgs = JSON.parse(buffer) as Record<string, unknown>
+      } catch {
+        parsedArgs = tryParseArgs(buffer)
       }
 
-    case EventType.CUSTOM:
-      return state
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { [event.toolCallId]: _discarded, ...remainingBuffers } = state.toolArgsBuffers
+      const items = updateItemById<ToolItem>(state.activity.items, event.toolCallId, (item) => ({
+        ...item,
+        status: "executing",
+        argsText: buffer,
+        ...(parsedArgs ? { parsedArgs } : {}),
+      }))
+      return {
+        ...state,
+        toolArgsBuffers: remainingBuffers,
+        activity: { ...state.activity, items },
+      }
+    }
+
+    case "TOOL_CALL_RESULT": {
+      const { resultText, isError } = parseToolResult(event.content, event.isError)
+      const items = updateItemById<ToolItem>(state.activity.items, event.toolCallId, (item) => ({
+        ...item,
+        status: isError ? "error" : "done",
+        resultText,
+        isError,
+      }))
+      return {
+        ...state,
+        activity: { ...state.activity, items },
+      }
+    }
 
     default:
       return state

@@ -1,51 +1,56 @@
-import { useEffect, useRef } from "react"
+import { useEffect, useMemo, useRef } from "react"
 
-import type { ActivityItem as StreamActivityItem } from "@/features/activity-stream/streaming/reducer"
-import { ActivityItem } from "@/features/activity-stream/items/ActivityItem"
-import { ErrorItem } from "@/features/activity-stream/items/ErrorItem"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import type { ActivityBlockData } from "@/features/activity-stream/types"
 
-interface ThreadViewProps {
-  items: StreamActivityItem[]
-  error: string | null
+import type { AssistantTurn } from "../types"
+
+import { TurnList } from "./TurnList"
+
+type ThreadViewProps = {
+  activity: ActivityBlockData
 }
 
-function getItemKey(item: StreamActivityItem, index: number): string {
-  switch (item.type) {
-    case "text":
-      return `text:${item.messageId}:${index}`
+function toAssistantTurn(activity: ActivityBlockData): AssistantTurn {
+  let status: AssistantTurn["status"] = "pending"
 
-    case "reasoning":
-      return `reasoning:${item.messageId}:${index}`
+  if (activity.isCancelled) {
+    status = "cancelled"
+  } else if (activity.error) {
+    status = "error"
+  } else if (activity.isStreaming) {
+    status = "streaming"
+  } else if (activity.items.length > 0 || activity.pendingText) {
+    status = "complete"
+  }
 
-    case "tool_call":
-      return `tool_call:${item.toolCallId}:${index}`
-
-    case "tool_result":
-      return `tool_result:${item.toolCallId}:${index}`
-
-    case "error":
-      return `error:${index}`
-
-    default:
-      return `item:${index}`
+  return {
+    id: activity.id,
+    threadId: `thread:${activity.id}`,
+    parentId: null,
+    role: "assistant",
+    status,
+    siblingIds: [activity.id],
+    siblingIndex: 0,
+    createdAt: new Date(),
+    error: activity.error,
+    activity,
   }
 }
 
-export function ThreadView({ items, error }: ThreadViewProps) {
+export function ThreadView({ activity }: ThreadViewProps) {
   const bottomRef = useRef<HTMLDivElement | null>(null)
+
+  const turns = useMemo(() => [toAssistantTurn(activity)], [activity])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
-  }, [items, error])
+  }, [activity])
 
   return (
     <ScrollArea className="h-full rounded-lg border border-border bg-card">
-      <div className="space-y-3 p-4">
-        {items.map((item, index) => (
-          <ActivityItem key={getItemKey(item, index)} item={item} />
-        ))}
-        {error ? <ErrorItem message={error} /> : null}
+      <div className="space-y-4 p-4">
+        <TurnList turns={turns} />
         <div ref={bottomRef} />
       </div>
     </ScrollArea>
