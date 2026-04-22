@@ -9,10 +9,11 @@ from typing import TYPE_CHECKING, Literal
 
 from meridian.lib.core.types import ArtifactKey, SpawnId
 from meridian.lib.harness.ids import HarnessId
-from meridian.lib.harness.projections.project_opencode_subprocess import (
-    extract_file_paths_for_native_injection,
+from meridian.lib.launch.composition import (
+    ProjectionChannels,
+    ReferenceRouting,
+    build_reference_routing,
 )
-from meridian.lib.launch.composition import ProjectionChannels, ReferenceRouting
 from meridian.lib.state.artifact_store import ArtifactStore
 from meridian.lib.state.atomic import atomic_write_text
 
@@ -38,46 +39,7 @@ def _resolve_reference_routing(launch_context: LaunchContext) -> tuple[Reference
     reference_items = launch_context.run_params.reference_items
     if not reference_items:
         return ()
-
-    native_injected_paths: set[str] = set()
-    if launch_context.harness.capabilities.supports_native_file_injection and hasattr(
-        launch_context.spec, "reference_items"
-    ):
-        spec_reference_items = tuple(getattr(launch_context.spec, "reference_items", ()))
-        native_injected_paths = set(extract_file_paths_for_native_injection(spec_reference_items))
-
-    routing: list[ReferenceRouting] = []
-    for item in reference_items:
-        item_path = item.path.as_posix()
-        if item_path in native_injected_paths:
-            routing.append(
-                ReferenceRouting(
-                    path=item_path,
-                    type=item.kind,
-                    routing="native-injection",
-                    native_flag=f"--file {item_path}",
-                )
-            )
-            continue
-        if item.kind == "file" and not item.body.strip() and not item.warning:
-            routing.append(
-                ReferenceRouting(
-                    path=item_path,
-                    type=item.kind,
-                    routing="omitted",
-                    native_flag=None,
-                )
-            )
-            continue
-        routing.append(
-            ReferenceRouting(
-                path=item_path,
-                type=item.kind,
-                routing="inline",
-                native_flag=None,
-            )
-        )
-    return tuple(routing)
+    return build_reference_routing(reference_items)
 
 
 def _fallback_projection_channels(

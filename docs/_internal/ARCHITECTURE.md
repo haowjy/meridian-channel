@@ -116,7 +116,7 @@ src/meridian/
       direct.py                # Direct Anthropic Messages API adapter
       common.py                # Shared adapter utilities + strategies
       materialize.py           # Agent/skill materialization into harness dirs
-      launch_types.py          # PromptPolicy, SessionSeed (shared between harness + launch)
+      launch_types.py          # SessionSeed (shared between harness + launch)
       session_detection.py     # Harness-specific session ID extraction
 
     state/                     # ALL file-backed stores
@@ -313,7 +313,6 @@ graph TD
     Proto --- PS["parse_stream_event()<br/>stdout line -> StreamEvent"]
     Proto --- EU["extract_usage()<br/>artifacts -> TokenUsage"]
     Proto --- SS["seed_session()<br/>resume/fork control"]
-    Proto --- FC["filter_launch_content()<br/>prompt policy (resume/fork session seeding)"]
     Proto --- PC["project_content()<br/>semantic channel routing (primary + spawn)"]
 ```
 

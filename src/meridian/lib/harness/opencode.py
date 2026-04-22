@@ -27,22 +27,15 @@ from meridian.lib.harness.connections.opencode_http import OpenCodeConnection
 from meridian.lib.harness.extractors.opencode import OPENCODE_EXTRACTOR
 from meridian.lib.harness.ids import HarnessId, TransportId
 from meridian.lib.harness.launch_spec import OpenCodeLaunchSpec
-from meridian.lib.harness.launch_types import PromptPolicy, SessionSeed
+from meridian.lib.harness.launch_types import SessionSeed
 from meridian.lib.harness.opencode_storage import resolve_opencode_session_file
 from meridian.lib.harness.projections.project_opencode_subprocess import (
     project_opencode_spec_to_cli_args,
-)
-from meridian.lib.launch.composition import (
-    ComposedLaunchContent,
-    ProjectedContent,
-    ProjectionChannels,
-    ReferenceRouting,
 )
 from meridian.lib.launch.constants import (
     BASE_COMMAND_OPENCODE_SUBPROCESS,
     PRIMARY_BASE_COMMAND_OPENCODE,
 )
-from meridian.lib.launch.reference import render_reference_blocks
 from meridian.lib.platform import get_home_path
 from meridian.lib.safety.permissions import PermissionConfig
 
@@ -206,7 +199,7 @@ class OpenCodeAdapter(BaseHarnessAdapter[OpenCodeLaunchSpec]):
             supports_session_fork=True,
             supports_native_skills=True,
             supports_primary_launch=True,
-            supports_native_file_injection=True,
+            supports_native_file_injection=False,
         )
 
     def run_prompt_policy(self) -> RunPromptPolicy:
@@ -221,8 +214,6 @@ class OpenCodeAdapter(BaseHarnessAdapter[OpenCodeLaunchSpec]):
         if run.model:
             normalized_model = _normalize_opencode_model(str(run.model))
         continue_session_id = (run.continue_harness_session_id or "").strip() or None
-        use_prompt_skill_channel = self.run_prompt_policy().include_skills
-        projected_skills = () if use_prompt_skill_channel else run.skills
         return OpenCodeLaunchSpec(
             model=normalized_model,
             effort=run.effort,
@@ -234,7 +225,7 @@ class OpenCodeAdapter(BaseHarnessAdapter[OpenCodeLaunchSpec]):
             interactive=run.interactive,
             mcp_tools=run.mcp_tools,
             agent_name=run.agent,
-            skills=projected_skills,
+            skills=(),
         )
 
     def build_command(self, run: SpawnParams, perms: PermissionResolver) -> list[str]:
@@ -268,84 +259,6 @@ class OpenCodeAdapter(BaseHarnessAdapter[OpenCodeLaunchSpec]):
             return SessionSeed()
         # Resume and fork both seed from an existing harness session id.
         return SessionSeed(session_id=normalized_harness_session_id)
-
-    def project_content(self, content: ComposedLaunchContent) -> ProjectedContent:
-        """OpenCode projection: inline content with optional native file injection.
-        
-        OpenCode supports --file injection for reference files.
-        """
-        reference_routing = tuple(
-            ReferenceRouting(
-                path=item.path.as_posix(),
-                type=item.kind,
-                routing=(
-                    "native-injection"
-                    if item.kind == "file" and item.body.strip() and not item.warning
-                    else (
-                        "omitted"
-                        if item.kind == "file" and not item.body.strip() and not item.warning
-                        else "inline"
-                    )
-                ),
-                native_flag=(
-                    f"--file {item.path.as_posix()}"
-                    if item.kind == "file" and item.body.strip() and not item.warning
-                    else None
-                ),
-            )
-            for item in content.reference_items
-        )
-        # Build inline prompt: SYSTEM_INSTRUCTION blocks first
-        system_blocks = [
-            content.skill_injection,
-            content.agent_profile_body,
-            content.inventory_prompt,
-            content.report_instruction,
-            *content.passthrough_system_fragments,
-        ]
-        system_text = "\n\n".join(b.strip() for b in system_blocks if b.strip())
-        
-        inline_reference_items = tuple(
-            item
-            for item, route in zip(
-                content.reference_items,
-                reference_routing,
-                strict=False,
-            )
-            if route.routing == "inline"
-        )
-        context_blocks = [*render_reference_blocks(inline_reference_items), content.prior_output]
-        context_text = "\n\n".join(b.strip() for b in context_blocks if b.strip())
-        
-        user_blocks = [system_text, content.user_task_prompt, context_text]
-        user_turn = "\n\n".join(b.strip() for b in user_blocks if b.strip())
-        has_native_injection = any(
-            route.routing == "native-injection" for route in reference_routing
-        )
-        
-        return ProjectedContent(
-            system_prompt="",  # OpenCode has no system-prompt channel
-            user_turn_content=user_turn,
-            reference_routing=reference_routing,
-            channels=ProjectionChannels(
-                system_instruction="inline",
-                user_task_prompt="inline",
-                task_context="native-injection" if has_native_injection else "inline",
-            ),
-        )
-
-    def filter_launch_content(
-        self,
-        *,
-        prompt: str,
-        skill_injection: str | None,
-        is_resume: bool,
-        harness_session_id: str,
-    ) -> PromptPolicy:
-        _ = harness_session_id
-        if is_resume:
-            return PromptPolicy()
-        return PromptPolicy(prompt=prompt, skill_injection=skill_injection)
 
     def detect_primary_session_id(
         self,

@@ -16,6 +16,24 @@ from typing import TYPE_CHECKING, Literal
 if TYPE_CHECKING:
     from meridian.lib.launch.reference import ReferenceItem
 
+from meridian.lib.launch.reference import render_reference_blocks
+
+# Named canonical orders for SYSTEM_INSTRUCTION composition.
+SYSTEM_INSTRUCTION_BLOCK_ORDER: tuple[str, ...] = (
+    "skill_injection",
+    "agent_profile_body",
+    "report_instruction",
+    "inventory_prompt",
+    # passthrough_system_fragments appended last
+)
+
+# Canonical ordering for inline harnesses (Codex, OpenCode).
+INLINE_BLOCK_ORDER: tuple[str, ...] = (
+    "system_instruction",
+    "task_context",
+    "user_task_prompt",
+)
+
 
 @dataclass(frozen=True)
 class ReferenceRouting:
@@ -126,9 +144,107 @@ class ProjectedContent:
         return self.channels.to_dict()
 
 
+def build_reference_routing(
+    reference_items: tuple[ReferenceItem, ...],
+) -> tuple[ReferenceRouting, ...]:
+    """Build reference routing decisions from items.
+
+    Files with empty body and no warning are omitted.
+    All other items route inline (no native injection).
+    """
+    return tuple(
+        ReferenceRouting(
+            path=item.path.as_posix(),
+            type=item.kind,
+            routing=(
+                "omitted"
+                if item.kind == "file" and not item.body.strip() and not item.warning
+                else "inline"
+            ),
+            native_flag=None,
+        )
+        for item in reference_items
+    )
+
+
+def join_content_blocks(*blocks: str) -> str:
+    """Join non-empty content blocks with double newlines."""
+    return "\n\n".join(block.strip() for block in blocks if block.strip())
+
+
+def render_system_instruction_blocks(content: ComposedLaunchContent) -> str:
+    """Render SYSTEM_INSTRUCTION blocks in canonical order.
+
+    Order: skill_injection, agent_profile_body, report_instruction,
+    inventory_prompt, then passthrough_system_fragments last.
+    """
+    ordered_blocks = tuple(
+        getattr(content, field_name) for field_name in SYSTEM_INSTRUCTION_BLOCK_ORDER
+    )
+    return join_content_blocks(*ordered_blocks, *content.passthrough_system_fragments)
+
+
+def render_task_context(
+    reference_items: tuple[ReferenceItem, ...],
+    reference_routing: tuple[ReferenceRouting, ...],
+    prior_output: str,
+) -> str:
+    """Render TASK_CONTEXT: inline references + prior output."""
+    inline_references = tuple(
+        item
+        for item, route in zip(
+            reference_items,
+            reference_routing,
+            strict=True,
+        )
+        if route.routing == "inline"
+    )
+    reference_blocks = render_reference_blocks(inline_references)
+    return join_content_blocks(*reference_blocks, prior_output)
+
+
+def project_inline_content(content: ComposedLaunchContent) -> ProjectedContent:
+    """Project all content inline with canonical INLINE_BLOCK_ORDER.
+
+    Ordering: SYSTEM_INSTRUCTION -> TASK_CONTEXT -> USER_TASK_PROMPT
+    Used by Codex, OpenCode, and the base adapter default.
+    """
+    reference_routing = build_reference_routing(content.reference_items)
+    system_text = render_system_instruction_blocks(content)
+    task_context = render_task_context(
+        content.reference_items,
+        reference_routing,
+        content.prior_output,
+    )
+    inline_blocks = {
+        "system_instruction": system_text,
+        "task_context": task_context,
+        "user_task_prompt": content.user_task_prompt,
+    }
+    user_turn = join_content_blocks(*(inline_blocks[name] for name in INLINE_BLOCK_ORDER))
+
+    return ProjectedContent(
+        system_prompt="",
+        user_turn_content=user_turn,
+        reference_routing=reference_routing,
+        channels=ProjectionChannels(
+            system_instruction="inline",
+            user_task_prompt="inline",
+            task_context="inline",
+        ),
+    )
+
+
 __all__ = [
+    "INLINE_BLOCK_ORDER",
+    "SYSTEM_INSTRUCTION_BLOCK_ORDER",
     "ComposedLaunchContent",
     "ProjectedContent",
     "ProjectionChannels",
     "ReferenceRouting",
+    "build_reference_routing",
+    "join_content_blocks",
+    "project_inline_content",
+    "render_system_instruction_blocks",
+    "render_task_context",
 ]

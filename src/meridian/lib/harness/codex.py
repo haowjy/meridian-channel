@@ -33,21 +33,13 @@ from meridian.lib.harness.connections.codex_ws import CodexConnection
 from meridian.lib.harness.extractors.codex import CODEX_EXTRACTOR
 from meridian.lib.harness.ids import HarnessId, TransportId
 from meridian.lib.harness.launch_spec import CodexLaunchSpec
-from meridian.lib.harness.launch_types import PromptPolicy
 from meridian.lib.harness.projections.project_codex_subprocess import (
     project_codex_spec_to_cli_args,
-)
-from meridian.lib.launch.composition import (
-    ComposedLaunchContent,
-    ProjectedContent,
-    ProjectionChannels,
-    ReferenceRouting,
 )
 from meridian.lib.launch.constants import (
     BASE_COMMAND_CODEX_SUBPROCESS,
     PRIMARY_BASE_COMMAND_CODEX,
 )
-from meridian.lib.launch.reference import render_reference_blocks
 from meridian.lib.platform import get_home_path
 from meridian.lib.safety.permissions import PermissionConfig
 
@@ -218,17 +210,6 @@ def _detect_primary_session_id(project_root: Path, started_at_epoch: float) -> s
     return None
 
 
-def _compose_inline_launch_prompt(*, prompt: str, skill_injection: str | None) -> str:
-    sections: list[str] = []
-    injected = (skill_injection or "").strip()
-    if injected:
-        sections.append(injected)
-    prompt_text = prompt.strip()
-    if prompt_text:
-        sections.append(prompt_text)
-    return "\n\n".join(sections)
-
-
 def _owns_session(project_root: Path, session_ref: str) -> bool:
     normalized = session_ref.strip()
     if not normalized:
@@ -370,81 +351,6 @@ class CodexAdapter(BaseHarnessAdapter[CodexLaunchSpec]):
 
     def extract_usage(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> TokenUsage:
         return extract_usage_from_artifacts(artifacts, spawn_id)
-
-    def project_content(self, content: ComposedLaunchContent) -> ProjectedContent:
-        """Codex projection: all content goes inline, no separate system-prompt channel.
-        
-        Ordering: SYSTEM_INSTRUCTION -> USER_TASK_PROMPT -> TASK_CONTEXT
-        """
-        reference_routing = tuple(
-            ReferenceRouting(
-                path=item.path.as_posix(),
-                type=item.kind,
-                routing=(
-                    "omitted"
-                    if item.kind == "file" and not item.body.strip() and not item.warning
-                    else "inline"
-                ),
-                native_flag=None,
-            )
-            for item in content.reference_items
-        )
-        # Build inline prompt: SYSTEM_INSTRUCTION blocks first
-        system_blocks = [
-            content.skill_injection,
-            content.agent_profile_body,
-            content.inventory_prompt,
-            content.report_instruction,
-            *content.passthrough_system_fragments,
-        ]
-        system_text = "\n\n".join(b.strip() for b in system_blocks if b.strip())
-        
-        # Then USER_TASK_PROMPT
-        user_task = content.user_task_prompt.strip()
-        
-        # Then TASK_CONTEXT
-        inline_reference_items = tuple(
-            item
-            for item, route in zip(
-                content.reference_items,
-                reference_routing,
-                strict=False,
-            )
-            if route.routing == "inline"
-        )
-        context_blocks = [*render_reference_blocks(inline_reference_items), content.prior_output]
-        context_text = "\n\n".join(b.strip() for b in context_blocks if b.strip())
-        
-        user_blocks = [system_text, user_task, context_text]
-        user_turn = "\n\n".join(b.strip() for b in user_blocks if b.strip())
-        
-        return ProjectedContent(
-            system_prompt="",  # Codex has no system-prompt channel
-            user_turn_content=user_turn,
-            reference_routing=reference_routing,
-            channels=ProjectionChannels(
-                system_instruction="inline",
-                user_task_prompt="inline",
-                task_context="inline",
-            ),
-        )
-
-    def filter_launch_content(
-        self,
-        *,
-        prompt: str,
-        skill_injection: str | None,
-        is_resume: bool,
-        harness_session_id: str,
-    ) -> PromptPolicy:
-        _ = harness_session_id
-        if is_resume:
-            return PromptPolicy()
-        return PromptPolicy(
-            prompt=_compose_inline_launch_prompt(prompt=prompt, skill_injection=skill_injection),
-            # Keep passthrough system-prompt fragments on the inline injection path.
-            skill_injection="",
-        )
 
     def detect_primary_session_id(
         self,

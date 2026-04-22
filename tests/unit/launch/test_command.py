@@ -16,7 +16,7 @@ def _resolver() -> TieredPermissionResolver:
     return TieredPermissionResolver(config=PermissionConfig())
 
 
-def test_build_launch_argv_preserves_opencode_reference_items_for_file_injection() -> None:
+def test_build_launch_argv_does_not_project_opencode_reference_items_as_file_flags() -> None:
     adapter = OpenCodeAdapter()
     file_ref = ReferenceItem(
         kind="file",
@@ -43,9 +43,9 @@ def test_build_launch_argv_preserves_opencode_reference_items_for_file_injection
         projected_spec=projected_spec,
     )
 
-    assert "--file" in argv
-    assert file_ref.path.as_posix() in argv
-    assert argv[-2:] == ("--", "-")
+    assert "--file" not in argv
+    assert file_ref.path.as_posix() not in argv
+    assert argv[-1] == "-"
 
 
 def test_build_launch_argv_projects_claude_prompt_file_path_from_resolved_spec() -> None:

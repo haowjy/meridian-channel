@@ -442,14 +442,13 @@ def _resolve_surface_request(
         )
         prompt = cleaned_user_prompt
 
-        skill_injection = ""
-        if prompt_policy.include_skills:
-            skill_injection = compose_skill_injections(resolved_skills.loaded_skills) or ""
+        skill_injection = compose_skill_injections(resolved_skills.loaded_skills) or ""
 
         agent_profile_body = ""
+        # When harness supports native agents, agent body is delivered separately
+        # (e.g. Claude's adhoc_agent_payload). Otherwise include it in composition.
         if (
-            prompt_policy.include_agent_body
-            and profile is not None
+            profile is not None
             and profile.body.strip()
             and not harness.capabilities.supports_native_agents
         ):
@@ -458,11 +457,9 @@ def _resolve_surface_request(
                 resolved_template_variables,
             )
             agent_profile_body = f"# Agent Profile\n\n{rendered_agent_body}"
-        inventory_prompt = ""
-        if prompt_policy.include_inventory:
-            inventory_prompt = (
-                build_agent_inventory_prompt(project_root=project_paths.project_root) or ""
-            )
+        inventory_prompt = (
+            build_agent_inventory_prompt(project_root=project_paths.project_root) or ""
+        )
 
         spawn_composed_content = ComposedLaunchContent(
             skill_injection=skill_injection,
@@ -548,6 +545,8 @@ def _resolve_surface_request(
             final_passthrough_args = passthrough_args
             skill_injection = compose_skill_injections(resolved_skills.loaded_skills) or ""
             agent_profile_body = ""
+            # When harness supports native agents, agent body is delivered separately
+            # (e.g. Claude's adhoc_agent_payload). Otherwise include it in composition.
             if (
                 profile is not None
                 and profile.body.strip()

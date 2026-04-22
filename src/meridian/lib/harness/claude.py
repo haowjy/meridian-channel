@@ -30,20 +30,22 @@ from meridian.lib.harness.connections.claude_ws import ClaudeConnection
 from meridian.lib.harness.extractors.claude import CLAUDE_EXTRACTOR
 from meridian.lib.harness.ids import HarnessId, TransportId
 from meridian.lib.harness.launch_spec import ClaudeLaunchSpec
-from meridian.lib.harness.launch_types import PromptPolicy, SessionSeed
+from meridian.lib.harness.launch_types import SessionSeed
 from meridian.lib.harness.projections.project_claude import project_claude_spec_to_cli_args
 from meridian.lib.launch.composition import (
     ComposedLaunchContent,
     ProjectedContent,
     ProjectionChannels,
-    ReferenceRouting,
+    build_reference_routing,
+    join_content_blocks,
+    render_system_instruction_blocks,
+    render_task_context,
 )
 from meridian.lib.launch.constants import (
     BASE_COMMAND_CLAUDE_SUBPROCESS,
     PRIMARY_BASE_COMMAND_CLAUDE,
 )
 from meridian.lib.launch.launch_types import PreflightResult
-from meridian.lib.launch.reference import render_reference_blocks
 from meridian.lib.platform import get_home_path
 from meridian.lib.safety.permissions import PermissionConfig
 
@@ -259,11 +261,7 @@ class ClaudeAdapter(BaseHarnessAdapter[ClaudeLaunchSpec]):
         )
 
     def run_prompt_policy(self) -> RunPromptPolicy:
-        return RunPromptPolicy(
-            include_agent_body=False,
-            include_skills=True,
-            skill_injection_mode="append-system-prompt",
-        )
+        return RunPromptPolicy(skill_injection_mode="append-system-prompt")
 
     def build_adhoc_agent_payload(self, *, name: str, description: str, prompt: str) -> str:
         return build_claude_adhoc_agent_json(name=name, description=description, prompt=prompt)
@@ -424,50 +422,19 @@ class ClaudeAdapter(BaseHarnessAdapter[ClaudeLaunchSpec]):
 
     def project_content(self, content: ComposedLaunchContent) -> ProjectedContent:
         """Claude projection: route system content to append-system-prompt.
-        
+
         - SYSTEM_INSTRUCTION (skills, profile, report, inventory, passthrough)
           → --append-system-prompt channel
         - USER_TASK_PROMPT + TASK_CONTEXT → positional prompt argument (user turn)
         """
-        # Build system prompt: all SYSTEM_INSTRUCTION blocks, passthrough last
-        system_blocks = [
-            content.skill_injection,
-            content.agent_profile_body,
-            content.report_instruction,
-            content.inventory_prompt,
-            *content.passthrough_system_fragments,
-        ]
-        system_prompt = "\n\n".join(b.strip() for b in system_blocks if b.strip())
-        
-        # Build user turn: TASK_CONTEXT + USER_TASK_PROMPT
-        reference_routing = tuple(
-            ReferenceRouting(
-                path=item.path.as_posix(),
-                type=item.kind,
-                routing=(
-                    "omitted"
-                    if item.kind == "file" and not item.body.strip() and not item.warning
-                    else "inline"
-                ),
-                native_flag=None,
-            )
-            for item in content.reference_items
-        )
-        inline_reference_items = tuple(
-            item
-            for item, route in zip(
-                content.reference_items,
-                reference_routing,
-                strict=False,
-            )
-            if route.routing == "inline"
-        )
-        user_blocks = [
-            *render_reference_blocks(inline_reference_items),
+        system_prompt = render_system_instruction_blocks(content)
+        reference_routing = build_reference_routing(content.reference_items)
+        task_context = render_task_context(
+            content.reference_items,
+            reference_routing,
             content.prior_output,
-            content.user_task_prompt,
-        ]
-        user_turn = "\n\n".join(b.strip() for b in user_blocks if b.strip())
+        )
+        user_turn = join_content_blocks(task_context, content.user_task_prompt)
         
         return ProjectedContent(
             system_prompt=system_prompt,
@@ -481,22 +448,6 @@ class ClaudeAdapter(BaseHarnessAdapter[ClaudeLaunchSpec]):
                 task_context="user-turn",
             ),
         )
-
-    def filter_launch_content(
-        self,
-        *,
-        prompt: str,
-        skill_injection: str | None,
-        is_resume: bool,
-        harness_session_id: str,
-    ) -> PromptPolicy:
-        _ = harness_session_id
-        if is_resume:
-            return PromptPolicy(skill_injection=skill_injection)
-        # Claude does not currently expand profile skills via --agent
-        # (see anthropics/claude-code#29902), so we must inject skill content
-        # explicitly through Meridian's --append-system-prompt path.
-        return PromptPolicy(prompt=prompt, skill_injection=skill_injection)
 
     def detect_primary_session_id(
         self,

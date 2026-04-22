@@ -123,7 +123,6 @@ _EXECUTOR_COMPOSITION_FORBIDDEN: list[tuple[str, str]] = [
     ("UnsafeNoOpPermissionResolver()", r"\bUnsafeNoOpPermissionResolver\s*\("),
     ("adapter.fork_session()", r"\.fork_session\s*\("),
     ("adapter.seed_session()", r"\.seed_session\s*\("),
-    ("adapter.filter_launch_content()", r"\.filter_launch_content\s*\("),
     ("adapter.resolve_launch_spec()", r"\.resolve_launch_spec\s*\("),
     ("adapter.build_command()", r"\.build_command\s*\("),
     ("build_harness_child_env()", r"\bbuild_harness_child_env\s*\("),
@@ -166,7 +165,6 @@ _EXECUTOR_FORBIDDEN: list[tuple[str, str]] = [
     ("TieredPermissionResolver()", r"\bTieredPermissionResolver\s*\("),
     ("adapter.build_command()", r"\.build_command\s*\("),
     ("adapter.seed_session()", r"\.seed_session\s*\("),
-    ("adapter.filter_launch_content()", r"\.filter_launch_content\s*\("),
 ]
 
 

@@ -80,7 +80,7 @@ def resolve_launch_spec_stage(
        exposes a `reference_items` field.
 
     This keeps generic `SpawnParams` stable while still making native-injection data
-    available to projections like OpenCode subprocess `--file`.
+    available to any harness projection that explicitly supports it.
     """
 
     spec = adapter.resolve_launch_spec(to_spawn_params(run_inputs), perms)

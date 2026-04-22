@@ -15,12 +15,3 @@ class SessionSeed(BaseModel):
 
     session_id: str = ""
     session_args: tuple[str, ...] = ()
-
-
-class PromptPolicy(BaseModel):
-    """Adapter's prompt decisions, resolved during command assembly."""
-
-    model_config = ConfigDict(frozen=True)
-
-    prompt: str = ""
-    skill_injection: str | None = None

@@ -158,7 +158,11 @@ Each harness adapter decides how to route these categories to its native CLI cha
 |---|---|---|---|
 | `SYSTEM_INSTRUCTION` | `--append-system-prompt-file` | inline (top) | inline |
 | `USER_TASK_PROMPT` | positional argument | inline (after system) | inline |
-| `TASK_CONTEXT` | user-turn (prepended to prompt) | inline (after prompt) | native `--file` or inline |
+| `TASK_CONTEXT` | user-turn (prepended to prompt) | inline (before prompt) | inline |
+
+Where an adapter flattens content into a single inline prompt (Codex and OpenCode), the canonical inline ordering is:
+
+`SYSTEM_INSTRUCTION -> TASK_CONTEXT -> USER_TASK_PROMPT`
 
 For Claude native profile passthrough, Meridian uses:
 
@@ -187,10 +191,10 @@ After every launch (primary and spawn), Meridian writes artifacts to the spawn l
 |---|---|---|
 | `system-prompt.md` | `SYSTEM_INSTRUCTION` content as sent to the system-prompt channel | System-prompt content exists (Claude composed launches) |
 | `starting-prompt.md` | Full user-turn content (`USER_TASK_PROMPT` + prepended `TASK_CONTEXT`) | User-turn content exists |
-| `references.json` | Per-reference routing decisions (inline / native-injection / omitted) | References exist |
+| `references.json` | Per-reference routing decisions (currently inline / omitted) | References exist |
 | `projection-manifest.json` | Harness ID, surface, and per-category channel routing decisions | Every launch |
 
-`references.json` is adapter-owned: OpenCode decides per reference whether to pass `--file` (native-injection) or inline the body. Claude and Codex mark all references as inline.
+`references.json` is adapter-owned. All harness adapters currently mark all references as inline.
 
 `projection-manifest.json` schema:
 

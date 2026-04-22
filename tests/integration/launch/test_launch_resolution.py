@@ -268,7 +268,7 @@ def test_opencode_workspace_projection_handles_parent_env_suppression(
         assert "workspace_opencode_parent_env_suppressed" not in warning_codes
 
 
-def test_spawn_prepare_opencode_uses_native_file_injection_and_keeps_inline_fallbacks(
+def test_spawn_prepare_opencode_keeps_all_references_inline(
     tmp_path: Path,
 ) -> None:
     _write_minimal_mars_config(tmp_path)
@@ -300,15 +300,15 @@ def test_spawn_prepare_opencode_uses_native_file_injection_and_keeps_inline_fall
         dry_run=True,
     )
 
-    assert "--file" in preview.argv
-    assert file_ref.as_posix() in preview.argv
+    assert "--file" not in preview.argv
+    assert file_ref.as_posix() not in preview.argv
     assert preview.projected_content is not None
     assert [route.to_dict() for route in preview.projected_content.reference_routing] == [
         {
             "path": file_ref.as_posix(),
             "type": "file",
-            "routing": "native-injection",
-            "native_flag": f"--file {file_ref.as_posix()}",
+            "routing": "inline",
+            "native_flag": None,
         },
         {
             "path": dir_ref.as_posix(),
@@ -320,9 +320,9 @@ def test_spawn_prepare_opencode_uses_native_file_injection_and_keeps_inline_fall
     assert preview.projected_content.channel_manifest() == {
         "system_instruction": "inline",
         "user_task_prompt": "inline",
-        "task_context": "native-injection",
+        "task_context": "inline",
     }
-    assert f"# Reference: {file_ref.as_posix()}" not in preview.resolved_request.prompt
+    assert f"# Reference: {file_ref.as_posix()}" in preview.resolved_request.prompt
     assert f"# Reference: {dir_ref.as_posix()}/" in preview.resolved_request.prompt
     assert "# Meridian Agents" in preview.resolved_request.prompt
 

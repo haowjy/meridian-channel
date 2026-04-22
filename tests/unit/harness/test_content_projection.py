@@ -95,12 +95,12 @@ def test_codex_project_content_keeps_required_inline_ordering() -> None:
         (
             "SYSTEM: skill content",
             "SYSTEM: profile body",
-            "SYSTEM: agent inventory",
             "SYSTEM: report instruction",
+            "SYSTEM: agent inventory",
             "SYSTEM: passthrough fragment",
-            "USER: task prompt",
             "CONTEXT: reference file",
             "CONTEXT: prior output",
+            "USER: task prompt",
         ),
     )
 
@@ -113,28 +113,28 @@ def test_opencode_project_content_includes_profile_body_as_system_instruction() 
         {
             "path": "/repo/ref.txt",
             "type": "file",
-            "routing": "native-injection",
-            "native_flag": "--file /repo/ref.txt",
+            "routing": "inline",
+            "native_flag": None,
         }
     ]
     assert projected.channel_manifest() == {
         "system_instruction": "inline",
         "user_task_prompt": "inline",
-        "task_context": "native-injection",
+        "task_context": "inline",
     }
     _assert_ordered(
         projected.user_turn_content,
         (
             "SYSTEM: skill content",
             "SYSTEM: profile body",
-            "SYSTEM: agent inventory",
             "SYSTEM: report instruction",
+            "SYSTEM: agent inventory",
             "SYSTEM: passthrough fragment",
-            "USER: task prompt",
+            "CONTEXT: reference file",
             "CONTEXT: prior output",
+            "USER: task prompt",
         ),
     )
-    assert "CONTEXT: reference file" not in projected.user_turn_content
 
 
 def test_claude_cli_projection_uses_system_prompt_file_and_positional_user_turn(

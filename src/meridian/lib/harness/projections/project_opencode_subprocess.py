@@ -4,13 +4,9 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable, Sequence
-from typing import TYPE_CHECKING
 
 from meridian.lib.harness.ids import HarnessId
 from meridian.lib.harness.launch_spec import OpenCodeLaunchSpec
-
-if TYPE_CHECKING:
-    from meridian.lib.launch.reference import ReferenceItem
 from meridian.lib.harness.projections._guards import (
     check_projection_drift as _check_projection_drift,
 )
@@ -36,11 +32,10 @@ _PROJECTED_FIELDS: frozenset[str] = frozenset(
         "mcp_tools",
         "agent_name",
         "skills",
-        "reference_items",
     }
 )
 
-_DELEGATED_FIELDS: frozenset[str] = frozenset()
+_DELEGATED_FIELDS: frozenset[str] = frozenset({"reference_items"})
 
 
 def _normalized_nonempty(values: Iterable[str]) -> tuple[str, ...]:
@@ -50,21 +45,6 @@ def _normalized_nonempty(values: Iterable[str]) -> tuple[str, ...]:
         if token:
             normalized.append(token)
     return tuple(normalized)
-
-
-def extract_file_paths_for_native_injection(
-    reference_items: tuple[ReferenceItem, ...],
-) -> list[str]:
-    """Extract file paths from reference items for --file flags.
-
-    Only files with content (not warnings) are extracted.
-    Directories are excluded - they should remain as inline trees in the prompt.
-    """
-    file_paths: list[str] = []
-    for item in reference_items:
-        if item.kind == "file" and item.body and not item.warning:
-            file_paths.append(item.path.as_posix())
-    return file_paths
 
 
 _MANAGED_FLAG_ALIASES: dict[str, tuple[str, ...]] = {
@@ -165,17 +145,7 @@ def project_opencode_spec_to_cli_args(
 
     command.extend(resolve_permission_flags(spec.permission_resolver, HarnessId.OPENCODE))
 
-    # Add --file flags for native file injection
-    file_paths = extract_file_paths_for_native_injection(spec.reference_items)
-    for file_path in file_paths:
-        command.extend(("--file", file_path))
-
     command.extend(passthrough_tail)
-
-    # Add -- separator before stdin marker when we have file flags
-    # This ensures the argument parser doesn't treat `-` as a flag
-    if file_paths and not spec.interactive:
-        command.append("--")
 
     if spec.interactive:
         if spec.prompt:
@@ -203,6 +173,5 @@ __all__ = [
     "_PROJECTED_FIELDS",
     "HarnessCapabilityMismatch",
     "_check_projection_drift",
-    "extract_file_paths_for_native_injection",
     "project_opencode_spec_to_cli_args",
 ]

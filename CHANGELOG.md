@@ -3,6 +3,20 @@
 Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [SemVer](https://semver.org/). Versions `0.0.6` through `0.0.25` in git history only — changelog fell stale, resumed at `[Unreleased]`.
 ## [Unreleased]
 
+## [0.0.42] - 2026-04-22
+
+### Changed
+- Spawn prompt projection now has one shared inline path. Codex and OpenCode inherit base inline projection: system instructions, task context, then user task.
+- Harness adapter docs now name the canonical prompt category routing and inline block order.
+
+### Removed
+- Dead `PromptPolicy` / `filter_launch_content` prompt-composition API.
+- OpenCode `--file` reference projection. References now inline or omit empty files until real native delivery exists.
+
+### Fixed
+- Spawn prompt composition now always includes loaded skills and agent inventory before harness projection, so Claude/Codex/OpenCode receive the same semantic payload through their supported channels.
+- OpenCode streaming no longer drops `-f` reference content by advertising native file injection it cannot deliver.
+
 ## [0.0.41] - 2026-04-22
 
 ### Fixed

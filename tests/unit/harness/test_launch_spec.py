@@ -7,7 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from meridian.lib.core.types import ModelId
-from meridian.lib.harness.adapter import RunPromptPolicy, SpawnParams, SubprocessHarness
+from meridian.lib.harness.adapter import SpawnParams, SubprocessHarness
 from meridian.lib.harness.claude import ClaudeAdapter
 from meridian.lib.harness.codex import CodexAdapter
 from meridian.lib.harness.launch_spec import (
@@ -153,23 +153,6 @@ def test_opencode_resolve_launch_spec_handles_model_shapes_exactly_once(
     assert spec.model == expected_model
 
 
-def test_opencode_resolve_launch_spec_preserves_skills_when_policy_disables_inline() -> None:
-    class _NoInlineSkillsOpenCodeAdapter(OpenCodeAdapter):
-        def run_prompt_policy(self) -> RunPromptPolicy:
-            return RunPromptPolicy(include_skills=False)
-
-    resolver = _resolver()
-    run = SpawnParams(
-        prompt="test prompt",
-        model=ModelId("opencode-gpt-5.3-codex"),
-        skills=("skill-a", "skill-b"),
-    )
-
-    spec = _NoInlineSkillsOpenCodeAdapter().resolve_launch_spec(run, resolver)
-
-    assert spec.skills == ("skill-a", "skill-b")
-
-
 def test_opencode_subprocess_rejects_mcp_tools() -> None:
     resolver = _resolver()
     run = SpawnParams(
@@ -224,7 +207,7 @@ def test_opencode_primary_projection_uses_prompt_flag_instead_of_project_positio
     assert command == ["opencode", "--prompt", "prompt text"]
 
 
-def test_opencode_subprocess_projection_injects_only_valid_file_references() -> None:
+def test_opencode_subprocess_projection_does_not_emit_file_injection_flags() -> None:
     spec = OpenCodeLaunchSpec(
         prompt="test prompt",
         permission_resolver=_resolver(),
@@ -255,12 +238,11 @@ def test_opencode_subprocess_projection_injects_only_valid_file_references() -> 
 
     command = project_opencode_spec_to_cli_args(spec, base_command=("opencode", "run"))
 
-    assert command.count("--file") == 1
-    assert "--file" in command
-    assert "/repo/src/auth.py" in command
+    assert "--file" not in command
+    assert "/repo/src/auth.py" not in command
     assert "/repo/src/binary.dat" not in command
     assert "/repo/src/empty.py" not in command
-    assert command[-2:] == ["--", "-"]
+    assert command[-1] == "-"
 
 
 @pytest.mark.parametrize(

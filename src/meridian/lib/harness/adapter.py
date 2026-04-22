@@ -11,12 +11,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from meridian.lib.core.domain import TokenUsage
 from meridian.lib.core.types import ArtifactKey, ModelId, SpawnId
 from meridian.lib.harness.ids import HarnessId
-from meridian.lib.harness.launch_types import PromptPolicy, SessionSeed
+from meridian.lib.harness.launch_types import SessionSeed
 from meridian.lib.launch.composition import (
     ComposedLaunchContent,
     ProjectedContent,
-    ProjectionChannels,
-    ReferenceRouting,
+    project_inline_content,
 )
 from meridian.lib.launch.launch_types import (
     PermissionResolver,
@@ -24,7 +23,6 @@ from meridian.lib.launch.launch_types import (
     ResolvedLaunchSpec,
     SpecT,
 )
-from meridian.lib.launch.reference import render_reference_blocks
 from meridian.lib.safety.permissions import PermissionConfig
 
 AdapterSpecT = TypeVar("AdapterSpecT", bound=ResolvedLaunchSpec, covariant=True)
@@ -60,9 +58,6 @@ class RunPromptPolicy(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    include_agent_body: bool = True
-    include_skills: bool = True
-    include_inventory: bool = True
     skill_injection_mode: Literal["none", "append-system-prompt"] = "none"
 
 
@@ -207,18 +202,9 @@ class SubprocessHarness(HarnessAdapter[ResolvedLaunchSpec], Protocol):
         passthrough_args: tuple[str, ...],
     ) -> SessionSeed: ...
 
-    def filter_launch_content(
-        self,
-        *,
-        prompt: str,
-        skill_injection: str | None,
-        is_resume: bool,
-        harness_session_id: str,
-    ) -> PromptPolicy: ...
-
     def project_content(self, content: ComposedLaunchContent) -> ProjectedContent:
         """Project semantic content blocks to harness channel assignments.
-        
+
         Takes harness-agnostic ComposedLaunchContent and returns
         ProjectedContent with harness-specific channel routing decisions.
         """
@@ -338,75 +324,13 @@ class BaseHarnessAdapter(Generic[SpecT], ABC):
         _ = is_resume, harness_session_id, passthrough_args
         return SessionSeed()
 
-    def filter_launch_content(
-        self,
-        *,
-        prompt: str,
-        skill_injection: str | None,
-        is_resume: bool,
-        harness_session_id: str,
-    ) -> PromptPolicy:
-        _ = is_resume, harness_session_id
-        return PromptPolicy(prompt=prompt, skill_injection=skill_injection)
-
     def project_content(self, content: ComposedLaunchContent) -> ProjectedContent:
-        """Default projection: all SYSTEM_INSTRUCTION inline at top, then user/context.
-        
+        """Default projection: all SYSTEM_INSTRUCTION inline at top, then context/user.
+
         Concrete adapters (Claude, Codex, OpenCode) should override for
         harness-specific channel routing.
         """
-        reference_routing = tuple(
-            ReferenceRouting(
-                path=item.path.as_posix(),
-                type=item.kind,
-                routing=(
-                    "omitted"
-                    if item.kind == "file" and not item.body.strip() and not item.warning
-                    else "inline"
-                ),
-                native_flag=None,
-            )
-            for item in content.reference_items
-        )
-        # Default: flatten everything inline (no separate system-prompt channel)
-        system_blocks = [
-            content.skill_injection,
-            content.agent_profile_body,
-            content.report_instruction,
-            content.inventory_prompt,
-            *content.passthrough_system_fragments,
-        ]
-        system_text = "\n\n".join(b.strip() for b in system_blocks if b.strip())
-        
-        context_blocks = [
-            *render_reference_blocks(
-                tuple(
-                    item
-                    for item, route in zip(
-                        content.reference_items,
-                        reference_routing,
-                        strict=False,
-                    )
-                    if route.routing == "inline"
-                )
-            ),
-            content.prior_output,
-        ]
-        context_text = "\n\n".join(b.strip() for b in context_blocks if b.strip())
-        
-        user_blocks = [system_text, content.user_task_prompt, context_text]
-        user_turn = "\n\n".join(b.strip() for b in user_blocks if b.strip())
-        
-        return ProjectedContent(
-            system_prompt="",  # Default: no separate system-prompt channel
-            user_turn_content=user_turn,
-            reference_routing=reference_routing,
-            channels=ProjectionChannels(
-                system_instruction="inline",
-                user_task_prompt="inline",
-                task_context="inline",
-            ),
-        )
+        return project_inline_content(content)
 
     def detect_primary_session_id(
         self,
