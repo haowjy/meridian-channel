@@ -43,7 +43,7 @@ class RuntimeContext(BaseModel):
         if self.repo_root is not None:
             overrides["MERIDIAN_REPO_ROOT"] = self.repo_root.as_posix()
         if self.state_root is not None:
-            overrides["MERIDIAN_DATA_DIR"] = self.state_root.as_posix()
+            overrides["MERIDIAN_PROJECT_ROOT"] = self.state_root.as_posix()
         if self.chat_id:
             overrides["MERIDIAN_CHAT_ID"] = self.chat_id
         if self.work_id:

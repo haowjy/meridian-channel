@@ -9,11 +9,11 @@ from meridian.lib.ops.spawn.models import (
     SpawnStatsOutput,
 )
 from meridian.lib.state import spawn_store
-from meridian.lib.state.paths import resolve_runtime_state_root
+from meridian.lib.state.paths import resolve_project_runtime_root
 
 
 def _state_root(repo_root: Path) -> Path:
-    state_root = resolve_runtime_state_root(repo_root)
+    state_root = resolve_project_runtime_root(repo_root)
     state_root.mkdir(parents=True, exist_ok=True)
     return state_root
 

@@ -18,7 +18,7 @@ from uuid import uuid4
 from pydantic import BaseModel, model_validator
 
 from meridian.lib.app.api_models import CursorEnvelope, SpawnProjection, SpawnStatsProjection
-from meridian.lib.config.project_paths import ProjectPaths
+from meridian.lib.config.project_paths import ProjectConfigPaths
 from meridian.lib.core.lifecycle import SpawnLifecycleService
 from meridian.lib.core.spawn_lifecycle import TERMINAL_SPAWN_STATUSES
 from meridian.lib.core.types import HarnessId, SpawnId
@@ -221,7 +221,7 @@ def register_spawn_routes(
     spawn_manager: SpawnManager,
     *,
     state_root: Path,
-    project_paths: ProjectPaths,
+    project_paths: ProjectConfigPaths,
     lifecycle_service: SpawnLifecycleService,
     spawn_id_lock: asyncio.Lock,
     background_finalize_tasks: set[asyncio.Task[None]],

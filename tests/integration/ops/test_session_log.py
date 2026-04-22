@@ -13,7 +13,7 @@ from meridian.lib.ops.session_log import (
     session_log_sync,
 )
 from meridian.lib.state import session_store, spawn_store
-from meridian.lib.state.paths import resolve_runtime_state_root
+from meridian.lib.state.paths import resolve_project_runtime_root
 
 
 def _write_spawn_output(state_root: Path, spawn_id: str, *events: dict[str, object]) -> None:
@@ -109,7 +109,7 @@ def test_session_log_resolves_opencode_storage_session_file(
 ) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    state_root = resolve_runtime_state_root(repo_root)
+    state_root = resolve_project_runtime_root(repo_root)
     state_root.mkdir(parents=True, exist_ok=True)
 
     xdg_data_home = tmp_path / "xdg-data"
@@ -153,7 +153,7 @@ def test_resolve_target_chat_missing_harness_session_id_reports_unavailable_tran
 ) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    state_root = resolve_runtime_state_root(repo_root)
+    state_root = resolve_project_runtime_root(repo_root)
     state_root.mkdir(parents=True, exist_ok=True)
 
     chat_id = session_store.start_session(
@@ -184,7 +184,7 @@ def test_session_log_spawn_missing_harness_session_id_reads_live_output(
 ) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    state_root = resolve_runtime_state_root(repo_root)
+    state_root = resolve_project_runtime_root(repo_root)
     state_root.mkdir(parents=True, exist_ok=True)
 
     spawn_store.start_spawn(
@@ -225,7 +225,7 @@ def test_session_log_chat_missing_harness_session_id_reads_primary_spawn_output(
 ) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    state_root = resolve_runtime_state_root(repo_root)
+    state_root = resolve_project_runtime_root(repo_root)
     state_root.mkdir(parents=True, exist_ok=True)
 
     chat_id = session_store.start_session(
@@ -275,7 +275,7 @@ def test_session_log_chat_missing_harness_session_id_reads_primary_spawn_output(
 def test_resolve_target_chat_not_found_preserves_missing_chat_error(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    state_root = resolve_runtime_state_root(repo_root)
+    state_root = resolve_project_runtime_root(repo_root)
     state_root.mkdir(parents=True, exist_ok=True)
 
     with pytest.raises(ValueError) as exc:

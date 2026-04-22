@@ -10,7 +10,7 @@ export SMOKE_REPO="$(mktemp -d /tmp/meridian-agent-mode.XXXXXX)"
 git -C "$SMOKE_REPO" init --quiet
 for var in $(env | awk -F= '/^MERIDIAN_/ {print $1}'); do unset "$var"; done
 export MERIDIAN_REPO_ROOT="$SMOKE_REPO"
-export MERIDIAN_STATE_ROOT="$SMOKE_REPO/.meridian"
+export MERIDIAN_PROJECT_ROOT="$SMOKE_REPO/.meridian"
 cd "$REPO_ROOT"
 test -d "$SMOKE_REPO/.git" && echo "PASS: agent-mode repo ready" || echo "FAIL: agent-mode repo setup failed"
 ```

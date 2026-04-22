@@ -47,7 +47,7 @@ def test_work_lifecycle_dispatches_started_and_done_hooks(
     user_config = tmp_path / "user-config.toml"
     user_config.write_text("", encoding="utf-8")
     monkeypatch.setenv("MERIDIAN_CONFIG", user_config.as_posix())
-    monkeypatch.setenv("MERIDIAN_STATE_ROOT", state_root.as_posix())
+    monkeypatch.setenv("MERIDIAN_PROJECT_ROOT", state_root.as_posix())
     monkeypatch.setenv("MERIDIAN_HOOKS_ENABLED", "true")
 
     marker = tmp_path / "work-hook-events.jsonl"

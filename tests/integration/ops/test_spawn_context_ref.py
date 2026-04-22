@@ -5,7 +5,7 @@ from meridian.lib.ops.spawn.api import SpawnCreateInput, spawn_create_sync
 from meridian.lib.ops.spawn.context_ref import render_context_refs, resolve_context_ref
 from meridian.lib.state import session_store, spawn_store
 from meridian.lib.state.artifact_store import LocalStore, make_artifact_key
-from meridian.lib.state.paths import resolve_runtime_state_root
+from meridian.lib.state.paths import resolve_project_runtime_root
 
 
 def _write_agent(path: Path, *, sandbox: str) -> None:
@@ -37,7 +37,7 @@ def _write_minimal_mars_config(repo_root: Path) -> None:
 
 
 def _seed_session(repo_root: Path, chat_id: str) -> None:
-    state_root = resolve_runtime_state_root(repo_root)
+    state_root = resolve_project_runtime_root(repo_root)
     session_store.start_session(
         state_root,
         chat_id=chat_id,
@@ -60,7 +60,7 @@ def _seed_spawn(
     report_text: str | None = None,
     written_files: tuple[str, ...] = (),
 ) -> str:
-    state_root = resolve_runtime_state_root(repo_root)
+    state_root = resolve_project_runtime_root(repo_root)
     spawn_id = str(
         spawn_store.start_spawn(
             state_root,

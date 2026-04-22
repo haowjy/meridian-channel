@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import pytest
 
-from meridian.plugin_api import file_lock, generate_repo_slug, get_user_state_root
+from meridian.plugin_api import file_lock, generate_repo_slug, get_user_home
 
 
 def test_generate_repo_slug_handles_ssh_and_https_urls() -> None:
@@ -26,13 +26,13 @@ def test_generate_repo_slug_sanitizes_fallback_input() -> None:
     assert len(slug) <= 100
 
 
-def test_get_user_state_root_honors_meridian_home(
+def test_get_user_home_honors_meridian_home(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     monkeypatch.setenv("MERIDIAN_HOME", str(tmp_path / "custom-meridian-home"))
 
-    assert get_user_state_root() == tmp_path / "custom-meridian-home"
+    assert get_user_home() == tmp_path / "custom-meridian-home"
 
 
 def test_file_lock_exclusive_creates_lock_and_writes_pid(tmp_path: Path) -> None:

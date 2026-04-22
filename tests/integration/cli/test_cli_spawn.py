@@ -175,7 +175,7 @@ def test_spawn_children_resolves_parent_reference_before_filtering(
     seen: dict[str, object] = {}
 
     monkeypatch.setattr(spawn_cli, "resolve_project_root", lambda: repo_root)
-    monkeypatch.setattr(spawn_cli, "resolve_state_root_for_read", lambda _root: state_root)
+    monkeypatch.setattr(spawn_cli, "resolve_runtime_root_for_read", lambda _root: state_root)
     monkeypatch.setattr(
         spawn_cli,
         "resolve_spawn_reference",

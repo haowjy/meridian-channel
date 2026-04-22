@@ -10,7 +10,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from meridian.lib.config.project_paths import ProjectPaths
+from meridian.lib.config.project_paths import ProjectConfigPaths
 from meridian.lib.config.settings import MeridianConfig, load_config
 from meridian.lib.config.workspace import get_projectable_roots
 from meridian.lib.core.child_env import build_child_env_overrides, validate_child_env_keys
@@ -97,7 +97,7 @@ class ChildEnvContext:
     def from_environment(
         cls,
         *,
-        project_paths: ProjectPaths,
+        project_paths: ProjectConfigPaths,
         state_root: Path,
     ) -> ChildEnvContext:
         parent_ctx = ResolvedContext.from_environment()
@@ -115,12 +115,12 @@ class ChildEnvContext:
                 work_id = None
 
         resolved_repo_root = project_paths.execution_cwd.resolve()
-        repo_state_paths = resolve_repo_paths(resolved_repo_root)
-        repo_state_root = repo_state_paths.root_dir
+        repo_paths = resolve_repo_paths(resolved_repo_root)
+        repo_state_root = repo_paths.root_dir
         work_dir = (
             resolve_work_scratch_dir(repo_state_root, work_id) if work_id is not None else None
         )
-        kb_dir = repo_state_paths.kb_dir
+        kb_dir = repo_paths.kb_dir
 
         return cls(
             # Keep launch semantics unchanged: runtime repo_root follows the
@@ -272,7 +272,7 @@ def _resolve_harness_id(
 def _resolve_report_output_path(
     *,
     runtime: LaunchRuntime,
-    project_paths: ProjectPaths,
+    project_paths: ProjectConfigPaths,
     spawn_id: str,
 ) -> Path:
     report_path_raw = (runtime.report_output_path or "").strip()
@@ -301,7 +301,7 @@ def _resolve_surface_request(
     *,
     request: SpawnRequest,
     runtime: LaunchRuntime,
-    project_paths: ProjectPaths,
+    project_paths: ProjectConfigPaths,
     harness_registry: HarnessRegistry,
     dry_run: bool,
 ) -> tuple[
@@ -612,13 +612,13 @@ def build_launch_context(
 ) -> LaunchContext:
     """Build deterministic launch context from raw request/runtime inputs."""
 
-    project_paths = ProjectPaths(
+    project_paths = ProjectConfigPaths(
         repo_root=Path(runtime.project_paths_repo_root).expanduser().resolve(),
         execution_cwd=Path(runtime.project_paths_execution_cwd).expanduser().resolve(),
     )
     workspace_snapshot = resolve_workspace_snapshot_for_launch(project_paths.repo_root)
     workspace_roots = get_projectable_roots(workspace_snapshot)
-    state_root = Path(runtime.state_root).expanduser().resolve()
+    runtime_root = Path(runtime.state_root).expanduser().resolve()
     resolved_request = request
     composition_warnings: tuple[CompositionWarning, ...] = ()
     projected_content: ProjectedContent | None = None
@@ -683,7 +683,7 @@ def build_launch_context(
 
     workspace_projection = project_workspace_roots(
         harness_id=harness.id,
-        roots=(*workspace_roots, state_root),
+        roots=(*workspace_roots, runtime_root),
         parent_opencode_config_content=os.getenv(OPENCODE_CONFIG_CONTENT_ENV),
     )
     projected_extra_args = (
@@ -763,7 +763,7 @@ def build_launch_context(
 
     runtime_ctx = ChildEnvContext.from_environment(
         project_paths=project_paths,
-        state_root=state_root,
+        state_root=runtime_root,
     )
     effective_work_id = (runtime_work_id or resolved_request.work_id_hint or "").strip() or None
     merged_overrides = merge_env_overrides(
@@ -793,7 +793,7 @@ def build_launch_context(
         runtime=runtime,
         repo_root=project_paths.repo_root,
         execution_cwd=execution_cwd,
-        state_root=state_root,
+        state_root=runtime_root,
         work_id=effective_work_id,
         argv=argv,
         run_params=run_params,

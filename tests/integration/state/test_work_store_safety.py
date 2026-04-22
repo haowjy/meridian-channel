@@ -11,7 +11,7 @@ import pytest
 import meridian.lib.state.work_store as work_store
 from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.event_store import utc_now_iso
-from meridian.lib.state.paths import StateRootPaths
+from meridian.lib.state.paths import RuntimePaths
 from meridian.lib.state.work_store import WorkRenameIntent
 
 
@@ -66,7 +66,7 @@ def test_create_work_item_rejects_existing_slug(tmp_path: Path) -> None:
 
 def test_rename_work_item_writes_and_cleans_intent_journal(tmp_path: Path) -> None:
     state_root = _state_root(tmp_path)
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
 
     item = work_store.create_work_item(state_root, "old-name")
     renamed = work_store.rename_work_item(state_root, item.name, "new-name")
@@ -79,7 +79,7 @@ def test_rename_work_item_writes_and_cleans_intent_journal(tmp_path: Path) -> No
 
 def test_rename_work_item_moves_archived_scratch_dir(tmp_path: Path) -> None:
     state_root = _state_root(tmp_path)
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
 
     item = work_store.create_work_item(state_root, "old-name")
     archived_dir = paths.work_archive_dir / item.name
@@ -97,7 +97,7 @@ def test_rename_work_item_moves_archived_scratch_dir(tmp_path: Path) -> None:
 
 def test_rename_work_item_crash_recovery_old_dir_exists_new_missing(tmp_path: Path) -> None:
     state_root = _state_root(tmp_path)
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
 
     old_item = work_store.create_work_item(state_root, "old-name")
     old_dir = paths.work_dir / old_item.name
@@ -125,7 +125,7 @@ def test_rename_work_item_crash_recovery_old_dir_exists_new_missing(tmp_path: Pa
 
 def test_rename_work_item_crash_recovery_new_dir_already_exists(tmp_path: Path) -> None:
     state_root = _state_root(tmp_path)
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
 
     old_item = work_store.create_work_item(state_root, "old-name")
     old_dir = paths.work_dir / old_item.name
@@ -151,7 +151,7 @@ def test_rename_work_item_crash_recovery_new_dir_already_exists(tmp_path: Path) 
 
 def test_rename_work_item_crash_recovery_neither_dir_exists(tmp_path: Path) -> None:
     state_root = _state_root(tmp_path)
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
 
     intent = WorkRenameIntent(
         old_work_id="old-missing",
@@ -204,7 +204,7 @@ def test_update_work_item_re_reads_after_lock(
 
 def test_list_work_items_reconciles_before_listing(tmp_path: Path) -> None:
     state_root = _state_root(tmp_path)
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
 
     old_item = work_store.create_work_item(state_root, "old-name")
     old_dir = paths.work_dir / old_item.name
@@ -248,7 +248,7 @@ def test_work_rename_intent_serialization_round_trip() -> None:
 
 def test_reconcile_work_store_tolerates_malformed_intent_file(tmp_path: Path) -> None:
     state_root = _state_root(tmp_path)
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
 
     atomic_write_text(paths.work_items_rename_intent, "not json")
 

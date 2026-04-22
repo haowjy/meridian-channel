@@ -55,9 +55,6 @@ _ACTIVE_VIEW_STATUSES: tuple[SpawnStatus, ...] = tuple(
     status for status in _SPAWN_STATUS_VALUES if status in ACTIVE_SPAWN_STATUSES
 )
 
-# Transitional alias for tests and callers still patching pre-rename symbol names.
-resolve_runtime_root_for_read = resolve_runtime_root_for_read
-
 
 def _spawn_create_exit_code(result: SpawnActionOutput) -> int:
     if result.exit_code is not None:

@@ -164,7 +164,7 @@ def test_build_launch_context_projects_runtime_child_env_paths(
     assert runtime_ctx.env_overrides["MERIDIAN_DEPTH"] == "3"
     assert runtime_ctx.env_overrides["MERIDIAN_CHAT_ID"] == "c-parent"
     assert runtime_ctx.env_overrides["MERIDIAN_REPO_ROOT"] == tmp_path.as_posix()
-    assert runtime_ctx.env_overrides["MERIDIAN_STATE_ROOT"] == (
+    assert runtime_ctx.env_overrides["MERIDIAN_PROJECT_ROOT"] == (
         tmp_path / ".meridian"
     ).as_posix()
     assert runtime_ctx.env_overrides["MERIDIAN_WORK_ID"] == "work-alpha"

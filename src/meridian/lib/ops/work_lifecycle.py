@@ -271,7 +271,7 @@ def work_start_sync(
     roots = resolve_roots(payload.repo_root)
     repo_root = roots.repo_root
     repo_state_root = roots.repo_state_root
-    runtime_state_root = roots.state_root
+    runtime_state_root = roots.runtime_root
     chat_id = resolve_chat_id(payload_chat_id=payload.chat_id, ctx=runtime_context(ctx))
     requested_description = payload.description.strip()
     normalized_work_id = work_store.slugify(payload.label)
@@ -318,7 +318,7 @@ def work_update_sync(
         raise ValueError("Nothing to update. Pass --status and/or --description.")
     roots = resolve_roots(payload.repo_root)
     repo_state_root = roots.repo_state_root
-    runtime_state_root = roots.state_root
+    runtime_state_root = roots.runtime_root
     current = _require_work_item(repo_state_root, payload.work_id)
     if payload.status == "done":
         attachment_warning = _active_work_attachment_warning(runtime_state_root, payload.work_id)
@@ -362,7 +362,7 @@ def work_done_sync(
     nested_warning = _work_warning(ctx)
     roots = resolve_roots(payload.repo_root)
     repo_state_root = roots.repo_state_root
-    runtime_state_root = roots.state_root
+    runtime_state_root = roots.runtime_root
     attachment_warning = _active_work_attachment_warning(runtime_state_root, payload.work_id)
     item = work_store.archive_work_item(repo_state_root, payload.work_id)
     _dispatch_work_hook_event(
@@ -426,7 +426,7 @@ def work_switch_sync(
     warning = _work_warning(ctx)
     roots = resolve_roots(payload.repo_root)
     repo_state_root = roots.repo_state_root
-    runtime_state_root = roots.state_root
+    runtime_state_root = roots.runtime_root
     item = _require_work_item(repo_state_root, payload.work_id)
     chat_id = resolve_chat_id(payload_chat_id=payload.chat_id, ctx=runtime_context(ctx))
     updated = set_session_work_attachment(runtime_state_root, chat_id=chat_id, work_id=item.name)
@@ -445,7 +445,7 @@ def work_rename_sync(
     warning = _work_warning(ctx)
     roots = resolve_roots(payload.repo_root)
     repo_state_root = roots.repo_state_root
-    runtime_state_root = roots.state_root
+    runtime_state_root = roots.runtime_root
     old_name = payload.work_id
     _require_work_item(repo_state_root, old_name)
     item = work_store.rename_work_item(repo_state_root, old_name, payload.new_name)
@@ -472,7 +472,7 @@ def work_clear_sync(
     ctx: RuntimeContext | None = None,
 ) -> WorkClearOutput:
     warning = _work_warning(ctx)
-    state_root = resolve_roots(payload.repo_root).state_root
+    state_root = resolve_roots(payload.repo_root).runtime_root
     chat_id = resolve_chat_id(payload_chat_id=payload.chat_id, ctx=runtime_context(ctx))
     updated = set_session_work_attachment(
         state_root,

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import meridian.lib.ops.spawn.api as spawn_api
 from meridian.lib.ops.spawn.models import SpawnCreateInput, SpawnListInput, SpawnStatsInput
 from meridian.lib.state import spawn_store
-from meridian.lib.state.paths import resolve_runtime_state_root
+from meridian.lib.state.paths import resolve_project_runtime_root
 
 
 def test_spawn_create_validates_model_against_resolved_runtime_root(
@@ -75,7 +75,7 @@ def test_spawn_stats_includes_finalizing_bucket(tmp_path: Path, monkeypatch) -> 
     monkeypatch.setenv("MERIDIAN_DEPTH", "1")
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    state_root = resolve_runtime_state_root(repo_root)
+    state_root = resolve_project_runtime_root(repo_root)
 
     running_id = spawn_store.start_spawn(
         state_root,
@@ -130,7 +130,7 @@ def test_spawn_list_does_not_infer_running_star_from_exited_at(
     monkeypatch.setenv("MERIDIAN_DEPTH", "1")
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    state_root = resolve_runtime_state_root(repo_root)
+    state_root = resolve_project_runtime_root(repo_root)
 
     spawn_id = spawn_store.start_spawn(
         state_root,

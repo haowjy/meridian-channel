@@ -31,10 +31,6 @@ from meridian.plugin_api import (
 
 logger = structlog.get_logger(__name__)
 
-# Transitional aliases for tests and callers still patching pre-rename symbol names.
-get_user_state_root = get_user_home
-get_meridian_home = get_user_home
-
 _REQUIREMENTS_TIMEOUT_SECS = 5
 _CLONE_TIMEOUT_SECS = 300
 _REMOTE_TIMEOUT_SECS = 10
@@ -129,7 +125,7 @@ class GitAutosync:
         clone_path_hash = hashlib.sha256(
             str(clone_path.resolve()).encode("utf-8")
         ).hexdigest()[:16]
-        lock_file_path = get_meridian_home() / "locks" / f"clone-{clone_path_hash}.lock"
+        lock_file_path = get_user_home() / "locks" / f"clone-{clone_path_hash}.lock"
         try:
             with file_lock(lock_file_path, timeout=_LOCK_TIMEOUT_SECS):
                 return self._execute_with_lock(context, config, clone_path, start)

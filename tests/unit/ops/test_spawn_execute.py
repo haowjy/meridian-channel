@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from types import MappingProxyType
 
-from meridian.lib.config.project_paths import ProjectPaths
+from meridian.lib.config.project_paths import ProjectConfigPaths
 from meridian.lib.core.types import ModelId, SpawnId
 from meridian.lib.harness.launch_spec import OpenCodeLaunchSpec
 from meridian.lib.harness.opencode import OpenCodeAdapter
@@ -180,7 +180,7 @@ def test_write_projection_artifacts_uses_projected_content_for_primary(tmp_path:
 
 
 def test_write_params_json_does_not_write_legacy_prompt_md(tmp_path: Path) -> None:
-    project_paths = ProjectPaths(repo_root=tmp_path, execution_cwd=tmp_path)
+    project_paths = ProjectConfigPaths(repo_root=tmp_path, execution_cwd=tmp_path)
     spawn_id = SpawnId("p123")
     request = SpawnRequest(prompt="prompt", model="gpt-5.4", harness="codex")
 

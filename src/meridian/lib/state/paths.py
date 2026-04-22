@@ -13,7 +13,7 @@ from meridian.lib.core.types import SpawnId
 from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.user_paths import (
     get_or_create_project_uuid,
-    get_project_data_root,
+    get_project_home,
     get_project_uuid,
 )
 
@@ -98,9 +98,9 @@ class RuntimePaths(BaseModel):
     def from_root_dir(cls, root_dir: Path) -> Self:
         """Build state-root-relative paths from an absolute state directory."""
 
-        resolved_repo_paths: ProjectPaths | None = None
+        resolved_project_paths: RepoStatePaths | None = None
         if _is_repo_owned_state_root(root_dir):
-            resolved_repo_paths = resolve_project_paths(root_dir.parent)
+            resolved_project_paths = resolve_repo_paths(root_dir.parent)
 
         return cls(
             root_dir=root_dir,
@@ -113,18 +113,18 @@ class RuntimePaths(BaseModel):
             session_id_counter_flock=root_dir / "session-id-counter.flock",
             sessions_dir=root_dir / "sessions",
             kb_dir=(
-                resolved_repo_paths.kb_dir
-                if resolved_repo_paths is not None
+                resolved_project_paths.kb_dir
+                if resolved_project_paths is not None
                 else root_dir / "kb"
             ),
             work_dir=(
-                resolved_repo_paths.work_dir
-                if resolved_repo_paths is not None
+                resolved_project_paths.work_dir
+                if resolved_project_paths is not None
                 else root_dir / "work"
             ),
             work_archive_dir=(
-                resolved_repo_paths.work_archive_dir
-                if resolved_repo_paths is not None
+                resolved_project_paths.work_archive_dir
+                if resolved_project_paths is not None
                 else root_dir / "archive" / "work"
             ),
             work_items_dir=root_dir / "work-items",
@@ -134,7 +134,7 @@ class RuntimePaths(BaseModel):
         )
 
 
-class ProjectPaths(BaseModel):
+class RepoStatePaths(BaseModel):
     """Resolved on-disk Meridian repo state paths."""
 
     model_config = ConfigDict(frozen=True)
@@ -159,10 +159,6 @@ class ProjectPaths(BaseModel):
 
 
 def _runtime_root_override_value() -> str:
-    override = os.getenv("MERIDIAN_DATA_DIR", "").strip()
-    if override:
-        return override
-    # Transitional fallback while callers migrate env var naming.
     return os.getenv("MERIDIAN_PROJECT_ROOT", "").strip()
 
 
@@ -236,13 +232,13 @@ def _merge_nested_dicts(base: dict[str, object], overrides: dict[str, object]) -
     return merged
 
 
-def resolve_project_paths(repo_root: Path) -> ProjectPaths:
+def resolve_repo_paths(repo_root: Path) -> RepoStatePaths:
     """Resolve repo-owned `.meridian/` paths only (ignores runtime overrides)."""
 
-    return resolve_project_paths_from_context(repo_root)
+    return resolve_repo_paths_from_context(repo_root)
 
 
-def resolve_project_paths_for_write(repo_root: Path) -> ProjectPaths:
+def resolve_repo_paths_for_write(repo_root: Path) -> RepoStatePaths:
     """Resolve repo-owned state paths for write flows.
 
     If context paths contain ``{project}``, this ensures `.meridian/id` exists
@@ -250,7 +246,7 @@ def resolve_project_paths_for_write(repo_root: Path) -> ProjectPaths:
     placeholder directories.
     """
 
-    return resolve_project_paths_from_context(repo_root, create_project_uuid=True)
+    return resolve_repo_paths_from_context(repo_root, create_project_uuid=True)
 
 
 def _try_load_context_config(
@@ -304,19 +300,19 @@ def load_context_config(
     )
 
 
-def resolve_project_paths_from_context(
+def resolve_repo_paths_from_context(
     repo_root: Path,
     context_config: ContextConfig | None = None,
     *,
     create_project_uuid: bool = False,
-) -> ProjectPaths:
+) -> RepoStatePaths:
     """Resolve repo paths with optional context config, falling back to defaults."""
 
     if context_config is None:
         context_config = _try_load_context_config(repo_root)
 
     if context_config is None:
-        return ProjectPaths.from_root_dir(repo_root / _MERIDIAN_DIR)
+        return RepoStatePaths.from_root_dir(repo_root / _MERIDIAN_DIR)
 
     from meridian.lib.context.resolver import (
         context_uses_project_placeholder,
@@ -331,14 +327,14 @@ def resolve_project_paths_from_context(
         else:
             project_uuid = get_project_uuid(repo_state_dir)
         if project_uuid is None:
-            return ProjectPaths.from_root_dir(repo_state_dir)
+            return RepoStatePaths.from_root_dir(repo_state_dir)
 
     resolved = resolve_context_paths(
         repo_root,
         context_config,
         project_uuid=project_uuid,
     )
-    return ProjectPaths(
+    return RepoStatePaths(
         root_dir=repo_state_dir,
         id_file=repo_state_dir / "id",
         kb_dir=resolved.kb_root,
@@ -347,11 +343,18 @@ def resolve_project_paths_from_context(
     )
 
 
-def resolve_runtime_paths(repo_root: Path) -> ProjectPaths:
+def resolve_state_paths(repo_root: Path) -> RepoStatePaths:
     """Resolve all state paths rooted under `.meridian/`."""
 
     root_dir = _resolve_project_runtime_root(repo_root)
-    return ProjectPaths.from_root_dir(root_dir)
+    return RepoStatePaths.from_root_dir(root_dir)
+
+
+# Aliases for callers migrated by Phase 2 rename.
+resolve_runtime_paths = resolve_state_paths
+resolve_project_paths = resolve_repo_paths
+resolve_project_paths_for_write = resolve_repo_paths_for_write
+resolve_project_paths_from_context = resolve_repo_paths_from_context
 
 
 def resolve_project_runtime_root(repo_root: Path) -> Path:
@@ -364,7 +367,7 @@ def resolve_project_runtime_root(repo_root: Path) -> Path:
     runtime_root = resolve_project_runtime_root_or_none(repo_root)
     if runtime_root is not None:
         return runtime_root
-    return resolve_project_paths(repo_root).root_dir
+    return resolve_repo_paths(repo_root).root_dir
 
 
 def resolve_project_runtime_root_or_none(repo_root: Path) -> Path | None:
@@ -377,10 +380,10 @@ def resolve_project_runtime_root_or_none(repo_root: Path) -> Path | None:
     if override is not None:
         return override
 
-    project_uuid = get_project_uuid(resolve_project_paths(repo_root).root_dir)
+    project_uuid = get_project_uuid(resolve_repo_paths(repo_root).root_dir)
     if project_uuid is None:
         return None
-    return get_project_data_root(project_uuid)
+    return get_project_home(project_uuid)
 
 
 def resolve_project_runtime_root_for_write(repo_root: Path) -> Path:
@@ -390,8 +393,8 @@ def resolve_project_runtime_root_for_write(repo_root: Path) -> Path:
     if override is not None:
         return override
 
-    project_uuid = get_or_create_project_uuid(resolve_project_paths(repo_root).root_dir)
-    return get_project_data_root(project_uuid)
+    project_uuid = get_or_create_project_uuid(resolve_repo_paths(repo_root).root_dir)
+    return get_project_home(project_uuid)
 
 
 def resolve_cache_dir(repo_root: Path) -> Path:
@@ -403,7 +406,7 @@ def resolve_cache_dir(repo_root: Path) -> Path:
 def resolve_kb_dir(repo_root: Path) -> Path:
     """Return `.meridian/kb/` for a repository root."""
 
-    return resolve_project_paths(repo_root).kb_dir
+    return resolve_repo_paths(repo_root).kb_dir
 
 
 def resolve_fs_dir(repo_root: Path) -> Path:
@@ -444,7 +447,7 @@ def heartbeat_path(runtime_root: Path, spawn_id: SpawnId | str) -> Path:
 def ensure_gitignore(repo_root: Path) -> Path:
     """Seed `.meridian/.gitignore` and non-destructively add required tracked entries."""
 
-    meridian_dir = resolve_project_paths(repo_root).root_dir
+    meridian_dir = resolve_repo_paths(repo_root).root_dir
     meridian_dir.mkdir(parents=True, exist_ok=True)
     gitignore_path = meridian_dir / ".gitignore"
 
@@ -485,13 +488,3 @@ def _merge_required_gitignore_lines(existing_text: str) -> str:
     if not normalized_existing.endswith("\n"):
         return normalized_existing + suffix
     return normalized_existing + suffix.lstrip("\n")
-
-
-# Transitional aliases for callers still on pre-rename symbols.
-ProjectPaths = ProjectPaths
-RuntimePaths = RuntimePaths
-resolve_project_paths = resolve_project_paths
-resolve_repo_state_paths_from_context = resolve_project_paths_from_context
-resolve_project_runtime_root = resolve_project_runtime_root
-resolve_project_runtime_root_or_none = resolve_project_runtime_root_or_none
-resolve_project_runtime_root_for_write = resolve_project_runtime_root_for_write

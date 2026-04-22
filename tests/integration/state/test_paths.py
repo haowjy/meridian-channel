@@ -4,12 +4,12 @@ import pytest
 
 from meridian.lib.config.context_config import ContextConfig
 from meridian.lib.state.paths import (
-    StateRootPaths,
+    RuntimePaths,
     ensure_gitignore,
     load_context_config,
-    resolve_repo_state_paths,
-    resolve_repo_state_paths_for_write,
-    resolve_repo_state_paths_from_context,
+    resolve_repo_paths,
+    resolve_repo_paths_for_write,
+    resolve_repo_paths_from_context,
     resolve_state_paths,
 )
 
@@ -52,7 +52,7 @@ def test_resolve_state_paths_does_not_expose_project_config_path(tmp_path: Path)
 
 def test_state_root_paths_resolves_hook_state_json(tmp_path: Path) -> None:
     state_root = tmp_path / "state"
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
 
     assert paths.hook_state_json == state_root / "hook-state.json"
 
@@ -80,7 +80,7 @@ def test_state_root_paths_override_meridian_dir_stays_root_local(
         encoding="utf-8",
     )
 
-    paths = StateRootPaths.from_root_dir(override_root)
+    paths = RuntimePaths.from_root_dir(override_root)
 
     assert paths.work_dir == override_root / "work"
     assert paths.work_archive_dir == override_root / "archive" / "work"
@@ -113,14 +113,14 @@ def test_state_root_paths_repo_meridian_uses_context_paths(
         encoding="utf-8",
     )
 
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
 
     assert paths.work_dir == repo_root / "ctx/work"
     assert paths.work_archive_dir == repo_root / "ctx/archive/work"
     assert paths.kb_dir == repo_root / "ctx/kb"
 
 
-def test_resolve_repo_state_paths_from_context_uses_custom_paths(tmp_path: Path) -> None:
+def test_resolve_project_paths_from_context_uses_custom_paths(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     config = ContextConfig.model_validate(
@@ -133,7 +133,7 @@ def test_resolve_repo_state_paths_from_context_uses_custom_paths(tmp_path: Path)
         }
     )
 
-    paths = resolve_repo_state_paths_from_context(repo_root, context_config=config)
+    paths = resolve_repo_paths_from_context(repo_root, context_config=config)
 
     assert paths.root_dir == repo_root / ".meridian"
     assert paths.id_file == repo_root / ".meridian" / "id"
@@ -142,7 +142,7 @@ def test_resolve_repo_state_paths_from_context_uses_custom_paths(tmp_path: Path)
     assert paths.kb_dir == repo_root / "contexts/kb"
 
 
-def test_resolve_repo_state_paths_from_context_falls_back_when_project_placeholder_uninitialized(
+def test_resolve_project_paths_from_context_falls_back_when_project_placeholder_uninitialized(
     tmp_path: Path,
 ) -> None:
     repo_root = tmp_path / "repo"
@@ -157,7 +157,7 @@ def test_resolve_repo_state_paths_from_context_falls_back_when_project_placehold
         }
     )
 
-    paths = resolve_repo_state_paths_from_context(repo_root, context_config=config)
+    paths = resolve_repo_paths_from_context(repo_root, context_config=config)
 
     assert paths.root_dir == repo_root / ".meridian"
     assert paths.work_dir == repo_root / ".meridian" / "work"
@@ -166,7 +166,7 @@ def test_resolve_repo_state_paths_from_context_falls_back_when_project_placehold
     assert not (repo_root / ".meridian" / "id").exists()
 
 
-def test_resolve_repo_state_paths_for_write_initializes_project_placeholder_paths(
+def test_resolve_project_paths_for_write_initializes_project_placeholder_paths(
     tmp_path: Path,
 ) -> None:
     repo_root = tmp_path / "repo"
@@ -186,7 +186,7 @@ def test_resolve_repo_state_paths_for_write_initializes_project_placeholder_path
         encoding="utf-8",
     )
 
-    paths = resolve_repo_state_paths_for_write(repo_root)
+    paths = resolve_repo_paths_for_write(repo_root)
     project_uuid = (repo_root / ".meridian" / "id").read_text(encoding="utf-8").strip()
 
     assert project_uuid
@@ -195,7 +195,7 @@ def test_resolve_repo_state_paths_for_write_initializes_project_placeholder_path
     assert paths.kb_dir == repo_root / f"contexts/{project_uuid}/kb"
 
 
-def test_resolve_repo_state_paths_merges_context_config_precedence(
+def test_resolve_project_paths_merges_context_config_precedence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo_root = tmp_path / "repo"
@@ -243,7 +243,7 @@ def test_resolve_repo_state_paths_merges_context_config_precedence(
         encoding="utf-8",
     )
 
-    paths = resolve_repo_state_paths(repo_root)
+    paths = resolve_repo_paths(repo_root)
 
     assert paths.work_dir == repo_root / "local/work"
     assert paths.work_archive_dir == repo_root / "project/archive/work"
@@ -291,7 +291,7 @@ def test_load_context_config_uses_meridian_config_env_override(
     monkeypatch.setenv("MERIDIAN_CONFIG", env_user_config.as_posix())
 
     context_config = load_context_config(repo_root)
-    resolved_paths = resolve_repo_state_paths(repo_root)
+    resolved_paths = resolve_repo_paths(repo_root)
 
     assert context_config is not None
     assert context_config.work.path == "env/work"

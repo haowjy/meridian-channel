@@ -12,9 +12,9 @@ from meridian.plugin_api import (
     file_lock,
     generate_repo_slug,
     get_git_overrides,
-    get_project_state_root,
+    get_project_home,
     get_user_config,
-    get_user_state_root,
+    get_user_home,
     normalize_repo_url,
     resolve_clone_path,
 )
@@ -32,9 +32,9 @@ def test_plugin_api_exports_match_documented_contract() -> None:
         "file_lock",
         "generate_repo_slug",
         "get_git_overrides",
-        "get_project_state_root",
+        "get_project_home",
         "get_user_config",
-        "get_user_state_root",
+        "get_user_home",
         "normalize_repo_url",
         "resolve_clone_path",
     ]
@@ -51,8 +51,8 @@ def test_plugin_api_documented_exports_are_importable() -> None:
     assert callable(file_lock)
     assert callable(generate_repo_slug)
     assert callable(get_git_overrides)
-    assert callable(get_project_state_root)
+    assert callable(get_project_home)
     assert callable(get_user_config)
-    assert callable(get_user_state_root)
+    assert callable(get_user_home)
     assert callable(normalize_repo_url)
     assert callable(resolve_clone_path)

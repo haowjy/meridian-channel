@@ -8,15 +8,15 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import pytest
 
-from meridian.lib.config.project_paths import ProjectPaths
+from meridian.lib.config.project_paths import ProjectConfigPaths
 from meridian.lib.core.resolved_context import ResolvedContext
 from meridian.lib.launch.context import ChildEnvContext
 
 
-def _project_paths(tmp_path: Path) -> ProjectPaths:
+def _project_paths(tmp_path: Path) -> ProjectConfigPaths:
     execution_cwd = tmp_path / "child-cwd"
     execution_cwd.mkdir()
-    return ProjectPaths(repo_root=tmp_path, execution_cwd=execution_cwd)
+    return ProjectConfigPaths(repo_root=tmp_path, execution_cwd=execution_cwd)
 
 
 def test_child_env_context_from_environment_uses_resolved_context_parent_fields(
@@ -139,7 +139,7 @@ def test_child_env_context_child_context_routes_through_contract_helpers(
     expected = {
         "MERIDIAN_DEPTH": "6",
         "MERIDIAN_REPO_ROOT": ctx.repo_root.as_posix(),
-        "MERIDIAN_STATE_ROOT": ctx.state_root.as_posix(),
+        "MERIDIAN_PROJECT_ROOT": ctx.state_root.as_posix(),
         "MERIDIAN_CHAT_ID": "chat-parent",
         "MERIDIAN_WORK_ID": "work-55",
         "MERIDIAN_WORK_DIR": ctx.work_dir.as_posix(),

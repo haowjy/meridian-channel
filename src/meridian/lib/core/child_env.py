@@ -15,7 +15,7 @@ ALLOWED_CHILD_ENV_KEYS: frozenset[str] = frozenset(
     {
         "MERIDIAN_SPAWN_ID",
         "MERIDIAN_REPO_ROOT",
-        "MERIDIAN_DATA_DIR",
+        "MERIDIAN_PROJECT_ROOT",
         "MERIDIAN_DEPTH",
         "MERIDIAN_CHAT_ID",
         "MERIDIAN_WORK_ID",
@@ -62,7 +62,7 @@ def build_child_env_overrides(
     repo_root:
         Repo root path, or ``None`` to omit ``MERIDIAN_REPO_ROOT``.
     state_root:
-        State root path, or ``None`` to omit ``MERIDIAN_DATA_DIR``.
+        State root path, or ``None`` to omit ``MERIDIAN_PROJECT_ROOT``.
     parent_chat_id:
         Parent chat ID string, or ``None``/empty to omit ``MERIDIAN_CHAT_ID``.
     parent_depth:

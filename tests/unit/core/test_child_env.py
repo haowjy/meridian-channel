@@ -111,7 +111,7 @@ def test_build_omits_none_fields() -> None:
         kb_dir=None,
     )
     assert "MERIDIAN_REPO_ROOT" not in result
-    assert "MERIDIAN_STATE_ROOT" not in result
+    assert "MERIDIAN_PROJECT_ROOT" not in result
     assert "MERIDIAN_CHAT_ID" not in result
     assert "MERIDIAN_WORK_ID" not in result
     assert "MERIDIAN_WORK_DIR" not in result
@@ -140,7 +140,7 @@ def test_build_full_overrides() -> None:
     assert result == {
         "MERIDIAN_DEPTH": "2",
         "MERIDIAN_REPO_ROOT": "/repo",
-        "MERIDIAN_STATE_ROOT": "/runtime/state",
+        "MERIDIAN_PROJECT_ROOT": "/runtime/state",
         "MERIDIAN_CHAT_ID": "c99",
         "MERIDIAN_WORK_ID": "w1",
         "MERIDIAN_WORK_DIR": "/repo/.meridian/work/w1",

@@ -70,9 +70,6 @@ class ResolvedContext:
         depth_raw = os.getenv("MERIDIAN_DEPTH", "0").strip()
         repo_root_raw = os.getenv("MERIDIAN_REPO_ROOT", "").strip()
         state_root_raw = os.getenv("MERIDIAN_PROJECT_ROOT", "").strip()
-        if not state_root_raw:
-            # Transitional fallback while child-env callers migrate key names.
-            state_root_raw = os.getenv("MERIDIAN_DATA_DIR", "").strip()
         chat_id_raw = os.getenv("MERIDIAN_CHAT_ID", "").strip()
         work_id_raw = os.getenv("MERIDIAN_WORK_ID", "").strip()
         explicit_work_id_raw = (explicit_work_id or "").strip()
@@ -94,8 +91,8 @@ class ResolvedContext:
         elif state_root is not None and chat_id_raw:
             work_id = backend_impl.get_session_active_work_id(state_root, chat_id_raw)
 
-        repo_state_paths = (
-            state_paths.resolve_repo_state_paths_from_context(
+        project_paths = (
+            state_paths.resolve_repo_paths_from_context(
                 repo_root,
                 context_config=context_config,
             )
@@ -106,12 +103,12 @@ class ResolvedContext:
         work_dir: Path | None = None
         if work_id:
             # Repo-scoped state paths take precedence when repo_root is known.
-            if repo_state_paths is not None:
-                work_dir = repo_state_paths.work_dir / work_id
+            if project_paths is not None:
+                work_dir = project_paths.work_dir / work_id
             elif state_root is not None:
                 work_dir = backend_impl.resolve_work_scratch_dir(state_root, work_id)
 
-        kb_dir = repo_state_paths.kb_dir if repo_state_paths is not None else None
+        kb_dir = project_paths.kb_dir if project_paths is not None else None
 
         resolved_config = context_config
         if resolved_config is None and repo_root is not None:
@@ -146,7 +143,7 @@ class ResolvedContext:
         if self.repo_root is not None:
             overrides["MERIDIAN_REPO_ROOT"] = self.repo_root.as_posix()
         if self.state_root is not None:
-            overrides["MERIDIAN_DATA_DIR"] = self.state_root.as_posix()
+            overrides["MERIDIAN_PROJECT_ROOT"] = self.state_root.as_posix()
         if self.chat_id:
             overrides["MERIDIAN_CHAT_ID"] = self.chat_id
         if self.work_id:

@@ -27,8 +27,3 @@ def get_project_home(project_uuid: str) -> Path:
     """Return the project-level state root path."""
 
     return _get_project_home(project_uuid)
-
-
-# Transitional aliases for callers still on pre-rename symbols.
-get_meridian_home = get_user_home
-get_project_data_root = get_project_home

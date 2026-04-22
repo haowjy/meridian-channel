@@ -21,7 +21,7 @@ from meridian.lib.state.paths import (
     resolve_kb_dir,
     resolve_repo_paths,
     resolve_spawn_log_dir,
-    resolve_runtime_paths,
+    resolve_state_paths,
     resolve_work_scratch_dir,
     spawn_log_subpath,
 )
@@ -58,7 +58,7 @@ __all__ = [
     "resolve_kb_dir",
     "resolve_repo_paths",
     "resolve_spawn_log_dir",
-    "resolve_runtime_paths",
+    "resolve_state_paths",
     "resolve_work_scratch_dir",
     "spawn_log_subpath",
     "spawn_stats",

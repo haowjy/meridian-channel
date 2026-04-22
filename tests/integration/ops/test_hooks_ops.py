@@ -14,7 +14,7 @@ from meridian.lib.hooks.interval import IntervalTracker
 @pytest.fixture(autouse=True)
 def _isolate_runtime_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("MERIDIAN_CONFIG", raising=False)
-    monkeypatch.delenv("MERIDIAN_STATE_ROOT", raising=False)
+    monkeypatch.delenv("MERIDIAN_PROJECT_ROOT", raising=False)
     monkeypatch.delenv("MERIDIAN_HOOKS_ENABLED", raising=False)
     monkeypatch.setenv("MERIDIAN_DEPTH", "1")
 
@@ -121,7 +121,7 @@ def test_hooks_run_bypasses_interval_throttling(
     user_config = tmp_path / "user-config.toml"
     user_config.write_text("", encoding="utf-8")
     monkeypatch.setenv("MERIDIAN_CONFIG", user_config.as_posix())
-    monkeypatch.setenv("MERIDIAN_STATE_ROOT", state_root.as_posix())
+    monkeypatch.setenv("MERIDIAN_PROJECT_ROOT", state_root.as_posix())
 
     marker = tmp_path / "manual-run-events.jsonl"
     recorder = tmp_path / "record_hook.py"
@@ -163,7 +163,7 @@ def test_hooks_run_accepts_event_override(
     user_config = tmp_path / "user-config.toml"
     user_config.write_text("", encoding="utf-8")
     monkeypatch.setenv("MERIDIAN_CONFIG", user_config.as_posix())
-    monkeypatch.setenv("MERIDIAN_STATE_ROOT", state_root.as_posix())
+    monkeypatch.setenv("MERIDIAN_PROJECT_ROOT", state_root.as_posix())
 
     marker = tmp_path / "manual-event-override.jsonl"
     recorder = tmp_path / "record_hook.py"

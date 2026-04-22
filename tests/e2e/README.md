@@ -22,7 +22,7 @@ uv run meridian --help >/dev/null && echo "PASS: meridian CLI is runnable" || ec
 
 ## Scratch repo setup
 
-When a smoke test needs isolated state, override both environment variables below. This matters because `MERIDIAN_STATE_ROOT` wins over repo-root discovery, and `uv run` resets the working directory back to the source checkout.
+When a smoke test needs isolated state, override both environment variables below. This matters because `MERIDIAN_PROJECT_ROOT` wins over repo-root discovery, and `uv run` resets the working directory back to the source checkout.
 
 ```bash
 export REPO_ROOT=/abs/path/to/meridian-channel
@@ -30,8 +30,8 @@ export SMOKE_REPO="$(mktemp -d /tmp/meridian-smoke.XXXXXX)"
 git -C "$SMOKE_REPO" init --quiet
 for var in $(env | awk -F= '/^MERIDIAN_/ {print $1}'); do unset "$var"; done
 export MERIDIAN_REPO_ROOT="$SMOKE_REPO"
-export MERIDIAN_STATE_ROOT="$SMOKE_REPO/.meridian"
-test "$MERIDIAN_STATE_ROOT" = "$SMOKE_REPO/.meridian" && echo "PASS: scratch repo env is isolated" || echo "FAIL: scratch repo env is wrong"
+export MERIDIAN_PROJECT_ROOT="$SMOKE_REPO/.meridian"
+test "$MERIDIAN_PROJECT_ROOT" = "$SMOKE_REPO/.meridian" && echo "PASS: scratch repo env is isolated" || echo "FAIL: scratch repo env is wrong"
 ```
 
 ## Conventions

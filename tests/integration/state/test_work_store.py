@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 import meridian.lib.state.work_store as work_store_module
-from meridian.lib.state.paths import StateRootPaths
+from meridian.lib.state.paths import RuntimePaths
 from meridian.lib.state.work_store import (
     archive_work_item,
     create_work_item,
@@ -73,7 +73,7 @@ def test_list_work_items_repairs_interrupted_archive_status(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     state_root = _state_root(tmp_path)
-    paths = StateRootPaths.from_root_dir(state_root)
+    paths = RuntimePaths.from_root_dir(state_root)
     item = create_work_item(state_root, "My feature")
     update_work_item(state_root, item.name, status="blocked")
 

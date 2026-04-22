@@ -14,9 +14,6 @@ from meridian.lib.ops.runtime import (
 )
 from meridian.lib.platform import IS_WINDOWS
 
-# Transitional alias for tests and callers still patching pre-rename symbol names.
-resolve_runtime_root = resolve_runtime_root
-
 
 def _fail(message: str) -> None:
     print(f"Error: {message}", file=sys.stderr)

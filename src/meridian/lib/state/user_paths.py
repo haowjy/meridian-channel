@@ -11,15 +11,15 @@ from meridian.lib.platform.locking import lock_file
 from meridian.lib.state.atomic import atomic_write_text
 
 
-def get_meridian_home() -> Path:
+def get_user_home() -> Path:
     """Return the user-level Meridian data directory.
 
     Resolution order:
     1. MERIDIAN_HOME env var if set
     2. Platform default:
        - Unix/macOS: ~/.meridian/
-       - Windows: %LOCALAPPDATA%\\\\meridian\\\\
-         (fallback: %USERPROFILE%\\\\AppData\\\\Local\\\\meridian\\\\)
+       - Windows: %LOCALAPPDATA%\\meridian\\
+         (fallback: %USERPROFILE%\\AppData\\Local\\meridian\\)
     """
 
     override = os.getenv("MERIDIAN_HOME", "").strip()
@@ -81,10 +81,10 @@ def get_or_create_project_uuid(meridian_dir: Path) -> str:
         return project_uuid
 
 
-def get_project_data_root(project_uuid: str) -> Path:
+def get_project_home(project_uuid: str) -> Path:
     """Return the user-level project data directory.
 
-    Returns: get_meridian_home() / "projects" / project_uuid
+    Returns: get_user_home() / "projects" / project_uuid
     """
 
-    return get_meridian_home() / "projects" / project_uuid
+    return get_user_home() / "projects" / project_uuid

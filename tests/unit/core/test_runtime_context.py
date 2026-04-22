@@ -59,7 +59,7 @@ def test_runtime_context_to_env_overrides_uses_repo_scoped_work_dir() -> None:
         "MERIDIAN_DEPTH": "2",
         "MERIDIAN_SPAWN_ID": "p456",
         "MERIDIAN_REPO_ROOT": "/repo",
-        "MERIDIAN_STATE_ROOT": "/runtime/state",
+        "MERIDIAN_PROJECT_ROOT": "/runtime/state",
         "MERIDIAN_CHAT_ID": "chat-9",
         "MERIDIAN_WORK_ID": "work-9",
         "MERIDIAN_WORK_DIR": "/repo/.meridian/work/work-9",
@@ -75,7 +75,7 @@ def test_runtime_context_to_env_overrides_falls_back_to_state_root_for_work_dir(
 
     assert ctx.to_env_overrides() == {
         "MERIDIAN_DEPTH": "1",
-        "MERIDIAN_STATE_ROOT": "/runtime/state",
+        "MERIDIAN_PROJECT_ROOT": "/runtime/state",
         "MERIDIAN_WORK_ID": "work-state",
         "MERIDIAN_WORK_DIR": "/runtime/state/work/work-state",
     }

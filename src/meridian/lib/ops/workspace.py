@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
-from meridian.lib.config.project_paths import resolve_project_paths
+from meridian.lib.config.project_paths import resolve_project_config_paths
 from meridian.lib.config.settings import resolve_project_root
 from meridian.lib.core.util import FormatContext
 from meridian.lib.ops.runtime import async_from_sync
@@ -110,7 +110,7 @@ def _ensure_local_gitignore_entries(
 def workspace_init_sync(payload: WorkspaceInitInput) -> WorkspaceInitOutput:
     explicit_root = Path(payload.repo_root).expanduser().resolve() if payload.repo_root else None
     repo_root = resolve_project_root(explicit_root)
-    project_paths = resolve_project_paths(repo_root=repo_root)
+    project_paths = resolve_project_config_paths(repo_root=repo_root)
 
     workspace_path = project_paths.workspace_local_toml
     created = False

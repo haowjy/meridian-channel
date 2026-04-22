@@ -16,12 +16,12 @@ from meridian.lib.ops.config import (
     config_show_sync,
     ensure_runtime_state_bootstrap_sync,
 )
-from meridian.lib.state.paths import resolve_runtime_state_root
+from meridian.lib.state.paths import resolve_project_runtime_root
 
 
 @pytest.fixture(autouse=True)
 def _isolate_config_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.delenv("MERIDIAN_STATE_ROOT", raising=False)
+    monkeypatch.delenv("MERIDIAN_PROJECT_ROOT", raising=False)
     monkeypatch.delenv("MERIDIAN_REPO_ROOT", raising=False)
     monkeypatch.delenv("MERIDIAN_CONFIG", raising=False)
     monkeypatch.delenv("MERIDIAN_DEFAULT_HARNESS", raising=False)
@@ -64,7 +64,7 @@ def test_runtime_bootstrap_does_not_create_meridian_toml(
     monkeypatch.setenv("MERIDIAN_HOME", user_state_root.as_posix())
 
     ensure_runtime_state_bootstrap_sync(repo_root)
-    runtime_root = resolve_runtime_state_root(repo_root)
+    runtime_root = resolve_project_runtime_root(repo_root)
 
     assert (repo_root / ".meridian").is_dir()
     assert (repo_root / ".meridian" / ".gitignore").is_file()

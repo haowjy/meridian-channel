@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from meridian.lib.hooks.interval import IntervalTracker, parse_interval
-from meridian.lib.state.paths import StateRootPaths
+from meridian.lib.state.paths import RuntimePaths
 
 
 @pytest.mark.parametrize(
@@ -35,7 +35,7 @@ def test_interval_tracker_uses_hook_state_path_from_state_root(tmp_path: Path) -
 
     tracker.mark_run("notify")
 
-    expected = StateRootPaths.from_root_dir(state_root).hook_state_json
+    expected = RuntimePaths.from_root_dir(state_root).hook_state_json
     assert tracker.state_path == expected
     assert expected.exists()
 
@@ -54,7 +54,7 @@ def test_interval_tracker_persists_and_reloads_last_success(tmp_path: Path) -> N
 
 def test_interval_tracker_runs_when_elapsed_interval_exceeds_last_success(tmp_path: Path) -> None:
     state_root = tmp_path / "state"
-    state_path = StateRootPaths.from_root_dir(state_root).hook_state_json
+    state_path = RuntimePaths.from_root_dir(state_root).hook_state_json
     state_path.parent.mkdir(parents=True, exist_ok=True)
     old_run = (datetime.now(UTC) - timedelta(hours=2)).isoformat()
     state_path.write_text(json.dumps({"autosync": old_run}), encoding="utf-8")
@@ -65,7 +65,7 @@ def test_interval_tracker_runs_when_elapsed_interval_exceeds_last_success(tmp_pa
 
 def test_interval_tracker_fails_open_when_state_file_is_corrupt(tmp_path: Path) -> None:
     state_root = tmp_path / "state"
-    state_path = StateRootPaths.from_root_dir(state_root).hook_state_json
+    state_path = RuntimePaths.from_root_dir(state_root).hook_state_json
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state_path.write_text("{not-json", encoding="utf-8")
 
@@ -88,7 +88,7 @@ def test_interval_tracker_persists_with_atomic_write(
     tracker = IntervalTracker(state_root)
     tracker.mark_run("notify")
 
-    expected_path = StateRootPaths.from_root_dir(state_root).hook_state_json
+    expected_path = RuntimePaths.from_root_dir(state_root).hook_state_json
     assert len(writes) == 1
     assert writes[0][0] == expected_path
     payload = json.loads(writes[0][1])

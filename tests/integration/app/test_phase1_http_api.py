@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from meridian.lib.app.server import create_app
 from meridian.lib.core.types import SpawnId
 from meridian.lib.state import spawn_store, work_store
-from meridian.lib.state.paths import resolve_repo_state_paths, resolve_state_paths
+from meridian.lib.state.paths import resolve_repo_paths, resolve_state_paths
 
 
 class FakeManager:
@@ -46,7 +46,7 @@ def _state_root(repo_root: Path) -> Path:
 
 
 def _repo_state_root(repo_root: Path) -> Path:
-    return resolve_repo_state_paths(repo_root).root_dir
+    return resolve_repo_paths(repo_root).root_dir
 
 
 def _write_spawn(

@@ -15,7 +15,7 @@ from typing import Any, cast
 import structlog
 from pydantic import BaseModel, ConfigDict
 
-from meridian.lib.config.project_paths import ProjectPaths, resolve_project_paths
+from meridian.lib.config.project_paths import ProjectConfigPaths, resolve_project_config_paths
 from meridian.lib.core.child_env import build_child_env_overrides
 from meridian.lib.core.context import RuntimeContext
 from meridian.lib.core.domain import Spawn, SpawnStatus
@@ -248,7 +248,7 @@ def _init_spawn(
     ctx: RuntimeContext | None = None,
 ) -> _SpawnContext:
     resolved_context = runtime_context(ctx)
-    project_paths = resolve_project_paths(repo_root=runtime.repo_root)
+    project_paths = resolve_project_config_paths(repo_root=runtime.repo_root)
     repo_state_root = resolve_repo_paths(project_paths.repo_root).root_dir
     state_root = resolve_runtime_root(project_paths.repo_root)
     resolved_work_id = _resolve_work_id(
@@ -311,7 +311,7 @@ def _init_spawn(
 
 
 def _write_params_json(
-    project_paths: ProjectPaths,
+    project_paths: ProjectConfigPaths,
     spawn_id: SpawnId,
     request: SpawnRequest,
     *,
@@ -449,7 +449,7 @@ def _session_execution_context(
 async def _execute_existing_spawn(
     *,
     spawn_id: SpawnId,
-    project_paths: ProjectPaths,
+    project_paths: ProjectConfigPaths,
     launch_request: BackgroundWorkerLaunchRequest,
     sink: OutputSink | None = None,
     ctx: RuntimeContext | None = None,
@@ -609,7 +609,7 @@ async def _execute_existing_spawn(
 def _build_background_worker_command(
     *,
     spawn_id: str,
-    project_paths: ProjectPaths,
+    project_paths: ProjectConfigPaths,
 ) -> tuple[str, ...]:
     return (
         sys.executable,
@@ -630,7 +630,7 @@ def execute_spawn_background(
     ctx: RuntimeContext | None = None,
 ) -> SpawnActionOutput:
     resolved_context = runtime_context(ctx)
-    project_paths = resolve_project_paths(repo_root=runtime.repo_root)
+    project_paths = resolve_project_config_paths(repo_root=runtime.repo_root)
     if payload.stream:
         logger.warning("--stream requires --foreground; output goes to spawn log files.")
     autocompact = request.autocompact
@@ -813,7 +813,7 @@ def execute_spawn_blocking(
     ctx: RuntimeContext | None = None,
 ) -> SpawnActionOutput:
     resolved_context = runtime_context(ctx)
-    project_paths = resolve_project_paths(repo_root=runtime.repo_root)
+    project_paths = resolve_project_config_paths(repo_root=runtime.repo_root)
     autocompact = request.autocompact
     context = _init_spawn(
         payload=payload,
@@ -1012,7 +1012,7 @@ def _background_worker_main(
     parsed = parser.parse_args(list(argv) if argv is not None else None)
 
     repo_root = Path(parsed.repo_root).expanduser().resolve()
-    project_paths = resolve_project_paths(repo_root=repo_root)
+    project_paths = resolve_project_config_paths(repo_root=repo_root)
     spawn_id = SpawnId(parsed.spawn_id)
     state_root = resolve_runtime_root(project_paths.repo_root)
     log_dir = resolve_spawn_log_dir(project_paths.repo_root, spawn_id)

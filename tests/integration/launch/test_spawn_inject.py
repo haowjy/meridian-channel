@@ -87,7 +87,7 @@ def test_inject_requires_message_or_interrupt(
     _create_running_spawn_layout_for_validation_path(state_root, "p1")
 
     monkeypatch.setattr(spawn_inject, "resolve_runtime_root_and_config", lambda _: (tmp_path, None))
-    monkeypatch.setattr(spawn_inject, "resolve_state_root", lambda _repo_root: state_root)
+    monkeypatch.setattr(spawn_inject, "resolve_runtime_root", lambda _repo_root: state_root)
 
     with pytest.raises(SystemExit) as exc_info:
         asyncio.run(spawn_inject.inject_message("p1", None, interrupt=False))
@@ -106,7 +106,7 @@ def test_interrupt_inject_allows_self_caller_and_sends_request(
     _create_running_spawn_layout_for_interrupt_path(state_root, "p1")
 
     monkeypatch.setattr(spawn_inject, "resolve_runtime_root_and_config", lambda _: (tmp_path, None))
-    monkeypatch.setattr(spawn_inject, "resolve_state_root", lambda _repo_root: state_root)
+    monkeypatch.setattr(spawn_inject, "resolve_runtime_root", lambda _repo_root: state_root)
 
     writer = _FakeWriter()
 

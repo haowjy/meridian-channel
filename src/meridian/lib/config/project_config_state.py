@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from meridian.lib.config.project_paths import ProjectPaths, resolve_project_paths
+from meridian.lib.config.project_paths import ProjectConfigPaths, resolve_project_config_paths
 
 ProjectConfigStatus = Literal["absent", "present"]
 
@@ -26,7 +26,7 @@ class ProjectConfigState(BaseModel):
         return self.status == "present"
 
     @classmethod
-    def from_project_paths(cls, project_paths: ProjectPaths) -> "ProjectConfigState":
+    def from_project_paths(cls, project_paths: ProjectConfigPaths) -> "ProjectConfigState":
         """Build config state from resolved project paths."""
 
         write_path = project_paths.meridian_toml
@@ -38,4 +38,4 @@ class ProjectConfigState(BaseModel):
 def resolve_project_config_state(repo_root: Path) -> ProjectConfigState:
     """Resolve canonical project-config state for one repo root."""
 
-    return ProjectConfigState.from_project_paths(resolve_project_paths(repo_root))
+    return ProjectConfigState.from_project_paths(resolve_project_config_paths(repo_root))

@@ -177,7 +177,7 @@ def test_execute_locks_under_user_state_outside_clone(
         _resolve_clone_path,
     )
     monkeypatch.setattr(
-        "meridian.lib.hooks.builtin.git_autosync.get_user_state_root",
+        "meridian.lib.hooks.builtin.git_autosync.get_user_home",
         lambda: user_state_root,
     )
 

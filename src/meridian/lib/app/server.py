@@ -16,7 +16,7 @@ from meridian.lib.app.spawn_routes import (
     PermissionRequest,
     SpawnCreateRequest,
 )
-from meridian.lib.config.project_paths import resolve_project_paths
+from meridian.lib.config.project_paths import resolve_project_config_paths
 from meridian.lib.core.lifecycle import create_lifecycle_service
 from meridian.lib.state.paths import resolve_repo_paths
 from meridian.lib.streaming.spawn_manager import SpawnManager
@@ -149,10 +149,10 @@ def create_app(
 
     app.state.spawn_manager = spawn_manager
 
-    state_root = spawn_manager.state_root
-    project_paths = resolve_project_paths(repo_root=spawn_manager.repo_root)
+    runtime_root = spawn_manager.state_root
+    project_paths = resolve_project_config_paths(repo_root=spawn_manager.repo_root)
     repo_state_root = resolve_repo_paths(project_paths.repo_root).root_dir
-    lifecycle_service = create_lifecycle_service(project_paths.repo_root, state_root)
+    lifecycle_service = create_lifecycle_service(project_paths.repo_root, runtime_root)
     spawn_id_lock = asyncio.Lock()
 
     # Import route registration functions
@@ -175,7 +175,7 @@ def create_app(
     # /api/spawns/{spawn_id} path parameter route.
     register_spawn_query_routes(
         app_obj,
-        state_root=state_root,
+        state_root=runtime_root,
         http_exception=http_exception,
     )
 
@@ -183,14 +183,14 @@ def create_app(
     event_broadcaster = register_stream_routes(
         app_obj,
         spawn_manager,
-        state_root=state_root,
+        state_root=runtime_root,
     )
 
     # Register spawn routes
     register_spawn_routes(
         app_obj,
         spawn_manager,
-        state_root=state_root,
+        state_root=runtime_root,
         project_paths=project_paths,
         lifecycle_service=lifecycle_service,
         spawn_id_lock=spawn_id_lock,
@@ -203,7 +203,7 @@ def create_app(
     # Register work routes
     register_work_routes(
         app_obj,
-        state_root=state_root,
+        state_root=runtime_root,
         repo_state_root=repo_state_root,
         repo_root=project_paths.repo_root,
         event_broadcaster=event_broadcaster,
@@ -232,8 +232,8 @@ def create_app(
 
     register_thread_routes(
         app_obj,
-        state_root=state_root,
-        artifact_root=state_root / "artifacts",
+        state_root=runtime_root,
+        artifact_root=runtime_root / "artifacts",
         http_exception=http_exception,
     )
 

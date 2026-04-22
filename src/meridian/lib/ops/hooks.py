@@ -342,15 +342,15 @@ def hooks_run_sync(payload: HookRunInput) -> HookRunOutput:
 
     dispatcher = HookDispatcher(
         roots.repo_root,
-        roots.state_root,
+        roots.runtime_root,
         registry=_SingleHookRegistry(effective_hook),
-        interval_tracker=_BypassIntervalTracker(IntervalTracker(roots.state_root)),
+        interval_tracker=_BypassIntervalTracker(IntervalTracker(roots.runtime_root)),
     )
     context = _manual_context(
         hook=effective_hook,
         event=run_event,
         repo_root=roots.repo_root,
-        state_root=roots.state_root,
+        state_root=roots.runtime_root,
     )
 
     results = dispatcher.fire(context)

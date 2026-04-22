@@ -10,12 +10,12 @@ from meridian.lib.ops import mars as mars_ops
 from meridian.lib.ops.config import ConfigShowInput, config_show_sync
 from meridian.lib.ops.diag import DoctorInput, doctor_sync
 from meridian.lib.state import spawn_store
-from meridian.lib.state.paths import resolve_runtime_state_root_for_write
+from meridian.lib.state.paths import resolve_project_runtime_root_for_write
 
 
 @pytest.fixture(autouse=True)
 def _isolate_runtime_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.delenv("MERIDIAN_STATE_ROOT", raising=False)
+    monkeypatch.delenv("MERIDIAN_PROJECT_ROOT", raising=False)
     monkeypatch.setenv("MERIDIAN_DEPTH", "1")
     monkeypatch.setenv("MERIDIAN_HOME", (tmp_path / "user-home").as_posix())
 
@@ -43,7 +43,7 @@ def _create_agent_skill_dirs(
 
 
 def _seed_active_spawn(repo_root: Path) -> str:
-    state_root = resolve_runtime_state_root_for_write(repo_root)
+    state_root = resolve_project_runtime_root_for_write(repo_root)
     state_root.mkdir(parents=True, exist_ok=True)
     return spawn_store.start_spawn(
         state_root,

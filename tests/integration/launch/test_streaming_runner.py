@@ -20,7 +20,7 @@ from meridian.lib.launch.context import build_launch_context
 from meridian.lib.launch.request import LaunchArgvIntent, LaunchRuntime, SpawnRequest
 from meridian.lib.state import spawn_store
 from meridian.lib.state.artifact_store import LocalStore
-from meridian.lib.state.paths import resolve_runtime_state_root, resolve_spawn_log_dir
+from meridian.lib.state.paths import resolve_project_runtime_root, resolve_spawn_log_dir
 from meridian.lib.streaming import spawn_manager as spawn_manager_module
 from tests.support.fakes import FakeClock, FakeHeartbeat
 
@@ -158,7 +158,7 @@ async def test_execute_with_streaming_succeeds_after_report_watchdog_cleanup(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    state_root = resolve_runtime_state_root(tmp_path)
+    state_root = resolve_project_runtime_root(tmp_path)
     artifacts = LocalStore(root_dir=tmp_path / ".artifacts")
     registry = HarnessRegistry.with_defaults()
     fake_clock = FakeClock(start=1_000.0)

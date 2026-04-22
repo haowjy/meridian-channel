@@ -387,7 +387,7 @@ def work_dashboard_sync(
     _ = ctx
     roots = resolve_roots_for_read(payload.repo_root)
     repo_state_root = roots.repo_state_root
-    runtime_state_root = roots.state_root
+    runtime_state_root = roots.runtime_root
     items_by_name = {item.name: item for item in work_store.list_work_items(repo_state_root)}
     active_session_work_ids = _active_session_work_ids(runtime_state_root)
     grouped: dict[str, list[WorkDashboardSpawn]] = {}
@@ -464,7 +464,7 @@ def work_show_sync(
     roots = resolve_roots_for_read(payload.repo_root)
     repo_root = roots.repo_root
     repo_state_root = roots.repo_state_root
-    runtime_state_root = roots.state_root
+    runtime_state_root = roots.runtime_root
 
     from meridian.lib.state.reaper import reconcile_spawns
 
@@ -503,7 +503,7 @@ def work_sessions_sync(
 ) -> WorkSessionsOutput:
     roots = resolve_roots_for_read(payload.repo_root)
     repo_state_root = roots.repo_state_root
-    runtime_state_root = roots.state_root
+    runtime_state_root = roots.runtime_root
     resolved_work_id = _resolve_work_id(
         payload_work_id=payload.work_id,
         state_root=runtime_state_root,

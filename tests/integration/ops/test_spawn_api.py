@@ -5,17 +5,17 @@ import pytest
 import meridian.lib.ops.spawn.api as spawn_api
 from meridian.lib.ops.spawn.models import SpawnCreateInput, SpawnListInput, SpawnStatsInput
 from meridian.lib.state import spawn_store
-from meridian.lib.state.paths import resolve_runtime_state_root_for_write
+from meridian.lib.state.paths import resolve_project_runtime_root_for_write
 
 
 @pytest.fixture(autouse=True)
 def _isolate_runtime_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("MERIDIAN_STATE_ROOT", raising=False)
+    monkeypatch.delenv("MERIDIAN_PROJECT_ROOT", raising=False)
     monkeypatch.setenv("MERIDIAN_DEPTH", "1")
 
 
 def _state_root(repo_root: Path) -> Path:
-    state_root = resolve_runtime_state_root_for_write(repo_root)
+    state_root = resolve_project_runtime_root_for_write(repo_root)
     state_root.mkdir(parents=True, exist_ok=True)
     return state_root
 

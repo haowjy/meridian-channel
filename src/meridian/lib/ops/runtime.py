@@ -52,12 +52,6 @@ class ResolvedRoots:
     repo_state_root: Path
     runtime_root: Path
 
-    @property
-    def state_root(self) -> Path:
-        """Transitional alias for callers still expecting `state_root`."""
-
-        return self.runtime_root
-
 
 def runtime_context(ctx: RuntimeContext | None) -> RuntimeContext:
     if ctx is not None:
@@ -132,7 +126,7 @@ def resolve_runtime_root(repo_root: Path) -> Path:
     return resolve_project_runtime_root_for_write(repo_root)
 
 
-def resolve_state_root_or_none(repo_root: Path) -> Path | None:
+def resolve_runtime_root_or_none(repo_root: Path) -> Path | None:
     """Resolve runtime state root for read paths, returning None when uninitialized."""
 
     return resolve_project_runtime_root_or_none(repo_root)
@@ -204,8 +198,3 @@ def resolve_chat_id(
     if resolved_chat_id:
         return resolved_chat_id
     return fallback.strip()
-
-
-# Transitional aliases for callers still on pre-rename symbols.
-resolve_runtime_root = resolve_runtime_root
-resolve_runtime_root_for_read = resolve_runtime_root_for_read

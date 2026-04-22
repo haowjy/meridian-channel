@@ -10,7 +10,7 @@ export SMOKE_REPO="$(mktemp -d /tmp/meridian-quick.XXXXXX)"
 git -C "$SMOKE_REPO" init --quiet
 for var in $(env | awk -F= '/^MERIDIAN_/ {print $1}'); do unset "$var"; done
 export MERIDIAN_REPO_ROOT="$SMOKE_REPO"
-export MERIDIAN_STATE_ROOT="$SMOKE_REPO/.meridian"
+export MERIDIAN_PROJECT_ROOT="$SMOKE_REPO/.meridian"
 mkdir -p "$SMOKE_REPO/.agents/agents"
 cat > "$SMOKE_REPO/.agents/agents/reviewer.md" <<'EOF'
 # Reviewer
@@ -42,7 +42,7 @@ uv run meridian --version 2>&1 | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+' && echo "PAS
 ```bash
 uv run meridian --help >/tmp/meridian-qs-help.txt && \
 uv run meridian config show >/tmp/meridian-qs-config-show.txt && \
-test -d "$MERIDIAN_STATE_ROOT" && \
+test -d "$MERIDIAN_PROJECT_ROOT" && \
 ! test -f "$SMOKE_REPO/meridian.toml" && \
 ! test -f "$SMOKE_REPO/workspace.local.toml" && \
 ! test -d "$SMOKE_REPO/.mars" && \

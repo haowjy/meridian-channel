@@ -45,7 +45,7 @@ def test_hook_context_to_env_includes_required_and_present_optional_fields() -> 
     assert env["MERIDIAN_HOOK_EVENT_ID"] == str(context.event_id)
     assert env["MERIDIAN_HOOK_SCHEMA_VERSION"] == "1"
     assert env["MERIDIAN_REPO_ROOT"] == "/repo"
-    assert env["MERIDIAN_STATE_ROOT"] == "/repo/.meridian"
+    assert env["MERIDIAN_PROJECT_ROOT"] == "/repo/.meridian"
     assert env["MERIDIAN_SPAWN_ID"] == "p123"
     assert env["MERIDIAN_SPAWN_STATUS"] == "cancelled"
     assert env["MERIDIAN_WORK_ID"] == "hook-system-design"
