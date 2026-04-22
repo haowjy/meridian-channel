@@ -25,7 +25,7 @@ class StreamingExtractor(SpawnExtractor):
         spec: ResolvedLaunchSpec,
         launch_env: Mapping[str, str],
         child_cwd: Path,
-        state_root: Path,
+        runtime_root: Path,
     ) -> None:
         if not isinstance(spec, bundle.spec_cls):
             raise TypeError(
@@ -38,7 +38,7 @@ class StreamingExtractor(SpawnExtractor):
         self._spec = spec
         self._launch_env = launch_env
         self._child_cwd = child_cwd
-        self._state_root = state_root
+        self._runtime_root = runtime_root
 
     def extract_session_id(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> str | None:
         connection = self._connection
@@ -55,7 +55,7 @@ class StreamingExtractor(SpawnExtractor):
             spec=self._spec,
             launch_env=self._launch_env,
             child_cwd=self._child_cwd,
-            state_root=self._state_root,
+            runtime_root=self._runtime_root,
         )
 
     def extract_usage(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> TokenUsage:

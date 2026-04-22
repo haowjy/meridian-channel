@@ -121,7 +121,7 @@ def run_harness_process(
 
     project_root = launch_context.project_root
     execution_cwd = launch_context.execution_cwd
-    state_root = launch_context.runtime_root
+    runtime_root = launch_context.runtime_root
     preview_context = launch_context
     command = preview_context.argv
     spawn_request = preview_context.request
@@ -141,8 +141,8 @@ def run_harness_process(
     primary_started = 0.0
     primary_started_epoch = 0.0
     primary_started_local_iso: str | None = None
-    artifacts = LocalStore(root_dir=state_root / "artifacts")
-    lifecycle_service = create_lifecycle_service(project_root, state_root)
+    artifacts = LocalStore(root_dir=runtime_root / "artifacts")
+    lifecycle_service = create_lifecycle_service(project_root, runtime_root)
 
     resume_chat_id = (
         preview_request.session.continue_chat_id if session_mode == SessionMode.RESUME else None
@@ -150,7 +150,7 @@ def run_harness_process(
     exit_code = 2
     try:
         with session_scope(
-            state_root=state_root,
+            runtime_root=runtime_root,
             harness=session_metadata.harness,
             harness_session_id=session_scope_harness_session_id,
             model=session_metadata.model,
@@ -168,7 +168,7 @@ def run_harness_process(
         ) as managed:
             chat_id = managed.chat_id
             attached_work_id = resolve_attached_work_id(
-                state_root=state_root,
+                runtime_root=runtime_root,
                 chat_id=chat_id,
                 explicit_work_id=preview_context.work_id,
                 resume_chat_id=resume_chat_id,
@@ -207,7 +207,7 @@ def run_harness_process(
                     forked_session_id = materialize_fork(
                         adapter=harness_adapter,
                         source_session_id=source_session_id,
-                        state_root=state_root,
+                        runtime_root=runtime_root,
                         spawn_id=primary_spawn_id,
                     )
                     spawn_request = spawn_request.model_copy(
@@ -231,7 +231,7 @@ def run_harness_process(
                 runtime = preview_context.runtime.model_copy(
                     update={
                         "composition_surface": LaunchCompositionSurface.PRIMARY,
-                        "state_root": state_root.as_posix(),
+                        "runtime_root": runtime_root.as_posix(),
                         "project_paths_project_root": project_root.as_posix(),
                         "project_paths_execution_cwd": execution_cwd.as_posix(),
                         "report_output_path": (log_dir / "report.md").as_posix(),
@@ -356,7 +356,7 @@ def run_harness_process(
                         managed.record_harness_session_id(resolved_harness_session_id)
                         if primary_spawn_id is not None:
                             spawn_store.update_spawn(
-                                state_root,
+                                runtime_root,
                                 primary_spawn_id,
                                 harness_session_id=resolved_harness_session_id,
                             )

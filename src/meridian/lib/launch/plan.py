@@ -70,7 +70,7 @@ def build_primary_launch_runtime(
 
     resolved_root = resolve_project_root(project_root)
     resolved_config = config if config is not None else load_config(resolved_root)
-    state_root = resolve_project_runtime_root_for_write(resolved_root)
+    runtime_root = resolve_project_runtime_root_for_write(resolved_root)
 
     return LaunchRuntime(
         argv_intent=LaunchArgvIntent.REQUIRED,
@@ -78,7 +78,7 @@ def build_primary_launch_runtime(
         config_snapshot=resolved_config.model_dump(mode="json", exclude_none=True),
         harness_command_override=os.getenv("MERIDIAN_HARNESS_COMMAND", "").strip() or None,
         report_output_path=_DRY_RUN_REPORT_PATH,
-        runtime_root=state_root.as_posix(),
+        runtime_root=runtime_root.as_posix(),
         project_paths_project_root=resolved_root.as_posix(),
         project_paths_execution_cwd=resolved_root.as_posix(),
     )

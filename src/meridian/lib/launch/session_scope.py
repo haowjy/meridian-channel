@@ -24,7 +24,7 @@ class ManagedSession:
 @contextmanager
 def session_scope(
     *,
-    state_root: Path,
+    runtime_root: Path,
     harness: str,
     harness_session_id: str,
     model: str,
@@ -42,7 +42,7 @@ def session_scope(
     _update_session_harness_id: Callable[[Path, str, str], None] = update_session_harness_id,
 ) -> Iterator[ManagedSession]:
     resolved_chat_id = _start_session(
-        state_root,
+        runtime_root,
         harness=harness,
         harness_session_id=harness_session_id,
         model=model,
@@ -58,7 +58,7 @@ def session_scope(
     )
 
     def _record_harness_session_id(session_id: str) -> None:
-        _update_session_harness_id(state_root, resolved_chat_id, session_id)
+        _update_session_harness_id(runtime_root, resolved_chat_id, session_id)
 
     try:
         yield ManagedSession(
@@ -66,7 +66,7 @@ def session_scope(
             record_harness_session_id=_record_harness_session_id,
         )
     finally:
-        _stop_session(state_root, resolved_chat_id)
+        _stop_session(runtime_root, resolved_chat_id)
 
 
 __all__ = ["ManagedSession", "session_scope"]

@@ -45,16 +45,16 @@ class SignalCanceller:
     def __init__(
         self,
         *,
-        state_root: Path,
+        runtime_root: Path,
         grace_seconds: float = 5.0,
         manager: SpawnManager | None = None,
     ) -> None:
-        self._state_root = state_root
+        self._runtime_root = runtime_root
         self._grace_seconds = grace_seconds
         self._manager = manager
 
     async def cancel(self, spawn_id: SpawnId) -> CancelOutcome:
-        record = spawn_store.get_spawn(self._state_root, spawn_id)
+        record = spawn_store.get_spawn(self._runtime_root, spawn_id)
         if record is None:
             raise ValueError(f"Spawn '{spawn_id}' not found")
 
@@ -65,7 +65,7 @@ class SignalCanceller:
             terminal = await self._wait_for_terminal(spawn_id)
             if terminal is not None:
                 return _outcome_from_record(terminal, already_terminal=True)
-            latest = spawn_store.get_spawn(self._state_root, spawn_id) or record
+            latest = spawn_store.get_spawn(self._runtime_root, spawn_id) or record
             return CancelOutcome(
                 status="finalizing",
                 origin="cancel",
@@ -85,11 +85,11 @@ class SignalCanceller:
         runner_pid = self._resolve_runner_pid(record)
         if runner_pid is None:
             finalized = create_lifecycle_service(
-                self._state_root.parent, self._state_root
+                self._runtime_root.parent, self._runtime_root
             ).cancel(
                 spawn_id, 130, error="cancelled"
             )
-            latest = spawn_store.get_spawn(self._state_root, spawn_id)
+            latest = spawn_store.get_spawn(self._runtime_root, spawn_id)
             if latest is not None and _is_terminal(latest.status):
                 return _outcome_from_record(latest, already_terminal=not finalized)
             return CancelOutcome(status="cancelled", origin="cancel", exit_code=130)
@@ -101,7 +101,7 @@ class SignalCanceller:
         if terminal is not None:
             return _outcome_from_record(terminal)
 
-        latest = spawn_store.get_spawn(self._state_root, spawn_id) or record
+        latest = spawn_store.get_spawn(self._runtime_root, spawn_id) or record
         return CancelOutcome(
             status="finalizing",
             origin="cancel",
@@ -127,7 +127,7 @@ class SignalCanceller:
         if terminal is not None:
             return _outcome_from_record(terminal)
 
-        latest = spawn_store.get_spawn(self._state_root, spawn_id) or record
+        latest = spawn_store.get_spawn(self._runtime_root, spawn_id) or record
         return CancelOutcome(
             status="finalizing",
             origin="cancel",
@@ -141,7 +141,7 @@ class SignalCanceller:
 
         connector: object | None = None
         if IS_WINDOWS:
-            port_file = self._state_root / "app.port"
+            port_file = self._runtime_root / "app.port"
             if not port_file.exists():
                 raise RuntimeError(f"app port file not found: {port_file}")
             try:
@@ -150,7 +150,7 @@ class SignalCanceller:
                 raise RuntimeError(f"invalid app port value in {port_file}") from exc
             url = f"http://127.0.0.1:{port}/api/spawns/{spawn_id}/cancel"
         else:
-            socket_path = self._state_root / "app.sock"
+            socket_path = self._runtime_root / "app.sock"
             if not socket_path.exists():
                 raise RuntimeError(f"app socket not found: {socket_path}")
             connector = cast("object", aiohttp.UnixConnector(path=str(socket_path)))
@@ -173,7 +173,7 @@ class SignalCanceller:
         payload = _parse_json_object(raw_body)
         detail = payload.get("detail")
         detail_text = detail if isinstance(detail, str) else ""
-        latest = spawn_store.get_spawn(self._state_root, spawn_id)
+        latest = spawn_store.get_spawn(self._runtime_root, spawn_id)
 
         if status_code == 200:
             status_value = payload.get("status")
@@ -234,7 +234,7 @@ class SignalCanceller:
     async def _wait_for_terminal(self, spawn_id: SpawnId) -> SpawnRecord | None:
         deadline = time.monotonic() + max(0.0, self._grace_seconds)
         while True:
-            current = spawn_store.get_spawn(self._state_root, spawn_id)
+            current = spawn_store.get_spawn(self._runtime_root, spawn_id)
             if current is not None and _is_terminal(current.status):
                 return current
             now = time.monotonic()

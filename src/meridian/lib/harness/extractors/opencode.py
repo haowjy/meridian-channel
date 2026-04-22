@@ -133,8 +133,8 @@ def _parse_start_time(value: object) -> float | None:
     return parsed.timestamp()
 
 
-def _latest_spawn_start_epoch(*, state_root: Path, child_cwd: Path) -> float | None:
-    spawns_path = state_root / "spawns.jsonl"
+def _latest_spawn_start_epoch(*, runtime_root: Path, child_cwd: Path) -> float | None:
+    spawns_path = runtime_root / "spawns.jsonl"
     if not spawns_path.is_file():
         return None
 
@@ -226,7 +226,7 @@ def _detect_storage_session_id(
     *,
     launch_env: Mapping[str, str],
     child_cwd: Path,
-    state_root: Path,
+    runtime_root: Path,
 ) -> str | None:
     storage_root = resolve_opencode_storage_root(launch_env)
     if not storage_root.is_dir():
@@ -234,8 +234,8 @@ def _detect_storage_session_id(
 
     spawn_targets = (
         _safe_resolve(child_cwd),
-        _safe_resolve(state_root),
-        _safe_resolve(state_root.parent),
+        _safe_resolve(runtime_root),
+        _safe_resolve(runtime_root.parent),
     )
     matches: list[tuple[float, str]] = []
     candidates: list[tuple[float, str]] = []
@@ -264,7 +264,7 @@ def _detect_storage_session_id(
     if not candidates:
         return None
 
-    started_at = _latest_spawn_start_epoch(state_root=state_root, child_cwd=child_cwd)
+    started_at = _latest_spawn_start_epoch(runtime_root=runtime_root, child_cwd=child_cwd)
     if started_at is not None:
         lower = started_at - 5.0
         upper = started_at + float(_SESSION_MATCH_WINDOW_SECONDS)
@@ -296,7 +296,7 @@ class OpenCodeHarnessExtractor(HarnessExtractor[OpenCodeLaunchSpec]):
         spec: OpenCodeLaunchSpec,
         launch_env: Mapping[str, str],
         child_cwd: Path,
-        state_root: Path,
+        runtime_root: Path,
     ) -> str | None:
         if spec.continue_session_id and spec.continue_session_id.strip():
             return spec.continue_session_id.strip()
@@ -306,7 +306,7 @@ class OpenCodeHarnessExtractor(HarnessExtractor[OpenCodeLaunchSpec]):
         return _detect_storage_session_id(
             launch_env=launch_env,
             child_cwd=child_cwd,
-            state_root=state_root,
+            runtime_root=runtime_root,
         )
 
     def extract_usage(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> TokenUsage:

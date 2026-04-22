@@ -29,7 +29,7 @@ class HarnessExtractor(SpawnExtractor, Protocol, Generic[ExtractorSpecT]):
         spec: ExtractorSpecT,
         launch_env: Mapping[str, str],
         child_cwd: Path,
-        state_root: Path,
+        runtime_root: Path,
     ) -> str | None:
         """Best-effort fallback extraction from harness-owned artifacts."""
         ...

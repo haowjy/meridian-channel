@@ -83,9 +83,9 @@ class ClaudeHarnessExtractor(HarnessExtractor[ClaudeLaunchSpec]):
         spec: ClaudeLaunchSpec,
         launch_env: Mapping[str, str],
         child_cwd: Path,
-        state_root: Path,
+        runtime_root: Path,
     ) -> str | None:
-        _ = state_root
+        _ = runtime_root
         if spec.continue_session_id and spec.continue_session_id.strip():
             return spec.continue_session_id.strip()
         return _detect_primary_session_id(child_cwd=child_cwd, launch_env=launch_env)

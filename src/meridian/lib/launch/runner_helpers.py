@@ -37,8 +37,8 @@ class SpawnTimeoutError(TimeoutError):
         super().__init__(f"Spawn exceeded timeout after {timeout_seconds:.3f}s")
 
 
-def spawn_kind(state_root: Path, spawn_id: SpawnId) -> str:
-    row = spawn_store.get_spawn(state_root, spawn_id)
+def spawn_kind(runtime_root: Path, spawn_id: SpawnId) -> str:
+    row = spawn_store.get_spawn(runtime_root, spawn_id)
     if row is None:
         return "child"
     normalized = row.kind.strip().lower()

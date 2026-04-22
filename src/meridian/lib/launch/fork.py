@@ -26,7 +26,7 @@ def materialize_fork(
     *,
     adapter: SubprocessHarness,
     source_session_id: str,
-    state_root: Path,
+    runtime_root: Path,
     spawn_id: SpawnId,
 ) -> str:
     """Fork one harness session and record the new session ID on the spawn row.
@@ -37,7 +37,7 @@ def materialize_fork(
     Returns the new (forked) harness session ID.
     """
 
-    row = spawn_store.get_spawn(state_root, spawn_id)
+    row = spawn_store.get_spawn(runtime_root, spawn_id)
     if row is None:
         raise RuntimeError(
             f"Fork precondition violated: no spawn row exists for {spawn_id!r}. "
@@ -51,7 +51,7 @@ def materialize_fork(
         )
 
     spawn_store.update_spawn(
-        state_root,
+        runtime_root,
         spawn_id,
         harness_session_id=forked_session_id,
     )

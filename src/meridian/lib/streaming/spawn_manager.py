@@ -104,14 +104,14 @@ class SpawnManager:
 
     def __init__(
         self,
-        state_root: Path,
+        runtime_root: Path,
         project_root: Path,
         *,
         debug: bool = False,
         heartbeat_interval_secs: float = 30.0,
         heartbeat_touch: Callable[[Path, SpawnId], None] | None = None,
     ):
-        self._state_root = state_root
+        self._runtime_root = runtime_root
         self._project_root = project_root
         self._debug = debug
         self._heartbeat_interval_secs = heartbeat_interval_secs
@@ -122,10 +122,10 @@ class SpawnManager:
         self._heartbeat_tasks: dict[SpawnId, asyncio.Task[None]] = {}
 
     @property
-    def state_root(self) -> Path:
+    def runtime_root(self) -> Path:
         """Return the resolved Meridian state root."""
 
-        return self._state_root
+        return self._runtime_root
 
     @property
     def project_root(self) -> Path:
@@ -142,7 +142,7 @@ class SpawnManager:
 
         task = asyncio.create_task(
             heartbeat_loop(
-                self._state_root,
+                self._runtime_root,
                 spawn_id,
                 interval=self._heartbeat_interval_secs,
                 touch=self._heartbeat_touch,
@@ -400,7 +400,7 @@ class SpawnManager:
     ) -> InjectResult:
         """Record and route one user message injection to the target connection."""
 
-        record = spawn_store.get_spawn(self._state_root, spawn_id)
+        record = spawn_store.get_spawn(self._runtime_root, spawn_id)
         if record is not None and record.status in TERMINAL_SPAWN_STATUSES:
             result = InjectResult(
                 success=False,
@@ -448,7 +448,7 @@ class SpawnManager:
     ) -> InjectResult:
         """Record and route one interrupt request to the target connection."""
 
-        record = spawn_store.get_spawn(self._state_root, spawn_id)
+        record = spawn_store.get_spawn(self._runtime_root, spawn_id)
         if record is not None and record.status in TERMINAL_SPAWN_STATUSES:
             result = InjectResult(
                 success=False,
@@ -685,7 +685,7 @@ class SpawnManager:
                 )
 
     def _spawn_dir(self, spawn_id: SpawnId) -> Path:
-        return self._state_root / "spawns" / str(spawn_id)
+        return self._runtime_root / "spawns" / str(spawn_id)
 
     def _output_log_path(self, spawn_id: SpawnId) -> Path:
         return self._spawn_dir(spawn_id) / "output.jsonl"

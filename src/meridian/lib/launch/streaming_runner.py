@@ -110,13 +110,13 @@ class _AttemptRuntime:
 
 
 def _touch_heartbeat_file(
-    state_root: Path,
+    runtime_root: Path,
     spawn_id: SpawnId,
     *,
     clock: Clock | None = None,
 ) -> None:
     FileHeartbeat(
-        state_paths.heartbeat_path(state_root, spawn_id),
+        state_paths.heartbeat_path(runtime_root, spawn_id),
         clock=clock,
     ).touch()
 
@@ -322,7 +322,7 @@ async def run_streaming_spawn(
     *,
     config: ConnectionConfig,
     spec: ResolvedLaunchSpec,
-    state_root: Path,
+    runtime_root: Path,
     project_root: Path,
     spawn_id: SpawnId,
     stream_to_terminal: bool = False,
@@ -337,13 +337,13 @@ async def run_streaming_spawn(
     """
 
     resolved_heartbeat_touch = heartbeat_touch or (
-        lambda: _touch_heartbeat_file(state_root, spawn_id)
+        lambda: _touch_heartbeat_file(runtime_root, spawn_id)
     )
     manager = SpawnManager(
-        state_root=state_root,
+        runtime_root=runtime_root,
         project_root=project_root,
         heartbeat_interval_secs=heartbeat_interval_secs,
-        heartbeat_touch=lambda _state_root, _spawn_id: resolved_heartbeat_touch(),
+        heartbeat_touch=lambda _runtime_root, _spawn_id: resolved_heartbeat_touch(),
     )
 
     loop = asyncio.get_running_loop()
@@ -359,11 +359,11 @@ async def run_streaming_spawn(
     subscriber: asyncio.Queue[HarnessEvent | None] | None = None
     run_spec = spec
     spawn_store.update_spawn(
-        state_root,
+        runtime_root,
         spawn_id,
         runner_pid=os.getpid(),
     )
-    lifecycle_service = create_lifecycle_service(project_root, state_root)
+    lifecycle_service = create_lifecycle_service(project_root, runtime_root)
     try:
         await manager.start_spawn(config, run_spec)
         await manager._start_heartbeat(spawn_id)  # pyright: ignore[reportPrivateUsage]
@@ -474,7 +474,7 @@ async def run_streaming_spawn(
 async def _run_streaming_attempt(
     *,
     run: Spawn,
-    state_root: Path,
+    runtime_root: Path,
     launch_mode: spawn_store.LaunchMode,
     log_dir: Path,
     manager: SpawnManager,
@@ -506,7 +506,7 @@ async def _run_streaming_attempt(
     timed_out = False
     terminated_by_report_watchdog = False
     terminal_outcome: TerminalEventOutcome | None = None
-    lifecycle_service = create_lifecycle_service(manager.project_root, state_root)
+    lifecycle_service = create_lifecycle_service(manager.project_root, runtime_root)
 
     try:
         connection = await manager.start_spawn(config, run_spec)
@@ -684,7 +684,7 @@ async def execute_with_streaming(
     request: SpawnRequest,
     launch_context: LaunchContext,
     project_root: Path,
-    state_root: Path,
+    runtime_root: Path,
     artifacts: ArtifactStore,
     budget: Budget | None = None,
     space_spent_usd: float = 0.0,
@@ -711,7 +711,7 @@ async def execute_with_streaming(
     resolved_clock = clock or RealClock()
     resolved_heartbeat_touch = heartbeat_touch or (
         lambda: _touch_heartbeat_file(
-            state_root,
+            runtime_root,
             run.spawn_id,
         )
     )
@@ -739,7 +739,7 @@ async def execute_with_streaming(
     harness_bundle = get_harness_bundle(resolved_harness_id)
 
     spawn_store.update_spawn(
-        state_root,
+        runtime_root,
         run.spawn_id,
         execution_cwd=str(child_cwd),
     )
@@ -776,7 +776,7 @@ async def execute_with_streaming(
 
     # I-10: spawn row MUST exist before execute_with_streaming is called.
     # Mid-flight row creation is forbidden — callers must call start_spawn first.
-    spawn_row = spawn_store.get_spawn(state_root, run.spawn_id)
+    spawn_row = spawn_store.get_spawn(runtime_root, run.spawn_id)
     if spawn_row is None:
         raise RuntimeError(
             f"execute_with_streaming precondition violated: "
@@ -784,7 +784,7 @@ async def execute_with_streaming(
             "Call start_spawn() before execute_with_streaming()."
         )
     spawn_store.update_spawn(
-        state_root,
+        runtime_root,
         run.spawn_id,
         runner_pid=os.getpid(),
     )
@@ -801,7 +801,7 @@ async def execute_with_streaming(
         and materialized_session_id != (request.session.requested_harness_session_id or "")
     ):
         spawn_store.update_spawn(
-            state_root,
+            runtime_root,
             run.spawn_id,
             harness_session_id=materialized_session_id,
         )
@@ -816,12 +816,12 @@ async def execute_with_streaming(
     )
     preflight_breach = budget_tracker.check() if budget_tracker is not None else None
     manager = SpawnManager(
-        state_root=state_root,
+        runtime_root=runtime_root,
         project_root=project_root,
         heartbeat_interval_secs=heartbeat_interval_secs,
-        heartbeat_touch=lambda _state_root, _spawn_id: resolved_heartbeat_touch(),
+        heartbeat_touch=lambda _runtime_root, _spawn_id: resolved_heartbeat_touch(),
     )
-    lifecycle_service = create_lifecycle_service(project_root, state_root)
+    lifecycle_service = create_lifecycle_service(project_root, runtime_root)
     retries_attempted = 0
     started_at = resolved_clock.monotonic()
     started_at_epoch = resolved_clock.time()
@@ -854,7 +854,7 @@ async def execute_with_streaming(
 
                 attempt = await _run_streaming_attempt(
                     run=run,
-                    state_root=state_root,
+                    runtime_root=runtime_root,
                     launch_mode=resolved_launch_mode,
                     log_dir=log_dir,
                     manager=manager,
@@ -916,7 +916,7 @@ async def execute_with_streaming(
                     spec=spec,
                     launch_env=child_env,
                     child_cwd=child_cwd,
-                    state_root=state_root,
+                    runtime_root=runtime_root,
                 )
                 extracted = enrich_finalize(
                     artifacts=artifacts,
@@ -948,7 +948,7 @@ async def execute_with_streaming(
                 ):
                     try:
                         spawn_store.update_spawn(
-                            state_root,
+                            runtime_root,
                             run.spawn_id,
                             harness_session_id=extracted_harness_session_id,
                         )
@@ -988,7 +988,7 @@ async def execute_with_streaming(
 
                 if (
                     exit_code == 0
-                    and _spawn_kind(state_root, run.spawn_id) == "child"
+                    and _spawn_kind(runtime_root, run.spawn_id) == "child"
                     and extracted.report.content is None
                 ):
                     failure_reason = "missing_report"

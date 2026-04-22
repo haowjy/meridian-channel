@@ -163,12 +163,12 @@ class SpawnLifecycleService:
 
     def __init__(
         self,
-        state_root: Path,
+        runtime_root: Path,
         *,
         hooks: list[LifecycleHook] | None = None,
         repository: SpawnRepository | None = None,
     ) -> None:
-        self._state_root = state_root
+        self._runtime_root = runtime_root
         self._hooks = hooks or []
         self._repository = repository
 
@@ -204,7 +204,7 @@ class SpawnLifecycleService:
         """Start a new spawn and dispatch spawn.created."""
         # Authoritative transition write still happens in spawn_store.
         result_id = spawn_store.start_spawn(
-            self._state_root,
+            self._runtime_root,
             chat_id=chat_id,
             parent_id=parent_id,
             model=model,
@@ -243,7 +243,7 @@ class SpawnLifecycleService:
         """Mark a spawn as running and dispatch spawn.running."""
         # Authoritative transition write still happens in spawn_store.
         spawn_store.mark_spawn_running(
-            self._state_root,
+            self._runtime_root,
             spawn_id,
             launch_mode=launch_mode,
             worker_pid=worker_pid,
@@ -264,7 +264,7 @@ class SpawnLifecycleService:
         """Record process exit — no lifecycle event dispatched."""
         # Authoritative transition write still happens in spawn_store.
         spawn_store.record_spawn_exited(
-            self._state_root,
+            self._runtime_root,
             spawn_id,
             exit_code=exit_code,
             exited_at=exited_at,
@@ -290,7 +290,7 @@ class SpawnLifecycleService:
         """Finalize a spawn.  Dispatches spawn.finalized only on first terminal transition."""
         # Authoritative transition write still happens in spawn_store.
         transitioned = spawn_store.finalize_spawn(
-            self._state_root,
+            self._runtime_root,
             spawn_id,
             status,
             exit_code,
@@ -313,7 +313,7 @@ class SpawnLifecycleService:
         """CAS transition running -> finalizing.  No lifecycle event dispatched."""
         # Authoritative transition write still happens in spawn_store.
         return spawn_store.mark_finalizing(
-            self._state_root,
+            self._runtime_root,
             spawn_id,
             repository=self._repository,
         )
@@ -365,7 +365,7 @@ class SpawnLifecycleService:
     def _build_event(self, event_type: EventType, spawn_id: str) -> LifecycleEvent:
         # Read event payload through the same authoritative store boundary.
         record = spawn_store.get_spawn(
-            self._state_root, spawn_id, repository=self._repository
+            self._runtime_root, spawn_id, repository=self._repository
         )
 
         # Terminal-only fields
@@ -421,7 +421,7 @@ def _hooks_dispatch_enabled(env: Mapping[str, str] | None = None) -> bool:
     return value.strip().lower() != "false"
 
 
-def get_hook_dispatcher(project_root: Path, state_root: Path) -> HookDispatcher | None:
+def get_hook_dispatcher(project_root: Path, runtime_root: Path) -> HookDispatcher | None:
     """Build a hook dispatcher when hook dispatch is enabled."""
 
     if not _hooks_dispatch_enabled():
@@ -436,21 +436,21 @@ def get_hook_dispatcher(project_root: Path, state_root: Path) -> HookDispatcher 
         )
         return None
 
-    return HookDispatcher(project_root, state_root)
+    return HookDispatcher(project_root, runtime_root)
 
 
 def create_lifecycle_service(
     project_root: Path,
-    state_root: Path,
+    runtime_root: Path,
     *,
     repository: SpawnRepository | None = None,
 ) -> SpawnLifecycleService:
     """Create a spawn lifecycle service with centralized hook wiring."""
 
-    dispatcher = get_hook_dispatcher(project_root, state_root)
+    dispatcher = get_hook_dispatcher(project_root, runtime_root)
     hooks: list[LifecycleHook] | None = [dispatcher] if dispatcher is not None else None
     return SpawnLifecycleService(
-        state_root,
+        runtime_root,
         hooks=hooks,
         repository=repository,
     )
