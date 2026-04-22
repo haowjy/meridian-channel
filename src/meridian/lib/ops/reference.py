@@ -46,14 +46,14 @@ def _normalize_optional(value: str | None) -> str | None:
     return normalized or None
 
 
-def resolve_spawn_ref(state_root: Path, ref: str) -> SpawnId | None:
+def resolve_spawn_ref(runtime_root: Path, ref: str) -> SpawnId | None:
     """Resolve a spawn reference from spawn id first, then chat id."""
 
-    spawn = spawn_store.get_spawn(state_root, ref)
+    spawn = spawn_store.get_spawn(runtime_root, ref)
     if spawn is not None:
         return SpawnId(spawn.id)
 
-    matches = spawn_store.list_spawns(state_root, filters={"chat_id": ref})
+    matches = spawn_store.list_spawns(runtime_root, filters={"chat_id": ref})
     if matches:
         matches.sort(key=lambda item: item.started_at or "", reverse=True)
         return SpawnId(matches[0].id)
@@ -128,9 +128,9 @@ def _build_tracked_reference(
 
 
 def _resolve_spawn_reference(
-    state_root: Path, ref: str, project_root: Path
+    runtime_root: Path, ref: str, project_root: Path
 ) -> ResolvedSessionReference:
-    row = spawn_store.get_spawn(state_root, ref)
+    row = spawn_store.get_spawn(runtime_root, ref)
     if row is None:
         return _resolve_untracked_reference(project_root, ref)
 
@@ -156,9 +156,9 @@ def _resolve_spawn_reference(
 
 
 def _resolve_chat_reference(
-    state_root: Path, ref: str, project_root: Path
+    runtime_root: Path, ref: str, project_root: Path
 ) -> ResolvedSessionReference:
-    records = session_store.get_session_records(state_root, {ref})
+    records = session_store.get_session_records(runtime_root, {ref})
     if not records:
         return _resolve_untracked_reference(project_root, ref)
 
@@ -179,9 +179,9 @@ def _resolve_chat_reference(
 
 
 def _resolve_harness_session_reference(
-    state_root: Path, ref: str, project_root: Path
+    runtime_root: Path, ref: str, project_root: Path
 ) -> ResolvedSessionReference:
-    session = session_store.resolve_session_ref(state_root, ref)
+    session = session_store.resolve_session_ref(runtime_root, ref)
     if session is None:
         return _resolve_untracked_reference(project_root, ref)
 
@@ -208,12 +208,12 @@ def resolve_session_reference(project_root: Path, ref: str) -> ResolvedSessionRe
     if not normalized:
         raise ValueError("Session reference is required.")
 
-    state_root = resolve_runtime_root_for_read(project_root)
+    runtime_root = resolve_runtime_root_for_read(project_root)
     if _SPAWN_REF_RE.fullmatch(normalized):
-        return _resolve_spawn_reference(state_root, normalized, project_root)
+        return _resolve_spawn_reference(runtime_root, normalized, project_root)
     if _CHAT_REF_RE.fullmatch(normalized):
-        return _resolve_chat_reference(state_root, normalized, project_root)
-    return _resolve_harness_session_reference(state_root, normalized, project_root)
+        return _resolve_chat_reference(runtime_root, normalized, project_root)
+    return _resolve_harness_session_reference(runtime_root, normalized, project_root)
 
 
 __all__ = [

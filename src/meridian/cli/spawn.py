@@ -513,15 +513,15 @@ def _spawn_children(
         raise ValueError("spawn_id is required")
     project_root = resolve_project_root()
     normalized_spawn_id = resolve_spawn_reference(project_root, normalized_ref)
-    state_root = resolve_runtime_root_for_read(project_root)
+    runtime_root = resolve_runtime_root_for_read(project_root)
     from meridian.lib.state.reaper import reconcile_spawns
 
     children = list(
         reversed(
             reconcile_spawns(
-                state_root,
+                runtime_root,
                 spawn_store.list_spawns(
-                    state_root,
+                    runtime_root,
                     filters={"parent_id": normalized_spawn_id},
                 ),
             )

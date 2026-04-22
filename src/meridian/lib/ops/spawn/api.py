@@ -121,8 +121,8 @@ def spawn_create_sync(
     payload = payload.model_copy(update={"project_root": resolved_root.as_posix()})
     payload, preflight_warning = validate_create_input(payload)
     if payload.dry_run and payload.work.strip():
-        repo_state_root = resolve_project_paths(resolved_root).root_dir
-        resolved_work_id = ensure_explicit_work_item(repo_state_root, payload.work)
+        project_local_root = resolve_project_paths(resolved_root).root_dir
+        resolved_work_id = ensure_explicit_work_item(project_local_root, payload.work)
         payload = payload.model_copy(update={"work": resolved_work_id})
 
     runtime = None
@@ -199,8 +199,8 @@ def spawn_list_sync(
     project_root = _resolve_project_root_input(payload.project_root)
     from meridian.lib.state.reaper import reconcile_spawns
 
-    state_root = resolve_runtime_root_for_read(project_root)
-    spawns = list(reversed(reconcile_spawns(state_root, spawn_store.list_spawns(state_root))))
+    runtime_root = resolve_runtime_root_for_read(project_root)
+    spawns = list(reversed(reconcile_spawns(runtime_root, spawn_store.list_spawns(runtime_root))))
 
     # When statuses is empty tuple, show all statuses but cap intelligently:
     # always include all active spawns, pad with recent non-active up to limit.
@@ -296,8 +296,8 @@ def spawn_stats_sync(
     project_root = _resolve_project_root_input(payload.project_root)
     from meridian.lib.state.reaper import reconcile_spawns
 
-    state_root = resolve_runtime_root_for_read(project_root)
-    all_spawns = reconcile_spawns(state_root, spawn_store.list_spawns(state_root))
+    runtime_root = resolve_runtime_root_for_read(project_root)
+    all_spawns = reconcile_spawns(runtime_root, spawn_store.list_spawns(runtime_root))
 
     if payload.session is not None and payload.session.strip():
         wanted_session = payload.session.strip()
@@ -495,12 +495,12 @@ async def _spawn_cancel_impl(
     _ = sink
     project_root, _ = resolve_runtime_root_and_config(payload.project_root)
     spawn_id = resolve_spawn_reference(project_root, payload.spawn_id)
-    state_root = resolve_runtime_root(project_root)
-    row = spawn_store.get_spawn(state_root, spawn_id)
+    runtime_root = resolve_runtime_root(project_root)
+    row = spawn_store.get_spawn(runtime_root, spawn_id)
     if row is None:
         raise ValueError(f"Spawn '{spawn_id}' not found")
 
-    canceller = SignalCanceller(state_root=state_root)
+    canceller = SignalCanceller(runtime_root=runtime_root)
     try:
         outcome = await canceller.cancel(SpawnId(spawn_id))
     except RuntimeError as exc:
@@ -515,7 +515,7 @@ async def _spawn_cancel_impl(
             exit_code=1,
         )
 
-    latest = spawn_store.get_spawn(state_root, spawn_id) or row
+    latest = spawn_store.get_spawn(runtime_root, spawn_id) or row
     return _spawn_cancel_output_from_outcome(
         spawn_id=spawn_id,
         outcome=outcome,

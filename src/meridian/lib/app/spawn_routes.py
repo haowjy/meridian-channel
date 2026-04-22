@@ -100,20 +100,20 @@ class ForkRequest(BaseModel):
 # ---- Archive State Helpers ----
 
 
-def _archived_spawns_path(state_root: Path) -> Path:
+def _archived_spawns_path(runtime_root: Path) -> Path:
     """Path to the archived spawns JSON file."""
-    return state_root / "app" / "archived_spawns.json"
+    return runtime_root / "app" / "archived_spawns.json"
 
 
-def _archived_spawns_lock_path(state_root: Path) -> Path:
+def _archived_spawns_lock_path(runtime_root: Path) -> Path:
     """Lock path for archived spawns file."""
-    return state_root / "app" / "archived_spawns.flock"
+    return runtime_root / "app" / "archived_spawns.flock"
 
 
-def _read_archived_spawns(state_root: Path) -> set[str]:
+def _read_archived_spawns(runtime_root: Path) -> set[str]:
     """Read the set of archived spawn IDs."""
-    path = _archived_spawns_path(state_root)
-    lock_path = _archived_spawns_lock_path(state_root)
+    path = _archived_spawns_path(runtime_root)
+    lock_path = _archived_spawns_lock_path(runtime_root)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     
     with lock_file(lock_path):
@@ -128,33 +128,33 @@ def _read_archived_spawns(state_root: Path) -> set[str]:
             return set()
 
 
-def _write_archived_spawns(state_root: Path, archived: set[str]) -> None:
+def _write_archived_spawns(runtime_root: Path, archived: set[str]) -> None:
     """Write the set of archived spawn IDs atomically."""
-    path = _archived_spawns_path(state_root)
-    lock_path = _archived_spawns_lock_path(state_root)
+    path = _archived_spawns_path(runtime_root)
+    lock_path = _archived_spawns_lock_path(runtime_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     
     with lock_file(lock_path):
         atomic_write_text(path, json_module.dumps(sorted(archived), indent=2) + "\n")
 
 
-def _archive_spawn(state_root: Path, spawn_id: str) -> None:
+def _archive_spawn(runtime_root: Path, spawn_id: str) -> None:
     """Add a spawn ID to the archived set."""
-    archived = _read_archived_spawns(state_root)
+    archived = _read_archived_spawns(runtime_root)
     archived.add(spawn_id)
-    _write_archived_spawns(state_root, archived)
+    _write_archived_spawns(runtime_root, archived)
 
 
-def _unarchive_spawn(state_root: Path, spawn_id: str) -> None:
+def _unarchive_spawn(runtime_root: Path, spawn_id: str) -> None:
     """Remove a spawn ID from the archived set."""
-    archived = _read_archived_spawns(state_root)
+    archived = _read_archived_spawns(runtime_root)
     archived.discard(spawn_id)
-    _write_archived_spawns(state_root, archived)
+    _write_archived_spawns(runtime_root, archived)
 
 
-def _is_spawn_archived(state_root: Path, spawn_id: str) -> bool:
+def _is_spawn_archived(runtime_root: Path, spawn_id: str) -> bool:
     """Check if a spawn is archived."""
-    return spawn_id in _read_archived_spawns(state_root)
+    return spawn_id in _read_archived_spawns(runtime_root)
 
 
 # ---- Validation Helpers ----
@@ -173,12 +173,12 @@ def spawn_is_terminal(status: str) -> bool:
 
 
 def require_spawn(
-    state_root: Path,
+    runtime_root: Path,
     spawn_id: SpawnId,
     http_exception: HTTPExceptionCallable,
 ) -> SpawnRecord:
     """Get spawn record or raise 404."""
-    record = spawn_store.get_spawn(state_root, spawn_id)
+    record = spawn_store.get_spawn(runtime_root, spawn_id)
     if record is None:
         raise http_exception(status_code=404, detail="spawn not found")
     return record
@@ -220,7 +220,7 @@ def register_spawn_routes(
     app: object,
     spawn_manager: SpawnManager,
     *,
-    state_root: Path,
+    runtime_root: Path,
     project_paths: ProjectConfigPaths,
     lifecycle_service: SpawnLifecycleService,
     spawn_id_lock: asyncio.Lock,
@@ -261,7 +261,7 @@ def register_spawn_routes(
         return validate_spawn_id(raw, http_exception)
 
     def _require_spawn(spawn_id: SpawnId) -> SpawnRecord:
-        return require_spawn(state_root, spawn_id, http_exception)
+        return require_spawn(runtime_root, spawn_id, http_exception)
 
     def _require_active_manager(spawn_id: SpawnId) -> None:
         require_active_manager(spawn_manager, spawn_id, http_exception)
@@ -375,7 +375,7 @@ def register_spawn_routes(
         launch_runtime = LaunchRuntime(
             argv_intent=LaunchArgvIntent.SPEC_ONLY,
             unsafe_no_permissions=unsafe_no_permissions,
-            runtime_root=state_root.as_posix(),
+            runtime_root=runtime_root.as_posix(),
             project_paths_project_root=project_paths.project_root.as_posix(),
             project_paths_execution_cwd=project_paths.execution_cwd.as_posix(),
         )
@@ -483,7 +483,7 @@ def register_spawn_routes(
                 status_code=409,
                 detail=f"spawn already terminal: {record.status}",
             )
-        canceller = SignalCanceller(state_root=state_root, manager=spawn_manager)
+        canceller = SignalCanceller(runtime_root=runtime_root, manager=spawn_manager)
         try:
             outcome = await canceller.cancel(typed_spawn_id)
         except ValueError as exc:
@@ -519,7 +519,7 @@ def register_spawn_routes(
             )
         
         # Check if already archived
-        if _is_spawn_archived(state_root, str(typed_spawn_id)):
+        if _is_spawn_archived(runtime_root, str(typed_spawn_id)):
             return {
                 "ok": True,
                 "spawn_id": str(typed_spawn_id),
@@ -527,7 +527,7 @@ def register_spawn_routes(
                 "noop": True,
             }
         
-        _archive_spawn(state_root, str(typed_spawn_id))
+        _archive_spawn(runtime_root, str(typed_spawn_id))
         _broadcast(
             "spawn.archived",
             {
@@ -613,7 +613,7 @@ def _spawn_to_projection(record: SpawnRecord, *, archived: bool = False) -> Spaw
 def register_spawn_query_routes(
     app: object,
     *,
-    state_root: Path,
+    runtime_root: Path,
     http_exception: HTTPExceptionCallable,
 ) -> None:
     """Register expanded spawn query routes (filters, pagination, stats)."""
@@ -653,13 +653,13 @@ def register_spawn_query_routes(
 
         # Get all matching spawns
         spawns = reconcile_spawns(
-            state_root,
-            spawn_store.list_spawns(state_root, filters=filters if filters else None),
+            runtime_root,
+            spawn_store.list_spawns(runtime_root, filters=filters if filters else None),
         )
 
         # Filter out archived spawns unless explicitly requested
         if not include_archived:
-            archived_ids = _read_archived_spawns(state_root)
+            archived_ids = _read_archived_spawns(runtime_root)
             spawns = [s for s in spawns if s.id not in archived_ids]
 
         # Sort by started_at desc, id desc for stable pagination
@@ -704,13 +704,13 @@ def register_spawn_query_routes(
 
         filters = {"work_id": work_id.strip()} if work_id else None
         spawns = reconcile_spawns(
-            state_root,
-            spawn_store.list_spawns(state_root, filters=filters),
+            runtime_root,
+            spawn_store.list_spawns(runtime_root, filters=filters),
         )
 
         # Filter out archived spawns unless explicitly requested
         if not include_archived:
-            archived_ids = _read_archived_spawns(state_root)
+            archived_ids = _read_archived_spawns(runtime_root)
             spawns = [s for s in spawns if s.id not in archived_ids]
 
         running = 0
@@ -755,11 +755,11 @@ def register_spawn_query_routes(
         typed_spawn_id = validate_spawn_id(spawn_id, http_exception)
         
         # Check spawn exists
-        record = spawn_store.get_spawn(state_root, typed_spawn_id)
+        record = spawn_store.get_spawn(runtime_root, typed_spawn_id)
         if record is None:
             raise http_exception(status_code=404, detail="spawn not found")
 
-        output_path = state_root / "spawns" / str(typed_spawn_id) / "output.jsonl"
+        output_path = runtime_root / "spawns" / str(typed_spawn_id) / "output.jsonl"
         if not output_path.exists():
             return []
 

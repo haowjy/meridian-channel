@@ -99,7 +99,7 @@ class WorkCurrentOutput(BaseModel):
 
 
 @contextmanager
-def _resolved_context_env_defaults(project_root: Path, state_root: Path) -> Iterator[None]:
+def _resolved_context_env_defaults(project_root: Path, runtime_root: Path) -> Iterator[None]:
     """Provide repo/state env defaults so `ResolvedContext` can resolve fully."""
 
     original_project_root = os.environ.get("MERIDIAN_PROJECT_DIR")
@@ -108,7 +108,7 @@ def _resolved_context_env_defaults(project_root: Path, state_root: Path) -> Iter
     if not (original_project_root or "").strip():
         os.environ["MERIDIAN_PROJECT_DIR"] = project_root.as_posix()
     if not (original_state_root or "").strip():
-        os.environ["MERIDIAN_RUNTIME_DIR"] = state_root.as_posix()
+        os.environ["MERIDIAN_RUNTIME_DIR"] = runtime_root.as_posix()
 
     try:
         yield
@@ -124,10 +124,10 @@ def _resolved_context_env_defaults(project_root: Path, state_root: Path) -> Iter
             os.environ["MERIDIAN_RUNTIME_DIR"] = original_state_root
 
 
-def _resolve_runtime_context(project_root: Path, state_root: Path) -> ResolvedContext:
+def _resolve_runtime_context(project_root: Path, runtime_root: Path) -> ResolvedContext:
     """Resolve context from environment with repo/state defaults applied."""
 
-    with _resolved_context_env_defaults(project_root, state_root):
+    with _resolved_context_env_defaults(project_root, runtime_root):
         return ResolvedContext.from_environment()
 
 
@@ -162,8 +162,8 @@ def work_current_sync(input: WorkCurrentInput) -> WorkCurrentOutput:
 
     _ = input
     project_root = resolve_project_root()
-    state_root = resolve_runtime_root_for_read(project_root)
-    resolved = _resolve_runtime_context(project_root, state_root)
+    runtime_root = resolve_runtime_root_for_read(project_root)
+    resolved = _resolve_runtime_context(project_root, runtime_root)
 
     return WorkCurrentOutput(
         work_dir=resolved.work_dir.as_posix() if resolved.work_dir is not None else None

@@ -96,9 +96,9 @@ def _format_session_rows(sessions: tuple[WorkSessionItem, ...], *, indent: str) 
     return [f"{indent}{line}" for line in tabular(rows).splitlines()]
 
 
-def _active_session_work_ids(state_root: Path) -> dict[str, str]:
+def _active_session_work_ids(runtime_root: Path) -> dict[str, str]:
     attached: dict[str, str] = {}
-    for record in session_store.list_active_session_records(state_root):
+    for record in session_store.list_active_session_records(runtime_root):
         active_work_id = record.active_work_id
         if active_work_id:
             attached[record.chat_id] = active_work_id
@@ -295,7 +295,7 @@ class WorkSessionsOutput(BaseModel):
 def _resolve_work_id(
     *,
     payload_work_id: str,
-    state_root: Path,
+    runtime_root: Path,
     ctx: RuntimeContext | None,
 ) -> str:
     normalized = payload_work_id.strip()
@@ -308,7 +308,7 @@ def _resolve_work_id(
 
     chat_id = resolved_ctx.chat_id.strip()
     if chat_id:
-        attached_work_id = session_store.get_session_active_work_id(state_root, chat_id)
+        attached_work_id = session_store.get_session_active_work_id(runtime_root, chat_id)
         if attached_work_id is not None and attached_work_id.strip():
             return attached_work_id.strip()
 
@@ -319,7 +319,7 @@ def _resolve_work_id(
 
 
 def _work_session_chat_ids(
-    state_root: Path,
+    runtime_root: Path,
     work_id: str,
     *,
     include_all: bool,
@@ -333,9 +333,9 @@ def _work_session_chat_ids(
     chat_ids: set[str] = set()
     if include_all:
         chat_ids.update(
-            session_store.chat_ids_ever_attached_to_work(state_root, normalized_work_id)
+            session_store.chat_ids_ever_attached_to_work(runtime_root, normalized_work_id)
         )
-        for spawn in reconcile_spawns(state_root, spawn_store.list_spawns(state_root)):
+        for spawn in reconcile_spawns(runtime_root, spawn_store.list_spawns(runtime_root)):
             if (spawn.work_id or "").strip() != normalized_work_id:
                 continue
             chat_id = (spawn.chat_id or "").strip()
@@ -343,10 +343,10 @@ def _work_session_chat_ids(
                 chat_ids.add(chat_id)
         return chat_ids
 
-    for record in session_store.list_active_session_records(state_root):
+    for record in session_store.list_active_session_records(runtime_root):
         if record.active_work_id == normalized_work_id:
             chat_ids.add(record.chat_id)
-    for spawn in reconcile_spawns(state_root, spawn_store.list_spawns(state_root)):
+    for spawn in reconcile_spawns(runtime_root, spawn_store.list_spawns(runtime_root)):
         if spawn.kind == "primary":
             continue
         if not is_active_spawn_status(spawn.status):
@@ -360,14 +360,14 @@ def _work_session_chat_ids(
 
 
 def _work_sessions_for_work_id(
-    state_root: Path,
+    runtime_root: Path,
     work_id: str,
     *,
     include_all: bool,
 ) -> tuple[WorkSessionItem, ...]:
-    active_chat_ids = set(session_store.list_active_sessions(state_root))
-    chat_ids = _work_session_chat_ids(state_root, work_id, include_all=include_all)
-    records = session_store.get_session_records(state_root, chat_ids)
+    active_chat_ids = set(session_store.list_active_sessions(runtime_root))
+    chat_ids = _work_session_chat_ids(runtime_root, work_id, include_all=include_all)
+    records = session_store.get_session_records(runtime_root, chat_ids)
     records.sort(key=lambda record: (record.started_at, record.chat_id))
     return tuple(
         WorkSessionItem(
@@ -511,7 +511,7 @@ def work_sessions_sync(
     runtime_state_root = roots.runtime_root
     resolved_work_id = _resolve_work_id(
         payload_work_id=payload.work_id,
-        state_root=runtime_state_root,
+        runtime_root=runtime_state_root,
         ctx=ctx,
     )
 

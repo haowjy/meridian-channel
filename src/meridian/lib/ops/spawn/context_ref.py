@@ -60,10 +60,10 @@ type ContextRef = SpawnContextRef | SessionContextRef
 def _select_primary_spawn_for_session(project_root: Path, chat_id: str) -> spawn_store.SpawnRecord:
     from meridian.lib.state.reaper import reconcile_spawns
 
-    state_root = resolve_runtime_root_for_read(project_root)
+    runtime_root = resolve_runtime_root_for_read(project_root)
     spawns = reconcile_spawns(
-        state_root,
-        spawn_store.list_spawns(state_root, filters={"chat_id": chat_id}),
+        runtime_root,
+        spawn_store.list_spawns(runtime_root, filters={"chat_id": chat_id}),
     )
     primary_spawns = [row for row in spawns if row.kind == "primary"]
     if not primary_spawns:
@@ -73,8 +73,8 @@ def _select_primary_spawn_for_session(project_root: Path, chat_id: str) -> spawn
 
 
 def _is_tracked_session(project_root: Path, chat_id: str) -> bool:
-    state_root = resolve_runtime_root_for_read(project_root)
-    return bool(session_store.get_session_records(state_root, {chat_id}))
+    runtime_root = resolve_runtime_root_for_read(project_root)
+    return bool(session_store.get_session_records(runtime_root, {chat_id}))
 
 
 def _load_report_text(project_root: Path, spawn_id: str) -> str | None:

@@ -437,9 +437,9 @@ def _resolve_harness_session_file(
     )
 
 
-def _spawn_output_path(state_root: Path, spawn_id: str, *, live_first: bool) -> Path | None:
-    live_path = state_root / "spawns" / spawn_id / "output.jsonl"
-    artifact_path = state_root / "artifacts" / spawn_id / "output.jsonl"
+def _spawn_output_path(runtime_root: Path, spawn_id: str, *, live_first: bool) -> Path | None:
+    live_path = runtime_root / "spawns" / spawn_id / "output.jsonl"
+    artifact_path = runtime_root / "artifacts" / spawn_id / "output.jsonl"
     candidates = (live_path, artifact_path) if live_first else (artifact_path, live_path)
     for candidate in candidates:
         if candidate.is_file():
@@ -448,13 +448,13 @@ def _spawn_output_path(state_root: Path, spawn_id: str, *, live_first: bool) -> 
 
 
 def _target_from_spawn_output(
-    state_root: Path,
+    runtime_root: Path,
     *,
     display_id: str,
     spawn_id: str,
     live_first: bool,
 ) -> _ResolvedTarget | None:
-    output_path = _spawn_output_path(state_root, spawn_id, live_first=live_first)
+    output_path = _spawn_output_path(runtime_root, spawn_id, live_first=live_first)
     if output_path is None:
         return None
     return _ResolvedTarget(
@@ -465,12 +465,12 @@ def _target_from_spawn_output(
     )
 
 
-def _primary_spawn_for_chat(state_root: Path, chat_id: str) -> spawn_store.SpawnRecord | None:
+def _primary_spawn_for_chat(runtime_root: Path, chat_id: str) -> spawn_store.SpawnRecord | None:
     from meridian.lib.state.reaper import reconcile_spawns
 
     spawns = reconcile_spawns(
-        state_root,
-        spawn_store.list_spawns(state_root, filters={"chat_id": chat_id}),
+        runtime_root,
+        spawn_store.list_spawns(runtime_root, filters={"chat_id": chat_id}),
     )
     primary_spawns = [row for row in spawns if row.kind == "primary"]
     if not primary_spawns:
@@ -481,19 +481,19 @@ def _primary_spawn_for_chat(state_root: Path, chat_id: str) -> spawn_store.Spawn
 def _resolve_from_chat_id(
     *,
     project_root: Path,
-    state_root: Path,
+    runtime_root: Path,
     chat_id: str,
 ) -> _ResolvedTarget:
     resolved = resolve_session_reference(project_root, chat_id)
     if not resolved.tracked:
         raise ValueError(f"Chat '{chat_id}' not found")
-    primary_spawn = _primary_spawn_for_chat(state_root, chat_id)
+    primary_spawn = _primary_spawn_for_chat(runtime_root, chat_id)
     if (
         primary_spawn is not None
         and is_active_spawn_status(primary_spawn.status)
         and (
             output_target := _target_from_spawn_output(
-                state_root,
+                runtime_root,
                 display_id=chat_id,
                 spawn_id=primary_spawn.id,
                 live_first=True,
@@ -505,7 +505,7 @@ def _resolve_from_chat_id(
 
     if resolved.missing_harness_session_id:
         # Fallback: check if the primary spawn for this chat has a harness session id
-        spawns = spawn_store.list_spawns(state_root, filters={"chat_id": chat_id})
+        spawns = spawn_store.list_spawns(runtime_root, filters={"chat_id": chat_id})
         fallback_session_id: str | None = None
         fallback_harness: str | None = resolved.harness
         for spawn in spawns:
@@ -523,7 +523,7 @@ def _resolve_from_chat_id(
             )
         if primary_spawn is not None and (
             output_target := _target_from_spawn_output(
-                state_root,
+                runtime_root,
                 display_id=chat_id,
                 spawn_id=primary_spawn.id,
                 live_first=True,
@@ -553,7 +553,7 @@ def _resolve_from_chat_id(
     except FileNotFoundError:
         if primary_spawn is not None and (
             output_target := _target_from_spawn_output(
-                state_root,
+                runtime_root,
                 display_id=chat_id,
                 spawn_id=primary_spawn.id,
                 live_first=True,
@@ -566,7 +566,7 @@ def _resolve_from_chat_id(
 def _resolve_from_spawn_id(
     *,
     project_root: Path,
-    state_root: Path,
+    runtime_root: Path,
     spawn_id: str,
 ) -> _ResolvedTarget:
     row = read_spawn_row(project_root, spawn_id)
@@ -575,7 +575,7 @@ def _resolve_from_spawn_id(
 
     if is_active_spawn_status(row.status) and (
         output_target := _target_from_spawn_output(
-            state_root,
+            runtime_root,
             display_id=spawn_id,
             spawn_id=spawn_id,
             live_first=True,
@@ -587,12 +587,12 @@ def _resolve_from_spawn_id(
     harness = (row.harness or "").strip() or None
 
     if not session_id and row.chat_id is not None:
-        by_chat = session_store.get_session_harness_id(state_root, row.chat_id)
+        by_chat = session_store.get_session_harness_id(runtime_root, row.chat_id)
         session_id = (by_chat or "").strip()
 
     if not session_id:
         output_target = _target_from_spawn_output(
-            state_root,
+            runtime_root,
             display_id=spawn_id,
             spawn_id=spawn_id,
             live_first=True,
@@ -605,7 +605,7 @@ def _resolve_from_spawn_id(
         )
 
     if harness is None:
-        record = session_store.resolve_session_ref(state_root, session_id)
+        record = session_store.resolve_session_ref(runtime_root, session_id)
         if record is not None and record.harness.strip():
             harness = record.harness.strip()
 
@@ -617,7 +617,7 @@ def _resolve_from_spawn_id(
         )
     except FileNotFoundError:
         output_target = _target_from_spawn_output(
-            state_root,
+            runtime_root,
             display_id=spawn_id,
             spawn_id=spawn_id,
             live_first=False,
@@ -630,10 +630,10 @@ def _resolve_from_spawn_id(
 def _resolve_from_session_ref(
     *,
     project_root: Path,
-    state_root: Path,
+    runtime_root: Path,
     session_ref: str,
 ) -> _ResolvedTarget:
-    record = session_store.resolve_session_ref(state_root, session_ref)
+    record = session_store.resolve_session_ref(runtime_root, session_ref)
     if record is not None:
         session_id = record.harness_session_id.strip() or session_ref
         harness = record.harness.strip() or None
@@ -653,7 +653,7 @@ def _resolve_from_session_ref(
 
 
 def resolve_target(
-    payload: SessionLogInput, *, project_root: Path, state_root: Path
+    payload: SessionLogInput, *, project_root: Path, runtime_root: Path
 ) -> _ResolvedTarget:
     if payload.file_path is not None and payload.file_path.strip():
         return _resolve_file_target(payload.file_path)
@@ -663,15 +663,19 @@ def resolve_target(
         raise ValueError("Session reference is required unless --file is provided")
 
     if ref.startswith("c") and ref[1:].isdigit():
-        return _resolve_from_chat_id(project_root=project_root, state_root=state_root, chat_id=ref)
+        return _resolve_from_chat_id(
+            project_root=project_root,
+            runtime_root=runtime_root,
+            chat_id=ref,
+        )
 
     if ref.startswith("p") and ref[1:].isdigit():
         return _resolve_from_spawn_id(
-            project_root=project_root, state_root=state_root, spawn_id=ref
+            project_root=project_root, runtime_root=runtime_root, spawn_id=ref
         )
 
     return _resolve_from_session_ref(
-        project_root=project_root, state_root=state_root, session_ref=ref
+        project_root=project_root, runtime_root=runtime_root, session_ref=ref
     )
 
 
@@ -727,9 +731,9 @@ def session_log_sync(
         Path(payload.project_root).expanduser().resolve() if payload.project_root else None
     )
     project_root = resolve_project_root(explicit_project_root)
-    state_root = resolve_runtime_root_for_read(project_root)
+    runtime_root = resolve_runtime_root_for_read(project_root)
 
-    target = resolve_target(payload, project_root=project_root, state_root=state_root)
+    target = resolve_target(payload, project_root=project_root, runtime_root=runtime_root)
     segments, total_compactions = parse_session_file(target.file_path)
     segment_messages = _select_segment(segments, compaction=payload.compaction)
 

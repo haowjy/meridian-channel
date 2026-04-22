@@ -29,8 +29,8 @@ def _select_latest_spawn_id(
 ) -> str | None:
     from meridian.lib.state.reaper import reconcile_spawns
 
-    state_root = resolve_runtime_root_for_read(project_root)
-    spawns = reconcile_spawns(state_root, spawn_store.list_spawns(state_root))
+    runtime_root = resolve_runtime_root_for_read(project_root)
+    spawns = reconcile_spawns(runtime_root, spawn_store.list_spawns(runtime_root))
     if statuses is not None:
         wanted = set(statuses)
         spawns = [item for item in spawns if item.status in wanted]
@@ -44,8 +44,8 @@ def resolve_spawn_reference(project_root: Path, ref: str) -> str:
     if not normalized:
         raise ValueError("spawn_id is required")
     if not normalized.startswith("@"):
-        state_root = resolve_runtime_root_for_read(project_root)
-        resolved = resolve_spawn_ref(state_root, normalized)
+        runtime_root = resolve_runtime_root_for_read(project_root)
+        resolved = resolve_spawn_ref(runtime_root, normalized)
         return str(resolved) if resolved is not None else normalized
 
     status_filter = _SPAWN_REFERENCE_STATUS_FILTERS.get(normalized)
@@ -66,12 +66,12 @@ def resolve_spawn_references(project_root: Path, refs: tuple[str, ...]) -> tuple
 
 
 def read_spawn_row(project_root: Path, spawn_id: str) -> spawn_store.SpawnRecord | None:
-    state_root = resolve_runtime_root_for_read(project_root)
-    record = spawn_store.get_spawn(state_root, spawn_id)
+    runtime_root = resolve_runtime_root_for_read(project_root)
+    record = spawn_store.get_spawn(runtime_root, spawn_id)
     if record is not None and is_active_spawn_status(record.status):
         from meridian.lib.state.reaper import reconcile_active_spawn
 
-        record = reconcile_active_spawn(state_root, record)
+        record = reconcile_active_spawn(runtime_root, record)
     return record
 
 

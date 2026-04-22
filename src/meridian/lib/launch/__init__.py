@@ -40,8 +40,8 @@ def _resolve_work_id_for_launch(project_root: Path, request: LaunchRequest) -> s
 
     explicit_work_id = (request.work_id or "").strip() or None
     if explicit_work_id is not None:
-        repo_state_root = resolve_project_paths(project_root).root_dir
-        return ensure_explicit_work_item(repo_state_root, explicit_work_id)
+        project_local_root = resolve_project_paths(project_root).root_dir
+        return ensure_explicit_work_item(project_local_root, explicit_work_id)
     return None
 
 

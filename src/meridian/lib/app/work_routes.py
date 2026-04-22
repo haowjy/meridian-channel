@@ -129,7 +129,7 @@ def _work_item_to_projection(
 def register_work_routes(
     app: object,
     *,
-    state_root: Path,
+    runtime_root: Path,
     project_state_dir: Path,
     project_root: Path,
     event_broadcaster: StreamBroadcaster | None = None,
@@ -156,10 +156,10 @@ def register_work_routes(
 
     def _get_work_stats(work_id: str) -> tuple[int, int, str | None]:
         """Get spawn count, session count, and last activity for a work item."""
-        spawns = spawn_store.list_spawns(state_root, filters={"work_id": work_id})
+        spawns = spawn_store.list_spawns(runtime_root, filters={"work_id": work_id})
         spawn_count = len(spawns)
 
-        sessions = session_store.list_active_sessions_for_work_id(state_root, work_id)
+        sessions = session_store.list_active_sessions_for_work_id(runtime_root, work_id)
         session_count = len(sessions)
 
         # Get last activity from spawns

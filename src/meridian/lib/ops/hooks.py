@@ -281,7 +281,7 @@ def _manual_context(
     hook: Hook,
     event: HookEventName,
     project_root: Path,
-    state_root: Path,
+    runtime_root: Path,
 ) -> HookContext:
     when = hook.when
     spawn_status = when.status[0] if when and when.status else "success"
@@ -292,7 +292,7 @@ def _manual_context(
         event_id=uuid4(),
         timestamp=datetime.now(UTC).isoformat(),
         project_root=project_root.as_posix(),
-        runtime_root=state_root.as_posix(),
+        runtime_root=runtime_root.as_posix(),
         spawn_id="manual",
         spawn_status=spawn_status,
         spawn_agent=spawn_agent,
@@ -350,7 +350,7 @@ def hooks_run_sync(payload: HookRunInput) -> HookRunOutput:
         hook=effective_hook,
         event=run_event,
         project_root=roots.project_root,
-        state_root=roots.runtime_root,
+        runtime_root=roots.runtime_root,
     )
 
     results = dispatcher.fire(context)

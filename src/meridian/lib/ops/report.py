@@ -43,8 +43,8 @@ def _resolve_spawn(
         spawn_id,
         current_spawn_id=str(resolved_ctx.spawn_id or ""),
     )
-    state_root = resolve_runtime_root_for_read(project_root)
-    if spawn_store.get_spawn(state_root, resolved_spawn) is None:
+    runtime_root = resolve_runtime_root_for_read(project_root)
+    if spawn_store.get_spawn(runtime_root, resolved_spawn) is None:
         raise ValueError(f"Spawn '{resolved_spawn}' not found")
     return resolved_spawn
 

@@ -43,9 +43,9 @@ async def streaming_serve(
         raise ValueError(f"unsupported harness '{harness}'. Supported: {supported}") from exc
 
     project_root, _ = resolve_runtime_root_and_config(None)
-    state_root = resolve_runtime_root(project_root)
+    runtime_root = resolve_runtime_root(project_root)
     start_monotonic = time.monotonic()
-    lifecycle = create_lifecycle_service(project_root, state_root)
+    lifecycle = create_lifecycle_service(project_root, runtime_root)
     spawn_id = SpawnId(
         lifecycle.start(
             chat_id=str(uuid4()),
@@ -63,7 +63,7 @@ async def streaming_serve(
     if debug:
         from meridian.lib.observability.debug_tracer import DebugTracer
 
-        spawn_dir = state_root / "spawns" / str(spawn_id)
+        spawn_dir = runtime_root / "spawns" / str(spawn_id)
         tracer = DebugTracer(
             spawn_id=str(spawn_id),
             debug_path=spawn_dir / "debug.jsonl",
@@ -89,7 +89,7 @@ async def streaming_serve(
     )
     launch_runtime = LaunchRuntime(
         argv_intent=LaunchArgvIntent.SPEC_ONLY,
-        runtime_root=state_root.as_posix(),
+        runtime_root=runtime_root.as_posix(),
         project_paths_project_root=project_root.as_posix(),
         project_paths_execution_cwd=project_root.as_posix(),
     )
@@ -100,8 +100,8 @@ async def streaming_serve(
         harness_registry=get_default_harness_registry(),
     )
 
-    output_path = state_root / "spawns" / str(spawn_id) / "output.jsonl"
-    socket_path = state_root / "spawns" / str(spawn_id) / "control.sock"
+    output_path = runtime_root / "spawns" / str(spawn_id) / "output.jsonl"
+    socket_path = runtime_root / "spawns" / str(spawn_id) / "control.sock"
 
     print(f"Started spawn {spawn_id} (harness={harness_id.value})")
     print(f"Control socket: {socket_path}")
@@ -114,7 +114,7 @@ async def streaming_serve(
         outcome = await run_streaming_spawn(
             config=config,
             spec=launch_ctx.spec,
-            state_root=state_root,
+            runtime_root=runtime_root,
             project_root=project_root,
             spawn_id=spawn_id,
         )

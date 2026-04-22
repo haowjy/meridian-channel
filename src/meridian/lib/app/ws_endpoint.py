@@ -214,7 +214,7 @@ async def _inbound_loop(
         elif message_type == "cancel":
             try:
                 outcome = await SignalCanceller(
-                    state_root=manager.state_root,
+                    runtime_root=manager.runtime_root,
                     manager=manager,
                 ).cancel(spawn_id)
             except ValueError as exc:

@@ -239,7 +239,7 @@ def register_stream_routes(
     app: object,
     spawn_manager: SpawnManager,
     *,
-    state_root: Path,
+    runtime_root: Path,
     multi_sub_manager: SpawnMultiSubscriberManager | None = None,
 ) -> StreamBroadcaster:
     """Register SSE streaming routes on the FastAPI app.
@@ -252,7 +252,7 @@ def register_stream_routes(
 
     _ = multi_sub_manager
     _ = spawn_manager
-    _ = state_root
+    _ = runtime_root
     global_broadcaster = get_or_create_stream_broadcaster(app)
     
     try:

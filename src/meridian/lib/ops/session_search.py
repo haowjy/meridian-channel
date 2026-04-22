@@ -134,7 +134,7 @@ def session_search_sync(
         Path(payload.project_root).expanduser().resolve() if payload.project_root else None
     )
     project_root = resolve_project_root(explicit_project_root)
-    state_root = resolve_runtime_root_for_read(project_root)
+    runtime_root = resolve_runtime_root_for_read(project_root)
 
     target = resolve_target(
         SessionLogInput(
@@ -143,7 +143,7 @@ def session_search_sync(
             project_root=payload.project_root,
         ),
         project_root=project_root,
-        state_root=state_root,
+        runtime_root=runtime_root,
     )
     segments, total_compactions = parse_session_file(target.file_path)
 

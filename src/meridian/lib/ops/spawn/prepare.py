@@ -152,7 +152,7 @@ def build_create_payload(
             config=runtime.config,
             harness_registry=runtime.harness_registry,
         )
-        state_root = resolve_runtime_root(runtime_view.project_root)
+        runtime_root = resolve_runtime_root(runtime_view.project_root)
     elif payload.dry_run:
         explicit_project_root = (
             Path(payload.project_root).expanduser().resolve() if payload.project_root else None
@@ -164,7 +164,7 @@ def build_create_payload(
             config=config,
             harness_registry=get_default_harness_registry(),
         )
-        state_root = resolve_runtime_root_for_read(runtime_view.project_root)
+        runtime_root = resolve_runtime_root_for_read(runtime_view.project_root)
     else:
         runtime_bundle = build_runtime(payload.project_root)
         runtime_view = _CreateRuntimeView(
@@ -172,7 +172,7 @@ def build_create_payload(
             config=runtime_bundle.config,
             harness_registry=runtime_bundle.harness_registry,
         )
-        state_root = resolve_runtime_root(runtime_view.project_root)
+        runtime_root = resolve_runtime_root(runtime_view.project_root)
     validated_paths = validate_reference_paths(
         payload.files,
         base_dir=runtime_view.project_root,
@@ -228,7 +228,7 @@ def build_create_payload(
             composition_surface=LaunchCompositionSurface.SPAWN_PREPARE,
             config_snapshot=runtime_view.config.model_dump(mode="json", exclude_none=True),
             report_output_path=_DRY_RUN_REPORT_PATH,
-            runtime_root=state_root.as_posix(),
+            runtime_root=runtime_root.as_posix(),
             project_paths_project_root=runtime_view.project_root.as_posix(),
             project_paths_execution_cwd=runtime_view.project_root.as_posix(),
         ),

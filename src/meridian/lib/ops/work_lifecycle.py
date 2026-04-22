@@ -50,11 +50,11 @@ def _merge_warnings(*warnings: str | None) -> str | None:
     return "\n".join(parts)
 
 
-def _active_work_attachment_warning(state_root: Path, work_id: str) -> str | None:
-    attached_session_ids = session_store.list_active_sessions_for_work_id(state_root, work_id)
+def _active_work_attachment_warning(runtime_root: Path, work_id: str) -> str | None:
+    attached_session_ids = session_store.list_active_sessions_for_work_id(runtime_root, work_id)
     active_spawn_ids = [
         spawn.id
-        for spawn in spawn_store.list_spawns(state_root, filters={"work_id": work_id})
+        for spawn in spawn_store.list_spawns(runtime_root, filters={"work_id": work_id})
         if spawn.kind != "primary" and is_active_spawn_status(spawn.status)
     ]
     warnings: list[str] = []
@@ -71,11 +71,11 @@ def _dispatch_work_hook_event(
     *,
     event_name: Literal["work.started", "work.done"],
     project_root: Path,
-    state_root: Path,
+    runtime_root: Path,
     project_state_dir: Path,
     work_id: str,
 ) -> None:
-    dispatcher = get_hook_dispatcher(project_root, state_root)
+    dispatcher = get_hook_dispatcher(project_root, runtime_root)
     if dispatcher is None:
         return
 
@@ -88,7 +88,7 @@ def _dispatch_work_hook_event(
                 event_id=generate_lifecycle_event_id(work_id, event_name, 0),
                 timestamp=datetime.now(tz=UTC).isoformat(),
                 project_root=str(project_root),
-                runtime_root=str(state_root),
+                runtime_root=str(runtime_root),
                 work_id=work_id,
                 work_dir=str(work_store.work_scratch_dir(project_state_dir, work_id)),
             )
@@ -294,7 +294,7 @@ def work_start_sync(
     _dispatch_work_hook_event(
         event_name="work.started",
         project_root=project_root,
-        state_root=runtime_state_root,
+        runtime_root=runtime_state_root,
         project_state_dir=project_state_dir,
         work_id=item.name,
     )
@@ -330,7 +330,7 @@ def work_update_sync(
         _dispatch_work_hook_event(
             event_name="work.done",
             project_root=roots.project_root,
-            state_root=runtime_state_root,
+            runtime_root=runtime_state_root,
             project_state_dir=project_state_dir,
             work_id=item.name,
         )
@@ -366,7 +366,7 @@ def work_done_sync(
     _dispatch_work_hook_event(
         event_name="work.done",
         project_root=roots.project_root,
-        state_root=runtime_state_root,
+        runtime_root=runtime_state_root,
         project_state_dir=project_state_dir,
         work_id=item.name,
     )
@@ -460,10 +460,10 @@ def work_clear_sync(
     ctx: RuntimeContext | None = None,
 ) -> WorkClearOutput:
     warning = _work_warning(ctx)
-    state_root = resolve_roots(payload.project_root).runtime_root
+    runtime_root = resolve_roots(payload.project_root).runtime_root
     chat_id = resolve_chat_id(payload_chat_id=payload.chat_id, ctx=runtime_context(ctx))
     updated = set_session_work_attachment(
-        state_root,
+        runtime_root,
         chat_id=chat_id,
         work_id=None,
     )

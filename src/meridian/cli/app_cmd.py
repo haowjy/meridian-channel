@@ -24,9 +24,9 @@ def run_app(
     from meridian.lib.streaming.spawn_manager import SpawnManager
 
     project_root, _ = resolve_runtime_root_and_config(None)
-    state_root = resolve_runtime_root(project_root)
+    runtime_root = resolve_runtime_root(project_root)
 
-    manager = SpawnManager(state_root=state_root, project_root=project_root, debug=debug)
+    manager = SpawnManager(runtime_root=runtime_root, project_root=project_root, debug=debug)
     app = create_app(
         manager,
         allow_unsafe_no_permissions=allow_unsafe_no_permissions,
@@ -35,7 +35,7 @@ def run_app(
     use_tcp = IS_WINDOWS or port is not None
     if use_tcp:
         resolved_port = port if port is not None else 8420
-        port_file = state_root / "app.port"
+        port_file = runtime_root / "app.port"
         port_file.parent.mkdir(parents=True, exist_ok=True)
         port_file.write_text(f"{resolved_port}\n", encoding="utf-8")
         print(f"Starting meridian app on http://127.0.0.1:{resolved_port}")
@@ -44,7 +44,7 @@ def run_app(
         uvicorn_module.run(app, host="127.0.0.1", port=resolved_port, log_level="info")
         return
 
-    socket_path = (uds or "").strip() or str(state_root / "app.sock")
+    socket_path = (uds or "").strip() or str(runtime_root / "app.sock")
     resolved_socket_path = Path(socket_path)
     resolved_socket_path.parent.mkdir(parents=True, exist_ok=True)
     resolved_socket_path.unlink(missing_ok=True)

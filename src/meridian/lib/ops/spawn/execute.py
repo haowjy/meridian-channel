@@ -76,7 +76,7 @@ class _SpawnContext(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     spawn: Spawn
-    state_root: Path
+    runtime_root: Path
     current_depth: int
     work_id: str | None = None
 
@@ -146,11 +146,11 @@ def _spawn_child_env(
     spawn_id: str | None = None,
     *,
     work_id: str | None = None,
-    state_root: Path | None = None,
+    runtime_root: Path | None = None,
     autocompact: int | None = None,
     ctx: RuntimeContext | None = None,
 ) -> dict[str, str]:
-    _ = spawn_id, work_id, state_root, ctx
+    _ = spawn_id, work_id, runtime_root, ctx
     child_env: dict[str, str] = {}
     # K5 boundary: ChildEnvContext.child_context() in launch/context.py is the sole
     # producer of MERIDIAN_* child overrides. Plan overrides stay non-MERIDIAN.
@@ -184,7 +184,7 @@ def _spawn_background_worker_env(
             normalized_work_id,
         )
 
-    # Omit project_root/state_root/chat_id (pass None) — those are already
+    # Omit project_root/runtime_root/chat_id (pass None) — those are already
     # correct in the inherited os.environ.  increment_depth=False because the
     # background worker is a peer, not a depth-child.
     child_env = build_child_env_overrides(
@@ -249,8 +249,8 @@ def _init_spawn(
 ) -> _SpawnContext:
     resolved_context = runtime_context(ctx)
     project_paths = resolve_project_config_paths(project_root=runtime.project_root)
-    repo_state_root = resolve_project_paths(project_paths.project_root).root_dir
-    state_root = resolve_runtime_root(project_paths.project_root)
+    project_local_root = resolve_project_paths(project_paths.project_root).root_dir
+    runtime_root = resolve_runtime_root(project_paths.project_root)
     resolved_work_id = _resolve_work_id(
         payload=payload,
         runtime_context=resolved_context,
@@ -258,9 +258,9 @@ def _init_spawn(
     )
     if (payload.work or "").strip():
         resolved_work_id = cast("str", resolved_work_id)
-        resolved_work_id = ensure_explicit_work_item(repo_state_root, resolved_work_id)
+        resolved_work_id = ensure_explicit_work_item(project_local_root, resolved_work_id)
     resolved_desc = (desc if desc is not None else payload.desc).strip() or None
-    service = create_lifecycle_service(project_paths.project_root, state_root)
+    service = create_lifecycle_service(project_paths.project_root, runtime_root)
     spawn_id = service.start(
         chat_id=resolve_chat_id(ctx=resolved_context, fallback="c0"),
         parent_id=str(resolved_context.spawn_id) if resolved_context.spawn_id else None,
@@ -304,7 +304,7 @@ def _init_spawn(
     _emit_subrun_event(run_start_event, sink=runtime.sink, ctx=resolved_context)
     return _SpawnContext(
         spawn=spawn,
-        state_root=state_root,
+        runtime_root=runtime_root,
         current_depth=current_depth,
         work_id=resolved_work_id,
     )
@@ -408,7 +408,7 @@ def _resolve_session_continuation(
 @contextmanager
 def _session_execution_context(
     *,
-    state_root: Path,
+    runtime_root: Path,
     harness_id: str,
     harness_session_id: str,
     model: str,
@@ -422,7 +422,7 @@ def _session_execution_context(
     execution_cwd: str | None = None,
 ) -> Iterator[_SessionExecutionContext]:
     with session_scope(
-        state_root=state_root,
+        runtime_root=runtime_root,
         harness=harness_id,
         harness_session_id=harness_session_id,
         model=model,
@@ -433,11 +433,11 @@ def _session_execution_context(
         forked_from_chat_id=forked_from_chat_id,
         execution_cwd=execution_cwd,
     ) as managed:
-        attached_work_id = get_session_active_work_id(state_root, managed.chat_id)
+        attached_work_id = get_session_active_work_id(runtime_root, managed.chat_id)
         if attached_work_id is None:
             attached_work_id = (inherited_work_id or "").strip() or None
             if attached_work_id is not None:
-                update_session_work_id(state_root, managed.chat_id, attached_work_id)
+                update_session_work_id(runtime_root, managed.chat_id, attached_work_id)
         yield _SessionExecutionContext(
             chat_id=managed.chat_id,
             work_id=attached_work_id,
@@ -456,8 +456,8 @@ async def _execute_existing_spawn(
 ) -> int:
     resolved_context = runtime_context(ctx)
     runtime = build_runtime(str(project_paths.project_root), sink=sink)
-    state_root = resolve_runtime_root(project_paths.project_root)
-    spawn_record = spawn_store.get_spawn(state_root, spawn_id)
+    runtime_root = resolve_runtime_root(project_paths.project_root)
+    spawn_record = spawn_store.get_spawn(runtime_root, spawn_id)
     if spawn_record is None:
         logger.error("Spawn not found for background execution.", spawn_id=str(spawn_id))
         return 1
@@ -524,7 +524,7 @@ async def _execute_existing_spawn(
     )
 
     with _session_execution_context(
-        state_root=state_root,
+        runtime_root=runtime_root,
         harness_id=resolved_harness_id,
         harness_session_id=(
             resolved_session.requested_harness_session_id or spawn_record.harness_session_id or ""
@@ -549,7 +549,7 @@ async def _execute_existing_spawn(
             forked_session_id = materialize_fork(
                 adapter=harness_adapter,
                 source_session_id=resolved_session.requested_harness_session_id,
-                state_root=state_root,
+                runtime_root=runtime_root,
                 spawn_id=spawn.spawn_id,
             )
             resolved_request = resolved_request.model_copy(
@@ -565,7 +565,7 @@ async def _execute_existing_spawn(
         run_env_overrides = _spawn_child_env(
             str(spawn.spawn_id),
             work_id=session_context.work_id or spawn_record.work_id,
-            state_root=state_root,
+            runtime_root=runtime_root,
             autocompact=autocompact,
             ctx=resolved_context,
         )
@@ -576,7 +576,7 @@ async def _execute_existing_spawn(
         launch_runtime = runtime_request.model_copy(
             update={
                 "argv_intent": LaunchArgvIntent.SPEC_ONLY,
-                "runtime_root": state_root.as_posix(),
+                "runtime_root": runtime_root.as_posix(),
                 "project_paths_project_root": project_paths.project_root.as_posix(),
                 "project_paths_execution_cwd": resolved_execution_cwd,
             }
@@ -599,7 +599,7 @@ async def _execute_existing_spawn(
             request=final_request,
             launch_context=launch_context,
             project_root=project_paths.project_root,
-            state_root=state_root,
+            runtime_root=runtime_root,
             artifacts=runtime.artifacts,
             harness_session_id_observer=session_context.harness_session_id_observer,
             debug=runtime_request.debug,
@@ -657,13 +657,13 @@ def execute_spawn_background(
     # the background worker dies before runner.py's authoritative update.
     if execution_cwd_str != str(project_paths.project_root):
         spawn_store.update_spawn(
-            context.state_root,
+            context.runtime_root,
             context.spawn.spawn_id,
             execution_cwd=execution_cwd_str,
         )
     log_dir = resolve_spawn_log_dir(project_paths.project_root, context.spawn.spawn_id)
     log_dir.mkdir(parents=True, exist_ok=True)
-    lifecycle_service = create_lifecycle_service(project_paths.project_root, context.state_root)
+    lifecycle_service = create_lifecycle_service(project_paths.project_root, context.runtime_root)
     try:
         _write_params_json(
             project_paths,
@@ -682,7 +682,7 @@ def execute_spawn_background(
         launch_runtime = LaunchRuntime(
             argv_intent=LaunchArgvIntent.SPEC_ONLY,
             debug=payload.debug,
-            runtime_root=context.state_root.as_posix(),
+            runtime_root=context.runtime_root.as_posix(),
             project_paths_project_root=project_paths.project_root.as_posix(),
             project_paths_execution_cwd=execution_cwd_str,
         )
@@ -839,7 +839,7 @@ def execute_spawn_blocking(
         # Pre-compute execution CWD for immediate visibility.
         # runner.py writes the authoritative value right before execution.
         spawn_store.update_spawn(
-            context.state_root,
+            context.runtime_root,
             spawn.spawn_id,
             execution_cwd=execution_cwd_str,
         )
@@ -864,7 +864,7 @@ def execute_spawn_blocking(
     context_from_resolved = request.context_from
 
     with _session_execution_context(
-        state_root=context.state_root,
+        runtime_root=context.runtime_root,
         harness_id=request.harness or "",
         harness_session_id=request.session.requested_harness_session_id or "",
         model=request.model or "",
@@ -890,7 +890,7 @@ def execute_spawn_blocking(
             forked_session_id = materialize_fork(
                 adapter=harness_adapter,
                 source_session_id=request.session.requested_harness_session_id,
-                state_root=context.state_root,
+                runtime_root=context.runtime_root,
                 spawn_id=spawn.spawn_id,
             )
             resolved_request = resolved_request.model_copy(
@@ -906,7 +906,7 @@ def execute_spawn_blocking(
         run_env_overrides = _spawn_child_env(
             str(spawn.spawn_id),
             work_id=session_context.work_id or context.work_id,
-            state_root=context.state_root,
+            runtime_root=context.runtime_root,
             autocompact=autocompact,
             ctx=resolved_context,
         )
@@ -916,7 +916,7 @@ def execute_spawn_blocking(
             argv_intent=LaunchArgvIntent.SPEC_ONLY,
             debug=payload.debug,
             harness_command_override=os.getenv("MERIDIAN_HARNESS_COMMAND", "").strip() or None,
-            runtime_root=context.state_root.as_posix(),
+            runtime_root=context.runtime_root.as_posix(),
             project_paths_project_root=project_paths.project_root.as_posix(),
             project_paths_execution_cwd=project_paths.execution_cwd.as_posix(),
         )
@@ -939,7 +939,7 @@ def execute_spawn_blocking(
                 request=launch_request,
                 launch_context=launch_context,
                 project_root=project_paths.project_root,
-                state_root=context.state_root,
+                runtime_root=context.runtime_root,
                 artifacts=runtime.artifacts,
                 event_observer=event_observer,
                 stream_stdout_to_terminal=stream_stdout_to_terminal,
@@ -1014,14 +1014,14 @@ def _background_worker_main(
     project_root = Path(parsed.project_root).expanduser().resolve()
     project_paths = resolve_project_config_paths(project_root=project_root)
     spawn_id = SpawnId(parsed.spawn_id)
-    state_root = resolve_runtime_root(project_paths.project_root)
+    runtime_root = resolve_runtime_root(project_paths.project_root)
     log_dir = resolve_spawn_log_dir(project_paths.project_root, spawn_id)
     try:
         try:
             launch_request = _load_bg_worker_request(log_dir)
         except Exception as exc:
             error = f"Failed to load background worker request: {exc}"
-            create_lifecycle_service(project_root, state_root).finalize(
+            create_lifecycle_service(project_root, runtime_root).finalize(
                 str(spawn_id),
                 status="failed",
                 exit_code=1,

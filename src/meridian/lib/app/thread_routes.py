@@ -37,7 +37,7 @@ class _FastAPIApp(Protocol):
     def get(self, path: str, **kwargs: object) -> Callable[[Callable[..., object]], object]: ...
 
 
-def _resolve_spawn_ids_for_thread(state_root: Path, chat_id: str) -> list[str]:
+def _resolve_spawn_ids_for_thread(runtime_root: Path, chat_id: str) -> list[str]:
     """Return spawn IDs associated with *chat_id*.
 
     Accepts either a spawn ID (``pN``) or a chat ID (``cN``).  Returns a list
@@ -45,20 +45,20 @@ def _resolve_spawn_ids_for_thread(state_root: Path, chat_id: str) -> list[str]:
     """
     # Direct spawn reference.
     if chat_id.startswith("p"):
-        record = spawn_store.get_spawn(state_root, chat_id)
+        record = spawn_store.get_spawn(runtime_root, chat_id)
         if record is not None:
             return [record.id]
         return []
 
     # Chat-level lookup: gather all spawns for this chat.
-    spawns = spawn_store.list_spawns(state_root, filters={"chat_id": chat_id})
+    spawns = spawn_store.list_spawns(runtime_root, filters={"chat_id": chat_id})
     return [s.id for s in spawns]
 
 
 def register_thread_routes(
     app: object,
     *,
-    state_root: Path,
+    runtime_root: Path,
     artifact_root: Path,
     http_exception: HTTPExceptionCallable,
 ) -> None:
@@ -87,7 +87,7 @@ def register_thread_routes(
             )
         spawn_id, line_index = parsed
 
-        valid_ids = _resolve_spawn_ids_for_thread(state_root, chat_id)
+        valid_ids = _resolve_spawn_ids_for_thread(runtime_root, chat_id)
         if not valid_ids:
             raise http_exception(status_code=404, detail=f"Thread '{chat_id}' not found.")
         if spawn_id not in valid_ids:
@@ -130,7 +130,7 @@ def register_thread_routes(
             )
         spawn_id, _ = parsed
 
-        valid_ids = _resolve_spawn_ids_for_thread(state_root, chat_id)
+        valid_ids = _resolve_spawn_ids_for_thread(runtime_root, chat_id)
         if not valid_ids:
             raise http_exception(status_code=404, detail=f"Thread '{chat_id}' not found.")
         if spawn_id not in valid_ids:
@@ -158,7 +158,7 @@ def register_thread_routes(
 
     async def list_tool_calls(chat_id: str) -> dict[str, object]:
         """Return all tool calls for a thread, in source order across all spawns."""
-        spawn_ids = _resolve_spawn_ids_for_thread(state_root, chat_id)
+        spawn_ids = _resolve_spawn_ids_for_thread(runtime_root, chat_id)
         if not spawn_ids:
             raise http_exception(status_code=404, detail=f"Thread '{chat_id}' not found.")
 
@@ -186,7 +186,7 @@ def register_thread_routes(
         tokens is used (matching the existing ``extract_usage_from_artifacts``
         selection logic which picks the best candidate).
         """
-        spawn_ids = _resolve_spawn_ids_for_thread(state_root, chat_id)
+        spawn_ids = _resolve_spawn_ids_for_thread(runtime_root, chat_id)
         if not spawn_ids:
             raise http_exception(status_code=404, detail=f"Thread '{chat_id}' not found.")
 
