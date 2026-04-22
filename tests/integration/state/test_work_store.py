@@ -10,6 +10,7 @@ from meridian.lib.state.work_store import (
     create_work_item,
     get_work_item,
     list_archived_work_items,
+    list_work_items,
     rename_work_item,
     reopen_work_item,
     slugify,
@@ -157,3 +158,59 @@ def test_archive_and_reopen_use_context_archive_path(
     reopen_work_item(state_root, item.name)
     assert not archived_dir.exists()
     assert (active_dir / "notes.md").read_text(encoding="utf-8") == "hello"
+
+
+def test_list_work_items_detects_manual_work_directory(tmp_path: Path) -> None:
+    state_root = _state_root(tmp_path)
+    manual_dir = state_root / "work" / "manual-item"
+    manual_dir.mkdir(parents=True, exist_ok=True)
+
+    items = list_work_items(state_root)
+
+    assert [item.name for item in items] == ["manual-item"]
+    assert items[0].status == "open"
+    status_payload = json.loads((manual_dir / "__status.json").read_text(encoding="utf-8"))
+    assert status_payload["status"] == "open"
+    assert status_payload["archived_at"] is None
+
+
+def test_list_archived_work_items_honors_limit_and_all_archived(tmp_path: Path) -> None:
+    state_root = _state_root(tmp_path)
+    created = [create_work_item(state_root, f"done-item-{idx}") for idx in range(1, 4)]
+    for item in created:
+        archive_work_item(state_root, item.name)
+
+    limited = list_archived_work_items(state_root, limit=2)
+    all_items = list_archived_work_items(state_root, limit=2, all_archived=True)
+
+    assert len(limited) == 2
+    assert len(all_items) == 3
+    assert {item.name for item in all_items} == {"done-item-1", "done-item-2", "done-item-3"}
+    assert {item.name for item in limited}.issubset({item.name for item in all_items})
+
+
+def test_rename_work_item_keeps_archived_item_archived(tmp_path: Path) -> None:
+    state_root = _state_root(tmp_path)
+    paths = RuntimePaths.from_root_dir(state_root)
+    item = create_work_item(state_root, "rename-me")
+    archive_work_item(state_root, item.name)
+
+    renamed = rename_work_item(state_root, item.name, "renamed-archived")
+
+    assert renamed.name == "renamed-archived"
+    assert renamed.status == "done"
+    assert renamed.archived_at is not None
+    assert not (paths.work_archive_dir / item.name).exists()
+    assert (paths.work_archive_dir / "renamed-archived").is_dir()
+    assert get_work_item(state_root, item.name) is None
+    loaded = get_work_item(state_root, "renamed-archived")
+    assert loaded is not None
+    assert loaded.status == "done"
+
+
+def test_update_work_item_rejects_done_status(tmp_path: Path) -> None:
+    state_root = _state_root(tmp_path)
+    item = create_work_item(state_root, "cannot-done-via-update")
+
+    with pytest.raises(ValueError, match=r"'done' is reserved for archived work items\."):
+        update_work_item(state_root, item.name, status="done")
