@@ -12,8 +12,8 @@
  * start) since that's what TimelineEntry expects.
  */
 
-import type { StreamEvent } from '../streaming/events'
-import type { TimelineEntry } from '../streaming/types'
+import type { StreamEvent } from '@/features/activity-stream/streaming/events'
+import type { TimelineEntry } from '@/features/activity-stream/streaming/types'
 import {
   randomFrom,
   CHAPTER_PATHS,
@@ -30,7 +30,7 @@ import {
   THINKING_FRAGMENTS,
   USER_MESSAGES,
   ASSISTANT_RESPONSES,
-} from './content-pools'
+} from '@/features/activity-stream/examples/content-pools'
 
 // ═══════════════════════════════════════════════════════════════════
 // Timing constants

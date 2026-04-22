@@ -1,4 +1,4 @@
-import type { ActivityBlockData } from "../types"
+import type { ActivityBlockData } from "@/features/activity-stream/types"
 
 import type { AssistantTurn, TurnStatus } from "@/features/threads/types"
 

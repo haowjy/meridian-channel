@@ -1,7 +1,7 @@
-import type { ActivityBlockData } from "../types"
+import type { ActivityBlockData } from "@/features/activity-stream/types"
 
-import { readTool, searchTool } from "./factories"
-import { PACING_FIX_SCENARIO } from "./streaming-scenario"
+import { readTool, searchTool } from "@/features/activity-stream/examples/factories"
+import { PACING_FIX_SCENARIO } from "@/features/activity-stream/examples/streaming-scenario"
 
 import type { AssistantTurn, ThreadTurn, TurnBlock, UserTurn } from "@/features/threads"
 

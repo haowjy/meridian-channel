@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 
 import { TimelineScrubber } from "@/components/storybook/TimelineScrubber"
-import { THREAD_WALKTHROUGH, THREAD_WALKTHROUGH_ACTIVE_TURN_ID } from "@/features/activity-stream/examples"
+import { THREAD_WALKTHROUGH, THREAD_WALKTHROUGH_ACTIVE_TURN_ID } from "./stories"
 import type { TimelinePlayback } from "@/lib/use-timeline-playback"
 
 import { TurnList } from "./components/TurnList"

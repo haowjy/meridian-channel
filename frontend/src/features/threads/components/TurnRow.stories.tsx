@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 
-import { STATUS_SCENARIO_TURNS, TURN_STATUS_ORDER } from "@/features/activity-stream/examples"
+import { STATUS_SCENARIO_TURNS, TURN_STATUS_ORDER } from "../stories"
 
 import { TurnRow } from "./TurnRow"
 
