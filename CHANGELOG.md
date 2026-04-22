@@ -83,7 +83,7 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 - Bundled `mars-agents` 0.1.2 → 0.1.3.
-- Workspace file location follows `MERIDIAN_STATE_ROOT` — lives at `state_root.parent / workspace.local.toml`.
+- Workspace file location follows `MERIDIAN_PROJECT_ROOT` — lives at `state_root.parent / workspace.local.toml`.
 
 ## [0.0.30] - 2026-04-16
 

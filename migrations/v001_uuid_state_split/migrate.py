@@ -29,8 +29,8 @@ def migrate(repo_root: Path) -> dict:
     project_uuid = uuid_file.read_text().strip()
     
     # Import here to avoid import errors if meridian not installed
-    from meridian.lib.state.user_paths import get_project_state_root
-    user_root = get_project_state_root(project_uuid)
+    from meridian.lib.state.user_paths import get_project_home
+    user_root = get_project_home(project_uuid)
     user_root.mkdir(parents=True, exist_ok=True)
     
     migrated = []

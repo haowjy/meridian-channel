@@ -161,17 +161,17 @@ mode = "auto"               # "auto" or "manual"
 
 ### Reading legacy state
 ```python
-from meridian.lib.state.paths import resolve_repo_state_paths
-repo_state = resolve_repo_state_paths(repo_root)
+from meridian.lib.state.paths import resolve_repo_paths
+repo_state = resolve_repo_paths(repo_root)
 legacy_spawns = repo_state.root_dir / "spawns.jsonl"
 ```
 
 ### Writing to user state
 ```python
-from meridian.lib.state.user_paths import get_project_uuid, get_project_state_root
+from meridian.lib.state.user_paths import get_project_uuid, get_project_home
 uuid = get_project_uuid(repo_root / ".meridian")
 if uuid:
-    user_root = get_project_state_root(uuid)
+    user_root = get_project_home(uuid)
 ```
 
 ### Atomic file operations
