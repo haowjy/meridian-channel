@@ -54,7 +54,7 @@ function ThreadScrubberStory() {
 }
 
 const meta = {
-  title: "Features/Threads/Thread View",
+  title: "Features/Threads/Spawn Activity View",
   component: TurnList,
   args: {
     turns: [],

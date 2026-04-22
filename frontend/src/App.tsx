@@ -8,7 +8,7 @@ import { SpawnHeader } from "@/features/spawn-selector/SpawnHeader"
 import { SpawnSelector } from "@/features/spawn-selector/SpawnSelector"
 import { Composer } from "@/features/threads/composer/Composer"
 import { StreamingIndicator } from "@/features/threads/components/StreamingIndicator"
-import { ThreadView } from "@/features/threads/components/ThreadView"
+import { SpawnActivityView } from "@/features/threads/components/SpawnActivityView"
 import { useThreadStreaming } from "@/hooks/use-thread-streaming"
 import type { ConnectionCapabilities, WsState } from "@/lib/ws"
 
@@ -164,7 +164,7 @@ function App() {
               </div>
 
               <div className="min-h-0 flex-1">
-                <ThreadView activity={state} />
+                <SpawnActivityView activity={state} />
               </div>
 
               {state.isStreaming ? <StreamingIndicator /> : null}

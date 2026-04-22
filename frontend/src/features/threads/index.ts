@@ -40,3 +40,4 @@ export { UserBubble } from "./components/UserBubble"
 // Storybook simulator
 export type { ThreadSimulator, ThreadSimulatorConfig } from "./hooks/use-thread-simulator"
 export { useThreadSimulator } from "./hooks/use-thread-simulator"
+export { SpawnActivityView } from "./components/SpawnActivityView"

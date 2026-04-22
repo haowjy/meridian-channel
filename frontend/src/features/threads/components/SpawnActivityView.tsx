@@ -7,7 +7,7 @@ import type { AssistantTurn } from "../types"
 
 import { TurnList } from "./TurnList"
 
-type ThreadViewProps = {
+type SpawnActivityViewProps = {
   activity: ActivityBlockData
 }
 
@@ -38,7 +38,7 @@ function toAssistantTurn(activity: ActivityBlockData): AssistantTurn {
   }
 }
 
-export function ThreadView({ activity }: ThreadViewProps) {
+export function SpawnActivityView({ activity }: SpawnActivityViewProps) {
   const bottomRef = useRef<HTMLDivElement | null>(null)
 
   const turns = useMemo(() => [toAssistantTurn(activity)], [activity])
