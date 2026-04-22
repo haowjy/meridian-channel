@@ -128,11 +128,10 @@ def test_workspace_roots_append_after_claude_preflight_projection(
     )
 
     runtime_root = tmp_path / ".meridian"
+    assert preview.child_cwd == tmp_path
     assert preview.run_params.extra_args == (
         "--user-tail",
         "1",
-        "--add-dir",
-        tmp_path.as_posix(),
         "--add-dir",
         shared_root.as_posix(),
         "--add-dir",
