@@ -14,9 +14,9 @@ from meridian.lib.core.context import RuntimeContext
 from meridian.lib.core.sink import NullSink, OutputSink
 from meridian.lib.state.artifact_store import LocalStore
 from meridian.lib.state.paths import (
-    resolve_repo_state_paths,
-    resolve_runtime_state_root_for_write,
-    resolve_runtime_state_root_or_none,
+    resolve_project_runtime_root_for_write,
+    resolve_project_runtime_root_or_none,
+    resolve_repo_paths,
 )
 from meridian.lib.state.user_paths import (
     get_or_create_project_uuid,
@@ -50,7 +50,13 @@ class OperationRuntime(BaseModel):
 class ResolvedRoots:
     repo_root: Path
     repo_state_root: Path
-    state_root: Path
+    runtime_root: Path
+
+    @property
+    def state_root(self) -> Path:
+        """Transitional alias for callers still expecting `state_root`."""
+
+        return self.runtime_root
 
 
 def runtime_context(ctx: RuntimeContext | None) -> RuntimeContext:
@@ -103,7 +109,7 @@ def build_runtime_from_root_and_config(
         config=config,
         harness_registry=get_default_harness_registry(),
         artifacts=LocalStore(
-            root_dir=resolve_runtime_state_root_for_write(repo_root) / "artifacts"
+            root_dir=resolve_project_runtime_root_for_write(repo_root) / "artifacts"
         ),
         sink=sink or NullSink(),
     )
@@ -120,68 +126,68 @@ def build_runtime(
     return build_runtime_from_root_and_config(resolved_root, config, sink=sink)
 
 
-def resolve_state_root(repo_root: Path) -> Path:
+def resolve_runtime_root(repo_root: Path) -> Path:
     """Resolve runtime state root for write paths."""
 
-    return resolve_runtime_state_root_for_write(repo_root)
+    return resolve_project_runtime_root_for_write(repo_root)
 
 
 def resolve_state_root_or_none(repo_root: Path) -> Path | None:
     """Resolve runtime state root for read paths, returning None when uninitialized."""
 
-    return resolve_runtime_state_root_or_none(repo_root)
+    return resolve_project_runtime_root_or_none(repo_root)
 
 
-def resolve_state_root_for_read(repo_root: Path) -> Path:
+def resolve_runtime_root_for_read(repo_root: Path) -> Path:
     """Resolve runtime state root for read paths without UUID creation.
 
     If a UUID exists but its user runtime root is still empty while repo-local
     state has data, prefer repo-local state as a compatibility fallback.
     """
 
-    repo_state_root = resolve_repo_state_paths(repo_root).root_dir
-    runtime_state_root = resolve_runtime_state_root_or_none(repo_root)
-    if runtime_state_root is None:
-        return repo_state_root
+    repo_state_dir = resolve_repo_paths(repo_root).root_dir
+    runtime_root = resolve_project_runtime_root_or_none(repo_root)
+    if runtime_root is None:
+        return repo_state_dir
 
-    if runtime_state_root == repo_state_root:
-        return runtime_state_root
+    if runtime_root == repo_state_dir:
+        return runtime_root
 
-    runtime_has_events = (runtime_state_root / "spawns.jsonl").is_file() or (
-        runtime_state_root / "sessions.jsonl"
+    runtime_has_events = (runtime_root / "spawns.jsonl").is_file() or (
+        runtime_root / "sessions.jsonl"
     ).is_file()
-    repo_has_events = (repo_state_root / "spawns.jsonl").is_file() or (
-        repo_state_root / "sessions.jsonl"
+    repo_has_events = (repo_state_dir / "spawns.jsonl").is_file() or (
+        repo_state_dir / "sessions.jsonl"
     ).is_file()
     if not runtime_has_events and repo_has_events:
-        return repo_state_root
+        return repo_state_dir
 
-    return runtime_state_root
+    return runtime_root
 
 
 def get_project_uuid(repo_root: Path) -> str:
     """Get/create project UUID, returns UUID string."""
 
-    return get_or_create_project_uuid(resolve_repo_state_paths(repo_root).root_dir)
+    return get_or_create_project_uuid(resolve_repo_paths(repo_root).root_dir)
 
 
 def resolve_roots(repo_root: str | None) -> ResolvedRoots:
     resolved_repo_root, _ = resolve_runtime_root_and_config(repo_root)
-    repo_state_root = resolve_repo_state_paths(resolved_repo_root).root_dir
+    repo_state_dir = resolve_repo_paths(resolved_repo_root).root_dir
     return ResolvedRoots(
         repo_root=resolved_repo_root,
-        repo_state_root=repo_state_root,
-        state_root=resolve_state_root(resolved_repo_root),
+        repo_state_root=repo_state_dir,
+        runtime_root=resolve_runtime_root(resolved_repo_root),
     )
 
 
 def resolve_roots_for_read(repo_root: str | None) -> ResolvedRoots:
     resolved_repo_root, _ = resolve_runtime_root_and_config_for_read(repo_root)
-    repo_state_root = resolve_repo_state_paths(resolved_repo_root).root_dir
+    repo_state_dir = resolve_repo_paths(resolved_repo_root).root_dir
     return ResolvedRoots(
         repo_root=resolved_repo_root,
-        repo_state_root=repo_state_root,
-        state_root=resolve_state_root_for_read(resolved_repo_root),
+        repo_state_root=repo_state_dir,
+        runtime_root=resolve_runtime_root_for_read(resolved_repo_root),
     )
 
 
@@ -198,3 +204,8 @@ def resolve_chat_id(
     if resolved_chat_id:
         return resolved_chat_id
     return fallback.strip()
+
+
+# Transitional aliases for callers still on pre-rename symbols.
+resolve_state_root = resolve_runtime_root
+resolve_state_root_for_read = resolve_runtime_root_for_read
