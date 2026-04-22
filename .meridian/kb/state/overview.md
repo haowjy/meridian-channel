@@ -56,7 +56,7 @@ The split means projects can be moved, renamed, or duplicated without losing run
 
 ## User Root Resolution
 
-`get_user_state_root()` in `user_paths.py` resolves the user root:
+`get_user_home()` in `user_paths.py` resolves the user root:
 
 1. `MERIDIAN_HOME` env var (if set)
 2. Platform default:
@@ -65,11 +65,11 @@ The split means projects can be moved, renamed, or duplicated without losing run
 
 ## Runtime Override Precedence
 
-`MERIDIAN_STATE_ROOT` overrides the runtime root entirely (bypasses UUID lookup):
+`MERIDIAN_PROJECT_ROOT` overrides the runtime root entirely (bypasses UUID lookup):
 - Absolute path → treated as the runtime root directly
 - Relative path → resolved relative to repo root
 
-`MERIDIAN_HOME` only affects the user root default (step 2 above). It does not override an absolute `MERIDIAN_STATE_ROOT`.
+`MERIDIAN_HOME` only affects the user root default (step 2 above). It does not override an absolute `MERIDIAN_PROJECT_ROOT`.
 
 ## Read vs Write Resolution
 
@@ -77,9 +77,9 @@ Bootstrap (UUID creation + runtime dir setup) is **skipped for read-only command
 
 | Resolver | Creates UUID? | Use when |
 |----------|--------------|----------|
-| `resolve_runtime_state_root(repo_root)` | No | Read paths; falls back to repo `.meridian/` if no UUID yet |
-| `resolve_runtime_state_root_or_none(repo_root)` | No | Read paths where caller needs to know if uninitialized |
-| `resolve_runtime_state_root_for_write(repo_root)` | Yes (under lock) | Write paths; creates UUID + runtime dir on first write |
+| `resolve_project_runtime_root(repo_root)` | No | Read paths; falls back to repo `.meridian/` if no UUID yet |
+| `resolve_project_runtime_root_or_none(repo_root)` | No | Read paths where caller needs to know if uninitialized |
+| `resolve_project_runtime_root_for_write(repo_root)` | Yes (under lock) | Write paths; creates UUID + runtime dir on first write |
 
 UUID generation in `get_or_create_project_uuid()` is double-checked under `id.lock` (cross-process exclusive lock) so concurrent first-writes converge to the same UUID.
 
@@ -87,14 +87,14 @@ UUID generation in `get_or_create_project_uuid()` is double-checked under `id.lo
 
 Two path model classes:
 
-**`StatePaths`** — repo-owned paths only (`root_dir`, `id_file`, `fs_dir`, `work_dir`, `work_archive_dir`). Built by `StatePaths.from_root_dir()`.
+**`RepoStatePaths`** — repo-owned paths only (`root_dir`, `id_file`, `fs_dir`, `work_dir`, `work_archive_dir`). Built by `RepoStatePaths.from_root_dir()`.
 
-**`StateRootPaths`** — runtime state paths (spawn/session indexes, per-spawn artifact dirs). Built by `StateRootPaths.from_root_dir()`. Still carries `fs_dir`, `work_dir`, `work_archive_dir` fields for transitional callers — these will be removed when all callers migrate to `StatePaths`. The authoritative repo paths come through `StatePaths`.
+**`RuntimePaths`** — runtime state paths (spawn/session indexes, per-spawn artifact dirs). Built by `RuntimePaths.from_root_dir()`. Still carries `fs_dir`, `work_dir`, `work_archive_dir` fields for transitional callers — these will be removed when all callers migrate to `RepoStatePaths`. The authoritative repo paths come through `RepoStatePaths`.
 
 Convenience resolvers:
 
-- `resolve_repo_state_paths(repo_root)` → `StatePaths` for repo `.meridian/` (ignores runtime overrides)
-- `resolve_state_paths(repo_root)` → `StatePaths` honoring `MERIDIAN_STATE_ROOT`
+- `resolve_repo_paths(repo_root)` → `RepoStatePaths` for repo `.meridian/` (ignores runtime overrides)
+- `resolve_state_paths(repo_root)` → `RepoStatePaths` honoring `MERIDIAN_PROJECT_ROOT`
 - `resolve_cache_dir(repo_root)` → runtime `cache/` directory
 - `resolve_fs_dir(repo_root)` → repo `fs/` directory
 - `resolve_spawn_log_dir(repo_root, spawn_id)` → per-spawn artifact dir under runtime root

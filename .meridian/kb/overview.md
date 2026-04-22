@@ -106,7 +106,7 @@ State splits across two roots keyed by a per-project UUID. See `fs/state/overvie
   cache/                models.json cache, other transient data
 ```
 
-UUID mapping: repo `.meridian/id` → runtime directory. Projects can be moved or renamed without losing runtime state. Platform user root defaults: `~/.meridian/` (Unix/macOS), `%LOCALAPPDATA%\meridian\` (Windows). Override: `MERIDIAN_STATE_ROOT` (absolute → full runtime root override; relative → repo-relative), `MERIDIAN_HOME` (user root default only).
+UUID mapping: repo `.meridian/id` → runtime directory. Projects can be moved or renamed without losing runtime state. Platform user root defaults: `~/.meridian/` (Unix/macOS), `%LOCALAPPDATA%\meridian\` (Windows). Override: `MERIDIAN_PROJECT_ROOT` (absolute → full runtime root override; relative → repo-relative), `MERIDIAN_HOME` (user root default only).
 
 ## Surface Summary
 

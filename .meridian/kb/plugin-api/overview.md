@@ -15,7 +15,7 @@ Version: `1.0.0` (exposed as `meridian.plugin_api.__version__`).
 src/meridian/plugin_api/
   __init__.py   Re-exports all public symbols; version declaration
   types.py      Hook, HookContext, HookResult, HookEventName, HookOutcome, FailurePolicy
-  state.py      get_project_state_root, get_user_state_root
+  state.py      get_project_home, get_user_home
   git.py        generate_repo_slug, normalize_repo_url, resolve_clone_path
   config.py     get_user_config, get_git_overrides
   fs.py         file_lock
@@ -91,11 +91,11 @@ class HookResult:
 ### State helpers (`meridian.plugin_api.state`)
 
 ```python
-get_user_state_root() -> Path
+get_user_home() -> Path
     # Returns ~/.meridian/ (or $MERIDIAN_HOME/)
     # Resolution: MERIDIAN_HOME env var → platform default
 
-get_project_state_root(project_uuid: str) -> Path
+get_project_home(project_uuid: str) -> Path
     # Returns per-project state root path under user state root
 ```
 
@@ -157,7 +157,7 @@ file_lock(
 from meridian.plugin_api import (
     Hook, HookContext, HookResult, HookOutcome,
     file_lock,
-    get_user_state_root,
+    get_user_home,
     resolve_clone_path,
     normalize_repo_url,
     generate_repo_slug,

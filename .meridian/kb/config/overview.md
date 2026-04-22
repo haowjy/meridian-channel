@@ -114,7 +114,7 @@ The `.agents/skills/` check is the primary heuristic — it finds the meridian p
 
 ### File Location
 
-`resolve_project_paths(repo_root).workspace_local_toml` resolves to `<state-root-parent>/workspace.local.toml` (one level above `.meridian/`). The file is local-only: `meridian workspace init` writes it and adds it to `.git/info/exclude` so it never gets committed.
+`resolve_project_config_paths(repo_root).workspace_local_toml` resolves to `<state-root-parent>/workspace.local.toml` (one level above `.meridian/`). The file is local-only: `meridian workspace init` writes it and adds it to `.git/info/exclude` so it never gets committed.
 
 ### Two-Stage Model
 

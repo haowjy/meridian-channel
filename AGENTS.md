@@ -20,7 +20,7 @@ No real users, no real user data. No backwards compatibility needed — complete
 ### Core Principles
 
 1. **Harness-Agnostic**: One CLI, many runtimes. Meridian never assumes Claude, Codex, or any specific harness — adapters bridge the gap.
-2. **Files as Authority**: All state is files under `.meridian/`. No databases, no services, no hidden state. If it's not on disk, it doesn't exist. `cat spawns.jsonl | jq` should tell you everything.
+2. **Files as Authority**: All state is files — project-level under `.meridian/`, user-level under `~/.meridian/` (see `get_user_home()`). No databases, no services, no hidden state. If it's not on disk, it doesn't exist.
 3. **Coordination, Not Control**: Meridian provides structure (spawns, sessions, skills, sync) but never dictates how agents do their work.
 4. **Observable by Default, Intrusive Only Where Observation Requires It**: Meridian reads harness state rather than driving harness behavior. Where observation needs a mechanism the harness doesn't provide — like capturing output from a TUI that only emits to a TTY — meridian reaches into the boundary with the minimum machinery needed (PTY capture for primary-launch session-ID extraction is the canonical example). Observability requirement, not control lever. Code that looks intrusive should be justified against a specific unobservable-otherwise constraint, and that constraint named in the commit or comment.
 5. **Idempotent Operations**: `meridian sync` twice = same result. Re-running after a crash converges to correct state, never doubles side effects.
@@ -30,7 +30,7 @@ No real users, no real user data. No backwards compatibility needed — complete
 
 ### Architecture
 
-- **State Root**: `.meridian/` (flat layout, no nesting). JSONL event stores, per-spawn artifact dirs, shared filesystem.
+- **State Root**: User-level `~/.meridian/` (via `get_user_home()`) is the primary state root — spawns, sessions, work items. Project-level `.meridian/` holds project identity and package config. Migration toward user-level is intentional and ongoing.
 - **Harness Adapters**: `src/meridian/lib/harness/` — per-harness command building, output extraction, materialization. Adding a harness = one adapter file + registration.
 - **State Layer**: `src/meridian/lib/state/` — path resolution, spawn store, session store. Atomic writes via tmp+rename, `fcntl.flock` for concurrency.
 - **Package Sync**: `meridian mars ...` — package resolution and `.agents/` materialization are delegated to mars.
@@ -171,7 +171,7 @@ Commit after each step that passes tests. Don't accumulate changes across multip
 Meridian has centralized cross-platform path handling. **Do not write new platform-detection code** — use the existing primitives:
 
 - **`src/meridian/lib/platform/__init__.py`**: `IS_WINDOWS`, `get_home_path()`
-- **`src/meridian/lib/state/user_paths.py`**: `get_user_state_root()`
+- **`src/meridian/lib/state/user_paths.py`**: `get_user_home()`
 
 User state root resolution:
 1. `MERIDIAN_HOME` env var (if set)
@@ -179,12 +179,12 @@ User state root resolution:
 3. Windows fallback: `%USERPROFILE%\AppData\Local\meridian`
 4. POSIX fallback: `~/.meridian`
 
-When adding features that need user-level storage (git clones, cache, etc.), put them under `get_user_state_root()`:
+When adding features that need user-level storage (git clones, cache, etc.), put them under `get_user_home()`:
 
 ```python
-from meridian.lib.state.user_paths import get_user_state_root
+from meridian.lib.state.user_paths import get_user_home
 
-repos_dir = get_user_state_root() / "git"  # Cross-platform correct
+repos_dir = get_user_home() / "git"  # Cross-platform correct
 ```
 
 Do not hardcode `~/.meridian/` or introduce new `LOCALAPPDATA` / `XDG_DATA_HOME` branches.

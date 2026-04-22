@@ -51,13 +51,13 @@ print(api.__version__)  # "1.0.0"
 ## State Helpers
 
 ```python
-from meridian.plugin_api import get_project_state_root, get_user_state_root
+from meridian.plugin_api import get_project_home, get_user_home
 
 # Resolve the per-machine state root for the current project
-state_root = get_project_state_root()
+state_root = get_project_home()
 
 # Resolve the user-level Meridian state root (~/.meridian or %LOCALAPPDATA%\meridian)
-user_root = get_user_state_root()
+user_root = get_user_home()
 ```
 
 ## Git Helpers
