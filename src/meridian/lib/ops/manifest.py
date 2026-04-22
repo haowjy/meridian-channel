@@ -426,7 +426,10 @@ _OPERATIONS: tuple[OperationSpec[Any, Any], ...] = (
     ),
     _spec(
         name="session.log",
-        description="Show readable messages from a harness session JSONL.",
+        description=(
+            "Show readable conversation/progress messages for a chat, spawn, "
+            "or harness session."
+        ),
         handler=session_log,
         sync_handler=session_log_sync,
         input_type=SessionLogInput,

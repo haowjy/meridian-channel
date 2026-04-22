@@ -62,8 +62,8 @@ The MCP server runs as `meridian serve` over stdio (JSON-RPC/MCP protocol). Clie
 | spawn.create | no | yes | Default action of bare `meridian spawn`, not a subcommand |
 | spawn.continue | no | yes | MCP-only: agents continue spawns |
 | spawn.cancel/list/show/stats/wait | yes | yes | Shared surface |
-| spawn.files/log/children | yes | no | Utility; agents use report/show instead |
-| session.log/search | yes | no | Transcript access is CLI/human concern |
+| spawn.files/children | yes | no | Utility; agents use report/show instead |
+| session.log/search | yes | no | Conversation/progress log access is CLI/human concern |
 | work.* | yes | no | Work lifecycle is CLI-managed |
 | report.create/show/search | yes | yes | Agents write reports; MCP needs create |
 | models.list/refresh | yes | yes | Both surfaces need model catalog |
@@ -81,7 +81,7 @@ ops/
   report.py           report_create/show/search handlers
   reference.py        --from / --file reference resolution, @path expansion
   runtime.py          Shared runtime context helpers
-  session_log.py      session log: compaction-aware paged transcript reader
+  session_log.py      session log: compaction-aware paged log reader; falls back to spawn output
   session_search.py   session search: multi-segment text scan with navigation hints
   work_attachment.py  Session-to-work-item attachment tracking
   work_dashboard.py   work_list/show/sessions: grouped spawn dashboard
@@ -89,7 +89,6 @@ ops/
   spawn/
     api.py            spawn_create/cancel/continue/list/show/stats/wait/files handlers
     prepare.py        Validation, model resolution, profile loading, prompt assembly
-    log.py            spawn_log: assistant message extraction from output.jsonl
 ```
 
 ## Operation Flow for spawn_create

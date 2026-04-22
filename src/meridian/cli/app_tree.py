@@ -88,11 +88,13 @@ report_app = App(
 session_app = App(
     name="session",
     help=(
-        "Inspect harness session transcripts.\n\n"
+        "Inspect conversation and progress logs.\n\n"
         "Session refs accept three forms: chat ids (c123), spawn ids (p123),\n"
-        "or raw harness session ids. By default, commands operate on\n"
+        "or raw harness session ids. Logs prefer harness transcripts when\n"
+        "available and fall back to Meridian spawn output for active or\n"
+        "transcriptless spawns. By default, commands operate on\n"
         "$MERIDIAN_CHAT_ID -- inherited from the spawning session -- so a\n"
-        "subagent reads its parent's transcript, not its own."
+        "subagent reads its parent's conversation/progress log, not its own."
     ),
     help_formatter="plain",
 )

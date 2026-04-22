@@ -171,9 +171,9 @@ def _spawn_create(
             help=(
                 "Inherit context from a prior spawn or chat/session.\n"
                 "Spawn refs include the spawn report and files touched;\n"
-                "chat refs point at the exact session transcript and\n"
-                "primary spawn. Repeatable. Use when the new spawn\n"
-                "needs prior conversation context."
+                "chat refs point at the session log and primary spawn.\n"
+                "Repeatable. Use when the new spawn needs prior\n"
+                "conversation context."
             ),
             negative_iterable=(),
         ),

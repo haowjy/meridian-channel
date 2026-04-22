@@ -66,7 +66,7 @@ This is distinct from the **sessions flock** (`.meridian/sessions.flock`), which
 
 ## Session Log (`ops/session_log.py`)
 
-Reads harness-specific session/conversation files (e.g., Claude's JSONL transcript files in `~/.claude/projects/`). Compaction-aware:
+Reads session/conversation logs for chat refs, spawn refs, raw harness session ids, or explicit files. Harness transcript files remain canonical when available; active or transcriptless spawn/chat refs fall back to Meridian-owned `output.jsonl` from the referenced spawn or chat primary spawn. Output labels the selected source. Compaction-aware when the selected source contains compaction markers:
 - `-c 0` = latest compaction segment, `-c 1` = previous, etc.
 - `-n <N>` = last N messages, `--offset` for paging
 - Reports whether earlier/later segments exist

@@ -116,7 +116,7 @@ def register_session_commands(app: App, emit: Emitter) -> tuple[set[str], dict[s
                 "Examples:\n\n"
                 "  meridian session log c123\n\n"
                 "  meridian session log c123 -n 20\n\n"
-                "  meridian session log p107 -c 1 --offset 5\n\n"
+                "  meridian session log p107 --last 20\n\n"
                 "  meridian session log c123 -c 0 -n 0    # latest segment, all messages\n\n"
                 "  meridian session log c123 -c 2          # older segment "
                 "(higher numbers walk backward)\n"
