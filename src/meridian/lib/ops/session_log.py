@@ -12,7 +12,6 @@ from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.config.settings import resolve_project_root
 from meridian.lib.core.context import RuntimeContext
-from meridian.lib.core.spawn_lifecycle import is_active_spawn_status
 from meridian.lib.core.types import HarnessId
 from meridian.lib.core.util import FormatContext
 from meridian.lib.harness.registry import get_default_harness_registry
@@ -678,7 +677,7 @@ def _resolve_from_spawn_id(
     is_primary_spawn = row.kind == "primary"
     is_managed_backend_primary = is_primary_spawn and is_managed_primary(runtime_root, spawn_id)
 
-    if is_managed_backend_primary and is_active_spawn_status(row.status) and (
+    if is_managed_backend_primary and row.status in {"queued", "running"} and (
         output_target := _target_from_spawn_output(
             runtime_root,
             display_id=spawn_id,
@@ -688,7 +687,7 @@ def _resolve_from_spawn_id(
     ):
         return output_target
 
-    if (not is_primary_spawn) and is_active_spawn_status(row.status) and (
+    if (not is_primary_spawn) and row.status in {"queued", "running"} and (
         output_target := _target_from_spawn_output(
             runtime_root,
             display_id=spawn_id,
@@ -727,7 +726,7 @@ def _resolve_from_spawn_id(
                     runtime_root,
                     display_id=spawn_id,
                     spawn_id=spawn_id,
-                    live_first=is_active_spawn_status(row.status),
+                    live_first=(row.status == "running"),
                     source=_managed_primary_fallback_source(spawn_id, harness),
                 ):
                     return output_target
@@ -791,7 +790,7 @@ def _resolve_from_spawn_id(
                     runtime_root,
                     display_id=spawn_id,
                     spawn_id=spawn_id,
-                    live_first=is_active_spawn_status(row.status),
+                    live_first=(row.status == "running"),
                     source=_managed_primary_fallback_source(spawn_id, harness),
                 )
                 if output_target is not None:
