@@ -72,6 +72,9 @@ export function AppShell({
   const [newSessionOpen, setNewSessionOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  // Handoff slot: navigateToChat records the requested spawn here, ChatPage
+  // consumes it on mount/update and calls clearPendingChatSpawnId to reset.
+  const [pendingChatSpawnId, setPendingChatSpawnId] = useState<string | null>(null)
 
   // Live stats — StatusBar binding. Explicit props still take precedence so
   // stories can pin specific states.
@@ -128,16 +131,24 @@ export function AppShell({
   )
 
   const handleNavigateToChat = useCallback((spawnId: string) => {
-    // Chat mode wiring (pick up spawnId) lands in A4b; for now the mode
-    // switch alone is the observable behaviour.
-    // eslint-disable-next-line no-console
-    console.log("[shell] navigate to chat for spawn:", spawnId)
+    // Record the spawn for ChatPage to consume, then switch modes. The order
+    // matters: setting the pending id before the mode change ensures the
+    // ChatPage mount effect sees a non-null value on its first render.
+    setPendingChatSpawnId(spawnId)
     setActiveMode("chat")
   }, [])
 
+  const clearPendingChatSpawnId = useCallback(() => {
+    setPendingChatSpawnId(null)
+  }, [])
+
   const navigationValue = useMemo<NavigationContextValue>(
-    () => ({ navigateToChat: handleNavigateToChat }),
-    [handleNavigateToChat],
+    () => ({
+      navigateToChat: handleNavigateToChat,
+      pendingChatSpawnId,
+      clearPendingChatSpawnId,
+    }),
+    [handleNavigateToChat, pendingChatSpawnId, clearPendingChatSpawnId],
   )
 
   return (
