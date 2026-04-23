@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 from collections.abc import Callable
@@ -17,12 +18,17 @@ from meridian.lib.app.locator import (
     AppServerUnreachable,
     AppServerWrongProject,
 )
+from meridian.lib.extensions.context import (
+    ExtensionCommandServices,
+    ExtensionInvocationContextBuilder,
+)
+from meridian.lib.extensions.dispatcher import ExtensionCommandDispatcher
 from meridian.lib.extensions.registry import build_first_party_registry, compute_manifest_hash
 from meridian.lib.extensions.remote_invoker import (
     RemoteExtensionInvoker,
     RemoteInvokeRequest,
 )
-from meridian.lib.extensions.types import ExtensionSurface
+from meridian.lib.extensions.types import ExtensionErrorResult, ExtensionSurface
 from meridian.lib.ops.runtime import (
     get_project_uuid,
     resolve_runtime_root_and_config_for_read,
@@ -48,6 +54,36 @@ EXIT_SERVER_STALE = 3
 EXIT_SERVER_WRONG_PROJECT = 4
 EXIT_SERVER_UNREACHABLE = 5
 EXIT_ARGS_ERROR = 7
+
+
+def _print_run_error(
+    *,
+    format: OutputFormat,
+    code: str | None,
+    message: str | None,
+) -> None:
+    if format == "json":
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "code": code,
+                    "message": message,
+                },
+                indent=2,
+            )
+        )
+    else:
+        print(f"Error: {code}", file=sys.stderr)
+        if message:
+            print(f"  {message}", file=sys.stderr)
+
+
+def _print_run_success(*, format: OutputFormat, payload: object) -> None:
+    if format == "json":
+        print(json.dumps({"result": payload}, indent=2))
+    else:
+        print(json.dumps(payload, indent=2))
 
 
 def _resolve_effective_format(
@@ -286,6 +322,33 @@ def ext_run(
         print(f"Command {fqid} is not available via CLI", file=sys.stderr)
         raise SystemExit(EXIT_GENERAL_ERROR)
 
+    if not spec.requires_app_server:
+        dispatcher = ExtensionCommandDispatcher(registry)
+        context_builder = ExtensionInvocationContextBuilder(ExtensionSurface.CLI)
+        if request_id is not None:
+            context_builder = context_builder.with_request_id(request_id)
+        if work_id is not None:
+            context_builder = context_builder.with_work_id(work_id)
+        if spawn_id is not None:
+            context_builder = context_builder.with_spawn_id(spawn_id)
+        result = asyncio.run(
+            dispatcher.dispatch(
+                fqid=fqid,
+                args=parsed_args,
+                context=context_builder.build(),
+                services=ExtensionCommandServices(),
+            )
+        )
+        if isinstance(result, ExtensionErrorResult):
+            _print_run_error(
+                format=effective_format,
+                code=result.code,
+                message=result.message,
+            )
+            raise SystemExit(EXIT_GENERAL_ERROR)
+        _print_run_success(format=effective_format, payload=result.payload)
+        return
+
     project_root, _ = resolve_runtime_root_and_config_for_read(None)
     runtime_root = resolve_runtime_root_for_read(project_root)
     locator = AppServerLocator(runtime_root, get_project_uuid(project_root))
@@ -318,27 +381,14 @@ def ext_run(
     )
 
     if not result.success:
-        if effective_format == "json":
-            print(
-                json.dumps(
-                    {
-                        "status": "error",
-                        "code": result.error_code,
-                        "message": result.error_message,
-                    },
-                    indent=2,
-                )
-            )
-        else:
-            print(f"Error: {result.error_code}", file=sys.stderr)
-            if result.error_message:
-                print(f"  {result.error_message}", file=sys.stderr)
+        _print_run_error(
+            format=effective_format,
+            code=result.error_code,
+            message=result.error_message,
+        )
         raise SystemExit(EXIT_GENERAL_ERROR)
 
-    if effective_format == "json":
-        print(json.dumps({"result": result.payload}, indent=2))
-    else:
-        print(json.dumps(result.payload, indent=2))
+    _print_run_success(format=effective_format, payload=result.payload)
 
 
 def register_ext_commands(
