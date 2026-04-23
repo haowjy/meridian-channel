@@ -21,6 +21,19 @@ def current_meridian_depth(env: Mapping[str, str] | None = None) -> int:
     return parse_meridian_depth(source.get(MERIDIAN_DEPTH_ENV))
 
 
+def has_valid_meridian_depth(env: Mapping[str, str] | None = None) -> bool:
+    """Return whether the current depth env value is absent/empty or parseable."""
+    source = os.environ if env is None else env
+    raw = (source.get(MERIDIAN_DEPTH_ENV) or "").strip()
+    if not raw:
+        return True
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return False
+    return value >= 0
+
+
 def child_meridian_depth(parent_depth: int, *, increment_depth: bool = True) -> int:
     """Return the depth to project into a child process."""
     normalized = max(0, parent_depth)
@@ -37,6 +50,19 @@ def is_nested_meridian_process(env: Mapping[str, str] | None = None) -> bool:
     return is_nested_meridian_depth(current_meridian_depth(env))
 
 
+def is_root_side_effect_process(env: Mapping[str, str] | None = None) -> bool:
+    """Return whether root-only repair/reaper side effects may run.
+
+    Malformed non-empty depth is fail-closed: normal read paths can normalize
+    bad values to depth 0, but root-only cleanup must not run unless the depth
+    value clearly represents the primary root.
+    """
+    source = os.environ if env is None else env
+    if not has_valid_meridian_depth(source):
+        return False
+    return not is_nested_meridian_process(source)
+
+
 def max_depth_reached(current_depth: int, max_depth: int) -> bool:
     """Return whether creating another depth-child would exceed the configured ceiling."""
     if max_depth < 0:
@@ -48,8 +74,10 @@ __all__ = [
     "MERIDIAN_DEPTH_ENV",
     "child_meridian_depth",
     "current_meridian_depth",
+    "has_valid_meridian_depth",
     "is_nested_meridian_depth",
     "is_nested_meridian_process",
+    "is_root_side_effect_process",
     "max_depth_reached",
     "parse_meridian_depth",
 ]

@@ -3,8 +3,12 @@
 Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [SemVer](https://semver.org/). Versions `0.0.6` through `0.0.25` in git history only — changelog fell stale, resumed at `[Unreleased]`.
 ## [Unreleased]
 
+### Changed
+- `MERIDIAN_DEPTH` parsing and nested-execution checks now share one core helper. CLI agent mode, doctor, reaper, work warnings, subrun events, and max-depth gates use same zero-based contract.
+
 ### Fixed
 - Primary launch preserves `MERIDIAN_DEPTH`; root sessions stay depth `0` while delegated spawns still increment.
+- Malformed non-empty `MERIDIAN_DEPTH` no longer enables root-only repair/reaper side effects.
 
 ## [0.0.43] - 2026-04-22
 

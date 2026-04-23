@@ -9,7 +9,7 @@ from pathlib import Path
 
 import structlog
 
-from meridian.lib.core.depth import is_nested_meridian_process
+from meridian.lib.core.depth import is_root_side_effect_process
 from meridian.lib.core.domain import SpawnStatus
 from meridian.lib.core.lifecycle import create_lifecycle_service
 from meridian.lib.core.spawn_lifecycle import (
@@ -249,7 +249,7 @@ def _in_startup_grace(started_epoch: float | None, now: float) -> bool:
 
 def reconcile_active_spawn(runtime_root: Path, record: SpawnRecord) -> SpawnRecord:
     """Reconcile one active spawn. Is the responsible process alive?"""
-    if is_nested_meridian_process():
+    if not is_root_side_effect_process():
         return record
     if not is_active_spawn_status(record.status):
         return record

@@ -42,7 +42,7 @@ def _create_agent_skill_dirs(
         (project_root / ".agents" / "skills").mkdir(parents=True, exist_ok=True)
 
 
-def _seed_active_spawn(project_root: Path) -> str:
+def _seed_active_spawn(project_root: Path, *, started_at: str | None = None) -> str:
     runtime_root = resolve_project_runtime_root_for_write(project_root)
     runtime_root.mkdir(parents=True, exist_ok=True)
     return spawn_store.start_spawn(
@@ -52,6 +52,7 @@ def _seed_active_spawn(project_root: Path) -> str:
         agent="coder",
         harness="codex",
         prompt="running",
+        started_at=started_at,
     )
 
 
@@ -107,14 +108,16 @@ def test_doctor_warning_shape_for_non_mars_warnings(
         assert warning.payload is None
 
 
-def test_doctor_skips_orphan_run_repair_when_depth_is_nonzero(
+@pytest.mark.parametrize("depth_value", ["1", "garbage", "1.5", "-1"])
+def test_doctor_skips_orphan_run_repair_when_depth_is_not_clearly_root(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    depth_value: str,
 ) -> None:
     project_root = _create_project_root(tmp_path)
     _create_agent_skill_dirs(project_root)
     _seed_active_spawn(project_root)
-    monkeypatch.setenv("MERIDIAN_DEPTH", "1")
+    monkeypatch.setenv("MERIDIAN_DEPTH", depth_value)
     monkeypatch.setattr(
         diag,
         "check_upgrade_availability",
@@ -124,6 +127,32 @@ def test_doctor_skips_orphan_run_repair_when_depth_is_nonzero(
     result = doctor_sync(DoctorInput(project_root=project_root.as_posix()))
 
     assert "orphan_runs" not in result.repaired
+
+
+@pytest.mark.parametrize("depth_value", [None, "", "0"])
+def test_doctor_repairs_orphan_runs_when_depth_is_clearly_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    depth_value: str | None,
+) -> None:
+    project_root = _create_project_root(tmp_path)
+    _create_agent_skill_dirs(project_root)
+    spawn_id = _seed_active_spawn(project_root, started_at="2020-01-01T00:00:00Z")
+    if depth_value is None:
+        monkeypatch.delenv("MERIDIAN_DEPTH", raising=False)
+    else:
+        monkeypatch.setenv("MERIDIAN_DEPTH", depth_value)
+    monkeypatch.setattr(
+        diag,
+        "check_upgrade_availability",
+        lambda *_args, **_kwargs: mars_ops.UpgradeAvailability(),
+    )
+
+    result = doctor_sync(DoctorInput(project_root=project_root.as_posix()))
+
+    assert "orphan_runs" in result.repaired
+    runtime_root = resolve_project_runtime_root_for_write(project_root)
+    assert spawn_store.get_spawn(runtime_root, spawn_id).status == "failed"
 
 
 def test_doctor_reports_no_warnings_when_conditions_are_clear(
