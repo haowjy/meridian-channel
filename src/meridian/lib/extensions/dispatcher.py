@@ -155,7 +155,7 @@ class ExtensionCommandDispatcher:
     ) -> bool:
         """Check if command can run on the invocation surface."""
 
-        return surface in spec.surfaces or ExtensionSurface.ALL in spec.surfaces
+        return surface in spec.surfaces
 
     def _redact_result(self, result: ExtensionResult | None) -> dict[str, Any]:
         """Redact result for observability output."""

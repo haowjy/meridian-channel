@@ -31,7 +31,6 @@ class ExtensionSurface(StrEnum):
     HTTP = "http"
     CLI = "cli"
     MCP = "mcp"
-    ALL = "*"
 
 
 class ExtensionCommandSpec(BaseModel):
@@ -52,7 +51,13 @@ class ExtensionCommandSpec(BaseModel):
     result_schema: type[BaseModel] = Field(description="Pydantic model for output")
     handler: ExtensionHandler
     surfaces: frozenset[ExtensionSurface] = Field(
-        default=frozenset({ExtensionSurface.ALL}),
+        default=frozenset(
+            {
+                ExtensionSurface.HTTP,
+                ExtensionSurface.CLI,
+                ExtensionSurface.MCP,
+            }
+        ),
     )
     first_party: bool = Field(default=False)
     requires_app_server: bool = Field(

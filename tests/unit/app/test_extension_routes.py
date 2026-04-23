@@ -110,7 +110,13 @@ def test_make_discovery_routes_registers_static_before_dynamic_paths() -> None:
         _make_spec(
             extension_id="meridian.workbench",
             command_id="ping",
-            surfaces=frozenset({ExtensionSurface.ALL}),
+            surfaces=frozenset(
+                {
+                    ExtensionSurface.CLI,
+                    ExtensionSurface.MCP,
+                    ExtensionSurface.HTTP,
+                }
+            ),
         )
     )
 

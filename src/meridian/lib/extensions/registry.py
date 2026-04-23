@@ -24,7 +24,7 @@ class ExtensionCommandRegistry:
 
         if not spec.first_party:
             forbidden_surfaces = {ExtensionSurface.CLI, ExtensionSurface.MCP}
-            if spec.surfaces & forbidden_surfaces or ExtensionSurface.ALL in spec.surfaces:
+            if spec.surfaces & forbidden_surfaces:
                 raise ValueError(
                     f"Non-first-party command {fqid} cannot expose CLI or MCP surfaces",
                 )
@@ -43,7 +43,7 @@ class ExtensionCommandRegistry:
         return [
             spec
             for spec in self._commands.values()
-            if surface in spec.surfaces or ExtensionSurface.ALL in spec.surfaces
+            if surface in spec.surfaces
         ]
 
     def __len__(self) -> int:

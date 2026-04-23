@@ -46,7 +46,13 @@ PING_SPEC = ExtensionCommandSpec(
     args_schema=PingArgs,
     result_schema=PingResult,
     handler=ping_handler,
-    surfaces=frozenset({ExtensionSurface.ALL}),
+    surfaces=frozenset(
+        {
+            ExtensionSurface.CLI,
+            ExtensionSurface.MCP,
+            ExtensionSurface.HTTP,
+        }
+    ),
     first_party=True,
     requires_app_server=True,
 )

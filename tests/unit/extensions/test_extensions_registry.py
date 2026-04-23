@@ -69,7 +69,6 @@ def test_duplicate_fqid_raises_value_error() -> None:
     [
         frozenset({ExtensionSurface.CLI}),
         frozenset({ExtensionSurface.MCP}),
-        frozenset({ExtensionSurface.ALL}),
     ],
 )
 def test_non_first_party_cli_or_mcp_is_rejected(
@@ -112,8 +111,8 @@ def test_list_for_surface_filters_by_requested_surface() -> None:
         surfaces=frozenset({ExtensionSurface.MCP}),
     )
     all_spec = _make_spec(
-        command_id="all_surfaces",
-        surfaces=frozenset({ExtensionSurface.ALL}),
+        command_id="cli_http_surfaces",
+        surfaces=frozenset({ExtensionSurface.CLI, ExtensionSurface.HTTP}),
     )
     http_spec = _make_spec(
         extension_id="third.party",
@@ -127,8 +126,8 @@ def test_list_for_surface_filters_by_requested_surface() -> None:
     cli_ids = {spec.command_id for spec in registry.list_for_surface(ExtensionSurface.CLI)}
     http_ids = {spec.command_id for spec in registry.list_for_surface(ExtensionSurface.HTTP)}
 
-    assert cli_ids == {"cli_only", "all_surfaces"}
-    assert http_ids == {"all_surfaces", "http_only"}
+    assert cli_ids == {"cli_only", "cli_http_surfaces"}
+    assert http_ids == {"cli_http_surfaces", "http_only"}
 
 
 def test_command_spec_fqid_property() -> None:

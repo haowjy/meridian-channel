@@ -282,7 +282,7 @@ def ext_run(
     if spec is None:
         print(f"Command not found: {fqid}", file=sys.stderr)
         raise SystemExit(EXIT_GENERAL_ERROR)
-    if ExtensionSurface.CLI not in spec.surfaces and ExtensionSurface.ALL not in spec.surfaces:
+    if ExtensionSurface.CLI not in spec.surfaces:
         print(f"Command {fqid} is not available via CLI", file=sys.stderr)
         raise SystemExit(EXIT_GENERAL_ERROR)
 

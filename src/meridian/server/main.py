@@ -103,7 +103,7 @@ async def extension_invoke(
             "code": "not_found",
             "message": f"Command not found: {fqid}",
         }
-    if ExtensionSurface.MCP not in spec.surfaces and ExtensionSurface.ALL not in spec.surfaces:
+    if ExtensionSurface.MCP not in spec.surfaces:
         return {
             "status": "error",
             "code": "surface_not_allowed",

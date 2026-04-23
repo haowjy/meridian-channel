@@ -22,7 +22,13 @@ from meridian.lib.ops.manifest import OperationSpec, get_all_operations
 def _map_surfaces(op: OperationSpec[Any, Any]) -> frozenset[ExtensionSurface]:
     """Map OperationSpec surfaces to ExtensionSurface with HTTP exposure."""
     if "cli" in op.surfaces and "mcp" in op.surfaces:
-        return frozenset({ExtensionSurface.ALL})
+        return frozenset(
+            {
+                ExtensionSurface.CLI,
+                ExtensionSurface.MCP,
+                ExtensionSurface.HTTP,
+            }
+        )
     if "cli" in op.surfaces:
         return frozenset({ExtensionSurface.CLI, ExtensionSurface.HTTP})
     return frozenset({ExtensionSurface.MCP, ExtensionSurface.HTTP})

@@ -71,7 +71,13 @@ ARCHIVE_SPAWN_SPEC = ExtensionCommandSpec(
     args_schema=ArchiveSpawnArgs,
     result_schema=ArchiveSpawnResult,
     handler=archive_spawn_handler,
-    surfaces=frozenset({ExtensionSurface.ALL}),
+    surfaces=frozenset(
+        {
+            ExtensionSurface.CLI,
+            ExtensionSurface.MCP,
+            ExtensionSurface.HTTP,
+        }
+    ),
     first_party=True,
     requires_app_server=True,
 )
@@ -115,7 +121,13 @@ GET_SPAWN_STATS_SPEC = ExtensionCommandSpec(
     args_schema=GetSpawnStatsArgs,
     result_schema=SpawnStatsOutput,
     handler=get_spawn_stats_handler,
-    surfaces=frozenset({ExtensionSurface.ALL}),
+    surfaces=frozenset(
+        {
+            ExtensionSurface.CLI,
+            ExtensionSurface.MCP,
+            ExtensionSurface.HTTP,
+        }
+    ),
     first_party=True,
     requires_app_server=True,
 )
