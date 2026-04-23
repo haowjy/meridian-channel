@@ -135,23 +135,24 @@ def test_opencode_event_from_json_line_pins_activity_transition_events(event_typ
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("primary_observer_mode", "expected_initial_messages"),
+    ("use_start_observer", "expected_initial_messages"),
     ((False, ["hello from test"]), (True, [])),
 )
 async def test_opencode_start_primary_observer_mode_controls_initial_prompt_post(
     tmp_path: Path,
-    primary_observer_mode: bool,
+    use_start_observer: bool,
     expected_initial_messages: list[str],
 ) -> None:
     connection = _StartProbeOpenCodeConnection()
-
-    await connection.start(
-        _build_connection_config(tmp_path),
-        OpenCodeLaunchSpec(
-            permission_resolver=UnsafeNoOpPermissionResolver(_suppress_warning=True),
-        ),
-        primary_observer_mode=primary_observer_mode,
+    config = _build_connection_config(tmp_path)
+    spec = OpenCodeLaunchSpec(
+        permission_resolver=UnsafeNoOpPermissionResolver(_suppress_warning=True),
     )
+
+    if use_start_observer:
+        await connection.start_observer(config, spec)
+    else:
+        await connection.start(config, spec)
 
     assert connection.state == "connected"
     assert connection.session_id == "sess-primary-observer"

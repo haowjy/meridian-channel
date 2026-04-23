@@ -116,13 +116,13 @@ def test_codex_ws_update_turn_state_accepts_thread_activity_aliases(event_type: 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("primary_observer_mode", "expect_turn_start"),
+    ("use_start_observer", "expect_turn_start"),
     ((False, True), (True, False)),
 )
 async def test_codex_ws_start_respects_primary_observer_mode_for_initial_turn(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    primary_observer_mode: bool,
+    use_start_observer: bool,
     expect_turn_start: bool,
 ) -> None:
     connection = codex_ws.CodexConnection()
@@ -160,13 +160,14 @@ async def test_codex_ws_start_respects_primary_observer_mode_for_initial_turn(
     monkeypatch.setattr(connection, "_bootstrap_thread", _fake_bootstrap_thread)
     monkeypatch.setattr(connection, "_read_messages_loop", _fake_read_messages_loop)
 
-    await connection.start(
-        _build_connection_config(tmp_path),
-        CodexLaunchSpec(
-            permission_resolver=UnsafeNoOpPermissionResolver(_suppress_warning=True),
-        ),
-        primary_observer_mode=primary_observer_mode,
+    config = _build_connection_config(tmp_path)
+    spec = CodexLaunchSpec(
+        permission_resolver=UnsafeNoOpPermissionResolver(_suppress_warning=True),
     )
+    if use_start_observer:
+        await connection.start_observer(config, spec)
+    else:
+        await connection.start(config, spec)
 
     assert connection.session_id == "thread-primary-observer"
     assert ("turn/start" in request_methods) is expect_turn_start

@@ -174,7 +174,6 @@ class OpenCodeConnection(HarnessConnection[OpenCodeLaunchSpec]):
         self,
         config: ConnectionConfig,
         spec: OpenCodeLaunchSpec,
-        primary_observer_mode: bool = False,
     ) -> None:
         if self._state not in {"created", "stopped", "failed"}:
             raise RuntimeError(f"Cannot start OpenCode connection from state '{self._state}'")
@@ -186,7 +185,6 @@ class OpenCodeConnection(HarnessConnection[OpenCodeLaunchSpec]):
         self._tracer = config.debug_tracer
         self._cancel_requested = False
         self._interrupt_in_flight = False
-        self._primary_observer_mode = primary_observer_mode
         self._transition("starting")
 
         startup_timeout = (
@@ -218,7 +216,8 @@ class OpenCodeConnection(HarnessConnection[OpenCodeLaunchSpec]):
     ) -> None:
         """Start connection in primary observer mode."""
 
-        await self.start(config, spec, primary_observer_mode=True)
+        self._primary_observer_mode = True
+        await self.start(config, spec)
 
     async def stop(self) -> None:
         if self._state == "stopped":

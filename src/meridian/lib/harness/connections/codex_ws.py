@@ -236,7 +236,6 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
         self,
         config: ConnectionConfig,
         spec: CodexLaunchSpec,
-        primary_observer_mode: bool = False,
     ) -> None:
         if self._state not in {"created", "stopped", "failed"}:
             raise RuntimeError(f"Cannot start CodexConnection from state '{self._state}'")
@@ -255,7 +254,6 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
         self._thread_id = None
         self._cancel_requested = False
         self._interrupt_in_flight = False
-        self._primary_observer_mode = primary_observer_mode
 
         host = config.ws_bind_host
         port = config.ws_port if config.ws_port > 0 else _reserve_port(host)
@@ -333,7 +331,8 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
     ) -> None:
         """Start connection in primary observer mode."""
 
-        await self.start(config, spec, primary_observer_mode=True)
+        self._primary_observer_mode = True
+        await self.start(config, spec)
 
     async def stop(self) -> None:
         if self._state in {"stopped"}:

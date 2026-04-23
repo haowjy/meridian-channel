@@ -47,9 +47,6 @@ class ConnectionCapabilities:
     supports_primary_observer: bool = False
 
 
-ConnectionStartMode = Literal["interactive", "observer"]
-
-
 @dataclass(frozen=True)
 class ObserverEndpoint:
     """Attach endpoint exposed by a managed primary backend."""
@@ -140,8 +137,16 @@ class HarnessConnection(Generic[SpecT], ABC):
         return None
 
     async def start_observer(self, config: ConnectionConfig, spec: SpecT) -> None:
-        """Start connection in primary observer mode."""
+        """Start connection in primary observer mode.
 
+        Subclasses that support observer mode must override this method
+        to set their internal observer flag and then call start().
+        """
+
+        if not self.capabilities.supports_primary_observer:
+            raise RuntimeError(
+                f"{self.harness_id} does not support primary observer mode"
+            )
         await self.start(config, spec)
 
     @abstractmethod
@@ -169,7 +174,6 @@ __all__ = [
     "ConnectionCapabilities",
     "ConnectionConfig",
     "ConnectionNotReady",
-    "ConnectionStartMode",
     "ConnectionState",
     "HarnessConnection",
     "HarnessEvent",

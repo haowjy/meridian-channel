@@ -103,14 +103,13 @@ class FakeManagedConnection:
         self,
         config: ConnectionConfig,
         spec: CodexLaunchSpec,
-        primary_observer_mode: bool = False,
     ) -> None:
         _ = spec
         self.start_calls += 1
         self.started_ports.append(config.ws_port)
         self._spawn_id = config.spawn_id
-        self.started_primary_observer_mode = primary_observer_mode
-        if primary_observer_mode and config.ws_port > 0:
+        start_in_observer_mode = self.started_primary_observer_mode is True
+        if start_in_observer_mode and config.ws_port > 0:
             self._observer_endpoint = ObserverEndpoint(
                 transport="ws",
                 url=f"ws://{config.ws_bind_host}:{config.ws_port}",
@@ -129,7 +128,8 @@ class FakeManagedConnection:
         config: ConnectionConfig,
         spec: CodexLaunchSpec,
     ) -> None:
-        await self.start(config, spec, primary_observer_mode=True)
+        self.started_primary_observer_mode = True
+        await self.start(config, spec)
 
     async def stop(self) -> None:
         self.stop_called = True
