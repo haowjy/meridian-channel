@@ -97,8 +97,8 @@ def test_build_first_party_registry_returns_fresh_instances() -> None:
     second = build_first_party_registry()
 
     assert first is not second
-    assert len(first) == 3
-    assert len(second) == 3
+    assert len(first) == len(second)
+    assert len(first) >= 42
 
 
 def test_list_for_surface_filters_by_requested_surface() -> None:
