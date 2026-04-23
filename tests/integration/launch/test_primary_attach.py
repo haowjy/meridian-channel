@@ -14,6 +14,7 @@ from meridian.lib.harness.connections.base import (
     ConnectionCapabilities,
     ConnectionConfig,
     HarnessEvent,
+    ObserverEndpoint,
 )
 from meridian.lib.harness.ids import HarnessId
 from meridian.lib.harness.launch_spec import CodexLaunchSpec
@@ -67,6 +68,7 @@ class FakeManagedConnection:
         self.started_primary_observer_mode: bool | None = None
         self.started_ports: list[int] = []
         self.start_calls = 0
+        self._observer_endpoint: ObserverEndpoint | None = None
         self.capabilities = ConnectionCapabilities(
             mid_turn_injection="interrupt_restart",
             supports_steer=True,
@@ -74,6 +76,7 @@ class FakeManagedConnection:
             supports_cancel=True,
             runtime_model_switch=False,
             structured_reasoning=True,
+            supports_primary_observer=True,
         )
 
     @property
@@ -92,6 +95,10 @@ class FakeManagedConnection:
     def subprocess_pid(self) -> int | None:
         return self._subprocess_pid
 
+    @property
+    def observer_endpoint(self) -> ObserverEndpoint | None:
+        return self._observer_endpoint
+
     async def start(
         self,
         config: ConnectionConfig,
@@ -103,10 +110,26 @@ class FakeManagedConnection:
         self.started_ports.append(config.ws_port)
         self._spawn_id = config.spawn_id
         self.started_primary_observer_mode = primary_observer_mode
+        if primary_observer_mode and config.ws_port > 0:
+            self._observer_endpoint = ObserverEndpoint(
+                transport="ws",
+                url=f"ws://{config.ws_bind_host}:{config.ws_port}",
+                host=config.ws_bind_host,
+                port=config.ws_port,
+            )
+        else:
+            self._observer_endpoint = None
         if self.start_calls <= self._port_bind_failures:
             self.state = "failed"
             raise PortBindError("address already in use (test)")
         self.state = "connected"
+
+    async def start_observer(
+        self,
+        config: ConnectionConfig,
+        spec: CodexLaunchSpec,
+    ) -> None:
+        await self.start(config, spec, primary_observer_mode=True)
 
     async def stop(self) -> None:
         self.stop_called = True

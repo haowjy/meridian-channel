@@ -30,11 +30,10 @@ from meridian.lib.launch.artifact_io import write_projection_artifacts
 from meridian.lib.launch.constants import (
     OUTPUT_FILENAME,
     PRIMARY_META_FILENAME,
-    PRIMARY_TUI_LOG_FILENAME,
 )
 from meridian.lib.launch.launch_types import ResolvedLaunchSpec
 from meridian.lib.state import spawn_store
-from meridian.lib.state.artifact_store import LocalStore, make_artifact_key
+from meridian.lib.state.artifact_store import LocalStore
 from meridian.lib.state.paths import resolve_spawn_log_dir
 from meridian.lib.state.session_store import (
     get_session_active_work_id,
@@ -102,9 +101,10 @@ RunPrimaryAttach = Callable[
 def select_process_launcher(output_log_path: Path | None) -> ProcessLauncher:
     """Choose the launch backend for one primary process invocation."""
 
+    _ = output_log_path
     if can_use_windows_console_launcher():
         return WindowsConsoleLauncher()
-    if can_use_pty(output_log_path=output_log_path):
+    if can_use_pty():
         return PtyProcessLauncher()
     return SubprocessProcessLauncher()
 
@@ -139,13 +139,6 @@ def _build_codex_attach_command(
     return ("codex", "resume", session_id, "--remote", ws_url)
 
 
-def _resolve_codex_ws_url(connection: HarnessConnection[Any]) -> str:
-    raw_config = getattr(connection, "_config", None)
-    if isinstance(raw_config, ConnectionConfig) and raw_config.ws_port > 0:
-        return f"ws://{raw_config.ws_bind_host}:{raw_config.ws_port}"
-    raise PrimaryAttachError("Codex managed backend did not expose a websocket attach URL")
-
-
 def _build_opencode_attach_command(
     session_id: str,
     http_url: str,
@@ -163,17 +156,28 @@ def _reserve_local_port(host: str = "127.0.0.1") -> int:
         return int(sock.getsockname()[1])
 
 
-def _resolve_opencode_http_url(connection: HarnessConnection[Any]) -> str:
-    raw_base_url = getattr(connection, "_base_url", None)
-    if isinstance(raw_base_url, str) and raw_base_url.strip():
-        return raw_base_url.strip()
-    raise PrimaryAttachError("OpenCode managed backend did not expose an HTTP attach URL")
+def _require_observer_endpoint_url(
+    connection: HarnessConnection[Any],
+    *,
+    transport: str,
+) -> str:
+    endpoint = connection.observer_endpoint
+    if endpoint is None:
+        raise PrimaryAttachError(
+            f"Managed backend did not expose an observer endpoint for {connection.harness_id.value}"
+        )
+    if endpoint.transport != transport:
+        raise PrimaryAttachError(
+            "Managed backend exposed unexpected observer transport "
+            f"'{endpoint.transport}' (expected '{transport}')"
+        )
+    return endpoint.url
 
 
 def _cleanup_managed_primary_sidecars(spawn_dir: Path) -> None:
     """Delete managed sidecars when attach startup falls back to black-box launch."""
 
-    for filename in (PRIMARY_META_FILENAME, OUTPUT_FILENAME):
+    for filename in (PRIMARY_META_FILENAME, OUTPUT_FILENAME, "stderr.log"):
         with suppress(OSError):
             (spawn_dir / filename).unlink()
 
@@ -221,7 +225,7 @@ async def _run_primary_attach(
                 connection=connection,
                 tui_command_builder=lambda session_id: _build_codex_attach_command(
                     session_id=session_id,
-                    ws_url=_resolve_codex_ws_url(connection),
+                    ws_url=_require_observer_endpoint_url(connection, transport="ws"),
                 ),
                 process_launcher=process_launcher,
                 on_running=on_running,
@@ -251,7 +255,7 @@ async def _run_primary_attach(
                 connection=connection,
                 tui_command_builder=lambda session_id: _build_opencode_attach_command(
                     session_id=session_id,
-                    http_url=_resolve_opencode_http_url(connection),
+                    http_url=_require_observer_endpoint_url(connection, transport="http"),
                 ),
                 process_launcher=process_launcher,
                 on_running=on_running,
@@ -460,7 +464,6 @@ def run_harness_process(
                 if managed.chat_id:
                     child_env["MERIDIAN_CHAT_ID"] = managed.chat_id
                 child_cwd = runtime_context.child_cwd
-                output_log_path = log_dir / PRIMARY_TUI_LOG_FILENAME
                 launch_spec = runtime_context.spec
 
                 if (
@@ -522,18 +525,13 @@ def run_harness_process(
                         command,
                         child_cwd,
                         child_env,
-                        output_log_path,
+                        None,
                         _record_primary_started,
                     )
                 with suppress(Exception):
                     lifecycle_service.record_exited(
                         primary_spawn_id,
                         exit_code=exit_code,
-                    )
-                if not use_managed_backend and output_log_path.exists():
-                    artifacts.put(
-                        make_artifact_key(primary_spawn_id, PRIMARY_TUI_LOG_FILENAME),
-                        output_log_path.read_bytes(),
                     )
             finally:
                 durable_report = False

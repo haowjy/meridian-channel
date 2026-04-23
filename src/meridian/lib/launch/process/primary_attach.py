@@ -6,7 +6,6 @@ Orchestrates: backend connection (owner: connection class) + TUI subprocess + me
 from __future__ import annotations
 
 import asyncio
-import inspect
 import json
 import os
 import socket
@@ -17,11 +16,11 @@ from dataclasses import dataclass, field, replace
 from io import BufferedWriter
 from pathlib import Path
 from threading import Lock
-from typing import Any, cast
-from urllib.parse import urlparse
+from typing import Any
 
 from meridian.lib.core.types import SpawnId
 from meridian.lib.harness.connections.base import ConnectionConfig, HarnessConnection, HarnessEvent
+from meridian.lib.harness.connections.errors import PortBindError
 from meridian.lib.launch.constants import OUTPUT_FILENAME
 from meridian.lib.launch.launch_types import ResolvedLaunchSpec
 from meridian.lib.state.primary_meta import ActivityState, PrimaryMetadata, write_primary_metadata
@@ -34,10 +33,6 @@ MAX_PORT_RETRY_ATTEMPTS = 3
 
 class PrimaryAttachError(Exception):
     """Managed backend startup failed; caller should fall back to black-box path."""
-
-
-class PortBindError(Exception):
-    """Backend failed to bind pre-reserved loopback port (TOCTOU race)."""
 
 
 @dataclass
@@ -121,7 +116,7 @@ class PrimaryAttachLauncher:
 
             with self._metadata_lock:
                 self._metadata.backend_pid = self._connection.subprocess_pid
-                self._metadata.backend_port = self._resolve_backend_port(config=config)
+                self._metadata.backend_port = self._resolve_backend_port()
             self._write_metadata()
 
             self._event_writer_task = asyncio.create_task(self._run_event_writer())
@@ -197,17 +192,7 @@ class PrimaryAttachLauncher:
         config: ConnectionConfig,
         spec: ResolvedLaunchSpec,
     ) -> None:
-        start_fn = self._connection.start
-        try:
-            parameters = inspect.signature(start_fn).parameters
-        except (TypeError, ValueError):
-            parameters = {}
-
-        if "primary_observer_mode" in parameters:
-            await cast("Any", start_fn)(config, spec, primary_observer_mode=True)
-            return
-
-        await start_fn(config, spec)
+        await self._connection.start_observer(config, spec)
 
     def _write_metadata(self) -> None:
         """Atomic write primary_meta.json to spawn_dir."""
@@ -277,15 +262,11 @@ class PrimaryAttachLauncher:
         if should_write:
             self._write_metadata()
 
-    def _resolve_backend_port(self, *, config: ConnectionConfig) -> int | None:
-        if config.ws_port > 0:
-            return config.ws_port
-
-        base_url = getattr(self._connection, "_base_url", None)
-        if not isinstance(base_url, str):
+    def _resolve_backend_port(self) -> int | None:
+        endpoint = self._connection.observer_endpoint
+        if endpoint is None:
             return None
-        parsed = urlparse(base_url)
-        return parsed.port
+        return endpoint.port
 
     def _with_fresh_retry_port(self, config: ConnectionConfig) -> ConnectionConfig:
         return replace(

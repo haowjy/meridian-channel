@@ -31,8 +31,10 @@ from meridian.lib.harness.connections.base import (
     ConnectionState,
     HarnessConnection,
     HarnessEvent,
+    ObserverEndpoint,
     validate_prompt_size,
 )
+from meridian.lib.harness.connections.errors import PortBindError
 from meridian.lib.harness.errors import HarnessBinaryNotFound
 from meridian.lib.harness.ids import HarnessId
 from meridian.lib.harness.launch_spec import CodexLaunchSpec
@@ -195,6 +197,7 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
             supports_cancel=True,
             runtime_model_switch=False,
             structured_reasoning=True,
+            supports_primary_observer=True,
         )
 
     @property
@@ -211,6 +214,23 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
         if process is None:
             return None
         return process.pid
+
+    @property
+    def observer_endpoint(self) -> ObserverEndpoint | None:
+        if not self._primary_observer_mode:
+            return None
+        config = self._config
+        if config is None:
+            return None
+        if config.ws_port <= 0:
+            return None
+        ws_url = f"ws://{config.ws_bind_host}:{config.ws_port}"
+        return ObserverEndpoint(
+            transport="ws",
+            url=ws_url,
+            host=config.ws_bind_host,
+            port=config.ws_port,
+        )
 
     async def start(
         self,
@@ -305,6 +325,15 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
             self._transition("failed")
             await self._cleanup_resources(mark_stopped=False)
             raise
+
+    async def start_observer(
+        self,
+        config: ConnectionConfig,
+        spec: CodexLaunchSpec,
+    ) -> None:
+        """Start connection in primary observer mode."""
+
+        await self.start(config, spec, primary_observer_mode=True)
 
     async def stop(self) -> None:
         if self._state in {"stopped"}:
@@ -728,8 +757,6 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
         exit_code = process.returncode if process is not None else None
         stderr_excerpt = self._read_startup_stderr_excerpt()
         if _looks_like_address_in_use(stderr_excerpt):
-            from meridian.lib.launch.process.primary_attach import PortBindError
-
             return PortBindError(
                 "Codex app-server failed to bind websocket port "
                 f"(exit={exit_code}): {stderr_excerpt or '<no stderr>'}"

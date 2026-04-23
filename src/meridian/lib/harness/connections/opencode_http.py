@@ -13,6 +13,7 @@ from collections.abc import AsyncIterator, Mapping
 from io import BufferedWriter
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, cast
+from urllib.parse import urlparse
 
 if TYPE_CHECKING:
     from meridian.lib.observability.debug_tracer import DebugTracer
@@ -25,8 +26,10 @@ from meridian.lib.harness.connections.base import (
     ConnectionState,
     HarnessConnection,
     HarnessEvent,
+    ObserverEndpoint,
     validate_prompt_size,
 )
+from meridian.lib.harness.connections.errors import PortBindError
 from meridian.lib.harness.errors import HarnessBinaryNotFound
 from meridian.lib.harness.ids import HarnessId
 from meridian.lib.harness.launch_spec import OpenCodeLaunchSpec
@@ -58,6 +61,7 @@ class OpenCodeConnection(HarnessConnection[OpenCodeLaunchSpec]):
         supports_cancel=True,
         runtime_model_switch=False,
         structured_reasoning=True,
+        supports_primary_observer=True,
     )
     _STATE_TRANSITIONS: ClassVar[dict[ConnectionState, frozenset[ConnectionState]]] = {
         "created": frozenset(("starting", "stopping", "failed")),
@@ -151,6 +155,21 @@ class OpenCodeConnection(HarnessConnection[OpenCodeLaunchSpec]):
             return None
         return process.pid
 
+    @property
+    def observer_endpoint(self) -> ObserverEndpoint | None:
+        if not self._primary_observer_mode:
+            return None
+        base_url = self._base_url
+        if base_url is None:
+            return None
+        parsed = urlparse(base_url)
+        return ObserverEndpoint(
+            transport="http",
+            url=base_url,
+            host=parsed.hostname,
+            port=parsed.port,
+        )
+
     async def start(
         self,
         config: ConnectionConfig,
@@ -191,6 +210,15 @@ class OpenCodeConnection(HarnessConnection[OpenCodeLaunchSpec]):
 
         self._transition("connected")
         self._last_health_ok = True
+
+    async def start_observer(
+        self,
+        config: ConnectionConfig,
+        spec: OpenCodeLaunchSpec,
+    ) -> None:
+        """Start connection in primary observer mode."""
+
+        await self.start(config, spec, primary_observer_mode=True)
 
     async def stop(self) -> None:
         if self._state == "stopped":
@@ -749,8 +777,6 @@ class OpenCodeConnection(HarnessConnection[OpenCodeLaunchSpec]):
         exit_code = process.returncode if process is not None else None
         stderr_excerpt = self._read_startup_stderr_excerpt()
         if _looks_like_address_in_use(stderr_excerpt):
-            from meridian.lib.launch.process.primary_attach import PortBindError
-
             return PortBindError(
                 "OpenCode backend failed to bind HTTP port "
                 f"(exit={exit_code}): {stderr_excerpt or '<no stderr>'}"

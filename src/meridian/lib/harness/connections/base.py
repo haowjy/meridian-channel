@@ -44,6 +44,20 @@ class ConnectionCapabilities:
     supports_cancel: bool
     runtime_model_switch: bool
     structured_reasoning: bool
+    supports_primary_observer: bool = False
+
+
+ConnectionStartMode = Literal["interactive", "observer"]
+
+
+@dataclass(frozen=True)
+class ObserverEndpoint:
+    """Attach endpoint exposed by a managed primary backend."""
+
+    transport: Literal["ws", "http"]
+    url: str
+    host: str | None = None
+    port: int | None = None
 
 
 ConnectionState = Literal["created", "starting", "connected", "stopping", "stopped", "failed"]
@@ -120,6 +134,16 @@ class HarnessConnection(Generic[SpecT], ABC):
     @abstractmethod
     async def start(self, config: ConnectionConfig, spec: SpecT) -> None: ...
 
+    @property
+    def observer_endpoint(self) -> ObserverEndpoint | None:
+        """Attach endpoint for primary observer mode. None if not in observer mode."""
+        return None
+
+    async def start_observer(self, config: ConnectionConfig, spec: SpecT) -> None:
+        """Start connection in primary observer mode."""
+
+        await self.start(config, spec)
+
     @abstractmethod
     async def stop(self) -> None: ...
 
@@ -145,9 +169,11 @@ __all__ = [
     "ConnectionCapabilities",
     "ConnectionConfig",
     "ConnectionNotReady",
+    "ConnectionStartMode",
     "ConnectionState",
     "HarnessConnection",
     "HarnessEvent",
+    "ObserverEndpoint",
     "PromptTooLargeError",
     "validate_prompt_size",
 ]
