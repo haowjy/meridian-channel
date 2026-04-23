@@ -56,13 +56,6 @@ def archive_spawn(runtime_root: Path, spawn_id: str) -> None:
     write_archived_spawns(runtime_root, archived)
 
 
-def unarchive_spawn(runtime_root: Path, spawn_id: str) -> None:
-    """Remove a spawn ID from the archived set."""
-    archived = read_archived_spawns(runtime_root)
-    archived.discard(spawn_id)
-    write_archived_spawns(runtime_root, archived)
-
-
 def is_spawn_archived(runtime_root: Path, spawn_id: str) -> bool:
     """Check if a spawn is archived."""
     return spawn_id in read_archived_spawns(runtime_root)
@@ -74,6 +67,5 @@ __all__ = [
     "archived_spawns_path",
     "is_spawn_archived",
     "read_archived_spawns",
-    "unarchive_spawn",
     "write_archived_spawns",
 ]

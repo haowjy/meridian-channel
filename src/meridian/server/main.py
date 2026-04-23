@@ -39,9 +39,6 @@ from meridian.lib.ops.runtime import (
     resolve_runtime_root_for_read,
 )
 
-_REGISTERED_MCP_TOOLS: set[str] = set()
-_REGISTERED_MCP_DESCRIPTIONS: dict[str, str] = {}
-
 
 @asynccontextmanager
 async def lifespan(_: FastMCP[Any]):
@@ -216,25 +213,11 @@ def _register_operation_tool(op: OperationSpec[Any, Any]) -> None:
     if op.mcp_name is None:
         raise ValueError(f"Operation '{op.name}' is missing MCP tool name")
     mcp.tool(name=op.mcp_name, description=op.description)(_build_tool_handler(op))
-    _REGISTERED_MCP_TOOLS.add(op.mcp_name)
-    _REGISTERED_MCP_DESCRIPTIONS[op.name] = op.description
 
 
 def _register_operation_tools() -> None:
     for op in get_operations_for_surface("mcp"):
         _register_operation_tool(op)
-
-
-def get_registered_mcp_tools() -> set[str]:
-    """Expose MCP tool names for parity tests."""
-
-    return set(_REGISTERED_MCP_TOOLS)
-
-
-def get_registered_mcp_descriptions() -> dict[str, str]:
-    """Expose MCP descriptions for parity tests."""
-
-    return dict(_REGISTERED_MCP_DESCRIPTIONS)
 
 
 def run_server() -> None:

@@ -284,7 +284,6 @@ def make_discovery_routes(registry: ExtensionCommandRegistry) -> list[Route]:
 
 
 def make_invoke_routes(
-    registry: ExtensionCommandRegistry,
     dispatcher: ExtensionCommandDispatcher,
     context_builder_factory: Callable[[], ExtensionInvocationContextBuilder],
     services: ExtensionCommandServices,
@@ -299,8 +298,6 @@ def make_invoke_routes(
     EB2.7: Not found returns 404.
     EB2.8: Streaming returns 501.
     """
-
-    _ = registry
 
     async def invoke_command(request: Request) -> JSONResponse:
         extension_id = str(request.path_params["extension_id"])

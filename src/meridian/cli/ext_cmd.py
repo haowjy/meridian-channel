@@ -42,13 +42,11 @@ _emit: Emitter | None = None
 _resolve_global_format: OutputFormatResolver | None = None
 
 # Exit codes for `meridian ext run`.
-EXIT_SUCCESS = 0
 EXIT_GENERAL_ERROR = 1
 EXIT_SERVER_NOT_RUNNING = 2
 EXIT_SERVER_STALE = 3
 EXIT_SERVER_WRONG_PROJECT = 4
 EXIT_SERVER_UNREACHABLE = 5
-EXIT_SERVER_AUTH_FAILED = 6
 EXIT_ARGS_ERROR = 7
 
 

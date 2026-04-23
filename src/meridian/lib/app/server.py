@@ -367,7 +367,6 @@ def create_app(
 
     if isinstance(ext_token, str) and ext_token:
         invoke_routes = make_invoke_routes(
-            registry=ext_registry,
             dispatcher=ext_dispatcher,
             context_builder_factory=make_http_context_builder,
             services=ext_services,

@@ -212,14 +212,6 @@ class OperationSpec(BaseModel, Generic[InputT, OutputT]):
     def enabled_on(self, surface: OperationSurface) -> bool:
         return surface in self.surfaces
 
-    @property
-    def cli_only(self) -> bool:
-        return self.surfaces == frozenset({"cli"})
-
-    @property
-    def mcp_only(self) -> bool:
-        return self.surfaces == frozenset({"mcp"})
-
 
 OperationSpec.model_rebuild()
 
@@ -805,12 +797,6 @@ def get_all_operations() -> list[OperationSpec[Any, Any]]:
     return [_OPERATIONS_BY_NAME[name] for name in sorted(_OPERATIONS_BY_NAME)]
 
 
-def get_operation(name: str) -> OperationSpec[Any, Any]:
-    """Fetch one operation spec by canonical name."""
-
-    return _OPERATIONS_BY_NAME[name]
-
-
 def get_operation_by_cli(group: str, name: str) -> OperationSpec[Any, Any] | None:
     """Look up an operation by CLI group and command name."""
 
@@ -828,20 +814,10 @@ def get_operations_for_surface(surface: OperationSurface) -> list[OperationSpec[
     return [spec for spec in get_all_operations() if spec.enabled_on(surface)]
 
 
-def get_mcp_tool_names() -> frozenset[str]:
-    """Return MCP tool names declared in the manifest."""
-
-    return frozenset(
-        spec.mcp_name for spec in get_operations_for_surface("mcp") if spec.mcp_name is not None
-    )
-
-
 __all__ = [
     "OperationSpec",
     "OperationSurface",
     "get_all_operations",
-    "get_mcp_tool_names",
-    "get_operation",
     "get_operation_by_cli",
     "get_operations_for_surface",
 ]

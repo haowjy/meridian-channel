@@ -49,10 +49,6 @@ class AppServerUnreachable(AppServerLocatorError):
     """Running server endpoint could not be reached."""
 
 
-class AppServerAuthFailed(AppServerLocatorError):
-    """App server rejected authentication (token mismatch or expired instance)."""
-
-
 def _uds_base_url(socket_path: str) -> str:
     """Build a httpx-compatible unix-socket base URL."""
 
