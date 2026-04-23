@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict
 from meridian.lib.config.project_paths import ProjectConfigPaths, resolve_project_config_paths
 from meridian.lib.core.child_env import build_child_env_overrides
 from meridian.lib.core.context import RuntimeContext
+from meridian.lib.core.depth import current_meridian_depth, max_depth_reached
 from meridian.lib.core.domain import Spawn, SpawnStatus
 from meridian.lib.core.lifecycle import create_lifecycle_service
 from meridian.lib.core.sink import OutputSink
@@ -109,8 +110,7 @@ def _cleanup_background_runtime_artifacts(log_dir: Path) -> None:
 
 def depth_limits(max_depth: int, *, ctx: RuntimeContext | None = None) -> tuple[int, int]:
     current_depth = runtime_context(ctx).depth
-    if max_depth < 0:
-        raise ValueError("max_depth must be >= 0.")
+    max_depth_reached(current_depth, max_depth)
     return current_depth, max_depth
 
 
@@ -121,7 +121,7 @@ def _emit_subrun_event(
     ctx: RuntimeContext | None = None,
 ) -> None:
     resolved_context = runtime_context(ctx)
-    if resolved_context.depth <= 0:
+    if not resolved_context.is_nested:
         return
     event_payload = dict(payload)
     event_payload["v"] = 1
@@ -172,9 +172,7 @@ def _spawn_background_worker_env(
     only the work-item keys differ from the parent environment.
     """
     # Read the current depth so the worker inherits the same value.
-    parent_depth = 0
-    with suppress(ValueError, TypeError):
-        parent_depth = max(0, int(os.getenv("MERIDIAN_DEPTH", "0").strip()))
+    parent_depth = current_meridian_depth()
 
     normalized_work_id = (work_id or "").strip() or None
     work_dir: Path | None = None

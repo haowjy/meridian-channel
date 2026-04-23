@@ -2,6 +2,7 @@ import importlib
 import io
 import json
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -244,6 +245,90 @@ def test_spawn_implicit_json_error_is_structured(
     payload = json.loads(captured.err)
     assert payload["error"] == "cannot specify both -p and --prompt-file"
     assert payload["exit_code"] == 1
+
+
+def test_spawn_background_implicit_json_returns_sparse_result_without_event_noise(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("MERIDIAN_DEPTH", "1")
+    monkeypatch.setattr(spawn_cli.sys, "stdin", _FakeStdin("", is_tty=True))
+
+    def _fake_spawn_create_sync(
+        payload: SpawnCreateInput,
+        *,
+        sink: Any | None = None,
+    ) -> SpawnActionOutput:
+        assert payload.background is True
+        assert sink is not None
+        sink.event({"t": "meridian.spawn.start", "id": "p123", "model": "gpt-5.4"})
+        return SpawnActionOutput(
+            command="spawn.create",
+            status="running",
+            spawn_id="p123",
+            warning="heads up",
+            model="gpt-5.4",
+            harness_id="codex",
+            agent="coder",
+            context_from_resolved=("c7",),
+            background=True,
+        )
+
+    monkeypatch.setattr(spawn_cli, "spawn_create_sync", _fake_spawn_create_sync)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main.main(["spawn", "-p", "build", "--bg"])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    payload = json.loads(captured.out)
+    assert payload == {
+        "status": "running",
+        "spawn_id": "p123",
+        "note": "Backgrounded. Run `meridian spawn wait p123` to get results.",
+        "warning": "heads up",
+    }
+
+
+def test_spawn_background_explicit_json_preserves_rich_wire_and_events(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("MERIDIAN_DEPTH", "1")
+    monkeypatch.setattr(spawn_cli.sys, "stdin", _FakeStdin("", is_tty=True))
+
+    def _fake_spawn_create_sync(
+        payload: SpawnCreateInput,
+        *,
+        sink: Any | None = None,
+    ) -> SpawnActionOutput:
+        assert payload.background is True
+        assert sink is not None
+        sink.event({"t": "meridian.spawn.start", "id": "p456", "model": "gpt-5.4"})
+        return SpawnActionOutput(
+            command="spawn.create",
+            status="running",
+            spawn_id="p456",
+            warning="explicit warning",
+            context_from_resolved=("c9",),
+            background=True,
+        )
+
+    monkeypatch.setattr(spawn_cli, "spawn_create_sync", _fake_spawn_create_sync)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main.main(["--format", "json", "spawn", "-p", "build", "--bg"])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["status"] == "running"
+    assert payload["spawn_id"] == "p456"
+    assert payload["warning"] == "explicit warning"
+    assert payload["context_from_resolved"] == ["c9"]
+    assert captured.err.strip().startswith("{"), captured.err
+    assert '"t":"meridian.spawn.start"' in captured.err
 
 
 def test_spawn_list_active_view_includes_finalizing(

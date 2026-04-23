@@ -3,6 +3,7 @@
 from cyclopts import App
 
 from meridian import __version__
+from meridian.cli.ext_cmd import ext_app
 
 # Curated help for agent mode: only commands useful for subagent callers.
 # Not auto-generated — update when adding agent-facing commands.
@@ -28,6 +29,7 @@ Commands:
   spawn    Create and manage subagent runs (includes report subgroup)
   work     Work item dashboard and coordination
   models   Model catalog
+  ext      Extension command discovery and invocation
 
 Output:
   Agent mode uses per-command defaults: control-plane commands default
@@ -135,3 +137,19 @@ app.command(streaming_app, name="streaming")
 app.command(config_app, name="config")
 app.command(workspace_app, name="workspace")
 app.command(completion_app, name="completion")
+
+__all__ = [
+    "AGENT_ROOT_HELP",
+    "app",
+    "completion_app",
+    "config_app",
+    "ext_app",
+    "hooks_app",
+    "models_app",
+    "report_app",
+    "session_app",
+    "spawn_app",
+    "streaming_app",
+    "work_app",
+    "workspace_app",
+]

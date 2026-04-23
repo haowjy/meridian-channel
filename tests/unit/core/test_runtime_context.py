@@ -85,3 +85,8 @@ def test_runtime_context_to_env_overrides_omits_absent_values() -> None:
     ctx = RuntimeContext(depth=0)
 
     assert ctx.to_env_overrides() == {"MERIDIAN_DEPTH": "0"}
+
+
+def test_runtime_context_is_nested_uses_zero_based_depth() -> None:
+    assert not RuntimeContext(depth=0).is_nested
+    assert RuntimeContext(depth=1).is_nested

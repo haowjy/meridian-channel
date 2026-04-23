@@ -1,12 +1,12 @@
 """Doctor operation for file-authoritative state health and repair."""
 
 import asyncio
-import os
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.config.settings import resolve_project_root
+from meridian.lib.core.depth import is_nested_meridian_process
 from meridian.lib.core.spawn_lifecycle import is_active_spawn_status
 from meridian.lib.core.util import FormatContext
 from meridian.lib.harness.ids import HarnessId
@@ -95,7 +95,7 @@ def doctor_sync(payload: DoctorInput) -> DoctorOutput:
     if stale_locks > 0:
         repaired.append("stale_session_locks")
 
-    if int(os.getenv("MERIDIAN_DEPTH", "0")) <= 0:
+    if not is_nested_meridian_process():
         orphan_runs = _repair_orphan_runs(project_root)
         if orphan_runs > 0:
             repaired.append("orphan_runs")

@@ -20,6 +20,7 @@ class OutputConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     format: OutputFormat
+    suppress_events: bool = False
 
 
 class _FlushableSink(Protocol):
@@ -127,11 +128,18 @@ class TextSink:
 
 
 class JsonSink:
-    def __init__(self, *, stdout: TextIO | None = None, stderr: TextIO | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        stdout: TextIO | None = None,
+        stderr: TextIO | None = None,
+        emit_events: bool = True,
+    ) -> None:
         self._stdout = sys.stdout if stdout is None else stdout
         self._stderr = sys.stderr if stderr is None else stderr
         self._result: JSONValue | str | None = None
         self._has_result = False
+        self._emit_events = emit_events
 
     def result(self, payload: Any) -> None:
         self._result = _to_json_value(payload)
@@ -154,6 +162,8 @@ class JsonSink:
         print(message, file=self._stderr, flush=True)
 
     def event(self, payload: dict[str, Any]) -> None:
+        if not self._emit_events:
+            return
         print(
             json.dumps(_to_json_value(payload), separators=(",", ":")),
             file=self._stderr,
@@ -172,7 +182,7 @@ _NULL_SINK = NullSink()
 
 def create_sink(config: OutputConfig) -> OutputSink:
     if config.format == "json":
-        return JsonSink()
+        return JsonSink(emit_events=not config.suppress_events)
     if config.format == "text":
         return TextSink(format=config.format)
     return _NULL_SINK

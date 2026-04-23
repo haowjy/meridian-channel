@@ -5,6 +5,7 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict
 
+from meridian.lib.core.depth import is_nested_meridian_depth
 from meridian.lib.core.resolved_context import ResolvedContext
 from meridian.lib.core.types import SpawnId
 from meridian.lib.state.paths import resolve_project_paths, resolve_work_scratch_dir
@@ -19,6 +20,11 @@ class RuntimeContext(BaseModel):
     runtime_root: Path | None = None
     chat_id: str = ""
     work_id: str | None = None
+
+    @property
+    def is_nested(self) -> bool:
+        """Whether this context is below the primary Meridian root."""
+        return is_nested_meridian_depth(self.depth)
 
     @classmethod
     def from_environment(cls) -> Self:

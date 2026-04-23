@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
@@ -216,12 +217,11 @@ def make_discovery_routes(registry: ExtensionCommandRegistry) -> list[Route]:
         ]
 
         if not commands:
-            return JSONResponse(
-                {
-                    "error": "not_found",
-                    "message": f"Extension not found: {extension_id}",
-                },
-                status_code=404,
+            return make_problem_response(
+                status=404,
+                code="not_found",
+                title="Extension Not Found",
+                detail=f"Extension not found: {extension_id}",
             )
 
         response = ExtensionProjection(extension_id=extension_id, commands=commands)
@@ -238,12 +238,11 @@ def make_discovery_routes(registry: ExtensionCommandRegistry) -> list[Route]:
         ]
 
         if not commands:
-            return JSONResponse(
-                {
-                    "error": "not_found",
-                    "message": f"Extension not found: {extension_id}",
-                },
-                status_code=404,
+            return make_problem_response(
+                status=404,
+                code="not_found",
+                title="Extension Not Found",
+                detail=f"Extension not found: {extension_id}",
             )
 
         return JSONResponse({"commands": [command.model_dump() for command in commands]})
@@ -252,12 +251,11 @@ def make_discovery_routes(registry: ExtensionCommandRegistry) -> list[Route]:
         """GET /api/extensions/operations/{operation_id} - stub."""
 
         _ = request
-        return JSONResponse(
-            {
-                "error": "not_found",
-                "message": "Operations not yet implemented",
-            },
-            status_code=404,
+        return make_problem_response(
+            status=404,
+            code="not_implemented",
+            title="Not Implemented",
+            detail="Operations not yet implemented",
         )
 
     return [
@@ -313,11 +311,29 @@ def make_invoke_routes(
         invoke_req: InvokeRequest
         try:
             raw_body = await request.json()
-            body = cast("dict[str, Any]", raw_body) if isinstance(raw_body, dict) else {}
+            if not isinstance(raw_body, dict):
+                return make_problem_response(
+                    status=400,
+                    code="invalid_request",
+                    title="Invalid Request",
+                    detail="Request body must be a JSON object",
+                )
+            body = cast("dict[str, Any]", raw_body)
             invoke_req = InvokeRequest(**body)
-        except Exception:
-            body = {}
-            invoke_req = InvokeRequest()
+        except json.JSONDecodeError as e:
+            return make_problem_response(
+                status=400,
+                code="invalid_json",
+                title="Invalid JSON",
+                detail=str(e),
+            )
+        except ValidationError as e:
+            return make_problem_response(
+                status=400,
+                code="invalid_request",
+                title="Invalid Request",
+                detail=str(e),
+            )
 
         if _stream_requested(request, body):
             return make_problem_response(
@@ -353,6 +369,9 @@ def make_invoke_routes(
             "args_invalid": 422,
             "surface_not_allowed": 403,
             "capability_missing": 403,
+            "trust_violation": 403,
+            "app_server_required": 503,
+            "service_unavailable": 503,
             "handler_error": 500,
         }
         status = status_map.get(result.code, 500)

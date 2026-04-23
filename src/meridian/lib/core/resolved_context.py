@@ -4,13 +4,17 @@ This module defines the canonical environment-to-context translation used by
 launch, ops, and child-environment composition paths.
 """
 
-from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, Self
 
 from meridian.lib.config.context_config import ContextConfig
 from meridian.lib.context.resolver import resolve_context_paths
+from meridian.lib.core.depth import (
+    MERIDIAN_DEPTH_ENV,
+    child_meridian_depth,
+    parse_meridian_depth,
+)
 from meridian.lib.core.types import SpawnId
 from meridian.lib.state import paths as state_paths
 from meridian.lib.state import session_store
@@ -69,16 +73,14 @@ class ResolvedContext:
 
         spawn_id_raw = os.getenv("MERIDIAN_SPAWN_ID", "").strip()
         parent_spawn_id_raw = os.getenv("MERIDIAN_PARENT_SPAWN_ID", "").strip()
-        depth_raw = os.getenv("MERIDIAN_DEPTH", "0").strip()
+        depth_raw = os.getenv(MERIDIAN_DEPTH_ENV, "0").strip()
         project_root_raw = os.getenv("MERIDIAN_PROJECT_DIR", "").strip()
         runtime_root_raw = os.getenv("MERIDIAN_RUNTIME_DIR", "").strip()
         chat_id_raw = os.getenv("MERIDIAN_CHAT_ID", "").strip()
         work_id_raw = os.getenv("MERIDIAN_WORK_ID", "").strip()
         explicit_work_id_raw = (explicit_work_id or "").strip()
 
-        depth = 0
-        with suppress(ValueError, TypeError):
-            depth = max(0, int(depth_raw))
+        depth = parse_meridian_depth(depth_raw)
 
         project_root = Path(project_root_raw) if project_root_raw else None
         runtime_root = Path(runtime_root_raw) if runtime_root_raw else None
@@ -141,7 +143,7 @@ class ResolvedContext:
     ) -> dict[str, str]:
         """Produce `MERIDIAN_*` env overrides for child processes."""
 
-        next_depth = self.depth + 1 if increment_depth else self.depth
+        next_depth = child_meridian_depth(self.depth, increment_depth=increment_depth)
         overrides: dict[str, str] = {"MERIDIAN_DEPTH": str(next_depth)}
         if child_spawn_id is not None:
             overrides["MERIDIAN_SPAWN_ID"] = child_spawn_id

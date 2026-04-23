@@ -1,6 +1,5 @@
 """Cyclopts CLI entry point for meridian."""
 
-import os
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -56,6 +55,7 @@ from meridian.cli.bootstrap import (
 )
 from meridian.cli.config_cmd import register_config_commands
 from meridian.cli.doctor_cmd import register_doctor_command
+from meridian.cli.ext_cmd import register_ext_commands
 from meridian.cli.hooks_commands import register_hooks_commands
 from meridian.cli.misc_commands import register_misc_commands
 from meridian.cli.models_cmd import register_models_commands
@@ -70,6 +70,7 @@ from meridian.cli.output import emit as emit_output
 from meridian.cli.report_cmd import register_report_commands
 from meridian.cli.session_cmd import register_session_commands
 from meridian.cli.workspace_cmd import register_workspace_commands
+from meridian.lib.core.depth import is_nested_meridian_process
 from meridian.lib.core.sink import OutputSink
 from meridian.lib.ops.mars import check_upgrade_availability, format_upgrade_availability
 from meridian.lib.ops.spawn.api import SpawnActionOutput
@@ -128,7 +129,10 @@ def emit(payload: object) -> None:
     sink, flush_after = _resolve_sink(options)
     if isinstance(payload, SpawnActionOutput):
         if options.output.format == "json":
-            emit_output(payload.to_wire(), sink=sink)
+            if options.explicit_format is None:
+                emit_output(payload.to_agent_wire(), sink=sink)
+            else:
+                emit_output(payload.to_wire(), sink=sink)
         else:
             emit_output(payload, sink=sink)
     else:
@@ -176,7 +180,7 @@ def _split_passthrough_args(argv: Sequence[str]) -> tuple[list[str], tuple[str, 
 
 
 def agent_mode_enabled() -> bool:
-    return int(os.getenv("MERIDIAN_DEPTH", "0")) > 0
+    return is_nested_meridian_process()
 
 
 def _resolve_command_path(argv: Sequence[str]) -> tuple[str | None, str | None]:
@@ -250,6 +254,15 @@ def _resolve_output_format_for_command(
         agent_mode=agent_mode,
         agent_default_format=agent_default_format,
     )
+
+
+def _is_spawn_background_request(argv: Sequence[str]) -> bool:
+    """Return True when argv targets spawn create/continue in background mode."""
+
+    group, subcommand = _resolve_command_path(argv)
+    if group != "spawn" or subcommand not in {"create", "continue"}:
+        return False
+    return "--background" in argv or "--bg" in argv
 
 
 def _interactive_terminal_attached() -> bool:
@@ -607,6 +620,11 @@ def _register_group_commands() -> None:
     register_work_commands(work_app, emit)
     register_hooks_commands(hooks_app, emit)
     register_models_commands(models_app, emit)
+    register_ext_commands(
+        app,
+        emit=emit,
+        resolve_global_format=lambda: get_global_options().output.format,
+    )
     register_config_commands(config_app, emit)
     register_workspace_commands(workspace_app, emit)
     register_doctor_command(app, emit)
@@ -689,7 +707,20 @@ def main(argv: Sequence[str] | None = None) -> None:
         explicit_format=options.explicit_format,
         agent_mode=effective_agent_mode,
     )
-    options = options.model_copy(update={"output": OutputConfig(format=resolved_format)})
+    suppress_events = (
+        effective_agent_mode
+        and options.explicit_format is None
+        and resolved_format == "json"
+        and _is_spawn_background_request(cleaned_args)
+    )
+    options = options.model_copy(
+        update={
+            "output": OutputConfig(
+                format=resolved_format,
+                suppress_events=suppress_events,
+            )
+        }
+    )
 
     if cleaned_args and cleaned_args[0] == "mars":
         _run_mars_passthrough(cleaned_args[1:], output_format=options.output.format)

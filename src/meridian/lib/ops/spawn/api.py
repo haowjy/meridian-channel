@@ -6,6 +6,7 @@ from pathlib import Path
 
 from meridian.lib.config.settings import load_config
 from meridian.lib.core.context import RuntimeContext
+from meridian.lib.core.depth import max_depth_reached
 from meridian.lib.core.sink import NullSink, OutputSink
 from meridian.lib.core.spawn_lifecycle import ACTIVE_SPAWN_STATUSES, is_active_spawn_status
 from meridian.lib.core.types import SpawnId
@@ -128,7 +129,7 @@ def spawn_create_sync(
     runtime = None
     if not payload.dry_run:
         current_depth, max_depth = depth_limits(config.max_depth, ctx=resolved_context)
-        if current_depth >= max_depth:
+        if max_depth_reached(current_depth, max_depth):
             return depth_exceeded_output(current_depth, max_depth)
         runtime = build_runtime_from_root_and_config(resolved_root, config, sink=sink)
 

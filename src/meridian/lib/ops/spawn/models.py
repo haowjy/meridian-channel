@@ -122,6 +122,21 @@ class SpawnActionOutput(BaseModel):
                 wire["cli_command"] = list(self.cli_command)
         return wire
 
+    def to_agent_wire(self) -> dict[str, object]:
+        """Project sparse JSON for implicit agent-mode consumers."""
+        if not (self.background and self.status == "running"):
+            return self.to_wire()
+
+        wire: dict[str, object] = {"status": self.status}
+        if self.spawn_id is not None:
+            wire["spawn_id"] = self.spawn_id
+            wire["note"] = (
+                f"Backgrounded. Run `meridian spawn wait {self.spawn_id}` to get results."
+            )
+        if self.warning is not None:
+            wire["warning"] = self.warning
+        return wire
+
     def format_text(self, ctx: FormatContext | None = None) -> str:
         _ = ctx
         lines: list[str] = []

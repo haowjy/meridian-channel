@@ -38,7 +38,7 @@ def _require_work_item(project_state_dir: Path, work_id: str) -> work_store.Work
 
 
 def _work_warning(ctx: RuntimeContext | None) -> str | None:
-    if runtime_context(ctx).depth > 0:
+    if runtime_context(ctx).is_nested:
         return _NESTED_WORK_WARNING
     return None
 

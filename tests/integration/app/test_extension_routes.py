@@ -88,8 +88,9 @@ class TestRouteShadowing:
         response = app_client.get("/api/extensions/operations/some-op-id")
         assert response.status_code == 404
         data = response.json()
-        message = str(data.get("message", ""))
-        assert "not yet implemented" in message.lower() or "Operations" in message
+        assert data["code"] == "not_implemented"
+        assert data["title"] == "Not Implemented"
+        assert data["detail"] == "Operations not yet implemented"
 
 
 class TestManifestHashParity:
