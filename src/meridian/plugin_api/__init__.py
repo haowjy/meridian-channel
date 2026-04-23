@@ -1,13 +1,18 @@
 """Meridian Plugin API.
 
 Stable interface for hooks and plugins.
+
+The public surface is intentionally narrow — hook types and state helpers only.
+Utility functions (git helpers, config, file locking) live in submodules and
+are not re-exported here.  Import them directly when needed::
+
+    from meridian.plugin_api.git import resolve_clone_path
+    from meridian.plugin_api.fs import file_lock
+    from meridian.plugin_api.config import get_user_config
 """
 
 from __future__ import annotations
 
-from meridian.plugin_api.config import get_git_overrides, get_user_config
-from meridian.plugin_api.fs import file_lock
-from meridian.plugin_api.git import generate_repo_slug, normalize_repo_url, resolve_clone_path
 from meridian.plugin_api.state import (
     get_project_home,
     get_user_home,
@@ -31,12 +36,6 @@ __all__ = [
     "HookOutcome",
     "HookResult",
     "__version__",
-    "file_lock",
-    "generate_repo_slug",
-    "get_git_overrides",
     "get_project_home",
-    "get_user_config",
     "get_user_home",
-    "normalize_repo_url",
-    "resolve_clone_path",
 ]

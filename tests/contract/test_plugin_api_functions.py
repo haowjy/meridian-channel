@@ -7,7 +7,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import pytest
 
-from meridian.plugin_api import file_lock, generate_repo_slug, get_user_home
+from meridian.plugin_api.fs import file_lock
+from meridian.plugin_api.git import generate_repo_slug
+from meridian.plugin_api.state import get_user_home
 
 
 def test_generate_repo_slug_handles_ssh_and_https_urls() -> None:

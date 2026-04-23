@@ -43,7 +43,7 @@ from meridian.lib.state.paths import (
     resolve_work_scratch_dir,
 )
 from meridian.lib.state.session_store import get_session_active_work_id
-from meridian.plugin_api import resolve_clone_path
+from meridian.plugin_api.git import resolve_clone_path
 
 from .command import (
     build_launch_argv,

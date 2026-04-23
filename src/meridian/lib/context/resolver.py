@@ -12,7 +12,7 @@ from meridian.lib.config.context_config import (
     ContextSourceType,
 )
 from meridian.lib.state.user_paths import get_project_uuid
-from meridian.plugin_api import resolve_clone_path
+from meridian.plugin_api.git import resolve_clone_path
 
 
 @dataclass(frozen=True)

@@ -18,7 +18,7 @@ from meridian.lib.launch.request import (
     SpawnRequest,
 )
 from meridian.lib.launch.types import LaunchRequest
-from meridian.plugin_api import resolve_clone_path
+from meridian.plugin_api.git import resolve_clone_path
 from tests.support.fixtures import write_agent, write_skill
 
 

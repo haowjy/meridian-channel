@@ -23,11 +23,10 @@ from meridian.plugin_api import (
     HookContext,
     HookOutcome,
     HookResult,
-    file_lock,
-    get_user_home,
-    normalize_repo_url,
-    resolve_clone_path,
 )
+from meridian.plugin_api.fs import file_lock
+from meridian.plugin_api.git import normalize_repo_url, resolve_clone_path
+from meridian.plugin_api.state import get_user_home
 
 logger = structlog.get_logger(__name__)
 

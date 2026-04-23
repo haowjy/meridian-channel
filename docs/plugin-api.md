@@ -60,12 +60,16 @@ runtime_root = get_project_home()
 user_root = get_user_home()
 ```
 
-## Git Helpers
+## Submodule Utilities
+
+The following helpers are available via submodule imports. They are not re-exported from the top-level `meridian.plugin_api` package — import them from the submodule directly.
+
+### Git Helpers
 
 Used by `git-autosync` and useful for any hook that operates on a remote repo.
 
 ```python
-from meridian.plugin_api import generate_repo_slug, normalize_repo_url, resolve_clone_path
+from meridian.plugin_api.git import generate_repo_slug, normalize_repo_url, resolve_clone_path
 
 url = "git@github.com:team/docs.git"
 slug = generate_repo_slug(url)           # "github.com-team-docs"
@@ -73,19 +77,19 @@ normalized = normalize_repo_url(url)     # canonical form
 clone_path = resolve_clone_path(url)     # path where the repo would be cloned
 ```
 
-## Config Helpers
+### Config Helpers
 
 ```python
-from meridian.plugin_api import get_user_config, get_git_overrides
+from meridian.plugin_api.config import get_user_config, get_git_overrides
 
 config = get_user_config()          # parsed user config dict
 overrides = get_git_overrides()     # config values from git config
 ```
 
-## File Locking
+### File Locking
 
 ```python
-from meridian.plugin_api import file_lock
+from meridian.plugin_api.fs import file_lock
 
 with file_lock("/path/to/lockfile"):
     # exclusive section

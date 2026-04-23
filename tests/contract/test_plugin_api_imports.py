@@ -9,18 +9,14 @@ from meridian.plugin_api import (
     HookOutcome,
     HookResult,
     __version__,
-    file_lock,
-    generate_repo_slug,
-    get_git_overrides,
     get_project_home,
-    get_user_config,
     get_user_home,
-    normalize_repo_url,
-    resolve_clone_path,
 )
 
 
-def test_plugin_api_exports_match_documented_contract() -> None:
+def test_plugin_api_exports_match_stable_contract() -> None:
+    """Pin the public surface — only hook types and state helpers."""
+
     assert plugin_api.__all__ == [
         "FailurePolicy",
         "Hook",
@@ -29,18 +25,12 @@ def test_plugin_api_exports_match_documented_contract() -> None:
         "HookOutcome",
         "HookResult",
         "__version__",
-        "file_lock",
-        "generate_repo_slug",
-        "get_git_overrides",
         "get_project_home",
-        "get_user_config",
         "get_user_home",
-        "normalize_repo_url",
-        "resolve_clone_path",
     ]
 
 
-def test_plugin_api_documented_exports_are_importable() -> None:
+def test_plugin_api_stable_exports_are_importable() -> None:
     assert FailurePolicy is not None
     assert Hook is not None
     assert HookContext is not None
@@ -48,11 +38,16 @@ def test_plugin_api_documented_exports_are_importable() -> None:
     assert HookOutcome is not None
     assert HookResult is not None
     assert isinstance(__version__, str)
-    assert callable(file_lock)
-    assert callable(generate_repo_slug)
-    assert callable(get_git_overrides)
     assert callable(get_project_home)
-    assert callable(get_user_config)
     assert callable(get_user_home)
-    assert callable(normalize_repo_url)
-    assert callable(resolve_clone_path)
+
+
+def test_unstable_helpers_not_reexported() -> None:
+    """Utility functions must be imported from submodules, not the top-level package."""
+
+    assert not hasattr(plugin_api, "file_lock")
+    assert not hasattr(plugin_api, "generate_repo_slug")
+    assert not hasattr(plugin_api, "normalize_repo_url")
+    assert not hasattr(plugin_api, "resolve_clone_path")
+    assert not hasattr(plugin_api, "get_git_overrides")
+    assert not hasattr(plugin_api, "get_user_config")
