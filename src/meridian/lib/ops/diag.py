@@ -37,7 +37,7 @@ class DoctorOutput(BaseModel):
 
     def format_text(self, ctx: FormatContext | None = None) -> str:
         """Key-value health check output for text output mode."""
-        from meridian.cli.format_helpers import kv_block
+        from meridian.lib.core.formatting import kv_block
 
         status = "ok" if self.ok else "WARNINGS"
         pairs: list[tuple[str, str | None]] = [

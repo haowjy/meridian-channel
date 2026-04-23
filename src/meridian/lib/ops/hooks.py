@@ -47,7 +47,7 @@ class HookListOutput(BaseModel):
         if not self.hooks:
             return "(no hooks configured)"
 
-        from meridian.cli.format_helpers import tabular
+        from meridian.lib.core.formatting import tabular
 
         rows = [["name", "event", "type", "source", "registration", "status"]]
         rows.extend(
@@ -88,7 +88,7 @@ class HookCheckOutput(BaseModel):
         if not self.checks:
             return "(no builtin hooks registered)"
 
-        from meridian.cli.format_helpers import tabular
+        from meridian.lib.core.formatting import tabular
 
         rows = [["name", "status", "requirements", "error"]]
         for item in self.checks:
@@ -135,7 +135,7 @@ class HookRunOutput(BaseModel):
     def format_text(self, ctx: FormatContext | None = None) -> str:
         _ = ctx
 
-        from meridian.cli.format_helpers import kv_block
+        from meridian.lib.core.formatting import kv_block
 
         return kv_block(
             [
@@ -186,7 +186,7 @@ class HookResolveOutput(BaseModel):
         if not self.hooks:
             return f"(no hooks for event '{self.event}')"
 
-        from meridian.cli.format_helpers import tabular
+        from meridian.lib.core.formatting import tabular
 
         rows = [["name", "source", "type", "priority", "interval", "when"]]
         for item in self.hooks:

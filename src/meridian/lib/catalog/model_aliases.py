@@ -43,7 +43,7 @@ class AliasEntry(BaseModel):
 
     def format_text(self, ctx: object | None = None) -> str:
         _ = ctx
-        from meridian.cli.format_helpers import kv_block
+        from meridian.lib.core.formatting import kv_block
 
         pairs: list[tuple[str, str | None]] = [
             ("Model", str(self.model_id)),

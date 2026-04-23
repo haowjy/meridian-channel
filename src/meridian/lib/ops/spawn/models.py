@@ -275,7 +275,7 @@ class SpawnStatsOutput(BaseModel):
             f"total_cost: ${self.total_cost_usd:.4f}",
         ]
         if self.models:
-            from meridian.cli.format_helpers import tabular
+            from meridian.lib.core.formatting import tabular
 
             lines.append("")
             rows = [["model", "total", "succeeded", "failed", "success%", "cost"]]
@@ -291,7 +291,7 @@ class SpawnStatsOutput(BaseModel):
                 ])
             lines.append(tabular(rows))
         if self.children:
-            from meridian.cli.format_helpers import tabular
+            from meridian.lib.core.formatting import tabular
 
             lines.append("")
             rows = [["spawn", "status", "model", "duration", "cost"]]
@@ -357,7 +357,7 @@ class SpawnListOutput(BaseModel):
             if self.text_view == "children":
                 return "(no children)"
             return "(no spawns)"
-        from meridian.cli.format_helpers import tabular
+        from meridian.lib.core.formatting import tabular
 
         if self.text_view == "children":
             rows = [["spawn", "status", "agent", "desc", "model", "duration"]]
@@ -480,7 +480,7 @@ class SpawnDetailOutput(BaseModel):
 
     def format_text(self, ctx: FormatContext | None = None) -> str:
         """Key-value detail view for text output mode. Omits None/empty fields."""
-        from meridian.cli.format_helpers import kv_block
+        from meridian.lib.core.formatting import kv_block
 
         status_str = self.status
         if self.status == "finalizing":
@@ -611,7 +611,7 @@ class SpawnWaitMultiOutput(BaseModel):
         if len(self.spawns) == 1:
             return self.spawns[0].format_text(ctx)
 
-        from meridian.cli.format_helpers import tabular
+        from meridian.lib.core.formatting import tabular
 
         rows = [["spawn_id", "status", "duration", "exit", "report"]]
         rows.extend(

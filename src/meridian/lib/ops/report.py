@@ -114,7 +114,7 @@ class ReportSearchOutput(BaseModel):
         _ = ctx
         if not self.results:
             return "(no matching reports)"
-        from meridian.cli.format_helpers import tabular
+        from meridian.lib.core.formatting import tabular
 
         return tabular([[item.spawn_id, item.report_path, item.snippet] for item in self.results])
 

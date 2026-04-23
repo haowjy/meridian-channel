@@ -57,7 +57,7 @@ def _format_spawn_rows(spawns: tuple[WorkDashboardSpawn, ...], *, indent: str) -
     if not spawns:
         return [f"{indent}(no spawns)"]
 
-    from meridian.cli.format_helpers import tabular
+    from meridian.lib.core.formatting import tabular
 
     table = tabular([[spawn.id, spawn.model, spawn.status, spawn.desc] for spawn in spawns])
     return [f"{indent}{line}" for line in table.splitlines()]
@@ -78,7 +78,7 @@ def _format_session_rows(sessions: tuple[WorkSessionItem, ...], *, indent: str) 
     if not sessions:
         return [f"{indent}(no sessions)"]
 
-    from meridian.cli.format_helpers import tabular
+    from meridian.lib.core.formatting import tabular
 
     rows = [["chat_id", "harness", "status", "model", "harness_session_id"]]
     rows.extend(
@@ -217,7 +217,7 @@ class WorkListOutput(BaseModel):
         if not self.items:
             return "(no work items)"
 
-        from meridian.cli.format_helpers import tabular
+        from meridian.lib.core.formatting import tabular
 
         rows = [["name", "status", "created"]]
         rows.extend([[item.name, item.status, item.created_at] for item in self.items])
@@ -245,7 +245,7 @@ class WorkShowOutput(BaseModel):
     def format_text(self, ctx: FormatContext | None = None) -> str:
         _ = ctx
 
-        from meridian.cli.format_helpers import kv_block
+        from meridian.lib.core.formatting import kv_block
 
         lines = [
             kv_block(

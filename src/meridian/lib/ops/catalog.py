@@ -97,7 +97,7 @@ class CatalogModel(BaseModel):
 
     def format_text(self, ctx: FormatContext | None = None) -> str:
         _ = ctx
-        from meridian.cli.format_helpers import kv_block
+        from meridian.lib.core.formatting import kv_block
 
         alias_names = ", ".join(alias.alias for alias in self.aliases) or None
         alias_details = ", ".join(_format_alias_detail(alias) for alias in self.aliases) or None
@@ -135,7 +135,7 @@ class ModelsListOutput(BaseModel):
         """Columnar model table for text output mode."""
         if not self.models:
             return "(no models)"
-        from meridian.cli.format_helpers import tabular
+        from meridian.lib.core.formatting import tabular
 
         header = ["MODEL", "HARNESS", "ALIAS", "PROVIDER", "COST", "RELEASED"]
         rows: list[list[str]] = []
