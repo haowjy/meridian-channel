@@ -1,10 +1,10 @@
-# ops/ — Operation Manifest and Shared Surface
+# ops/ — Operation Commands and Shared Surface
 
 `src/meridian/lib/ops/` is the API layer between the user-facing surfaces (CLI, MCP) and the lib subsystems. It owns the explicit operation manifest, all operation handler implementations, and the shared business logic for each command.
 
 ## Manifest Architecture
 
-`ops/manifest.py` defines every operation as an `OperationSpec` instance:
+`ops/commands.py` defines every operation as an `OperationSpec` instance:
 
 ```python
 class OperationSpec(Generic[InputT, OutputT]):
@@ -73,7 +73,7 @@ The MCP server runs as `meridian serve` over stdio (JSON-RPC/MCP protocol). Clie
 
 ```
 ops/
-  manifest.py         Operation registry and OperationSpec definition
+  commands.py          Operation registry and OperationSpec definition
   catalog.py          models_list, models_refresh handlers
   config.py           config_get/set/reset/show/init + ensure_state_bootstrap_sync + mars init
   context.py          context query: resolved work/kb paths and sources (CLI + MCP)
@@ -93,7 +93,7 @@ ops/
 
 ## Operation Flow for spawn_create
 
-Spawn create is the most complex operation — it illustrates how ops/manifest/launch connect:
+Spawn create is the most complex operation — it illustrates how ops/commands/launch connect:
 
 1. `cli/spawn.py` explicit handler → constructs `SpawnCreateInput` from CLI flags, calls `spawn_create_sync`
 2. `ops/spawn/api.py:spawn_create_sync` → calls `prepare_spawn()` then dispatches to background or blocking `launch_primary()`

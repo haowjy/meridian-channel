@@ -34,7 +34,7 @@ src/meridian/
 
 **Entry points → ops → lib:**
 - `meridian spawn ...` (CLI) and `spawn_create` (MCP tool) both call `spawn_create_sync` from `ops/spawn/api.py`
-- All user-facing operations are declared in `ops/manifest.py` as `OperationSpec` instances
+- All user-facing operations are declared in `ops/commands.py` as `OperationSpec` instances
 - CLI commands are auto-generated or explicitly registered from the manifest; the MCP server registers the same ops as FastMCP tools
 - See `fs/ops/overview.md` for the manifest architecture
 
@@ -73,7 +73,7 @@ Composition is centralized in `lib/launch/context.py:build_launch_context()`. Ev
 
 **Harness-agnostic:** Meridian never assumes a specific AI harness. The adapter contract (`lib/harness/adapter.py:HarnessCapabilities`) declares what each harness supports (stream events, session resume, native skills, etc.). Command construction, output parsing, and session detection are adapter-private. Adding a harness = one adapter file + registry entry.
 
-**Manifest as single source of truth:** `ops/manifest.py` declares every operation once with name, description, input/output types, async+sync handlers, and surface membership (CLI and/or MCP). Both the CLI registration layer and the MCP server consume the manifest — no duplicated operation definitions.
+**Manifest as single source of truth:** `ops/commands.py` declares every operation once with name, description, input/output types, async+sync handlers, and surface membership (CLI and/or MCP). Both the CLI registration layer and the MCP server consume the manifest — no duplicated operation definitions.
 
 **Config precedence:** CLI flags > ENV vars > agent profile > project config > user config > harness defaults. Each field resolves independently — a CLI model override forces harness re-derivation from the overridden model, not from the profile's harness.
 
