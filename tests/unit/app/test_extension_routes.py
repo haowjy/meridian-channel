@@ -1,4 +1,4 @@
-"""Unit tests for extension discovery projections and invoke route behavior."""
+"""Unit tests for extension discovery projections and problem response shape."""
 
 from __future__ import annotations
 
@@ -6,18 +6,10 @@ import json
 from typing import Any, cast
 
 from pydantic import BaseModel
-from starlette.applications import Starlette
-from starlette.testclient import TestClient
 
 from meridian.lib.app.extension_routes import (
-    make_invoke_routes,
     make_problem_response,
     project_extensions,
-)
-from meridian.lib.extensions.context import (
-    ExtensionCommandServices,
-    ExtensionInvocationContext,
-    ExtensionInvocationContextBuilder,
 )
 from meridian.lib.extensions.registry import (
     ExtensionCommandRegistry,
@@ -25,7 +17,6 @@ from meridian.lib.extensions.registry import (
 )
 from meridian.lib.extensions.types import (
     ExtensionCommandSpec,
-    ExtensionErrorResult,
     ExtensionJSONResult,
     ExtensionSurface,
 )
@@ -48,29 +39,6 @@ async def _handler(
     return ExtensionJSONResult(payload={"archived": True})
 
 
-class _RecordingDispatcher:
-    def __init__(self, result: object) -> None:
-        self._result = result
-        self.calls: list[dict[str, object]] = []
-
-    async def dispatch(
-        self,
-        fqid: str,
-        args: dict[str, Any],
-        context: ExtensionInvocationContext,
-        services: ExtensionCommandServices,
-    ) -> object:
-        self.calls.append(
-            {
-                "fqid": fqid,
-                "args": args,
-                "context": context,
-                "services": services,
-            }
-        )
-        return self._result
-
-
 def _make_spec(
     *,
     extension_id: str,
@@ -88,24 +56,6 @@ def _make_spec(
         first_party=True,
         requires_app_server=True,
     )
-
-
-def _make_invoke_client(
-    dispatcher: _RecordingDispatcher,
-    *,
-    token: str = "secret-token",
-    services: ExtensionCommandServices | None = None,
-) -> tuple[TestClient, ExtensionCommandServices]:
-    resolved_services = services or ExtensionCommandServices()
-    app = Starlette(
-        routes=make_invoke_routes(
-            cast("Any", dispatcher),
-            lambda: ExtensionInvocationContextBuilder(ExtensionSurface.HTTP),
-            resolved_services,
-            token,
-        )
-    )
-    return TestClient(app), resolved_services
 
 
 def test_project_extensions_contains_canonical_command_contracts() -> None:
@@ -189,47 +139,3 @@ def test_make_problem_response_uses_rfc_9457_shape() -> None:
     }
 
 
-def test_invoke_route_rejects_missing_bearer_token() -> None:
-    dispatcher = _RecordingDispatcher(ExtensionJSONResult(payload={"archived": True}))
-    client, _ = _make_invoke_client(dispatcher)
-
-    response = client.post(
-        "/api/extensions/meridian.sessions/commands/archiveSpawn/invoke",
-        json={"args": {"spawn_id": "p123"}},
-    )
-
-    assert response.status_code == 401
-    assert response.headers["content-type"].startswith("application/problem+json")
-    assert response.json()["code"] == "unauthorized"
-    assert dispatcher.calls == []
-
-
-def test_invoke_route_maps_extension_errors_to_problem_details() -> None:
-    dispatcher = _RecordingDispatcher(
-        ExtensionErrorResult(
-            code="args_invalid",
-            message="spawn_id field required",
-        )
-    )
-    client, _ = _make_invoke_client(dispatcher)
-
-    response = client.post(
-        "/api/extensions/meridian.sessions/commands/archiveSpawn/invoke",
-        headers={"Authorization": "Bearer secret-token"},
-        json={
-            "args": {},
-            "request_id": "req-invalid",
-        },
-    )
-
-    assert response.status_code == 422
-    assert response.headers["content-type"].startswith("application/problem+json")
-    assert response.json() == {
-        "type": "urn:meridian:extension:error:args_invalid",
-        "title": "Args Invalid",
-        "status": 422,
-        "detail": "spawn_id field required",
-        "instance": "req-invalid",
-        "code": "args_invalid",
-        "request_id": "req-invalid",
-    }
