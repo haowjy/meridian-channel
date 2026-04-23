@@ -25,3 +25,16 @@ export interface WorkItemSummary {
   status: string
   spawns: SpawnSummary[]
 }
+
+const KNOWN_STATUSES: ReadonlySet<string> = new Set<string>([
+  'running',
+  'queued',
+  'succeeded',
+  'failed',
+  'cancelled',
+  'finalizing',
+])
+
+export function parseStatus(s: string): SpawnStatus {
+  return KNOWN_STATUSES.has(s) ? (s as SpawnStatus) : 'queued'
+}

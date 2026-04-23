@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { ErrorBoundary } from "@/components/ErrorBoundary"
 import { NewSessionDialog } from "@/components/molecules"
 import { CommandPalette } from "./CommandPalette"
 import { useSpawnStats } from "@/features/sessions/hooks"
@@ -194,7 +195,9 @@ export function AppShell({
           </div>
 
           <div style={{ gridColumn: "2", gridRow: "2" }} className="min-h-0 min-w-0 overflow-hidden">
-            {children ?? <ModeViewport activeMode={activeMode} />}
+            <ErrorBoundary>
+              {children ?? <ModeViewport activeMode={activeMode} />}
+            </ErrorBoundary>
           </div>
 
           <div style={{ gridColumn: "1 / -1", gridRow: "3" }}>

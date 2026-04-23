@@ -1,21 +1,13 @@
 import { Toaster as SonnerToaster, type ToasterProps } from "sonner"
-import { useTheme } from "@/components/theme-provider"
+import { useOptionalTheme } from "@/components/theme-provider"
 
 /**
  * Meridian toast container.
  * Uses sonner under the hood with theme-aware styling.
  */
 function Toaster(props: ToasterProps) {
-  let theme: ToasterProps["theme"] = "light"
-
-  // Try to use theme context — fall back to light if outside provider
-  try {
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    const { resolvedTheme } = useTheme()
-    theme = resolvedTheme
-  } catch {
-    // Outside ThemeProvider (e.g. Storybook) — default to light
-  }
+  const ctx = useOptionalTheme()
+  const theme: ToasterProps["theme"] = ctx?.resolvedTheme ?? "light"
 
   return (
     <SonnerToaster

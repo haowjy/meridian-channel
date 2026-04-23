@@ -26,6 +26,7 @@ import { useEffect, useState } from "react"
 import { ChatCircle, List, SidebarSimple } from "@phosphor-icons/react"
 
 import { Button } from "@/components/ui/button"
+import { ErrorBoundary } from "@/components/ErrorBoundary"
 import {
   Tooltip,
   TooltipContent,
@@ -180,14 +181,15 @@ function ChatPageContent({
             }}
           >
             {state.columns.map((spawnId) => (
-              <ThreadColumn
-                key={spawnId}
-                spawnId={spawnId}
-                isFocused={state.focusedColumn === spawnId}
-                onClose={() => closeColumn(spawnId)}
-                onFocus={() => focusColumn(spawnId)}
-                detailsOverride={threadDetailsOverride?.[spawnId]}
-              />
+              <ErrorBoundary key={spawnId}>
+                <ThreadColumn
+                  spawnId={spawnId}
+                  isFocused={state.focusedColumn === spawnId}
+                  onClose={() => closeColumn(spawnId)}
+                  onFocus={() => focusColumn(spawnId)}
+                  detailsOverride={threadDetailsOverride?.[spawnId]}
+                />
+              </ErrorBoundary>
             ))}
           </div>
         )}

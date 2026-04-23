@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from "react"
 
+import { ErrorBoundary } from "@/components/ErrorBoundary"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import type { ActivityBlockData } from "@/features/activity-stream/types"
 
@@ -50,7 +51,9 @@ export function SpawnActivityView({ activity }: SpawnActivityViewProps) {
   return (
     <ScrollArea className="h-full rounded-lg border border-border bg-card">
       <div className="space-y-4 p-4">
-        <TurnList turns={turns} />
+        <ErrorBoundary>
+          <TurnList turns={turns} />
+        </ErrorBoundary>
         <div ref={bottomRef} />
       </div>
     </ScrollArea>

@@ -29,7 +29,7 @@ import {
   fetchSpawns,
   type SpawnProjection,
 } from "@/features/sessions/lib/api"
-import type { SpawnStatus } from "@/types/spawn"
+import { parseStatus, type SpawnStatus } from "@/types/spawn"
 import { cn } from "@/lib/utils"
 
 import { SpawnHeader } from "./SpawnHeader"
@@ -54,24 +54,9 @@ export interface ThreadColumnProps {
   detailsOverride?: ThreadColumnSpawnDetails
 }
 
-const KNOWN_STATUSES: ReadonlySet<SpawnStatus> = new Set<SpawnStatus>([
-  "running",
-  "queued",
-  "succeeded",
-  "failed",
-  "cancelled",
-  "finalizing",
-])
-
-function coerceStatus(status: string): SpawnStatus {
-  return KNOWN_STATUSES.has(status as SpawnStatus)
-    ? (status as SpawnStatus)
-    : "running"
-}
-
 function projectionToDetails(p: SpawnProjection): ThreadColumnSpawnDetails {
   return {
-    status: coerceStatus(p.status),
+    status: parseStatus(p.status),
     agent: p.agent || null,
     model: p.model || null,
     harness: p.harness,

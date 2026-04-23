@@ -81,3 +81,12 @@ export function useTheme(): ThemeContextValue {
   }
   return ctx
 }
+
+/**
+ * Non-throwing variant for consumers (e.g. Storybook-mounted surfaces) that
+ * may render outside a {@link ThemeProvider}. Returns `null` when no provider
+ * is mounted; callers decide on the fallback.
+ */
+export function useOptionalTheme(): ThemeContextValue | null {
+  return useContext(ThemeContext)
+}

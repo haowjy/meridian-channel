@@ -22,7 +22,7 @@ import {
   WorkItemGroupHeaderSkeleton,
   type StatusFilterValue,
 } from '@/components/molecules'
-import type { SpawnStatus, SpawnSummary } from '@/types/spawn'
+import { parseStatus, type SpawnStatus, type SpawnSummary } from '@/types/spawn'
 import { cn } from '@/lib/utils'
 import { useNavigation } from '@/shell/NavigationContext'
 
@@ -65,19 +65,6 @@ export interface SessionsPageDataOverride {
 // Adapters
 // ---------------------------------------------------------------------------
 
-const KNOWN_STATUSES: ReadonlySet<SpawnStatus> = new Set<SpawnStatus>([
-  'running',
-  'queued',
-  'succeeded',
-  'failed',
-  'cancelled',
-  'finalizing',
-])
-
-function coerceStatus(raw: string): SpawnStatus {
-  return (KNOWN_STATUSES.has(raw as SpawnStatus) ? raw : 'queued') as SpawnStatus
-}
-
 function nullifyEmpty(s: string | null | undefined): string | null {
   if (s === null || s === undefined) return null
   return s.trim() === '' ? null : s
@@ -92,7 +79,7 @@ function toSummary(p: SpawnProjection): SpawnSummary {
   const started = p.started_at ?? p.created_at ?? new Date(0).toISOString()
   return {
     spawn_id: p.spawn_id,
-    status: coerceStatus(p.status),
+    status: parseStatus(p.status),
     agent: nullifyEmpty(p.agent),
     model: nullifyEmpty(p.model),
     harness: p.harness,

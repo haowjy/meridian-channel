@@ -14,10 +14,11 @@
 
 import { useMemo } from "react"
 
-import { ElapsedTime, MonoId, StatusDot, type SpawnStatus } from "@/components/atoms"
+import { ElapsedTime, MonoId, StatusDot } from "@/components/atoms"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
+import { parseStatus } from "@/types/spawn"
 
 import { useChat } from "./ChatContext"
 import { useSessions } from "@/features/sessions/hooks"
@@ -44,23 +45,6 @@ export interface SessionListDataOverride {
   activeColumns?: readonly string[]
   focusedColumn?: string | null
   onSelect?: (spawnId: string) => void
-}
-
-// ---------------------------------------------------------------------------
-// Status coercion (mirrors SessionsPage — projection is loosely typed)
-// ---------------------------------------------------------------------------
-
-const KNOWN_STATUSES: ReadonlySet<SpawnStatus> = new Set<SpawnStatus>([
-  "running",
-  "queued",
-  "succeeded",
-  "failed",
-  "cancelled",
-  "finalizing",
-])
-
-function coerceStatus(raw: string): SpawnStatus {
-  return (KNOWN_STATUSES.has(raw as SpawnStatus) ? raw : "queued") as SpawnStatus
 }
 
 function startedDate(p: SpawnProjection): Date {
@@ -168,7 +152,7 @@ interface SessionListRowProps {
 }
 
 function SessionListRow({ spawn, isActive, isFocused, onSelect }: SessionListRowProps) {
-  const status = coerceStatus(spawn.status)
+  const status = parseStatus(spawn.status)
   const agent = spawn.agent?.trim() || "—"
 
   return (

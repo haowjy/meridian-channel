@@ -1,12 +1,7 @@
 import { cn } from "@/lib/utils"
+import type { SpawnStatus } from "@/types/spawn"
 
-export type SpawnStatus = 
-  | "running" 
-  | "queued" 
-  | "succeeded" 
-  | "failed" 
-  | "cancelled" 
-  | "finalizing"
+export type { SpawnStatus }
 
 interface StatusDotProps {
   status: SpawnStatus

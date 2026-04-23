@@ -5,14 +5,15 @@
  * Request/response shapes mirror the backend's `api_models.py`.
  */
 
+import type { SpawnStatus } from '@/types/spawn'
+
 // ---------------------------------------------------------------------------
 // Response types
 // ---------------------------------------------------------------------------
 
 export interface SpawnProjection {
   spawn_id: string
-  /** 'running' | 'queued' | 'succeeded' | 'failed' | 'cancelled' | 'finalizing' */
-  status: string
+  status: SpawnStatus
   harness: string
   model: string
   agent: string
@@ -103,10 +104,12 @@ function buildQuery(params: Record<string, string | number | undefined | null>):
   return parts.length === 0 ? '' : `?${parts.join('&')}`
 }
 
-async function request<T>(
+async function request(path: string, init?: RequestInit): Promise<void>
+async function request<T>(path: string, init?: RequestInit): Promise<T>
+async function request<T = void>(
   path: string,
   init?: RequestInit,
-): Promise<T> {
+): Promise<T | void> {
   const response = await fetch(path, {
     ...init,
     headers: {
@@ -127,9 +130,9 @@ async function request<T>(
   }
 
   // 204 / empty body
-  if (response.status === 204) return undefined as T
+  if (response.status === 204) return undefined
   const text = await response.text()
-  if (!text) return undefined as T
+  if (!text) return undefined
   return JSON.parse(text) as T
 }
 
@@ -163,7 +166,7 @@ export function createSpawn(req: CreateSpawnRequest): Promise<CreateSpawnRespons
 }
 
 export async function cancelSpawn(spawnId: string): Promise<void> {
-  await request<void>(`/api/spawns/${encodeURIComponent(spawnId)}/cancel`, {
+  await request(`/api/spawns/${encodeURIComponent(spawnId)}/cancel`, {
     method: 'POST',
   })
 }
@@ -176,7 +179,7 @@ export function forkSpawn(spawnId: string): Promise<{ spawn_id: string }> {
 }
 
 export async function archiveSpawn(spawnId: string): Promise<void> {
-  await request<void>(`/api/spawns/${encodeURIComponent(spawnId)}/archive`, {
+  await request(`/api/spawns/${encodeURIComponent(spawnId)}/archive`, {
     method: 'POST',
   })
 }
