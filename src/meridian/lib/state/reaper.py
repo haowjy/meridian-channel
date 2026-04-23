@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import signal
 import time
@@ -20,8 +19,8 @@ from meridian.lib.core.spawn_lifecycle import (
     is_active_spawn_status,
     resolve_reconciled_terminal_state,
 )
-from meridian.lib.launch.constants import PRIMARY_META_FILENAME
 from meridian.lib.state.liveness import is_process_alive
+from meridian.lib.state.primary_meta import PrimaryMetadata, read_primary_metadata
 from meridian.lib.state.spawn_store import SpawnRecord
 
 logger = structlog.get_logger(__name__)
@@ -29,15 +28,6 @@ logger = structlog.get_logger(__name__)
 _STARTUP_GRACE_SECS = 15
 _HEARTBEAT_WINDOW_SECS = 120
 _ACTIVITY_ARTIFACTS: tuple[str, ...] = ("heartbeat", "output.jsonl", "stderr.log", "report.md")
-
-
-@dataclass(frozen=True)
-class PrimaryMetadata:
-    managed_backend: bool
-    launcher_pid: int | None
-    backend_pid: int | None
-    tui_pid: int | None
-    activity: str | None
 
 
 @dataclass(frozen=True)
@@ -97,45 +87,6 @@ def _read_completion_report(runtime_root: Path, spawn_id: str) -> str | None:
         return None
 
 
-def _coerce_positive_int(value: object) -> int | None:
-    if not isinstance(value, int):
-        return None
-    if value <= 0:
-        return None
-    return value
-
-
-def _normalize_primary_activity(value: object) -> str | None:
-    if not isinstance(value, str):
-        return None
-    normalized = value.strip().lower()
-    if not normalized:
-        return None
-    return normalized
-
-
-def read_primary_metadata(runtime_root: Path, spawn_id: str) -> PrimaryMetadata | None:
-    """Read managed-primary metadata sidecar for a spawn."""
-    metadata_path = runtime_root / "spawns" / spawn_id / PRIMARY_META_FILENAME
-    if not metadata_path.is_file():
-        return None
-    try:
-        raw = json.loads(metadata_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(raw, dict):
-        return None
-    if raw.get("managed_backend") is not True:
-        return None
-    return PrimaryMetadata(
-        managed_backend=True,
-        launcher_pid=_coerce_positive_int(raw.get("launcher_pid")),
-        backend_pid=_coerce_positive_int(raw.get("backend_pid")),
-        tui_pid=_coerce_positive_int(raw.get("tui_pid")),
-        activity=_normalize_primary_activity(raw.get("activity")),
-    )
-
-
 def _terminate_pid(pid: int | None) -> bool:
     if pid is None or pid <= 0 or pid == os.getpid():
         return False
@@ -149,6 +100,7 @@ def _terminate_pid(pid: int | None) -> bool:
 def terminate_managed_primary_processes(
     primary_metadata: PrimaryMetadata | None,
     *,
+    started_epoch: float | None = None,
     include_launcher: bool,
     include_runtime_children: bool = True,
 ) -> tuple[int, ...]:
@@ -174,6 +126,8 @@ def terminate_managed_primary_processes(
         if candidate is None or candidate in seen:
             continue
         seen.add(candidate)
+        if not is_process_alive(candidate, created_after_epoch=started_epoch):
+            continue
         if _terminate_pid(candidate):
             signaled.append(candidate)
     return tuple(signaled)
@@ -393,6 +347,7 @@ def reconcile_active_spawn(runtime_root: Path, record: SpawnRecord) -> SpawnReco
     if decision.terminate_orphan_primary_children:
         terminate_managed_primary_processes(
             snapshot.primary_metadata,
+            started_epoch=snapshot.started_epoch,
             include_launcher=False,
         )
     return _finalize_failed(runtime_root, record, decision.error, snapshot, now)

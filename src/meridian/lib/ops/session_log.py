@@ -18,7 +18,7 @@ from meridian.lib.core.util import FormatContext
 from meridian.lib.harness.registry import get_default_harness_registry
 from meridian.lib.harness.session_detection import infer_harness_from_untracked_session_ref
 from meridian.lib.harness.transcript import TranscriptMessage, text_from_value
-from meridian.lib.launch.constants import OUTPUT_FILENAME, PRIMARY_META_FILENAME
+from meridian.lib.launch.constants import OUTPUT_FILENAME
 from meridian.lib.ops.reference import resolve_session_reference
 from meridian.lib.ops.runtime import (
     async_from_sync,
@@ -26,6 +26,10 @@ from meridian.lib.ops.runtime import (
 )
 from meridian.lib.ops.spawn.query import read_spawn_row
 from meridian.lib.state import session_store, spawn_store
+from meridian.lib.state.primary_meta import (
+    is_managed_primary,
+    read_primary_harness_session_id,
+)
 
 _CODEX_FILENAME_RE = re.compile(
     r"^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-(?P<session_id>[0-9a-fA-F-]{36})\.jsonl$"
@@ -534,39 +538,6 @@ def _spawn_output_path(runtime_root: Path, spawn_id: str, *, live_first: bool) -
     return None
 
 
-def _read_primary_meta(runtime_root: Path, spawn_id: str) -> dict[str, object] | None:
-    meta_path = runtime_root / "spawns" / spawn_id / PRIMARY_META_FILENAME
-    if not meta_path.is_file():
-        return None
-    try:
-        payload_obj = json.loads(meta_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(payload_obj, dict):
-        return None
-    return cast("dict[str, object]", payload_obj)
-
-
-def _is_managed_backend_primary(runtime_root: Path, spawn_id: str) -> bool:
-    primary_meta = _read_primary_meta(runtime_root, spawn_id)
-    if primary_meta is None:
-        return False
-    return primary_meta.get("managed_backend") is True
-
-
-def _primary_meta_harness_session_id(runtime_root: Path, spawn_id: str) -> str | None:
-    primary_meta = _read_primary_meta(runtime_root, spawn_id)
-    if primary_meta is None:
-        return None
-    raw_session_id = primary_meta.get("harness_session_id")
-    if not isinstance(raw_session_id, str):
-        return None
-    normalized_session_id = raw_session_id.strip()
-    if not normalized_session_id:
-        return None
-    return normalized_session_id
-
-
 def _managed_primary_fallback_source(spawn_id: str, harness: str | None) -> str:
     source = f"spawn {spawn_id} output"
     normalized_harness = (harness or "").strip().lower()
@@ -633,7 +604,7 @@ def _resolve_from_chat_id(
             normalized_session_id = primary_spawn_session_id
             should_persist_primary_session_id = True
         else:
-            primary_meta_session_id = _primary_meta_harness_session_id(
+            primary_meta_session_id = read_primary_harness_session_id(
                 runtime_root, primary_spawn.id
             )
             if primary_meta_session_id is not None:
@@ -705,9 +676,7 @@ def _resolve_from_spawn_id(
         raise ValueError(f"Spawn '{spawn_id}' not found")
 
     is_primary_spawn = row.kind == "primary"
-    is_managed_backend_primary = is_primary_spawn and _is_managed_backend_primary(
-        runtime_root, spawn_id
-    )
+    is_managed_backend_primary = is_primary_spawn and is_managed_primary(runtime_root, spawn_id)
 
     if is_managed_backend_primary and is_active_spawn_status(row.status) and (
         output_target := _target_from_spawn_output(
@@ -738,7 +707,7 @@ def _resolve_from_spawn_id(
         session_id = (by_chat or "").strip()
 
     if not session_id and is_primary_spawn:
-        primary_meta_session_id = _primary_meta_harness_session_id(runtime_root, spawn_id)
+        primary_meta_session_id = read_primary_harness_session_id(runtime_root, spawn_id)
         if primary_meta_session_id is not None:
             session_id = primary_meta_session_id
             should_persist_primary_session_id = True

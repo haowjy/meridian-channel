@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from meridian.lib.platform import fcntl, termios
+from meridian.lib.state.primary_meta import ActivityState, PrimaryMetadata
 from meridian.lib.state.session_store import (
     get_session_active_work_id,
     start_session,
@@ -18,12 +19,10 @@ from meridian.lib.state.session_store import (
 from .ports import ChildStartedHook, LaunchedProcess, ProcessLauncher
 from .primary_attach import (
     MAX_PORT_RETRY_ATTEMPTS,
-    ActivityState,
     PortBindError,
     PrimaryAttachError,
     PrimaryAttachLauncher,
     PrimaryAttachOutcome,
-    PrimaryMetadata,
     TuiCommandBuilder,
 )
 from .pty_launcher import can_use_pty

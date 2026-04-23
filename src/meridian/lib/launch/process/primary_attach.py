@@ -17,21 +17,17 @@ from dataclasses import dataclass, field, replace
 from io import BufferedWriter
 from pathlib import Path
 from threading import Lock
-from typing import Any, Literal, cast
+from typing import Any, cast
 from urllib.parse import urlparse
 
 from meridian.lib.core.types import SpawnId
 from meridian.lib.harness.connections.base import ConnectionConfig, HarnessConnection, HarnessEvent
-from meridian.lib.launch.constants import (
-    OUTPUT_FILENAME,
-    PRIMARY_META_FILENAME,
-)
+from meridian.lib.launch.constants import OUTPUT_FILENAME
 from meridian.lib.launch.launch_types import ResolvedLaunchSpec
-from meridian.lib.state.atomic import atomic_write_text
+from meridian.lib.state.primary_meta import ActivityState, PrimaryMetadata, write_primary_metadata
 
 from .ports import ProcessLauncher
 
-ActivityState = Literal["starting", "idle", "turn_active", "finalizing"]
 TuiCommandBuilder = Callable[[str], tuple[str, ...]]
 MAX_PORT_RETRY_ATTEMPTS = 3
 
@@ -45,8 +41,8 @@ class PortBindError(Exception):
 
 
 @dataclass
-class PrimaryMetadata:
-    """Metadata sidecar for managed-backend primaries."""
+class _LauncherMetadata:
+    """Mutable working copy for launcher writes."""
 
     managed_backend: bool = True
     launcher_pid: int = field(default_factory=os.getpid)
@@ -55,6 +51,17 @@ class PrimaryMetadata:
     backend_port: int | None = None
     activity: ActivityState = "starting"
     harness_session_id: str | None = None
+
+    def to_primary_metadata(self) -> PrimaryMetadata:
+        return PrimaryMetadata(
+            managed_backend=self.managed_backend,
+            launcher_pid=self.launcher_pid,
+            backend_pid=self.backend_pid,
+            tui_pid=self.tui_pid,
+            backend_port=self.backend_port,
+            activity=self.activity,
+            harness_session_id=self.harness_session_id,
+        )
 
 
 @dataclass(frozen=True)
@@ -85,7 +92,7 @@ class PrimaryAttachLauncher:
         self._tui_command_builder = tui_command_builder
         self._process_launcher = process_launcher
         self._on_running = on_running
-        self._metadata = PrimaryMetadata()
+        self._metadata = _LauncherMetadata()
         self._metadata_lock = Lock()
         self._output_handle: BufferedWriter | None = None
         self._event_writer_task: asyncio.Task[None] | None = None
@@ -206,19 +213,8 @@ class PrimaryAttachLauncher:
         """Atomic write primary_meta.json to spawn_dir."""
 
         with self._metadata_lock:
-            payload = {
-                "managed_backend": self._metadata.managed_backend,
-                "launcher_pid": self._metadata.launcher_pid,
-                "backend_pid": self._metadata.backend_pid,
-                "tui_pid": self._metadata.tui_pid,
-                "backend_port": self._metadata.backend_port,
-                "activity": self._metadata.activity,
-                "harness_session_id": self._metadata.harness_session_id,
-            }
-        atomic_write_text(
-            self._spawn_dir / PRIMARY_META_FILENAME,
-            json.dumps(payload, separators=(",", ":")) + "\n",
-        )
+            metadata = self._metadata.to_primary_metadata()
+        write_primary_metadata(self._spawn_dir, metadata)
 
     async def _run_event_writer(self) -> None:
         """Stream connection events to output.jsonl."""
