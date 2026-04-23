@@ -9,10 +9,8 @@
  * instance to the Composer's transport-neutral interface.
  *
  * Spawn identity (agent / model / harness / status) is fetched lazily via
- * `fetchSpawns` and filtered client-side by id. The list endpoint is the
- * only source that returns full projections; the per-spawn endpoint lacks
- * agent/model metadata. Stories supply `detailsOverride` to skip the
- * fetch entirely.
+ * the `/api/spawns/{id}/details` endpoint which returns the full projection.
+ * Stories supply `detailsOverride` to skip the fetch entirely.
  *
  * Focus feedback is deliberately restrained: a 2px accent bar slides in
  * along the top edge of the focused column. Unfocused columns fade
@@ -26,7 +24,7 @@ import { Composer } from "@/features/threads/composer/Composer"
 import type { StreamController } from "@/features/threads/transport-types"
 import { useThreadStreaming } from "@/hooks/use-thread-streaming"
 import {
-  fetchSpawns,
+  fetchSpawn,
   type SpawnProjection,
 } from "@/features/sessions/lib/api"
 import { parseStatus, type SpawnStatus } from "@/types/spawn"
@@ -88,11 +86,10 @@ export function ThreadColumn({
     let cancelled = false
     setFetchedDetails(null)
 
-    fetchSpawns({ limit: 200 })
-      .then((envelope) => {
+    fetchSpawn(spawnId)
+      .then((projection) => {
         if (cancelled) return
-        const hit = envelope.items.find((item) => item.spawn_id === spawnId)
-        if (hit) setFetchedDetails(projectionToDetails(hit))
+        setFetchedDetails(projectionToDetails(projection))
       })
       .catch(() => {
         // Silent — header degrades gracefully when details unknown.

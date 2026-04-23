@@ -567,7 +567,7 @@ def register_spawn_query_routes(
         agent: str | None = Query(default=None, description="Filter by agent"),
         harness: str | None = Query(default=None, description="Filter by harness"),
         include_archived: bool = Query(default=False, description="Include archived spawns"),
-        limit: int = Query(default=20, ge=1, le=100, description="Page size"),
+        limit: int = Query(default=20, ge=1, le=200, description="Page size"),
         cursor: str | None = Query(default=None, description="Pagination cursor"),
     ) -> CursorEnvelope[SpawnProjection]:
         """List spawns with filtering and cursor-based pagination."""
@@ -716,11 +716,20 @@ def register_spawn_query_routes(
 
         return events
 
+    async def get_spawn_details(spawn_id: str) -> SpawnProjection:
+        """Get a single spawn's full projection (identity + timestamps)."""
+        typed_spawn_id = validate_spawn_id(spawn_id, http_exception)
+        record = spawn_store.get_spawn(runtime_root, typed_spawn_id)
+        if record is None:
+            raise http_exception(status_code=404, detail="spawn not found")
+        return _spawn_to_projection(record)
+
     # Register routes with query params
     # Note: The paginated list replaces the simple list from register_spawn_routes
     # We register with a different internal name but same path
     typed_app.get("/api/spawns/list")(list_spawns_paginated)
     typed_app.get("/api/spawns/stats")(get_spawn_stats)
+    typed_app.get("/api/spawns/{spawn_id}/details")(get_spawn_details)
     typed_app.get("/api/spawns/{spawn_id}/events")(get_spawn_events)
 
 

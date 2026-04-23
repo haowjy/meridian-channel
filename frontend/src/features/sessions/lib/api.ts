@@ -153,6 +153,10 @@ export function fetchSpawns(
   return request<CursorEnvelope<SpawnProjection>>(`/api/spawns/list${query}`)
 }
 
+export function fetchSpawn(spawnId: string): Promise<SpawnProjection> {
+  return request<SpawnProjection>(`/api/spawns/${encodeURIComponent(spawnId)}/details`)
+}
+
 export function fetchSpawnStats(work_id?: string): Promise<SpawnStats> {
   const query = buildQuery({ work_id })
   return request<SpawnStats>(`/api/spawns/stats${query}`)
