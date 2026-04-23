@@ -46,7 +46,7 @@ export function SpawnActivityView({ activity }: SpawnActivityViewProps) {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
-  }, [activity])
+  }, [activity.items.length, activity.pendingText])
 
   return (
     <ScrollArea className="h-full rounded-lg border border-border bg-card">

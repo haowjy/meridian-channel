@@ -22,7 +22,7 @@
  * stories never touch the network.
  */
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { ChatCircle, List, SidebarSimple } from "@phosphor-icons/react"
 
 import { Button } from "@/components/ui/button"
@@ -114,18 +114,21 @@ function ChatPageContent({
 
   // Open the initial spawn — and any storybook-seeded columns — exactly once.
   // `openSpawn` is stable (useCallback with empty deps inside ChatProvider),
-  // but we guard with an effect-scoped "done" flag so a parent re-render
-  // can't accidentally reopen them.
+  // but we guard with a ref flag so a parent re-render can't reopen them,
+  // even if the seed props change after mount (they're launch hints, not
+  // reactive bindings).
+  const didSeed = useRef(false)
+
   useEffect(() => {
+    if (didSeed.current) return
+    didSeed.current = true
+
     const seeds: string[] = []
     if (initialColumns) seeds.push(...initialColumns)
     if (initialSpawnId && !seeds.includes(initialSpawnId)) seeds.push(initialSpawnId)
     for (const id of seeds) openSpawn(id)
     if (initialFocus) focusColumn(initialFocus)
-    // Intentional: run once on mount. initialSpawnId / initialColumns are a
-    // launch hint, not a reactive binding.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [initialColumns, initialSpawnId, initialFocus, openSpawn, focusColumn])
 
   // Cross-mode navigation handoff: AppShell stashes a spawn id into
   // NavigationContext when navigateToChat fires. Consume it here (on mount

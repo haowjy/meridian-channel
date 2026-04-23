@@ -143,9 +143,14 @@ export function NewSessionDialog({
     if (harness !== "claude") parts.push(`--harness ${harness}`)
     const body = prompt.trim()
     parts.push(`-p "${shellEscape(body)}"`)
-    await navigator.clipboard.writeText(parts.join(" "))
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
+    try {
+      await navigator.clipboard.writeText(parts.join(" "))
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // Clipboard API unavailable — fail silently (button stays in un-copied state)
+      console.warn("[shell] clipboard.writeText failed — clipboard API may be unavailable")
+    }
   }, [agent, model, harness, workItem, prompt])
 
   const handleSubmit = useCallback(() => {

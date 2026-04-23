@@ -36,6 +36,8 @@ export function StatusDot({ status, size = "md", className }: StatusDotProps) {
         viewBox={`0 0 ${s} ${s}`}
         className={baseClasses}
         style={{ animation: "pulse 1s ease-in-out infinite" }}
+        role="img"
+        aria-label={status}
       >
         <circle
           cx={center}
@@ -55,6 +57,8 @@ export function StatusDot({ status, size = "md", className }: StatusDotProps) {
         height={s}
         viewBox={`0 0 ${s} ${s}`}
         className={baseClasses}
+        role="img"
+        aria-label={status}
       >
         <defs>
           <clipPath id={`half-clip-${s}`}>
@@ -89,6 +93,8 @@ export function StatusDot({ status, size = "md", className }: StatusDotProps) {
         height={s}
         viewBox={`0 0 ${s} ${s}`}
         className={baseClasses}
+        role="img"
+        aria-label={status}
       >
         <circle
           cx={center}
@@ -117,6 +123,8 @@ export function StatusDot({ status, size = "md", className }: StatusDotProps) {
         height={s}
         viewBox={`0 0 ${s} ${s}`}
         className={baseClasses}
+        role="img"
+        aria-label={status}
       >
         <circle
           cx={center}
@@ -154,6 +162,8 @@ export function StatusDot({ status, size = "md", className }: StatusDotProps) {
         height={s}
         viewBox={`0 0 ${s} ${s}`}
         className={baseClasses}
+        role="img"
+        aria-label={status}
       >
         <circle
           cx={center}
@@ -176,6 +186,8 @@ export function StatusDot({ status, size = "md", className }: StatusDotProps) {
         viewBox={`0 0 ${s} ${s}`}
         className={baseClasses}
         style={{ animation: "pulse 2s ease-in-out infinite" }}
+        role="img"
+        aria-label={status}
       >
         <circle
           cx={center}

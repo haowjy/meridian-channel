@@ -50,6 +50,7 @@ export function CommandPalette({
   onNewSession,
 }: CommandPaletteProps) {
   const registry = useRegistry()
+  const registryVersion = registry.getSnapshot()
   const { resolvedTheme, setTheme } = useTheme()
 
   const railIconById = useMemo(() => {
@@ -58,7 +59,8 @@ export function CommandPalette({
       map.set(item.id, item.icon)
     }
     return map
-  }, [registry, registry.getSnapshot()])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [registryVersion])
 
   const grouped = useMemo(() => {
     const registryCommands = registry.getCommands()
@@ -115,7 +117,8 @@ export function CommandPalette({
       category: cat,
       items: byCategory.get(cat) ?? [],
     }))
-  }, [registry, registry.getSnapshot(), railIconById, onNewSession, resolvedTheme, setTheme])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [registryVersion, railIconById, onNewSession, resolvedTheme, setTheme])
 
   const handleSelect = (cmd: ResolvedCommand) => {
     if (cmd.id.startsWith(SWITCH_PREFIX)) {
