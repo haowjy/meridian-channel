@@ -38,13 +38,10 @@ Meridian splits state across two roots: repo-tracked files that belong in versio
   workspace.local.toml       # local-only, gitignored via .git/info/exclude
   .meridian/
     .gitignore               # committed — controls what else is tracked
-    models.toml              # committed — model catalog overrides
-    fs/                      # committed — shared filesystem mirror
+    id                       # committed — project UUID (stable across renames)
+    kb/                      # committed — knowledge base directory
     work/                    # committed — active work-item scratch dirs
-    work-archive/            # committed — scratch for completed work items
-    work-items/              # gitignored — mutable JSON per work item (not committed)
-    id                       # gitignored — project UUID (created on first write)
-    .migrations.json         # gitignored — migration state
+    archive/work/            # committed — scratch for completed work items
 ```
 
 Read-only commands (`meridian spawn list`, `meridian config show`, etc.) do not create `.meridian/id` or any runtime state. `meridian doctor` skips bootstrap at startup but calls `ensure_runtime_state_bootstrap_sync` internally, so it **does** create the UUID and runtime dir when run.
@@ -268,52 +265,18 @@ path   = "knowledge"
 
 When `source = "git"`, Meridian clones the remote into a local cache and resolves paths relative to the clone root. Use `meridian context` to inspect the resolved paths.
 
-## Model Catalog Overrides
+## Model Catalog
 
-Customize aliases, harness routing, and default list visibility in `.meridian/models.toml`:
+`meridian models list` shows the current model catalog. Use `--all` to include hidden/superseded models, or `--show-superseded` to see older lineage variants.
 
-```toml
-[models]
-fast = "gpt-5.4"                      # pinned alias shorthand
+Builtin aliases (`opus`, `sonnet`, `haiku`, `codex`, `gpt`, `gemini`) auto-resolve to the latest model per family. The default list filters aggressively:
 
-[models.coder]                        # auto-resolve: picks latest match
-provider = "openai"
-include = "codex"
-exclude = ["-mini", "-spark", "-max"]
-description = "Optimized for code editing."
+- Date-suffixed variants hidden when base model exists
+- Superseded models hidden when a newer lineage successor exists
+- Models older than ~120 days hidden by default
+- High-cost models (≥$10/M input tokens) hidden by default
 
-[models."gpt-5.4-mini"]              # key is model ID when no model_id field
-description = "Quick and cheap for simple tasks."
-pinned = true                         # always show regardless of filters
-
-[harness_patterns]
-codex = ["gpt-*", "o*", "codex*"]
-opencode = ["gemini*", "opencode-*"]
-
-[model_visibility]
-exclude = ["gemini-live-*", "*-latest"]
-hide_date_variants = true
-hide_superseded = true
-max_age_days = 120
-```
-
-Builtin aliases (`opus`, `sonnet`, `haiku`, `codex`, `gpt`, `gemini`) auto-resolve to the latest model per family from the models.dev catalog. Pin an alias to a specific version by setting it as a string value under `[models]`. Add `description` to any model entry — descriptions show as sub-lines in `meridian models list`. Set `pinned = true` to keep a model visible regardless of filters.
-
-### Visibility Defaults
-
-The default model list filters aggressively to show only current, relevant models:
-
-| Setting | Default | Effect |
-|---|---|---|
-| `exclude` | `*-latest`, `*-deep-research`, `gemini-live-*`, `o1*`, `o3*`, `o4*` | Hide by glob pattern |
-| `hide_date_variants` | `true` | Hide date-suffixed variants when base exists |
-| `hide_superseded` | `true` | Hide older models when a newer model in the same lineage exists |
-| `max_age_days` | `120` | Hide models older than 120 days |
-| `max_input_cost` | `10.0` | Hide models costing ≥$10/M input tokens |
-
-Aliased and pinned models always pass through all visibility filters. Use `--show-superseded` or `--all` to see hidden models.
-
-Use `meridian models config init/show/get/set/reset` to manage this file from the CLI.
+Use `meridian models refresh` to force a cache refresh from the models.dev catalog.
 
 ## Environment Variables
 

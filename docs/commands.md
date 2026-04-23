@@ -14,6 +14,7 @@ Full command surface. Use `--help` on any command for flags and options.
 | `meridian spawn --continue ID -p "more"` | Resume a prior spawn with new input |
 | `meridian spawn --from REF -p "next"` | Start a new spawn with prior spawn or chat/session context |
 | `meridian spawn cancel ID` | Cancel a running spawn |
+| `meridian spawn inject ID --message "text"` | Inject a message into a running streaming spawn |
 | `meridian spawn stats` | Aggregate spawn statistics |
 | `meridian spawn children ID` | List direct child spawns |
 | `meridian spawn files ID` | List files changed by a spawn |
@@ -36,7 +37,8 @@ Common `spawn` flags:
 
 | Command | Description |
 | ------- | ----------- |
-| `meridian report search "query"` | Search across all spawn reports |
+| `meridian spawn report show ID` | Show one spawn's report |
+| `meridian spawn report search "query"` | Search across all spawn reports |
 | `meridian session log REF` | Read conversation/progress logs for a chat, spawn, or harness session |
 | `meridian session search "query" REF` | Search session transcripts |
 
@@ -45,8 +47,11 @@ Common `spawn` flags:
 | Command | Description |
 | ------- | ----------- |
 | `meridian work` | Dashboard — active work items and spawns |
-| `meridian work create SLUG` | Create a new work item |
+| `meridian work start LABEL` | Create a work item if missing, or switch to it |
+| `meridian work list` | List all work items |
+| `meridian work show SLUG` | Show one work item, its directory, and attached spawns |
 | `meridian work switch SLUG` | Set active work item |
+| `meridian work done SLUG` | Mark a work item done and archive its scratch directory |
 | `meridian work sessions SLUG` | List sessions attached to a work item |
 
 ## Hooks
@@ -93,6 +98,33 @@ path   = "knowledge"
 
 See [configuration.md](configuration.md#context) for the full schema.
 
+## Extensions
+
+| Command | Description |
+| ------- | ----------- |
+| `meridian ext list` | List registered extensions grouped by namespace |
+| `meridian ext show EXT_ID` | Show commands in one extension |
+| `meridian ext commands` | List all extension commands; `--json` for stable agent output |
+| `meridian ext run FQID` | Invoke an extension command via app server |
+
+`FQID` is `extension_id.command_id`, e.g. `meridian.sessions.getSpawnStats`.
+
+`ext list`, `ext show`, and `ext commands` work with no app server running. `ext run` runs in-process for commands with `requires_app_server: false`; commands with `requires_app_server: true` need a running app server (`meridian app`).
+
+Common `ext run` flags:
+
+| Flag | Description |
+| ---- | ----------- |
+| `--args JSON` | JSON object of args for the command (default `{}`) |
+| `--work-id ID` | Work item context |
+| `--spawn-id ID` | Spawn context |
+| `--request-id ID` | Tracing request ID |
+| `--json` | Output as JSON (alias for `--format json`) |
+
+Exit codes for `ext run`: `2` = no server, `3` = stale endpoint, `4` = wrong project, `5` = unreachable, `7` = invalid `--args`.
+
+See [extensions.md](extensions.md) for HTTP API and MCP tool details.
+
 ## Configuration & Diagnostics
 
 | Command | Description |
@@ -104,10 +136,10 @@ See [configuration.md](configuration.md#context) for the full schema.
 | `meridian config get KEY` | Read a config value |
 | `meridian config reset KEY` | Reset a config value to default |
 | `meridian models list` | Inspect the model catalog |
-| `meridian models show MODEL` | Show details for a specific model |
-| `meridian models config show` | Show model catalog overrides |
+| `meridian models refresh` | Force-refresh the models.dev cache |
 | `meridian doctor` | Run diagnostics and reconcile orphan state |
 | `meridian serve` | Start the MCP server |
+| `meridian app` | Start the app web UI server (HTTP extension API endpoint) |
 
 ## Package Management (mars)
 

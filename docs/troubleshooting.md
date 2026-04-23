@@ -20,17 +20,22 @@ Then confirm with `meridian doctor`.
 Harness routing is determined by model prefix patterns. Check what's resolved:
 
 ```bash
-meridian models list           # see available models and their harnesses
-meridian models show MODEL     # see routing for a specific model
-meridian config show           # see harness defaults and overrides
+meridian models list      # see available models and their harnesses
+meridian config show      # see harness defaults and overrides
 ```
 
-Override harness patterns in `.meridian/models.toml`:
+To force a specific harness for a spawn, use `--harness`:
+
+```bash
+meridian spawn -m MODEL --harness claude -p "task"
+```
+
+Set a default harness for a model family in `meridian.toml`:
 
 ```toml
-[harness_patterns]
-codex = ["gpt-*", "o*", "codex*"]
-opencode = ["gemini*", "opencode-*"]
+[harness]
+claude = "claude-opus-4-6"
+codex  = "gpt-5.3-codex"
 ```
 
 ## Spawn disconnected from earlier work
@@ -130,13 +135,15 @@ If multi-repo context is required, use Claude Code or OpenCode harnesses instead
 
 ## Spawn artifacts
 
-Each spawn writes to `.meridian/spawns/<spawn_id>/`:
+Each spawn writes artifacts to the user-level runtime directory, under `~/.meridian/projects/<uuid>/spawns/<spawn_id>/` on POSIX (or `%LOCALAPPDATA%\meridian\projects\<uuid>\spawns\<spawn_id>\` on Windows). Use `meridian spawn show ID` to read them without navigating the path directly.
 
 | File | Contents |
 | ---- | -------- |
 | `report.md` | Agent's final report |
 | `output.jsonl` | Raw harness output (surfaced through `meridian session log <spawn_id>`) |
 | `stderr.log` | Harness stderr, warnings, errors |
-| `prompt.md` | Materialized prompt sent to the harness |
+| `system-prompt.md` | System instruction content as sent to the harness (Claude composed launches) |
+| `starting-prompt.md` | Full user-turn content (prompt + prepended context) |
+| `projection-manifest.json` | Harness ID and per-category channel routing decisions |
 
 If a spawn directory is missing entirely, the harness crashed before artifacts stabilized — relaunch.

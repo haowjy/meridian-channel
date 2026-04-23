@@ -2,6 +2,8 @@
 
 `meridian serve` exposes Meridian operations as FastMCP tools over stdio.
 
+The MCP server provides two tools: `extension_list_commands` and `extension_invoke`. These give agents full access to all registered extension commands across the extension system.
+
 ## Start Server
 
 ```bash
@@ -21,22 +23,64 @@ Minimal MCP config:
 }
 ```
 
-## Tool Set
+## Tools
 
-Current MCP tools:
+### `extension_list_commands`
 
-- `spawn_create`, `spawn_list`, `spawn_show`, `spawn_continue`, `spawn_cancel`, `spawn_wait`, `spawn_stats`
-- `report_show`, `report_search`
-- `models_list`, `models_show`
-- `skills_list`, `skills_show`
-- `hooks_resolve`
-- `doctor`
+No arguments. Returns all extension commands registered on the MCP surface with their `fqid`, `summary`, `surfaces`, and `requires_app_server`.
 
-Not MCP-exposed (CLI-only): `config_*`, `hooks_list`, `hooks_check`, `hooks_run`, `skills_search`, `sync_*`.
+```json
+{}
+```
+
+Response:
+
+```json
+{
+  "schema_version": 1,
+  "manifest_hash": "a3f9c2b1d8e74f06",
+  "commands": [
+    {
+      "fqid": "meridian.sessions.archiveSpawn",
+      "extension_id": "meridian.sessions",
+      "command_id": "archiveSpawn",
+      "summary": "Archive a completed spawn to hide it from default listings",
+      "surfaces": ["cli", "http", "mcp"],
+      "requires_app_server": true
+    }
+  ]
+}
+```
+
+The `manifest_hash` is a short hash of all command schemas and metadata. Cache the manifest and re-check the hash to detect when the registry has changed.
+
+### `extension_invoke`
+
+Invoke any registered extension command by its fully qualified ID.
+
+```json
+{
+  "fqid": "meridian.sessions.getSpawnStats",
+  "args": { "spawn_id": "p42" },
+  "request_id": "req-abc123",
+  "work_id": "auth-refactor",
+  "spawn_id": "p42"
+}
+```
+
+Only `fqid` is required. `args` defaults to `{}`. `request_id`, `work_id`, and `spawn_id` are optional context passed to the handler for tracing.
+
+**Success:** `{"status": "ok", "result": {...}}`
+
+**Error:** `{"status": "error", "code": "...", "message": "..."}`
+
+Common error codes: `not_found`, `surface_not_allowed`, `args_invalid`, `app_server_required`, `app_server_stale`, `app_server_unreachable`, `capability_missing`, `handler_error`.
+
+**Routing.** Commands with `requires_app_server: false` run in-process — no HTTP round-trip. Commands with `requires_app_server: true` locate the running app server and invoke over HTTP automatically.
 
 ## Spawn Statuses
 
-Spawn records returned by `spawn_show`, `spawn_list`, `spawn_wait`, and `spawn_stats` carry a `status` field with one of these values:
+Extension commands that return spawn records carry a `status` field with one of these values:
 
 | Status | Meaning |
 | ------ | ------- |
@@ -49,124 +93,4 @@ Spawn records returned by `spawn_show`, `spawn_list`, `spawn_wait`, and `spawn_s
 
 `queued`, `running`, and `finalizing` are active (in-flight). `succeeded`, `failed`, and `cancelled` are terminal. `finalizing` is typically brief but is visible in responses between harness exit and final persistence. Treat it the same as `running` when deciding whether to poll again.
 
-## Spawn Tools
-
-### `spawn_create`
-
-```json
-{
-  "prompt": "Refactor auth flow",
-  "model": "gpt-5.3-codex",
-  "files": ["docs/spec.md"],
-  "template_vars": ["TARGET=auth"],
-  "agent": "coder"
-}
-```
-
-### `spawn_show`
-
-```json
-{
-  "spawn_id": "p7",
-  "report": true
-}
-```
-
-`spawn_id` also accepts references: `@latest`, `@last-failed`, `@last-completed`.
-
-### `spawn_wait`
-
-```json
-{
-  "spawn_ids": ["p7", "p8"],
-  "timeout": 30,
-  "report": true
-}
-```
-
-Compatibility alias accepted: `spawn_id` (single string).
-
-## Report Tools
-
-### `report_show`
-
-```json
-{
-  "spawn_id": "@latest"
-}
-```
-
-### `report_search`
-
-```json
-{
-  "query": "guardrail",
-  "limit": 20
-}
-```
-
-Optional scope to one spawn:
-
-```json
-{
-  "query": "timeout",
-  "spawn_id": "@last-failed"
-}
-```
-
-## Models and Skills
-
-### `models_list`
-
-```json
-{}
-```
-
-### `models_show`
-
-```json
-{ "model": "codex" }
-```
-
-### `skills_list`
-
-```json
-{}
-```
-
-### `skills_show`
-
-```json
-{ "name": "scratchpad" }
-```
-
-## Hooks
-
-### `hooks_resolve`
-
-Returns the enabled hooks for a given event, in execution order.
-
-```json
-{
-  "event": "spawn.finalized"
-}
-```
-
-Optional — scope to a specific repo root:
-
-```json
-{
-  "event": "work.done",
-  "project_root": "/path/to/repo"
-}
-```
-
-`hooks_list`, `hooks_check`, and `hooks_run` are CLI-only (not MCP-exposed).
-
-## Diagnostics
-
-### `doctor`
-
-```json
-{}
-```
+See [extensions.md](extensions.md) for the full extension command reference including the HTTP API and CLI details.

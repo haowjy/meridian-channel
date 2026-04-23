@@ -50,7 +50,7 @@ Rules:
 
 ### State Root
 
-A repo-local coordination root under `.meridian/`. It contains shared filesystem state, spawn history, session history, and per-spawn artifacts for one Meridian-managed workspace.
+The `.meridian/` directory holds repo-tracked state (project identity, shared kb, work scratch dirs). High-churn runtime state — spawn history, session history, per-spawn artifacts — lives at the user level under `~/.meridian/projects/<uuid>/` (keyed by project UUID so the repo can be renamed without losing history).
 
 ### Spawn
 
@@ -80,11 +80,12 @@ src/meridian/
     output.py                  # Output sink implementations (text/JSON/agent)
     format_helpers.py          # Tabular display formatting
     config_cmd.py              # Config subcommands
-    report_cmd.py              # Report subcommands
-    skills_cmd.py              # Skills subcommands
     models_cmd.py              # Models subcommands
     doctor_cmd.py              # Doctor subcommand
-    sync_cmd.py                # Sync subcommand
+    ext_cmd.py                 # Extension command discovery/invocation
+    work_cmd.py                # Work item subcommands
+    hooks_commands.py          # Hooks subcommands
+    session_cmd.py             # Session log/search subcommands
 
   server/
     main.py                    # FastMCP server on stdio
@@ -243,16 +244,18 @@ All state lives in files. No database. Append-only JSONL for event streams and p
 ```mermaid
 graph TD
     Repo["<repo-root>/"] --> Config["meridian.toml"]
-    Repo --> Root[".meridian/"]
+    Repo --> Root[".meridian/  (repo-tracked)"]
     Root --> Models["models.toml"]
-    Root --> Cache["cache/"]
-    Root --> FS["fs/ (shared workspace)"]
-    Root --> WorkItems["work-items/ (work metadata)"]
-    Root --> Work["work/ (scratch/docs)"]
-    Root --> WorkArchive["work-archive/ (completed scratch/docs)"]
-    Root --> SpJ["spawns.jsonl"]
-    Root --> SeJ["sessions.jsonl"]
-    Root --> SpDir["spawns/"]
+    Root --> Id["id  (project UUID)"]
+    Root --> KB["kb/  (knowledge base)"]
+    Root --> Work["work/  (active work scratch)"]
+    Root --> Archive["archive/work/  (completed work scratch)"]
+
+    User["~/.meridian/projects/&lt;uuid&gt;/  (user-level runtime)"]
+    User --> SpJ["spawns.jsonl"]
+    User --> SeJ["sessions.jsonl"]
+    User --> Cache["cache/"]
+    User --> SpDir["spawns/"]
     SpDir --> Sp1["&lt;spawn-id&gt;/"]
     Sp1 --> Out["output.jsonl"]
     Sp1 --> Err["stderr.log"]
@@ -264,9 +267,10 @@ graph TD
     Sp1 --> RefJ["references.json (when refs exist)"]
 ```
 
-`work-items/` is the authoritative store for repo-scoped work coordination metadata.
-`work/` is optional scratch space for notes, plans, and design docs attached to a work item.
-`work-archive/` holds scratch/docs for completed work items.
+`work/` is scratch space for notes, plans, and design docs attached to a work item. Work item metadata is stored as `__status.json` inside each work directory.
+`archive/work/` holds scratch/docs for completed work items.
+
+Spawn history (`spawns.jsonl`) and session history (`sessions.jsonl`) live at the user level under `~/.meridian/projects/<uuid>/` — outside the repo so it isn't committed, and keyed by UUID so state survives repo renames/moves.
 
 ### Event Sourcing
 

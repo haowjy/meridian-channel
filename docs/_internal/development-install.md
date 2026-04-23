@@ -65,9 +65,9 @@ Useful targeted test patterns during development:
 
 ```bash
 uv run pytest tests/config -q
-uv run pytest tests/space tests/test_space -q
 uv run pytest tests/harness tests/prompt tests/exec -q
-uv run pytest tests/ops tests/test_state -q
+uv run pytest tests/ops tests/lib -q
+uv run pytest tests/launch -q
 ```
 
 ## 5) Validate CLI Behavior in the Repo Context

@@ -57,10 +57,9 @@ Not allowed:
 
 ## State Root Rule
 
-Spawns always read and write within the repo's `.meridian/` state root:
+State is split across two roots:
 
-- Spawn history lives in `.meridian/spawns.jsonl`.
-- Session history lives in `.meridian/sessions.jsonl`.
-- Shared handoff files live in `.meridian/fs/`.
+- **Repo-tracked (`.meridian/`)**: project identity (`id`), knowledge base (`kb/`), work scratch dirs (`work/`, `archive/work/`). Committed and shared across machines.
+- **User-level (`~/.meridian/projects/<uuid>/`)**: spawn history (`spawns.jsonl`), session history (`sessions.jsonl`), per-spawn artifact dirs (`spawns/<id>/`). Not committed. Keyed by project UUID so it survives repo renames.
 
 Use `--continue` or spawn references like `@latest` when you want repeatable routing to a prior spawn.

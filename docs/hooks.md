@@ -134,6 +134,6 @@ meridian hooks run git-autosync --event work.done
 
 ## MCP
 
-`hooks.resolve` is exposed as an MCP tool (`hooks_resolve`). `hooks list`, `hooks check`, and `hooks run` are CLI-only.
+Hook commands (`hooks list`, `hooks check`, `hooks run`) are CLI-only and not exposed via MCP. The MCP server exposes `extension_list_commands` and `extension_invoke` — hook state is accessible through extension commands if registered.
 
-See [mcp-tools.md](mcp-tools.md) for the full MCP tool listing.
+See [mcp-tools.md](mcp-tools.md) for the MCP tool reference.

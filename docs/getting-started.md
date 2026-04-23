@@ -29,7 +29,7 @@ cd your-repo
 meridian init
 ```
 
-This creates `.meridian/` with default config. Add `.meridian/fs/` and `.meridian/spawns/` to `.gitignore` (or let `meridian init` do it).
+This creates `.meridian/` with a project UUID and default `.gitignore`. The `.gitignore` inside `.meridian/` is managed automatically — it tracks `id`, `kb/`, `work/`, and `archive/` and ignores everything else. Spawn history and session state live at the user level (`~/.meridian/projects/<uuid>/`) and are never committed.
 
 ## Tool Integration
 
