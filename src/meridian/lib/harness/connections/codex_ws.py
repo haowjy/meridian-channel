@@ -15,10 +15,10 @@ from collections.abc import AsyncIterator
 from io import BufferedWriter
 from typing import TYPE_CHECKING, Any, Final, cast
 
+from aiohttp import ClientSession, WSMsgType
+
 if TYPE_CHECKING:
     from meridian.lib.observability.debug_tracer import DebugTracer
-
-from aiohttp import ClientSession, WSMsgType
 
 from meridian import __version__
 from meridian.lib.core.types import SpawnId
@@ -29,6 +29,7 @@ from meridian.lib.harness.connections.base import (
     ConnectionState,
     HarnessConnection,
     HarnessEvent,
+    MAX_HARNESS_MESSAGE_BYTES,
     validate_prompt_size,
 )
 from meridian.lib.harness.errors import HarnessBinaryNotFound
@@ -122,7 +123,7 @@ class _AiohttpWebSocketCompat:
 async def _aiohttp_connect(ws_url: str) -> _AiohttpWebSocketCompat:
     session = ClientSession()
     try:
-        ws = await session.ws_connect(ws_url)
+        ws = await session.ws_connect(ws_url, max_msg_size=MAX_HARNESS_MESSAGE_BYTES)
     except Exception:
         await session.close()
         raise
@@ -378,7 +379,10 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
 
             try:
                 if _WEBSOCKETS_MODULE is not None:
-                    return await _WEBSOCKETS_MODULE.connect(ws_url)
+                    return await _WEBSOCKETS_MODULE.connect(
+                        ws_url,
+                        max_size=MAX_HARNESS_MESSAGE_BYTES,
+                    )
                 return await _aiohttp_connect(ws_url)
             except Exception as exc:
                 last_error = exc

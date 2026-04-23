@@ -15,6 +15,9 @@ from meridian.lib.launch.launch_types import SpecT
 if TYPE_CHECKING:
     from meridian.lib.observability.debug_tracer import DebugTracer
 
+# Uniform transport message cap across harness adapters.
+MAX_HARNESS_MESSAGE_BYTES: Final[int] = 10 * 1024 * 1024
+
 # Uniform initial-prompt cap across adapters; fail loudly if the prompt is too large.
 MAX_INITIAL_PROMPT_BYTES: Final[int] = 10 * 1024 * 1024
 
@@ -137,6 +140,7 @@ class HarnessConnection(Generic[SpecT], ABC):
 
 
 __all__ = [
+    "MAX_HARNESS_MESSAGE_BYTES",
     "MAX_INITIAL_PROMPT_BYTES",
     "ConnectionCapabilities",
     "ConnectionConfig",
