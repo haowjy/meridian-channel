@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+import socket
 import time
 from collections.abc import Callable
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
+from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict
 
@@ -19,9 +22,13 @@ from meridian.lib.core.spawn_lifecycle import (
 )
 from meridian.lib.core.types import HarnessId, SpawnId
 from meridian.lib.harness.claude_preflight import ensure_claude_session_accessible
+from meridian.lib.harness.connections import get_connection_class
+from meridian.lib.harness.connections.base import ConnectionConfig, HarnessConnection
+from meridian.lib.harness.launch_spec import CodexLaunchSpec, OpenCodeLaunchSpec
 from meridian.lib.harness.registry import HarnessRegistry
 from meridian.lib.launch.artifact_io import write_projection_artifacts
 from meridian.lib.launch.constants import PRIMARY_TUI_LOG_FILENAME
+from meridian.lib.launch.launch_types import ResolvedLaunchSpec
 from meridian.lib.state import spawn_store
 from meridian.lib.state.artifact_store import LocalStore, make_artifact_key
 from meridian.lib.state.paths import resolve_spawn_log_dir
@@ -40,6 +47,7 @@ from ..request import LaunchCompositionSurface
 from ..session_scope import session_scope
 from ..types import SessionMode
 from .ports import ProcessLauncher, ProcessLauncherSelector
+from .primary_attach import PrimaryAttachError, PrimaryAttachLauncher, PrimaryAttachOutcome
 from .pty_launcher import PtyProcessLauncher, can_use_pty
 from .session import (
     build_session_metadata,
@@ -70,6 +78,20 @@ class ProcessOutcome(BaseModel):
 RunPrimaryProcessWithCapture = Callable[
     [tuple[str, ...], Path, dict[str, str], Path | None, Callable[[int], None] | None],
     tuple[int, int | None],
+]
+RunPrimaryAttach = Callable[
+    [
+        HarnessId,
+        SpawnId,
+        Path,
+        Path,
+        Path,
+        dict[str, str],
+        ResolvedLaunchSpec,
+        ProcessLauncher,
+        Callable[[int], None] | None,
+    ],
+    PrimaryAttachOutcome,
 ]
 
 
@@ -104,6 +126,170 @@ def run_primary_process_with_capture(
     return launched.exit_code, launched.pid
 
 
+def _build_codex_attach_command(
+    session_id: str,
+    ws_url: str,
+) -> tuple[str, ...]:
+    """Build `codex resume {session_id} --remote {ws_url}`."""
+
+    return ("codex", "resume", session_id, "--remote", ws_url)
+
+
+def _resolve_codex_ws_url(connection: HarnessConnection[Any]) -> str:
+    raw_config = getattr(connection, "_config", None)
+    if isinstance(raw_config, ConnectionConfig) and raw_config.ws_port > 0:
+        return f"ws://{raw_config.ws_bind_host}:{raw_config.ws_port}"
+    raise PrimaryAttachError("Codex managed backend did not expose a websocket attach URL")
+
+
+def _build_opencode_attach_command(
+    session_id: str,
+    http_url: str,
+) -> tuple[str, ...]:
+    """Build `opencode attach {http_url} --session {session_id}`."""
+
+    return ("opencode", "attach", http_url, "--session", session_id)
+
+
+def _reserve_local_port(host: str = "127.0.0.1") -> int:
+    """Reserve one ephemeral TCP port and return it."""
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind((host, 0))
+        return int(sock.getsockname()[1])
+
+
+def _resolve_opencode_http_url(connection: HarnessConnection[Any]) -> str:
+    raw_base_url = getattr(connection, "_base_url", None)
+    if isinstance(raw_base_url, str) and raw_base_url.strip():
+        return raw_base_url.strip()
+    raise PrimaryAttachError("OpenCode managed backend did not expose an HTTP attach URL")
+
+
+async def _run_primary_attach(
+    *,
+    harness_id: HarnessId,
+    spawn_id: SpawnId,
+    spawn_dir: Path,
+    project_root: Path,
+    execution_cwd: Path,
+    env: dict[str, str],
+    spec: ResolvedLaunchSpec,
+    process_launcher: ProcessLauncher,
+    on_running: Callable[[int], None] | None = None,
+) -> PrimaryAttachOutcome:
+    """Launch managed backend + primary TUI attach flow for supported harnesses."""
+
+    _ = project_root
+    try:
+        connection_factory = cast(
+            "Callable[[], HarnessConnection[Any]]",
+            get_connection_class(harness_id),
+        )
+        connection = connection_factory()
+        if harness_id == HarnessId.CODEX:
+            if not isinstance(spec, CodexLaunchSpec):
+                raise PrimaryAttachError(
+                    f"Expected CodexLaunchSpec, got {type(spec).__name__}"
+                )
+            ws_bind_host = "127.0.0.1"
+            ws_port = _reserve_local_port(ws_bind_host)
+            config = ConnectionConfig(
+                spawn_id=spawn_id,
+                harness_id=harness_id,
+                prompt=spec.prompt,
+                project_root=execution_cwd,
+                env_overrides=dict(env),
+                ws_bind_host=ws_bind_host,
+                ws_port=ws_port,
+            )
+            launcher = PrimaryAttachLauncher(
+                spawn_id=spawn_id,
+                spawn_dir=spawn_dir,
+                connection=connection,
+                tui_command_builder=lambda session_id: _build_codex_attach_command(
+                    session_id=session_id,
+                    ws_url=_resolve_codex_ws_url(connection),
+                ),
+                process_launcher=process_launcher,
+                on_running=on_running,
+            )
+            return await launcher.run(
+                config=config,
+                spec=spec,
+                cwd=execution_cwd,
+                env=env,
+            )
+
+        if harness_id == HarnessId.OPENCODE:
+            if not isinstance(spec, OpenCodeLaunchSpec):
+                raise PrimaryAttachError(
+                    f"Expected OpenCodeLaunchSpec, got {type(spec).__name__}"
+                )
+            config = ConnectionConfig(
+                spawn_id=spawn_id,
+                harness_id=harness_id,
+                prompt=spec.prompt,
+                project_root=execution_cwd,
+                env_overrides=dict(env),
+            )
+            launcher = PrimaryAttachLauncher(
+                spawn_id=spawn_id,
+                spawn_dir=spawn_dir,
+                connection=connection,
+                tui_command_builder=lambda session_id: _build_opencode_attach_command(
+                    session_id=session_id,
+                    http_url=_resolve_opencode_http_url(connection),
+                ),
+                process_launcher=process_launcher,
+                on_running=on_running,
+            )
+            return await launcher.run(
+                config=config,
+                spec=spec,
+                cwd=execution_cwd,
+                env=env,
+            )
+
+        raise PrimaryAttachError(f"Managed primary attach is not supported for {harness_id.value}")
+    except PrimaryAttachError:
+        raise
+    except Exception as exc:
+        raise PrimaryAttachError(f"Managed primary attach failed for {harness_id.value}") from exc
+
+
+def run_primary_attach(
+    harness_id: HarnessId,
+    spawn_id: SpawnId,
+    spawn_dir: Path,
+    project_root: Path,
+    execution_cwd: Path,
+    env: dict[str, str],
+    spec: ResolvedLaunchSpec,
+    process_launcher: ProcessLauncher,
+    on_running: Callable[[int], None] | None = None,
+) -> PrimaryAttachOutcome:
+    """Run managed primary attach lifecycle from sync runner code."""
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(
+            _run_primary_attach(
+                harness_id=harness_id,
+                spawn_id=spawn_id,
+                spawn_dir=spawn_dir,
+                project_root=project_root,
+                execution_cwd=execution_cwd,
+                env=env,
+                spec=spec,
+                process_launcher=process_launcher,
+                on_running=on_running,
+            )
+        )
+    raise PrimaryAttachError("Managed primary attach cannot run inside an active event loop")
+
+
 def run_harness_process(
     launch_context: LaunchContext,
     harness_registry: HarnessRegistry,
@@ -111,6 +297,7 @@ def run_harness_process(
     run_primary_process_with_capture_fn: RunPrimaryProcessWithCapture = (
         run_primary_process_with_capture
     ),
+    run_primary_attach_fn: RunPrimaryAttach = run_primary_attach,
     start_session_fn: Callable[..., str] = start_session,
     stop_session_fn: Callable[..., None] = stop_session,
     update_session_harness_id_fn: Callable[..., None] = update_session_harness_id,
@@ -262,6 +449,7 @@ def run_harness_process(
                     child_env["MERIDIAN_CHAT_ID"] = managed.chat_id
                 child_cwd = runtime_context.child_cwd
                 output_log_path = log_dir / PRIMARY_TUI_LOG_FILENAME
+                launch_spec = runtime_context.spec
 
                 if (
                     harness_adapter.id == HarnessId.CLAUDE
@@ -274,6 +462,11 @@ def run_harness_process(
                         child_cwd=child_cwd,
                     )
 
+                use_managed_backend = (
+                    harness_id in {HarnessId.CODEX, HarnessId.OPENCODE}
+                    and session_mode != SessionMode.FORK
+                )
+
                 def _record_primary_started(child_pid: int) -> None:
                     lifecycle_service.mark_running(
                         primary_spawn_id,
@@ -281,13 +474,44 @@ def run_harness_process(
                         worker_pid=child_pid,
                     )
 
-                exit_code, _child_pid = run_primary_process_with_capture_fn(
-                    command,
-                    child_cwd,
-                    child_env,
-                    output_log_path,
-                    _record_primary_started,
-                )
+                if use_managed_backend:
+                    try:
+                        managed_outcome = run_primary_attach_fn(
+                            harness_id,
+                            primary_spawn_id,
+                            log_dir,
+                            project_root,
+                            child_cwd,
+                            child_env,
+                            launch_spec,
+                            select_process_launcher(output_log_path),
+                            _record_primary_started,
+                        )
+                        exit_code = managed_outcome.exit_code
+                        managed_session_id = (managed_outcome.session_id or "").strip()
+                        if managed_session_id:
+                            resolved_harness_session_id = managed_session_id
+                            managed.record_harness_session_id(managed_session_id)
+                            spawn_store.update_spawn(
+                                runtime_root,
+                                primary_spawn_id,
+                                harness_session_id=managed_session_id,
+                            )
+                    except PrimaryAttachError as exc:
+                        logger.warning(
+                            "Managed backend failed, falling back to black-box TUI: %s",
+                            exc,
+                        )
+                        use_managed_backend = False
+
+                if harness_id == HarnessId.CLAUDE or not use_managed_backend:
+                    exit_code, _child_pid = run_primary_process_with_capture_fn(
+                        command,
+                        child_cwd,
+                        child_env,
+                        output_log_path,
+                        _record_primary_started,
+                    )
                 with suppress(Exception):
                     lifecycle_service.record_exited(
                         primary_spawn_id,
@@ -384,6 +608,7 @@ def run_harness_process(
 __all__ = [
     "ProcessOutcome",
     "run_harness_process",
+    "run_primary_attach",
     "run_primary_process_with_capture",
     "select_process_launcher",
 ]

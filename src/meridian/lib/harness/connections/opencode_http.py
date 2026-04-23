@@ -11,6 +11,7 @@ import socket
 import time
 from collections.abc import AsyncIterator, Mapping
 from io import BufferedWriter
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 if TYPE_CHECKING:
@@ -43,6 +44,8 @@ from meridian.lib.observability.trace_helpers import (
 from meridian.lib.state.paths import resolve_spawn_log_dir
 
 logger = logging.getLogger(__name__)
+_STARTUP_STDERR_MAX_BYTES = 16 * 1024
+_ADDRESS_IN_USE_MARKERS = ("address already in use", "address in use", "eaddrinuse")
 
 
 class OpenCodeConnection(HarnessConnection[OpenCodeLaunchSpec]):
@@ -61,8 +64,8 @@ class OpenCodeConnection(HarnessConnection[OpenCodeLaunchSpec]):
         "starting": frozenset(("connected", "stopping", "failed")),
         "connected": frozenset(("stopping", "failed")),
         "stopping": frozenset(("stopped", "failed")),
-        "stopped": frozenset(),
-        "failed": frozenset(("stopping", "stopped")),
+        "stopped": frozenset(("starting",)),
+        "failed": frozenset(("starting", "stopping", "stopped")),
     }
     _HEALTH_PATHS: ClassVar[tuple[str, ...]] = ("/global/health", "/health", "/api/health")
     _CREATE_SESSION_PATHS: ClassVar[tuple[str, ...]] = ("/session", "/sessions")
@@ -108,6 +111,8 @@ class OpenCodeConnection(HarnessConnection[OpenCodeLaunchSpec]):
         self._client: Any | None = None
         self._aiohttp_module: Any | None = None
         self._stderr_handle: BufferedWriter | None = None
+        self._stderr_log_path: Path | None = None
+        self._stderr_read_offset = 0
         self._base_url: str | None = None
         self._session_id: str | None = None
         self._event_path: str | None = None
@@ -152,7 +157,7 @@ class OpenCodeConnection(HarnessConnection[OpenCodeLaunchSpec]):
         spec: OpenCodeLaunchSpec,
         primary_observer_mode: bool = False,
     ) -> None:
-        if self._state != "created":
+        if self._state not in {"created", "stopped", "failed"}:
             raise RuntimeError(f"Cannot start OpenCode connection from state '{self._state}'")
 
         validate_prompt_size(config)
@@ -330,7 +335,9 @@ class OpenCodeConnection(HarnessConnection[OpenCodeLaunchSpec]):
         env = inherit_child_env(os.environ, config.env_overrides)
         spawn_dir = resolve_spawn_log_dir(config.project_root, config.spawn_id)
         spawn_dir.mkdir(parents=True, exist_ok=True)
-        self._stderr_handle = (spawn_dir / "stderr.log").open("ab")
+        self._stderr_log_path = spawn_dir / "stderr.log"
+        self._stderr_handle = self._stderr_log_path.open("ab")
+        self._stderr_read_offset = self._stderr_handle.tell()
         try:
             self._process = await asyncio.create_subprocess_exec(
                 *command,
@@ -356,7 +363,7 @@ class OpenCodeConnection(HarnessConnection[OpenCodeLaunchSpec]):
         last_error: Exception | None = None
         while True:
             if self._process_exited():
-                raise RuntimeError("OpenCode process exited before becoming healthy")
+                raise self._startup_exit_exception()
             try:
                 session_id = await self._create_session(spec)
                 self._last_health_ok = True
@@ -734,6 +741,47 @@ class OpenCodeConnection(HarnessConnection[OpenCodeLaunchSpec]):
         if self._stderr_handle is not None:
             self._stderr_handle.close()
             self._stderr_handle = None
+        self._stderr_log_path = None
+        self._stderr_read_offset = 0
+
+    def _startup_exit_exception(self) -> Exception:
+        process = self._process
+        exit_code = process.returncode if process is not None else None
+        stderr_excerpt = self._read_startup_stderr_excerpt()
+        if _looks_like_address_in_use(stderr_excerpt):
+            from meridian.lib.launch.process.primary_attach import PortBindError
+
+            return PortBindError(
+                "OpenCode backend failed to bind HTTP port "
+                f"(exit={exit_code}): {stderr_excerpt or '<no stderr>'}"
+            )
+        if stderr_excerpt:
+            return RuntimeError(
+                "OpenCode process exited before becoming healthy "
+                f"(exit={exit_code}): {stderr_excerpt}"
+            )
+        return RuntimeError(
+            "OpenCode process exited before becoming healthy "
+            f"(exit={exit_code})"
+        )
+
+    def _read_startup_stderr_excerpt(self) -> str:
+        stderr_handle = self._stderr_handle
+        if stderr_handle is not None:
+            stderr_handle.flush()
+
+        path = self._stderr_log_path
+        if path is None or not path.exists():
+            return ""
+
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            end_offset = handle.tell()
+            start_offset = min(self._stderr_read_offset, end_offset)
+            read_offset = max(start_offset, end_offset - _STARTUP_STDERR_MAX_BYTES)
+            handle.seek(read_offset, os.SEEK_SET)
+            data = handle.read(max(0, end_offset - read_offset))
+        return data.decode("utf-8", errors="replace").strip()
 
     def _transition(self, next_state: ConnectionState) -> None:
         if next_state == self._state:
@@ -808,3 +856,8 @@ def _summarize_body(body: object | None) -> str:
 def _looks_like_html(body_summary: str) -> bool:
     normalized = body_summary.strip().lower()
     return normalized.startswith("<!doctype html") or normalized.startswith("<html")
+
+
+def _looks_like_address_in_use(stderr_text: str) -> bool:
+    normalized = stderr_text.lower()
+    return any(marker in normalized for marker in _ADDRESS_IN_USE_MARKERS)

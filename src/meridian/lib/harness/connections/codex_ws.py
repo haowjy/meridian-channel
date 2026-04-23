@@ -13,6 +13,7 @@ import socket
 from asyncio.subprocess import Process
 from collections.abc import AsyncIterator
 from io import BufferedWriter
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, cast
 
 from aiohttp import ClientSession, WSMsgType
@@ -50,6 +51,12 @@ from meridian.lib.state.paths import resolve_spawn_log_dir
 _DEFAULT_CONNECT_TIMEOUT_SECONDS = 10.0
 _DEFAULT_REQUEST_TIMEOUT_SECONDS = 30.0
 _STOP_WAIT_TIMEOUT_SECONDS = 5.0
+_STARTUP_STDERR_MAX_BYTES = 16 * 1024
+_ADDRESS_IN_USE_MARKERS: Final[tuple[str, ...]] = (
+    "address already in use",
+    "address in use",
+    "eaddrinuse",
+)
 
 
 def _load_websockets_module() -> Any | None:
@@ -153,6 +160,8 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
         self._reader_task: asyncio.Task[None] | None = None
         self._send_lock = asyncio.Lock()
         self._stderr_handle: BufferedWriter | None = None
+        self._stderr_log_path: Path | None = None
+        self._stderr_read_offset = 0
 
         self._next_request_id = 1
         self._pending_requests: dict[int, asyncio.Future[dict[str, object]]] = {}
@@ -235,7 +244,9 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
         env = inherit_child_env(os.environ, config.env_overrides)
         spawn_dir = resolve_spawn_log_dir(config.project_root, config.spawn_id)
         spawn_dir.mkdir(parents=True, exist_ok=True)
-        self._stderr_handle = (spawn_dir / "stderr.log").open("ab")
+        self._stderr_log_path = spawn_dir / "stderr.log"
+        self._stderr_handle = self._stderr_log_path.open("ab")
+        self._stderr_read_offset = self._stderr_handle.tell()
 
         try:
             appserver_command = project_codex_spec_to_appserver_command(
@@ -380,10 +391,7 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
 
         while loop.time() < deadline:
             if self._process is not None and self._process.returncode is not None:
-                raise RuntimeError(
-                    "Codex app-server exited before websocket connect "
-                    f"(exit={self._process.returncode})"
-                )
+                raise self._startup_exit_exception()
 
             try:
                 if _WEBSOCKETS_MODULE is not None:
@@ -712,6 +720,47 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
         if self._stderr_handle is not None:
             self._stderr_handle.close()
             self._stderr_handle = None
+        self._stderr_log_path = None
+        self._stderr_read_offset = 0
+
+    def _startup_exit_exception(self) -> Exception:
+        process = self._process
+        exit_code = process.returncode if process is not None else None
+        stderr_excerpt = self._read_startup_stderr_excerpt()
+        if _looks_like_address_in_use(stderr_excerpt):
+            from meridian.lib.launch.process.primary_attach import PortBindError
+
+            return PortBindError(
+                "Codex app-server failed to bind websocket port "
+                f"(exit={exit_code}): {stderr_excerpt or '<no stderr>'}"
+            )
+        if stderr_excerpt:
+            return RuntimeError(
+                "Codex app-server exited before websocket connect "
+                f"(exit={exit_code}): {stderr_excerpt}"
+            )
+        return RuntimeError(
+            "Codex app-server exited before websocket connect "
+            f"(exit={exit_code})"
+        )
+
+    def _read_startup_stderr_excerpt(self) -> str:
+        stderr_handle = self._stderr_handle
+        if stderr_handle is not None:
+            stderr_handle.flush()
+
+        path = self._stderr_log_path
+        if path is None or not path.exists():
+            return ""
+
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            end_offset = handle.tell()
+            start_offset = min(self._stderr_read_offset, end_offset)
+            read_offset = max(start_offset, end_offset - _STARTUP_STDERR_MAX_BYTES)
+            handle.seek(read_offset, os.SEEK_SET)
+            data = handle.read(max(0, end_offset - read_offset))
+        return data.decode("utf-8", errors="replace").strip()
 
     def _transition(self, next_state: ConnectionState) -> None:
         """Validate and apply a state transition."""
@@ -777,6 +826,11 @@ def _reserve_port(host: str) -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind((host, 0))
         return int(sock.getsockname()[1])
+
+
+def _looks_like_address_in_use(stderr_text: str) -> bool:
+    normalized = stderr_text.lower()
+    return any(marker in normalized for marker in _ADDRESS_IN_USE_MARKERS)
 
 
 def _coerce_text(raw_message: object) -> str:
