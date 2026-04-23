@@ -1,9 +1,16 @@
+import json
 from pathlib import Path
 
 import pytest
 
 import meridian.lib.ops.spawn.api as spawn_api
-from meridian.lib.ops.spawn.models import SpawnCreateInput, SpawnListInput, SpawnStatsInput
+from meridian.lib.launch.constants import PRIMARY_META_FILENAME
+from meridian.lib.ops.spawn.models import (
+    SpawnCreateInput,
+    SpawnListInput,
+    SpawnShowInput,
+    SpawnStatsInput,
+)
 from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_project_runtime_root_for_write
 
@@ -18,6 +25,30 @@ def _state_root(project_root: Path) -> Path:
     runtime_root = resolve_project_runtime_root_for_write(project_root)
     runtime_root.mkdir(parents=True, exist_ok=True)
     return runtime_root
+
+
+def _write_primary_meta(
+    runtime_root: Path,
+    spawn_id: str,
+    *,
+    activity: str,
+    backend_pid: int | None = None,
+    tui_pid: int | None = None,
+) -> None:
+    meta_path = runtime_root / "spawns" / spawn_id / PRIMARY_META_FILENAME
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+    meta_path.write_text(
+        json.dumps(
+            {
+                "managed_backend": True,
+                "activity": activity,
+                "backend_pid": backend_pid,
+                "tui_pid": tui_pid,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def test_spawn_create_dry_run_resolves_project_root_from_nested_cwd(
@@ -133,3 +164,48 @@ def test_spawn_list_does_not_infer_running_star_from_exited_at(
     assert len(output.spawns) == 1
     assert output.spawns[0].status == "running"
     assert output.spawns[0].status_display is None
+
+
+def test_spawn_list_and_show_suppress_terminal_primary_activity(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    runtime_root = _state_root(project_root)
+
+    spawn_id = spawn_store.start_spawn(
+        runtime_root,
+        spawn_id="p42",
+        chat_id="c42",
+        model="gpt-5.4",
+        agent="dev-orchestrator",
+        harness="codex",
+        kind="primary",
+        prompt="done",
+        status="succeeded",
+    )
+    _write_primary_meta(
+        runtime_root,
+        str(spawn_id),
+        activity="finalizing",
+        backend_pid=4242,
+        tui_pid=4343,
+    )
+
+    listed = spawn_api.spawn_list_sync(
+        SpawnListInput(project_root=project_root.as_posix(), statuses=("succeeded",))
+    )
+    assert len(listed.spawns) == 1
+    entry = listed.spawns[0]
+    assert entry.spawn_id == "p42"
+    assert entry.status == "succeeded"
+    assert entry.status_display is None
+    assert entry.activity is None
+
+    detail = spawn_api.spawn_show_sync(
+        SpawnShowInput(project_root=project_root.as_posix(), spawn_id="p42")
+    )
+    assert detail.status == "succeeded"
+    assert detail.activity is None
+    assert detail.backend_pid == 4242
+    assert detail.tui_pid == 4343

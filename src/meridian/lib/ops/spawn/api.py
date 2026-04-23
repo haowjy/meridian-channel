@@ -1,15 +1,21 @@
 """Spawn operations used by CLI and MCP surfaces."""
 
 import asyncio
+import json
 import time
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 from meridian.lib.config.settings import load_config
 from meridian.lib.core.context import RuntimeContext
 from meridian.lib.core.depth import max_depth_reached
+from meridian.lib.core.domain import SpawnStatus
+from meridian.lib.core.lifecycle import create_lifecycle_service
 from meridian.lib.core.sink import NullSink, OutputSink
 from meridian.lib.core.spawn_lifecycle import ACTIVE_SPAWN_STATUSES, is_active_spawn_status
 from meridian.lib.core.types import SpawnId
+from meridian.lib.launch.constants import PRIMARY_META_FILENAME
 from meridian.lib.launch.request import SessionRequest
 from meridian.lib.ops.reference import ResolvedSessionReference, resolve_session_reference
 from meridian.lib.ops.runtime import (
@@ -22,7 +28,13 @@ from meridian.lib.ops.runtime import (
 )
 from meridian.lib.ops.work_attachment import ensure_explicit_work_item
 from meridian.lib.state import spawn_store
+from meridian.lib.state.liveness import is_process_alive
 from meridian.lib.state.paths import resolve_project_paths
+from meridian.lib.state.reaper import (
+    PrimaryMetadata,
+    read_primary_metadata,
+    terminate_managed_primary_processes,
+)
 from meridian.lib.streaming.signal_canceller import CancelOutcome, SignalCanceller
 from meridian.lib.utils.time import minutes_to_seconds
 
@@ -92,6 +104,94 @@ def _build_wait_timeout_message(pending_spawn_ids: set[str], elapsed_secs: float
 def _resolve_project_root_input(project_root: str | None) -> Path:
     resolved_root, _ = resolve_runtime_root_and_config_for_read(project_root)
     return resolved_root
+
+
+def _coerce_optional_positive_int(value: object) -> int | None:
+    if not isinstance(value, int):
+        return None
+    if value <= 0:
+        return None
+    return value
+
+
+def _coerce_optional_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    return normalized
+
+
+def _read_primary_surface_metadata(
+    runtime_root: Path,
+    spawn_id: str,
+) -> tuple[bool, str | None, int | None, int | None, int | None, str | None]:
+    """Return metadata surfaced by spawn list/show for managed primary sessions."""
+    metadata = read_primary_metadata(runtime_root, spawn_id)
+    managed_backend = bool(metadata is not None and metadata.managed_backend)
+    activity = metadata.activity if metadata is not None else None
+    backend_pid = metadata.backend_pid if metadata is not None else None
+    tui_pid = metadata.tui_pid if metadata is not None else None
+    backend_port: int | None = None
+    harness_session_id: str | None = None
+
+    metadata_path = runtime_root / "spawns" / spawn_id / PRIMARY_META_FILENAME
+    if not metadata_path.is_file():
+        return (
+            managed_backend,
+            activity,
+            backend_pid,
+            tui_pid,
+            backend_port,
+            harness_session_id,
+        )
+
+    try:
+        raw = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return (
+            managed_backend,
+            activity,
+            backend_pid,
+            tui_pid,
+            backend_port,
+            harness_session_id,
+        )
+    if not isinstance(raw, dict):
+        return (
+            managed_backend,
+            activity,
+            backend_pid,
+            tui_pid,
+            backend_port,
+            harness_session_id,
+        )
+
+    raw_meta = cast("dict[str, object]", raw)
+    managed_backend = managed_backend or raw_meta.get("managed_backend") is True
+    activity = activity or _coerce_optional_text(raw_meta.get("activity"))
+    backend_pid = backend_pid or _coerce_optional_positive_int(raw_meta.get("backend_pid"))
+    tui_pid = tui_pid or _coerce_optional_positive_int(raw_meta.get("tui_pid"))
+    backend_port = _coerce_optional_positive_int(raw_meta.get("backend_port"))
+    harness_session_id = _coerce_optional_text(raw_meta.get("harness_session_id"))
+    return (
+        managed_backend,
+        activity,
+        backend_pid,
+        tui_pid,
+        backend_port,
+        harness_session_id,
+    )
+
+
+def _surface_primary_activity(status: str, activity: str | None) -> str | None:
+    normalized = (activity or "").strip()
+    if not normalized:
+        return None
+    if not is_active_spawn_status(status):
+        return None
+    return normalized
 
 
 def _forked_from_output(payload: SpawnCreateInput) -> str | None:
@@ -221,6 +321,8 @@ def spawn_list_sync(
     if payload.model is not None and payload.model.strip():
         wanted_model = payload.model.strip()
         spawns = [row for row in spawns if row.model == wanted_model]
+    if payload.primary:
+        spawns = [row for row in spawns if row.kind == "primary"]
 
     total_count = len(spawns)
     limit = payload.limit if payload.limit > 0 else 20
@@ -236,18 +338,42 @@ def spawn_list_sync(
         selected = spawns[:limit]
 
     truncated = total_count > len(selected)
-    return SpawnListOutput(
-        spawns=tuple(
+    entries: list[SpawnListEntry] = []
+    for row in selected:
+        kind = "primary" if (row.kind or "").strip() == "primary" else None
+        managed_backend = False
+        activity: str | None = None
+        surfaced_activity: str | None = None
+        if kind == "primary":
+            (
+                managed_backend,
+                activity,
+                _backend_pid,
+                _tui_pid,
+                _backend_port,
+                _harness_session_id,
+            ) = _read_primary_surface_metadata(runtime_root, row.id)
+            surfaced_activity = _surface_primary_activity(row.status, activity)
+        entries.append(
             SpawnListEntry(
                 spawn_id=row.id,
                 status=row.status,
-                status_display=None,
+                status_display=(
+                    f"{row.status} ({surfaced_activity})"
+                    if surfaced_activity is not None
+                    else None
+                ),
                 model=row.model or "",
+                kind=kind,
+                activity=surfaced_activity,
+                managed_backend=managed_backend,
                 duration_secs=row.duration_secs,
                 cost_usd=row.total_cost_usd,
             )
-            for row in selected
-        ),
+        )
+
+    return SpawnListOutput(
+        spawns=tuple(entries),
         total_count=total_count if truncated else None,
         truncated=truncated,
     )
@@ -414,10 +540,40 @@ def spawn_show_sync(
     row = read_spawn_row(project_root, spawn_id)
     if row is None:
         raise ValueError(f"Spawn '{spawn_id}' not found")
-    return detail_from_row(
+    kind = "primary" if (row.kind or "").strip() == "primary" else None
+    managed_backend = False
+    activity: str | None = None
+    backend_pid: int | None = None
+    tui_pid: int | None = None
+    backend_port: int | None = None
+    harness_session_id: str | None = None
+    runtime_root = resolve_runtime_root_for_read(project_root)
+    if kind == "primary":
+        (
+            managed_backend,
+            activity,
+            backend_pid,
+            tui_pid,
+            backend_port,
+            harness_session_id,
+        ) = _read_primary_surface_metadata(runtime_root, spawn_id)
+
+    detail = detail_from_row(
         project_root=project_root,
         row=row,
         include_report_body=payload.include_report_body,
+    )
+    surfaced_activity = _surface_primary_activity(row.status, activity)
+    return detail.model_copy(
+        update={
+            "kind": kind,
+            "activity": surfaced_activity,
+            "managed_backend": managed_backend,
+            "backend_pid": backend_pid,
+            "tui_pid": tui_pid,
+            "backend_port": backend_port,
+            "harness_session_id": harness_session_id or detail.harness_session_id,
+        }
     )
 
 
@@ -456,6 +612,118 @@ async def spawn_files(
     sink: OutputSink | None = None,
 ) -> SpawnWrittenFilesOutput:
     return await asyncio.to_thread(spawn_files_sync, payload, ctx=ctx, sink=sink)
+
+
+_MANAGED_CANCEL_GRACE_SECS = 5.0
+_MANAGED_CANCEL_FALLBACK_WAIT_SECS = 1.0
+_MANAGED_CANCEL_POLL_SECS = 0.1
+
+
+def _started_at_epoch(started_at: str | None) -> float | None:
+    normalized = (started_at or "").strip()
+    if not normalized:
+        return None
+    if normalized.endswith("Z"):
+        normalized = f"{normalized[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.timestamp()
+
+
+def _coerce_cancel_status(status: str) -> SpawnStatus:
+    if status in {"queued", "running", "finalizing", "succeeded", "failed", "cancelled"}:
+        return cast("SpawnStatus", status)
+    return "failed"
+
+
+def _cancel_outcome_from_row(
+    row: spawn_store.SpawnRecord,
+    *,
+    already_terminal: bool = False,
+) -> CancelOutcome:
+    status = _coerce_cancel_status(row.status)
+    return CancelOutcome(
+        status=status,
+        origin=row.terminal_origin or "cancel",
+        exit_code=(
+            row.exit_code
+            if row.exit_code is not None
+            else (143 if status == "cancelled" else 1)
+        ),
+        already_terminal=already_terminal,
+        finalizing=status == "finalizing",
+    )
+
+
+async def _wait_for_terminal_spawn(
+    runtime_root: Path,
+    spawn_id: str,
+    *,
+    grace_seconds: float,
+) -> spawn_store.SpawnRecord | None:
+    deadline = time.monotonic() + max(0.0, grace_seconds)
+    while True:
+        current = spawn_store.get_spawn(runtime_root, spawn_id)
+        if current is not None and _spawn_is_terminal(current.status):
+            return current
+        now = time.monotonic()
+        if now >= deadline:
+            return None
+        await asyncio.sleep(min(_MANAGED_CANCEL_POLL_SECS, deadline - now))
+
+
+async def _cancel_managed_primary_spawn(
+    runtime_root: Path,
+    spawn_id: str,
+    row: spawn_store.SpawnRecord,
+    primary_metadata: PrimaryMetadata,
+) -> tuple[CancelOutcome, spawn_store.SpawnRecord]:
+    if _spawn_is_terminal(row.status):
+        return _cancel_outcome_from_row(row, already_terminal=True), row
+
+    started_epoch = _started_at_epoch(row.started_at)
+    launcher_pid = primary_metadata.launcher_pid
+    launcher_alive = (
+        launcher_pid is not None
+        and is_process_alive(launcher_pid, created_after_epoch=started_epoch)
+    )
+    if launcher_alive:
+        terminate_managed_primary_processes(
+            primary_metadata,
+            include_launcher=True,
+            include_runtime_children=False,
+        )
+    else:
+        terminate_managed_primary_processes(
+            primary_metadata,
+            include_launcher=False,
+        )
+
+    latest = await _wait_for_terminal_spawn(
+        runtime_root,
+        spawn_id,
+        grace_seconds=_MANAGED_CANCEL_GRACE_SECS,
+    )
+    if latest is None and launcher_alive:
+        terminate_managed_primary_processes(
+            primary_metadata,
+            include_launcher=False,
+        )
+        latest = await _wait_for_terminal_spawn(
+            runtime_root,
+            spawn_id,
+            grace_seconds=_MANAGED_CANCEL_FALLBACK_WAIT_SECS,
+        )
+
+    if latest is None:
+        create_lifecycle_service(runtime_root.parent, runtime_root).mark_finalizing(spawn_id)
+        latest = spawn_store.get_spawn(runtime_root, spawn_id) or row
+
+    return _cancel_outcome_from_row(latest), latest
 
 
 def _spawn_cancel_output_from_outcome(
@@ -500,6 +768,21 @@ async def _spawn_cancel_impl(
     row = spawn_store.get_spawn(runtime_root, spawn_id)
     if row is None:
         raise ValueError(f"Spawn '{spawn_id}' not found")
+
+    primary_metadata = read_primary_metadata(runtime_root, spawn_id)
+    if primary_metadata is not None and primary_metadata.managed_backend:
+        managed_outcome, managed_row = await _cancel_managed_primary_spawn(
+            runtime_root,
+            spawn_id,
+            row,
+            primary_metadata,
+        )
+        latest = spawn_store.get_spawn(runtime_root, spawn_id) or managed_row
+        return _spawn_cancel_output_from_outcome(
+            spawn_id=spawn_id,
+            outcome=managed_outcome,
+            row=latest,
+        )
 
     canceller = SignalCanceller(runtime_root=runtime_root)
     try:

@@ -9,6 +9,7 @@ Full command surface. Use `--help` on any command for flags and options.
 | `meridian` | Launch the primary agent session with startup context, including the installed agent catalog |
 | `meridian spawn -a AGENT -p "task"` | Delegate work to a routed agent/model |
 | `meridian spawn list` | See running and recent spawns |
+| `meridian spawn list --primary` | Show only primary spawns (top-level sessions) |
 | `meridian spawn wait ID` | Block until a spawn completes |
 | `meridian spawn show ID` | Read a spawn's report and status |
 | `meridian spawn --continue ID -p "more"` | Resume a prior spawn with new input |
@@ -31,7 +32,12 @@ Common `spawn` flags:
 | `--from REF` | Attach prior context from a spawn ref (`p123`) or chat/session ref (`c123`) |
 | `--desc "label"` | Human-readable label in dashboards |
 | `--work SLUG` | Attach to a specific work item |
+| `--primary` | `spawn list` only: include only `kind=primary` spawns |
 | `--approval MODE` | `default` \| `confirm` \| `auto` \| `yolo` |
+
+`spawn show` includes primary-session metadata when available from `primary_meta.json`:
+`kind`, `activity`, `managed_backend`, `backend_pid`, `tui_pid`, `backend_port`,
+and `harness_session_id`.
 
 ## Reports & Sessions
 

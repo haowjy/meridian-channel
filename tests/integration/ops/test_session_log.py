@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from meridian.lib.harness.claude import project_slug
+from meridian.lib.launch.constants import PRIMARY_META_FILENAME
 from meridian.lib.ops.session_log import (
     SessionLogInput,
     _extract_from_event,
@@ -29,6 +30,29 @@ def _write_spawn_output(
     output_path = runtime_root / base_dir / spawn_id / "output.jsonl"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(json.dumps(event) for event in events) + "\n")
+
+
+def _write_primary_meta(
+    runtime_root: Path,
+    spawn_id: str,
+    *,
+    managed_backend: bool = True,
+    launcher_pid: int | None = None,
+    harness_session_id: str | None = None,
+) -> None:
+    meta_path = runtime_root / "spawns" / spawn_id / PRIMARY_META_FILENAME
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+    data: dict[str, object] = {"managed_backend": managed_backend}
+    if launcher_pid is not None:
+        data["launcher_pid"] = launcher_pid
+    elif managed_backend:
+        data["launcher_pid"] = os.getpid()
+    if harness_session_id is not None:
+        data["harness_session_id"] = harness_session_id
+    meta_path.write_text(
+        json.dumps(data) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _write_codex_rollout(
@@ -613,6 +637,67 @@ def test_session_log_chat_missing_harness_session_id_detects_and_persists_primar
         session_store.stop_session(runtime_root, chat_id)
 
 
+def test_session_log_chat_missing_harness_session_id_reads_primary_meta_session_id(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    runtime_root = resolve_project_runtime_root(project_root)
+    runtime_root.mkdir(parents=True, exist_ok=True)
+
+    home_root = tmp_path / "home"
+    monkeypatch.setenv("HOME", home_root.as_posix())
+    session_id = "52ea07a8-5fbe-410f-b5f4-f0a9ec4a7315"
+    _write_codex_rollout(
+        home_root=home_root,
+        project_root=project_root,
+        session_id=session_id,
+        assistant_text="meta-backed chat transcript",
+    )
+    monkeypatch.setattr(
+        "meridian.lib.ops.session_log._detect_primary_harness_session_id",
+        lambda **_kwargs: pytest.fail("session detection should not run when primary_meta is set"),
+    )
+
+    chat_id = session_store.start_session(
+        runtime_root,
+        harness="codex",
+        harness_session_id="",
+        model="gpt-5.4",
+        chat_id="c42",
+    )
+    try:
+        spawn_store.start_spawn(
+            runtime_root,
+            spawn_id="p42",
+            chat_id=chat_id,
+            model="gpt-5.4",
+            agent="dev-orchestrator",
+            harness="codex",
+            kind="primary",
+            prompt="do thing",
+            harness_session_id="",
+        )
+        _write_primary_meta(runtime_root, "p42", harness_session_id=session_id)
+
+        output = session_log_sync(
+            SessionLogInput(ref=chat_id, project_root=project_root.as_posix(), last_n=5)
+        )
+
+        assert output.session_id == session_id
+        assert output.source == "codex transcript"
+        assert [(message.role, message.content) for message in output.messages] == [
+            ("assistant", "meta-backed chat transcript")
+        ]
+        assert session_store.get_session_harness_id(runtime_root, chat_id) == session_id
+        primary_spawn = spawn_store.get_spawn(runtime_root, "p42")
+        assert primary_spawn is not None
+        assert primary_spawn.harness_session_id == session_id
+    finally:
+        session_store.stop_session(runtime_root, chat_id)
+
+
 def test_session_log_primary_spawn_missing_harness_session_id_detects_native_session(
     tmp_path: Path,
     monkeypatch,
@@ -657,6 +742,258 @@ def test_session_log_primary_spawn_missing_harness_session_id_detects_native_ses
     primary_spawn = spawn_store.get_spawn(runtime_root, "p42")
     assert primary_spawn is not None
     assert primary_spawn.harness_session_id == session_id
+
+
+def test_session_log_primary_spawn_missing_harness_session_id_reads_primary_meta_session_id(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    runtime_root = resolve_project_runtime_root(project_root)
+    runtime_root.mkdir(parents=True, exist_ok=True)
+
+    home_root = tmp_path / "home"
+    monkeypatch.setenv("HOME", home_root.as_posix())
+    session_id = "bc5e81d8-f91f-4e37-a728-9e9a24a026cf"
+    _write_codex_rollout(
+        home_root=home_root,
+        project_root=project_root,
+        session_id=session_id,
+        assistant_text="meta-backed spawn transcript",
+    )
+    monkeypatch.setattr(
+        "meridian.lib.ops.session_log._detect_primary_harness_session_id",
+        lambda **_kwargs: pytest.fail("session detection should not run when primary_meta is set"),
+    )
+
+    spawn_store.start_spawn(
+        runtime_root,
+        spawn_id="p42",
+        chat_id="c42",
+        model="gpt-5.4",
+        agent="dev-orchestrator",
+        harness="codex",
+        kind="primary",
+        prompt="do thing",
+        harness_session_id="",
+    )
+    _write_primary_meta(runtime_root, "p42", harness_session_id=session_id)
+
+    output = session_log_sync(
+        SessionLogInput(ref="p42", project_root=project_root.as_posix(), last_n=5)
+    )
+
+    assert output.session_id == session_id
+    assert output.source == "codex transcript"
+    assert [(message.role, message.content) for message in output.messages] == [
+        ("assistant", "meta-backed spawn transcript")
+    ]
+    primary_spawn = spawn_store.get_spawn(runtime_root, "p42")
+    assert primary_spawn is not None
+    assert primary_spawn.harness_session_id == session_id
+
+
+def test_session_log_active_managed_primary_prefers_live_output_over_native_transcript(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    runtime_root = resolve_project_runtime_root(project_root)
+    runtime_root.mkdir(parents=True, exist_ok=True)
+
+    home_root = tmp_path / "home"
+    monkeypatch.setenv("HOME", home_root.as_posix())
+    session_id = "3e9a0285-2c37-4311-96f5-2ec5c0d7c6c7"
+    _write_codex_rollout(
+        home_root=home_root,
+        project_root=project_root,
+        session_id=session_id,
+        assistant_text="native managed primary transcript",
+    )
+
+    spawn_store.start_spawn(
+        runtime_root,
+        spawn_id="p42",
+        chat_id="c42",
+        model="gpt-5.4",
+        agent="dev-orchestrator",
+        harness="codex",
+        kind="primary",
+        prompt="do thing",
+        harness_session_id=session_id,
+        status="running",
+    )
+    _write_primary_meta(runtime_root, "p42")
+    _write_spawn_output(
+        runtime_root,
+        "p42",
+        {
+            "event_type": "item/completed",
+            "harness_id": "codex",
+            "payload": {
+                "item": {"type": "agentMessage", "text": "managed live progress"},
+            },
+        },
+    )
+
+    output = session_log_sync(
+        SessionLogInput(ref="p42", project_root=project_root.as_posix(), last_n=5)
+    )
+
+    assert output.session_id == "p42"
+    assert output.source == "spawn p42 output"
+    assert [(message.role, message.content) for message in output.messages] == [
+        ("assistant", "managed live progress")
+    ]
+
+
+def test_session_log_completed_managed_primary_prefers_native_transcript(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    runtime_root = resolve_project_runtime_root(project_root)
+    runtime_root.mkdir(parents=True, exist_ok=True)
+
+    home_root = tmp_path / "home"
+    monkeypatch.setenv("HOME", home_root.as_posix())
+    session_id = "9f7f0edf-1cdf-4701-a9ce-679f58aab0f9"
+    _write_codex_rollout(
+        home_root=home_root,
+        project_root=project_root,
+        session_id=session_id,
+        assistant_text="native completed managed transcript",
+    )
+
+    spawn_store.start_spawn(
+        runtime_root,
+        spawn_id="p42",
+        chat_id="c42",
+        model="gpt-5.4",
+        agent="dev-orchestrator",
+        harness="codex",
+        kind="primary",
+        prompt="do thing",
+        harness_session_id=session_id,
+        status="failed",
+    )
+    _write_primary_meta(runtime_root, "p42")
+    _write_spawn_output(
+        runtime_root,
+        "p42",
+        {
+            "event_type": "item/completed",
+            "harness_id": "codex",
+            "payload": {
+                "item": {"type": "agentMessage", "text": "managed fallback transcript"},
+            },
+        },
+        artifact=True,
+    )
+
+    output = session_log_sync(
+        SessionLogInput(ref="p42", project_root=project_root.as_posix(), last_n=5)
+    )
+
+    assert output.session_id == session_id
+    assert output.source == "codex transcript"
+    assert [(message.role, message.content) for message in output.messages] == [
+        ("assistant", "native completed managed transcript")
+    ]
+
+
+def test_session_log_completed_managed_primary_falls_back_to_output_when_native_unavailable(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    runtime_root = resolve_project_runtime_root(project_root)
+    runtime_root.mkdir(parents=True, exist_ok=True)
+
+    spawn_store.start_spawn(
+        runtime_root,
+        spawn_id="p42",
+        chat_id="c42",
+        model="gpt-5.4",
+        agent="dev-orchestrator",
+        harness="codex",
+        kind="primary",
+        prompt="do thing",
+        harness_session_id="missing-native-session",
+        status="failed",
+    )
+    _write_primary_meta(runtime_root, "p42")
+    _write_spawn_output(
+        runtime_root,
+        "p42",
+        {
+            "event_type": "item/completed",
+            "harness_id": "codex",
+            "payload": {
+                "item": {"type": "agentMessage", "text": "managed artifact transcript"},
+            },
+        },
+        artifact=True,
+    )
+
+    output = session_log_sync(
+        SessionLogInput(ref="p42", project_root=project_root.as_posix(), last_n=5)
+    )
+
+    assert output.session_id == "p42"
+    assert output.source == "spawn p42 output"
+    assert [(message.role, message.content) for message in output.messages] == [
+        ("assistant", "managed artifact transcript")
+    ]
+
+
+def test_session_log_completed_managed_opencode_fallback_is_best_effort(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    runtime_root = resolve_project_runtime_root(project_root)
+    runtime_root.mkdir(parents=True, exist_ok=True)
+
+    spawn_store.start_spawn(
+        runtime_root,
+        spawn_id="p42",
+        chat_id="c42",
+        model="opencode-gpt-5.3-codex",
+        agent="dev-orchestrator",
+        harness="opencode",
+        kind="primary",
+        prompt="do thing",
+        harness_session_id="missing-native-session",
+        status="failed",
+    )
+    _write_primary_meta(runtime_root, "p42")
+    _write_spawn_output(
+        runtime_root,
+        "p42",
+        {
+            "event_type": "item/completed",
+            "harness_id": "opencode",
+            "payload": {
+                "item": {"type": "agentMessage", "text": "managed opencode fallback"},
+            },
+        },
+        artifact=True,
+    )
+
+    output = session_log_sync(
+        SessionLogInput(ref="p42", project_root=project_root.as_posix(), last_n=5)
+    )
+
+    assert output.session_id == "p42"
+    assert output.source is not None
+    assert "best-effort" in output.source
+    assert [(message.role, message.content) for message in output.messages] == [
+        ("assistant", "managed opencode fallback")
+    ]
 
 
 def test_session_log_primary_spawn_missing_harness_session_id_does_not_read_spawn_output(

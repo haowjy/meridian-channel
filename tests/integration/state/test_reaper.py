@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import json
 import os
+import signal
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
+import meridian.lib.ops.spawn.api as spawn_api
+from meridian.lib.launch.constants import PRIMARY_META_FILENAME
+from meridian.lib.ops.spawn.models import SpawnCancelInput
 from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_runtime_paths
 from meridian.lib.state.reaper import reconcile_active_spawn
@@ -63,6 +68,35 @@ def _write_report(
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(text, encoding="utf-8")
     return report_path
+
+
+def _write_primary_meta(
+    runtime_root: Path,
+    spawn_id: str,
+    *,
+    launcher_pid: int | None,
+    backend_pid: int | None = None,
+    tui_pid: int | None = None,
+    activity: str = "idle",
+    managed_backend: bool = True,
+) -> Path:
+    metadata_path = runtime_root / "spawns" / spawn_id / PRIMARY_META_FILENAME
+    metadata_path.parent.mkdir(parents=True, exist_ok=True)
+    metadata_path.write_text(
+        json.dumps(
+            {
+                "managed_backend": managed_backend,
+                "launcher_pid": launcher_pid,
+                "backend_pid": backend_pid,
+                "tui_pid": tui_pid,
+                "activity": activity,
+            },
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return metadata_path
 
 
 def _set_artifact_age_secs(path: Path, *, age_secs: float) -> None:
@@ -149,6 +183,140 @@ def test_reconcile_active_spawn_returns_unchanged_when_runner_is_alive(
     latest = _get_spawn(runtime_root, spawn_id)
     assert latest.status == "running"
     assert latest.error is None
+
+
+def test_reconcile_active_spawn_managed_primary_idle_launcher_alive_skips(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_root, spawn_id = _create_spawn(
+        tmp_path,
+        runner_pid=None,
+        started_at=_OLD_STARTED_AT,
+    )
+    _write_primary_meta(
+        runtime_root,
+        spawn_id,
+        launcher_pid=7771,
+        activity="idle",
+    )
+    record = _get_spawn(runtime_root, spawn_id)
+    monkeypatch.setattr(
+        "meridian.lib.state.reaper.is_process_alive",
+        lambda pid, created_after_epoch=None: pid == 7771,
+    )
+
+    reconciled = reconcile_active_spawn(runtime_root, record)
+
+    assert reconciled == record
+    latest = _get_spawn(runtime_root, spawn_id)
+    assert latest.status == "running"
+    assert latest.error is None
+
+
+def test_reconcile_active_spawn_managed_primary_launcher_alive_skips_when_finalizing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_root, spawn_id = _create_spawn(
+        tmp_path,
+        status="finalizing",
+        started_at=_OLD_STARTED_AT,
+    )
+    _write_primary_meta(
+        runtime_root,
+        spawn_id,
+        launcher_pid=7774,
+        activity="finalizing",
+    )
+    record = _get_spawn(runtime_root, spawn_id)
+    monkeypatch.setattr(
+        "meridian.lib.state.reaper.is_process_alive",
+        lambda pid, created_after_epoch=None: pid == 7774,
+    )
+
+    reconciled = reconcile_active_spawn(runtime_root, record)
+
+    assert reconciled == record
+    latest = _get_spawn(runtime_root, spawn_id)
+    assert latest.status == "finalizing"
+    assert latest.error is None
+
+
+def test_reconcile_active_spawn_managed_primary_dead_launcher_marks_orphan_primary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_root, spawn_id = _create_spawn(
+        tmp_path,
+        started_at=_OLD_STARTED_AT,
+    )
+    _write_primary_meta(
+        runtime_root,
+        spawn_id,
+        launcher_pid=7772,
+        backend_pid=8882,
+        tui_pid=9992,
+        activity="idle",
+    )
+    record = _get_spawn(runtime_root, spawn_id)
+    monkeypatch.setattr(
+        "meridian.lib.state.reaper.is_process_alive",
+        lambda *_args, **_kwargs: False,
+    )
+    sent_signals: list[tuple[int, int]] = []
+
+    def _fake_kill(pid: int, sig: int) -> None:
+        sent_signals.append((pid, sig))
+
+    monkeypatch.setattr("meridian.lib.state.reaper.os.kill", _fake_kill)
+
+    reconciled = reconcile_active_spawn(runtime_root, record)
+
+    assert reconciled.status == "failed"
+    assert reconciled.exit_code == 1
+    assert reconciled.error == "orphan_primary"
+    latest = _get_spawn(runtime_root, spawn_id)
+    assert latest.status == "failed"
+    assert latest.error == "orphan_primary"
+    assert sent_signals == [(8882, signal.SIGTERM), (9992, signal.SIGTERM)]
+
+
+def test_reconcile_active_spawn_managed_primary_finalizing_activity_uses_report_recovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_root, spawn_id = _create_spawn(
+        tmp_path,
+        started_at=_OLD_STARTED_AT,
+    )
+    report_path = _write_report(runtime_root, spawn_id)
+    _set_artifact_age_secs(report_path, age_secs=300)
+    _write_primary_meta(
+        runtime_root,
+        spawn_id,
+        launcher_pid=7773,
+        backend_pid=8883,
+        tui_pid=9993,
+        activity="finalizing",
+    )
+    record = _get_spawn(runtime_root, spawn_id)
+    monkeypatch.setattr(
+        "meridian.lib.state.reaper.is_process_alive",
+        lambda *_args, **_kwargs: False,
+    )
+    sent_signals: list[tuple[int, int]] = []
+    monkeypatch.setattr(
+        "meridian.lib.state.reaper.os.kill",
+        lambda pid, sig: sent_signals.append((pid, sig)),
+    )
+
+    reconciled = reconcile_active_spawn(runtime_root, record)
+
+    assert reconciled.status == "succeeded"
+    assert reconciled.exit_code == 0
+    assert reconciled.error is None
+    assert sent_signals == []
 
 
 def test_reconcile_active_spawn_finalizing_stale_heartbeat_marks_orphan_finalization(
@@ -335,3 +503,112 @@ def test_reconcile_active_spawn_dead_runner_recent_activity_skips_across_artifac
     latest = _get_spawn(runtime_root, spawn_id)
     assert latest.status == "running"
     assert latest.error is None
+
+
+def _patch_spawn_cancel_runtime_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    runtime_root: Path,
+    spawn_id: str,
+) -> None:
+    monkeypatch.setattr(
+        "meridian.lib.ops.spawn.api.resolve_runtime_root_and_config",
+        lambda _project_root: (runtime_root, object()),
+    )
+    monkeypatch.setattr(
+        "meridian.lib.ops.spawn.api.resolve_runtime_root",
+        lambda _project_root: runtime_root,
+    )
+    monkeypatch.setattr(
+        "meridian.lib.ops.spawn.api.resolve_spawn_reference",
+        lambda _project_root, _spawn_id: spawn_id,
+    )
+
+
+def test_spawn_cancel_managed_primary_signals_launcher_first(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_root, spawn_id = _create_spawn(tmp_path, started_at=_OLD_STARTED_AT)
+    _write_primary_meta(
+        runtime_root,
+        spawn_id,
+        launcher_pid=7001,
+        backend_pid=7002,
+        tui_pid=7003,
+        activity="idle",
+    )
+    _patch_spawn_cancel_runtime_resolution(
+        monkeypatch,
+        runtime_root=runtime_root,
+        spawn_id=spawn_id,
+    )
+    monkeypatch.setattr(
+        "meridian.lib.ops.spawn.api.is_process_alive",
+        lambda pid, created_after_epoch=None: pid == 7001,
+    )
+    monkeypatch.setattr("meridian.lib.ops.spawn.api._MANAGED_CANCEL_GRACE_SECS", 0.01)
+    monkeypatch.setattr("meridian.lib.ops.spawn.api._MANAGED_CANCEL_FALLBACK_WAIT_SECS", 0.01)
+    sent_signals: list[tuple[int, int]] = []
+    monkeypatch.setattr(
+        "meridian.lib.state.reaper.os.kill",
+        lambda pid, sig: sent_signals.append((pid, sig)),
+    )
+
+    output = spawn_api.spawn_cancel_sync(
+        SpawnCancelInput(
+            spawn_id=spawn_id,
+            project_root=tmp_path.as_posix(),
+        )
+    )
+
+    assert output.status == "finalizing"
+    assert output.exit_code == 1
+    assert sent_signals[0] == (7001, signal.SIGTERM)
+    assert set(sent_signals[1:]) == {(7002, signal.SIGTERM), (7003, signal.SIGTERM)}
+    latest = _get_spawn(runtime_root, spawn_id)
+    assert latest.status == "finalizing"
+
+
+def test_spawn_cancel_managed_primary_without_launcher_directly_terminates_backend_and_tui(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_root, spawn_id = _create_spawn(tmp_path, started_at=_OLD_STARTED_AT)
+    _write_primary_meta(
+        runtime_root,
+        spawn_id,
+        launcher_pid=7101,
+        backend_pid=7102,
+        tui_pid=7103,
+        activity="idle",
+    )
+    _patch_spawn_cancel_runtime_resolution(
+        monkeypatch,
+        runtime_root=runtime_root,
+        spawn_id=spawn_id,
+    )
+    monkeypatch.setattr(
+        "meridian.lib.ops.spawn.api.is_process_alive",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr("meridian.lib.ops.spawn.api._MANAGED_CANCEL_GRACE_SECS", 0.01)
+    monkeypatch.setattr("meridian.lib.ops.spawn.api._MANAGED_CANCEL_FALLBACK_WAIT_SECS", 0.01)
+    sent_signals: list[tuple[int, int]] = []
+    monkeypatch.setattr(
+        "meridian.lib.state.reaper.os.kill",
+        lambda pid, sig: sent_signals.append((pid, sig)),
+    )
+
+    output = spawn_api.spawn_cancel_sync(
+        SpawnCancelInput(
+            spawn_id=spawn_id,
+            project_root=tmp_path.as_posix(),
+        )
+    )
+
+    assert output.status == "finalizing"
+    assert output.exit_code == 1
+    assert sent_signals == [(7102, signal.SIGTERM), (7103, signal.SIGTERM)]
+    latest = _get_spawn(runtime_root, spawn_id)
+    assert latest.status == "finalizing"

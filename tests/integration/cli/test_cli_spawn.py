@@ -378,6 +378,34 @@ def test_spawn_list_status_accepts_finalizing(
     assert captured["payload"].statuses is None
 
 
+def test_spawn_list_primary_filter_routes_to_spawn_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MERIDIAN_DEPTH", "1")
+    captured: dict[str, SpawnListInput] = {}
+
+    def _fake_spawn_list_sync(
+        payload: SpawnListInput,
+        *,
+        sink: object | None = None,
+    ) -> SpawnListOutput:
+        _ = sink
+        captured["payload"] = payload
+        return SpawnListOutput(spawns=())
+
+    monkeypatch.setattr(spawn_cli, "spawn_list_sync", _fake_spawn_list_sync)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main.main(["spawn", "list", "--primary"])
+
+    assert exc_info.value.code == 0
+    payload = captured["payload"]
+    assert payload.primary is True
+    statuses = payload.statuses
+    assert statuses is not None
+    assert "finalizing" in statuses
+
+
 def test_spawn_children_resolves_parent_reference_before_filtering(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,

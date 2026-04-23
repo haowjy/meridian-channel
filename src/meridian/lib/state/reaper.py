@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import os
+import signal
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -17,6 +20,7 @@ from meridian.lib.core.spawn_lifecycle import (
     is_active_spawn_status,
     resolve_reconciled_terminal_state,
 )
+from meridian.lib.launch.constants import PRIMARY_META_FILENAME
 from meridian.lib.state.liveness import is_process_alive
 from meridian.lib.state.spawn_store import SpawnRecord
 
@@ -28,12 +32,23 @@ _ACTIVITY_ARTIFACTS: tuple[str, ...] = ("heartbeat", "output.jsonl", "stderr.log
 
 
 @dataclass(frozen=True)
+class PrimaryMetadata:
+    managed_backend: bool
+    launcher_pid: int | None
+    backend_pid: int | None
+    tui_pid: int | None
+    activity: str | None
+
+
+@dataclass(frozen=True)
 class ArtifactSnapshot:
     started_epoch: float | None
     last_activity_epoch: float | None
     recent_activity_artifact: str | None
     durable_report_completion: bool
     runner_pid_alive: bool
+    primary_metadata: PrimaryMetadata | None
+    primary_launcher_pid_alive: bool
 
 
 @dataclass(frozen=True)
@@ -44,6 +59,7 @@ class Skip:
 @dataclass(frozen=True)
 class FinalizeFailed:
     error: str
+    terminate_orphan_primary_children: bool = False
 
 
 @dataclass(frozen=True)
@@ -79,6 +95,88 @@ def _read_completion_report(runtime_root: Path, spawn_id: str) -> str | None:
         return report_path.read_text(encoding="utf-8", errors="ignore").strip() or None
     except OSError:
         return None
+
+
+def _coerce_positive_int(value: object) -> int | None:
+    if not isinstance(value, int):
+        return None
+    if value <= 0:
+        return None
+    return value
+
+
+def _normalize_primary_activity(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    if not normalized:
+        return None
+    return normalized
+
+
+def read_primary_metadata(runtime_root: Path, spawn_id: str) -> PrimaryMetadata | None:
+    """Read managed-primary metadata sidecar for a spawn."""
+    metadata_path = runtime_root / "spawns" / spawn_id / PRIMARY_META_FILENAME
+    if not metadata_path.is_file():
+        return None
+    try:
+        raw = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    if raw.get("managed_backend") is not True:
+        return None
+    return PrimaryMetadata(
+        managed_backend=True,
+        launcher_pid=_coerce_positive_int(raw.get("launcher_pid")),
+        backend_pid=_coerce_positive_int(raw.get("backend_pid")),
+        tui_pid=_coerce_positive_int(raw.get("tui_pid")),
+        activity=_normalize_primary_activity(raw.get("activity")),
+    )
+
+
+def _terminate_pid(pid: int | None) -> bool:
+    if pid is None or pid <= 0 or pid == os.getpid():
+        return False
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except (OSError, ProcessLookupError):
+        return False
+    return True
+
+
+def terminate_managed_primary_processes(
+    primary_metadata: PrimaryMetadata | None,
+    *,
+    include_launcher: bool,
+    include_runtime_children: bool = True,
+) -> tuple[int, ...]:
+    """Best-effort SIGTERM for tracked managed-primary processes."""
+    if primary_metadata is None or not primary_metadata.managed_backend:
+        return ()
+    if include_launcher and include_runtime_children:
+        candidates = (
+            primary_metadata.launcher_pid,
+            primary_metadata.backend_pid,
+            primary_metadata.tui_pid,
+        )
+    elif include_launcher:
+        candidates = (primary_metadata.launcher_pid,)
+    else:
+        candidates = (
+            primary_metadata.backend_pid,
+            primary_metadata.tui_pid,
+        )
+    signaled: list[int] = []
+    seen: set[int] = set()
+    for candidate in candidates:
+        if candidate is None or candidate in seen:
+            continue
+        seen.add(candidate)
+        if _terminate_pid(candidate):
+            signaled.append(candidate)
+    return tuple(signaled)
 
 
 def _artifact_mtime_epoch(path: Path) -> float | None:
@@ -118,9 +216,23 @@ def _collect_artifact_snapshot(
         now,
     )
     report_text = _read_completion_report(runtime_root, record.id)
+    primary_metadata = read_primary_metadata(runtime_root, record.id)
     runner_pid_alive = False
+    primary_launcher_pid_alive = False
     if (
-        record.status != "finalizing"
+        primary_metadata is not None
+        and primary_metadata.managed_backend
+        and primary_metadata.launcher_pid is not None
+    ):
+        primary_launcher_pid_alive = is_process_alive(
+            primary_metadata.launcher_pid,
+            created_after_epoch=started_epoch,
+        )
+
+    if (
+        (primary_metadata is None or not primary_metadata.managed_backend)
+        and not primary_launcher_pid_alive
+        and record.status != "finalizing"
         and record.runner_pid is not None
         and record.runner_pid > 0
     ):
@@ -134,6 +246,8 @@ def _collect_artifact_snapshot(
         recent_activity_artifact=recent_activity_artifact,
         durable_report_completion=has_durable_report_completion(report_text),
         runner_pid_alive=runner_pid_alive,
+        primary_metadata=primary_metadata,
+        primary_launcher_pid_alive=primary_launcher_pid_alive,
     )
 
 
@@ -147,6 +261,21 @@ def decide_reconciliation(
     snapshot: ArtifactSnapshot,
     now: float,
 ) -> ReconciliationDecision:
+    primary_metadata = snapshot.primary_metadata
+    if primary_metadata is not None and primary_metadata.managed_backend:
+        if snapshot.primary_launcher_pid_alive:
+            return Skip(reason="primary_launcher_alive")
+        if primary_metadata.activity == "finalizing":
+            if _has_recent_activity(snapshot):
+                return Skip(reason="recent_activity")
+            if snapshot.durable_report_completion:
+                return FinalizeSucceededFromReport()
+            return FinalizeFailed(error="orphan_finalization")
+        return FinalizeFailed(
+            error="orphan_primary",
+            terminate_orphan_primary_children=True,
+        )
+
     if record.status == "finalizing":
         if _has_recent_activity(snapshot):
             return Skip(reason="recent_activity")
@@ -261,6 +390,11 @@ def reconcile_active_spawn(runtime_root: Path, record: SpawnRecord) -> SpawnReco
         return record
     if isinstance(decision, FinalizeSucceededFromReport):
         return _finalize_completed_report(runtime_root, record, snapshot, now)
+    if decision.terminate_orphan_primary_children:
+        terminate_managed_primary_processes(
+            snapshot.primary_metadata,
+            include_launcher=False,
+        )
     return _finalize_failed(runtime_root, record, decision.error, snapshot, now)
 
 

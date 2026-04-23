@@ -18,7 +18,7 @@ from meridian.lib.core.util import FormatContext
 from meridian.lib.harness.registry import get_default_harness_registry
 from meridian.lib.harness.session_detection import infer_harness_from_untracked_session_ref
 from meridian.lib.harness.transcript import TranscriptMessage, text_from_value
-from meridian.lib.launch.constants import OUTPUT_FILENAME
+from meridian.lib.launch.constants import OUTPUT_FILENAME, PRIMARY_META_FILENAME
 from meridian.lib.ops.reference import resolve_session_reference
 from meridian.lib.ops.runtime import (
     async_from_sync,
@@ -534,12 +534,54 @@ def _spawn_output_path(runtime_root: Path, spawn_id: str, *, live_first: bool) -
     return None
 
 
+def _read_primary_meta(runtime_root: Path, spawn_id: str) -> dict[str, object] | None:
+    meta_path = runtime_root / "spawns" / spawn_id / PRIMARY_META_FILENAME
+    if not meta_path.is_file():
+        return None
+    try:
+        payload_obj = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload_obj, dict):
+        return None
+    return cast("dict[str, object]", payload_obj)
+
+
+def _is_managed_backend_primary(runtime_root: Path, spawn_id: str) -> bool:
+    primary_meta = _read_primary_meta(runtime_root, spawn_id)
+    if primary_meta is None:
+        return False
+    return primary_meta.get("managed_backend") is True
+
+
+def _primary_meta_harness_session_id(runtime_root: Path, spawn_id: str) -> str | None:
+    primary_meta = _read_primary_meta(runtime_root, spawn_id)
+    if primary_meta is None:
+        return None
+    raw_session_id = primary_meta.get("harness_session_id")
+    if not isinstance(raw_session_id, str):
+        return None
+    normalized_session_id = raw_session_id.strip()
+    if not normalized_session_id:
+        return None
+    return normalized_session_id
+
+
+def _managed_primary_fallback_source(spawn_id: str, harness: str | None) -> str:
+    source = f"spawn {spawn_id} output"
+    normalized_harness = (harness or "").strip().lower()
+    if normalized_harness == "opencode":
+        return f"{source} (best-effort fallback; native opencode transcript unavailable)"
+    return source
+
+
 def _target_from_spawn_output(
     runtime_root: Path,
     *,
     display_id: str,
     spawn_id: str,
     live_first: bool,
+    source: str | None = None,
 ) -> _ResolvedTarget | None:
     output_path = _spawn_output_path(runtime_root, spawn_id, live_first=live_first)
     if output_path is None:
@@ -548,7 +590,7 @@ def _target_from_spawn_output(
         session_id=display_id,
         harness=None,
         file_path=output_path,
-        source=f"spawn {spawn_id} output",
+        source=source or f"spawn {spawn_id} output",
     )
 
 
@@ -591,12 +633,19 @@ def _resolve_from_chat_id(
             normalized_session_id = primary_spawn_session_id
             should_persist_primary_session_id = True
         else:
-            normalized_session_id = _detect_primary_harness_session_id(
-                project_root=project_root,
-                spawn_row=primary_spawn,
-                harness_hint=normalized_harness,
+            primary_meta_session_id = _primary_meta_harness_session_id(
+                runtime_root, primary_spawn.id
             )
-            should_persist_primary_session_id = normalized_session_id is not None
+            if primary_meta_session_id is not None:
+                normalized_session_id = primary_meta_session_id
+                should_persist_primary_session_id = True
+            else:
+                normalized_session_id = _detect_primary_harness_session_id(
+                    project_root=project_root,
+                    spawn_row=primary_spawn,
+                    harness_hint=normalized_harness,
+                )
+                should_persist_primary_session_id = normalized_session_id is not None
         if normalized_session_id is None:
             raise ValueError(_primary_transcript_unavailable_message(chat_id))
 
@@ -656,6 +705,19 @@ def _resolve_from_spawn_id(
         raise ValueError(f"Spawn '{spawn_id}' not found")
 
     is_primary_spawn = row.kind == "primary"
+    is_managed_backend_primary = is_primary_spawn and _is_managed_backend_primary(
+        runtime_root, spawn_id
+    )
+
+    if is_managed_backend_primary and is_active_spawn_status(row.status) and (
+        output_target := _target_from_spawn_output(
+            runtime_root,
+            display_id=spawn_id,
+            spawn_id=spawn_id,
+            live_first=True,
+        )
+    ):
+        return output_target
 
     if (not is_primary_spawn) and is_active_spawn_status(row.status) and (
         output_target := _target_from_spawn_output(
@@ -675,6 +737,12 @@ def _resolve_from_spawn_id(
         by_chat = session_store.get_session_harness_id(runtime_root, row.chat_id)
         session_id = (by_chat or "").strip()
 
+    if not session_id and is_primary_spawn:
+        primary_meta_session_id = _primary_meta_harness_session_id(runtime_root, spawn_id)
+        if primary_meta_session_id is not None:
+            session_id = primary_meta_session_id
+            should_persist_primary_session_id = True
+
     if not session_id:
         if is_primary_spawn:
             detected_session_id = _detect_primary_harness_session_id(
@@ -685,6 +753,15 @@ def _resolve_from_spawn_id(
             if detected_session_id:
                 session_id = detected_session_id
                 should_persist_primary_session_id = True
+            elif is_managed_backend_primary:
+                if output_target := _target_from_spawn_output(
+                    runtime_root,
+                    display_id=spawn_id,
+                    spawn_id=spawn_id,
+                    live_first=is_active_spawn_status(row.status),
+                    source=_managed_primary_fallback_source(spawn_id, harness),
+                ):
+                    return output_target
         else:
             output_target = _target_from_spawn_output(
                 runtime_root,
@@ -740,6 +817,16 @@ def _resolve_from_spawn_id(
                     harness_session_id=resolved_target.session_id,
                 )
                 return resolved_target
+            if is_managed_backend_primary:
+                output_target = _target_from_spawn_output(
+                    runtime_root,
+                    display_id=spawn_id,
+                    spawn_id=spawn_id,
+                    live_first=is_active_spawn_status(row.status),
+                    source=_managed_primary_fallback_source(spawn_id, harness),
+                )
+                if output_target is not None:
+                    return output_target
             raise
         output_target = _target_from_spawn_output(
             runtime_root,

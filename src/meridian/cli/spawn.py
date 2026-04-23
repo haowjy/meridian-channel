@@ -463,6 +463,10 @@ def _spawn_list(
         str | None,
         Parameter(name="--model", help="Filter by model id."),
     ] = None,
+    primary: Annotated[
+        bool,
+        Parameter(name="--primary", help="Only show primary spawns."),
+    ] = False,
     limit: Annotated[
         int, Parameter(name="--limit", help="Maximum number of spawns to return.")
     ] = 20,
@@ -507,6 +511,7 @@ def _spawn_list(
             status=normalized_status,
             statuses=normalized_statuses,
             model=model,
+            primary=primary,
             limit=limit,
             failed=False,
         ),

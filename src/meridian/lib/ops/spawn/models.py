@@ -190,6 +190,7 @@ class SpawnListInput(BaseModel):
     status: SpawnStatus | None = None
     statuses: tuple[SpawnStatus, ...] | None = None
     model: str | None = None
+    primary: bool = False
     limit: int = 20
     failed: bool = False
     project_root: str | None = None
@@ -309,14 +310,23 @@ class SpawnListEntry(BaseModel):
     model: str
     agent: str | None = None
     desc: str | None = None
+    kind: str | None = None
+    activity: str | None = None
+    managed_backend: bool = False
     duration_secs: float | None
     cost_usd: float | None
+
+    def display_status(self) -> str:
+        shown = (self.status_display or "").strip()
+        if shown:
+            return shown
+        return self.status
 
     def as_row(self) -> list[str]:
         """Return columnar cells for tabular alignment."""
         return [
             self.spawn_id,
-            self.status,
+            self.display_status(),
             _truncate_cell(self.model, max_chars=18),
             f"{self.duration_secs:.1f}s" if self.duration_secs is not None else "-",
         ]
@@ -332,19 +342,27 @@ class SpawnListOutput(BaseModel):
 
     @model_serializer(mode="plain")
     def _serialize(self) -> dict[str, object]:
+        serialized_spawns: list[dict[str, object]] = []
+        for entry in self.spawns:
+            payload_entry: dict[str, object] = {
+                "spawn_id": entry.spawn_id,
+                "status": entry.status,
+                "agent": entry.agent,
+                "desc": entry.desc,
+                "model": entry.model,
+                "duration_secs": entry.duration_secs,
+                "cost_usd": entry.cost_usd,
+            }
+            if entry.kind is not None:
+                payload_entry["kind"] = entry.kind
+            if entry.activity is not None:
+                payload_entry["activity"] = entry.activity
+            if entry.managed_backend:
+                payload_entry["managed_backend"] = True
+            serialized_spawns.append(payload_entry)
+
         payload: dict[str, object] = {
-            "spawns": [
-                {
-                    "spawn_id": entry.spawn_id,
-                    "status": entry.status,
-                    "agent": entry.agent,
-                    "desc": entry.desc,
-                    "model": entry.model,
-                    "duration_secs": entry.duration_secs,
-                    "cost_usd": entry.cost_usd,
-                }
-                for entry in self.spawns
-            ],
+            "spawns": serialized_spawns,
             "truncated": self.truncated,
         }
         if self.total_count is not None:
@@ -365,7 +383,7 @@ class SpawnListOutput(BaseModel):
                 rows.append(
                     [
                         entry.spawn_id,
-                        entry.status,
+                        entry.display_status(),
                         entry.agent or "-",
                         entry.desc or "-",
                         _truncate_cell(entry.model, max_chars=18) if entry.model else "-",
@@ -407,6 +425,12 @@ class SpawnDetailOutput(BaseModel):
     status: str
     model: str
     harness: str
+    kind: str | None = None
+    activity: str | None = None
+    managed_backend: bool = False
+    backend_pid: int | None = None
+    tui_pid: int | None = None
+    backend_port: int | None = None
     parent_id: str | None = None
     work_id: str | None = None
     desc: str | None = None
@@ -456,6 +480,20 @@ class SpawnDetailOutput(BaseModel):
             "model": self.model,
             "harness": self.harness,
         }
+        if self.kind is not None:
+            wire["kind"] = self.kind
+        if self.activity is not None:
+            wire["activity"] = self.activity
+        if self.managed_backend:
+            wire["managed_backend"] = True
+        if self.backend_pid is not None:
+            wire["backend_pid"] = self.backend_pid
+        if self.tui_pid is not None:
+            wire["tui_pid"] = self.tui_pid
+        if self.backend_port is not None:
+            wire["backend_port"] = self.backend_port
+        if self.kind == "primary" and self.harness_session_id is not None:
+            wire["harness_session_id"] = self.harness_session_id
         if self.parent_id is not None:
             wire["parent_id"] = self.parent_id
         if self.work_id is not None:
@@ -506,12 +544,25 @@ class SpawnDetailOutput(BaseModel):
 
         work_value = (self.work_id or "").strip() or None
         desc_value = (self.desc or "").strip() or None
+        kind_value = (self.kind or "").strip() or None
+        activity_value = (self.activity or "").strip() or None
+        managed_backend_value: str | None = "true" if self.managed_backend else None
+        harness_session_value: str | None = None
+        if self.kind == "primary":
+            harness_session_value = (self.harness_session_id or "").strip() or None
 
         parent_value = (self.parent_id or "").strip() or None
 
         pairs: list[tuple[str, str | None]] = [
             ("Spawn", self.spawn_id),
             ("Status", status_str),
+            ("Kind", kind_value),
+            ("Activity", activity_value),
+            ("Managed backend", managed_backend_value),
+            ("Backend pid", None if self.backend_pid is None else str(self.backend_pid)),
+            ("TUI pid", None if self.tui_pid is None else str(self.tui_pid)),
+            ("Backend port", None if self.backend_port is None else str(self.backend_port)),
+            ("Harness session", harness_session_value),
             ("Exited at", self.exited_at),
             (
                 "Process exit code",
