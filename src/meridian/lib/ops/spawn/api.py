@@ -27,14 +27,12 @@ from meridian.lib.ops.runtime import (
 from meridian.lib.ops.work_attachment import ensure_explicit_work_item
 from meridian.lib.state import spawn_store
 from meridian.lib.state.liveness import is_process_alive
+from meridian.lib.state.managed_primary import terminate_managed_primary_processes
 from meridian.lib.state.paths import resolve_project_paths
 from meridian.lib.state.primary_meta import (
     PrimaryMetadata,
     read_primary_metadata,
     read_primary_surface_metadata,
-)
-from meridian.lib.state.reaper import (
-    terminate_managed_primary_processes,
 )
 from meridian.lib.streaming.signal_canceller import CancelOutcome, SignalCanceller
 from meridian.lib.utils.time import minutes_to_seconds

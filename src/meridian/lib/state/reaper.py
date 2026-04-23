@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import signal
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -20,6 +18,7 @@ from meridian.lib.core.spawn_lifecycle import (
     resolve_reconciled_terminal_state,
 )
 from meridian.lib.state.liveness import is_process_alive
+from meridian.lib.state.managed_primary import terminate_managed_primary_processes
 from meridian.lib.state.primary_meta import PrimaryMetadata, read_primary_metadata
 from meridian.lib.state.spawn_store import SpawnRecord
 
@@ -85,52 +84,6 @@ def _read_completion_report(runtime_root: Path, spawn_id: str) -> str | None:
         return report_path.read_text(encoding="utf-8", errors="ignore").strip() or None
     except OSError:
         return None
-
-
-def _terminate_pid(pid: int | None) -> bool:
-    if pid is None or pid <= 0 or pid == os.getpid():
-        return False
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except (OSError, ProcessLookupError):
-        return False
-    return True
-
-
-def terminate_managed_primary_processes(
-    primary_metadata: PrimaryMetadata | None,
-    *,
-    started_epoch: float | None = None,
-    include_launcher: bool,
-    include_runtime_children: bool = True,
-) -> tuple[int, ...]:
-    """Best-effort SIGTERM for tracked managed-primary processes."""
-    if primary_metadata is None or not primary_metadata.managed_backend:
-        return ()
-    if include_launcher and include_runtime_children:
-        candidates = (
-            primary_metadata.launcher_pid,
-            primary_metadata.backend_pid,
-            primary_metadata.tui_pid,
-        )
-    elif include_launcher:
-        candidates = (primary_metadata.launcher_pid,)
-    else:
-        candidates = (
-            primary_metadata.backend_pid,
-            primary_metadata.tui_pid,
-        )
-    signaled: list[int] = []
-    seen: set[int] = set()
-    for candidate in candidates:
-        if candidate is None or candidate in seen:
-            continue
-        seen.add(candidate)
-        if not is_process_alive(candidate, created_after_epoch=started_epoch):
-            continue
-        if _terminate_pid(candidate):
-            signaled.append(candidate)
-    return tuple(signaled)
 
 
 def _artifact_mtime_epoch(path: Path) -> float | None:

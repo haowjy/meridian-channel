@@ -14,7 +14,11 @@ from meridian.lib.launch.constants import PRIMARY_META_FILENAME
 from meridian.lib.ops.spawn.models import SpawnCancelInput
 from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_runtime_paths
-from meridian.lib.state.reaper import reconcile_active_spawn
+from meridian.lib.state.reaper import (
+    PrimaryMetadata,
+    reconcile_active_spawn,
+    terminate_managed_primary_processes,
+)
 
 _OLD_STARTED_AT = "2000-01-01T00:00:00Z"
 
@@ -119,6 +123,36 @@ def _write_activity_artifact(
         artifact_path.write_text("recent activity\n", encoding="utf-8")
     _set_artifact_age_secs(artifact_path, age_secs=age_secs)
     return artifact_path
+
+
+def test_terminate_managed_primary_processes_skips_unvalidated_child_pid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metadata = PrimaryMetadata(
+        managed_backend=True,
+        launcher_pid=8001,
+        backend_pid=8002,
+        tui_pid=8003,
+        activity="idle",
+    )
+    monkeypatch.setattr(
+        "meridian.lib.state.managed_primary.is_process_alive",
+        lambda pid, created_after_epoch=None: pid == 8002,
+    )
+    sent_signals: list[tuple[int, int]] = []
+    monkeypatch.setattr(
+        "meridian.lib.state.managed_primary.os.kill",
+        lambda pid, sig: sent_signals.append((pid, sig)),
+    )
+
+    signaled = terminate_managed_primary_processes(
+        metadata,
+        started_epoch=100.0,
+        include_launcher=False,
+    )
+
+    assert signaled == (8002,)
+    assert sent_signals == [(8002, signal.SIGTERM)]
 
 
 def test_reconcile_active_spawn_returns_terminal_record_unchanged(
@@ -262,14 +296,18 @@ def test_reconcile_active_spawn_managed_primary_dead_launcher_marks_orphan_prima
     record = _get_spawn(runtime_root, spawn_id)
     monkeypatch.setattr(
         "meridian.lib.state.reaper.is_process_alive",
-        lambda *_args, **_kwargs: False,
+        lambda pid, created_after_epoch=None: pid in {8882, 9992},
+    )
+    monkeypatch.setattr(
+        "meridian.lib.state.managed_primary.is_process_alive",
+        lambda pid, created_after_epoch=None: pid in {8882, 9992},
     )
     sent_signals: list[tuple[int, int]] = []
 
     def _fake_kill(pid: int, sig: int) -> None:
         sent_signals.append((pid, sig))
 
-    monkeypatch.setattr("meridian.lib.state.reaper.os.kill", _fake_kill)
+    monkeypatch.setattr("meridian.lib.state.managed_primary.os.kill", _fake_kill)
 
     reconciled = reconcile_active_spawn(runtime_root, record)
 
@@ -307,7 +345,7 @@ def test_reconcile_active_spawn_managed_primary_finalizing_activity_uses_report_
     )
     sent_signals: list[tuple[int, int]] = []
     monkeypatch.setattr(
-        "meridian.lib.state.reaper.os.kill",
+        "meridian.lib.state.managed_primary.os.kill",
         lambda pid, sig: sent_signals.append((pid, sig)),
     )
 
@@ -547,11 +585,15 @@ def test_spawn_cancel_managed_primary_signals_launcher_first(
         "meridian.lib.ops.spawn.api.is_process_alive",
         lambda pid, created_after_epoch=None: pid == 7001,
     )
+    monkeypatch.setattr(
+        "meridian.lib.state.managed_primary.is_process_alive",
+        lambda pid, created_after_epoch=None: pid in {7001, 7002, 7003},
+    )
     monkeypatch.setattr("meridian.lib.ops.spawn.api._MANAGED_CANCEL_GRACE_SECS", 0.01)
     monkeypatch.setattr("meridian.lib.ops.spawn.api._MANAGED_CANCEL_FALLBACK_WAIT_SECS", 0.01)
     sent_signals: list[tuple[int, int]] = []
     monkeypatch.setattr(
-        "meridian.lib.state.reaper.os.kill",
+        "meridian.lib.state.managed_primary.os.kill",
         lambda pid, sig: sent_signals.append((pid, sig)),
     )
 
@@ -592,11 +634,15 @@ def test_spawn_cancel_managed_primary_without_launcher_directly_terminates_backe
         "meridian.lib.ops.spawn.api.is_process_alive",
         lambda *_args, **_kwargs: False,
     )
+    monkeypatch.setattr(
+        "meridian.lib.state.managed_primary.is_process_alive",
+        lambda pid, created_after_epoch=None: pid in {7102, 7103},
+    )
     monkeypatch.setattr("meridian.lib.ops.spawn.api._MANAGED_CANCEL_GRACE_SECS", 0.01)
     monkeypatch.setattr("meridian.lib.ops.spawn.api._MANAGED_CANCEL_FALLBACK_WAIT_SECS", 0.01)
     sent_signals: list[tuple[int, int]] = []
     monkeypatch.setattr(
-        "meridian.lib.state.reaper.os.kill",
+        "meridian.lib.state.managed_primary.os.kill",
         lambda pid, sig: sent_signals.append((pid, sig)),
     )
 
@@ -612,3 +658,58 @@ def test_spawn_cancel_managed_primary_without_launcher_directly_terminates_backe
     assert sent_signals == [(7102, signal.SIGTERM), (7103, signal.SIGTERM)]
     latest = _get_spawn(runtime_root, spawn_id)
     assert latest.status == "finalizing"
+
+
+def test_spawn_cancel_managed_primary_queued_converges_to_terminal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_root, spawn_id = _create_spawn(
+        tmp_path,
+        status="queued",
+        runner_pid=None,
+        started_at=_OLD_STARTED_AT,
+    )
+    _write_primary_meta(
+        runtime_root,
+        spawn_id,
+        launcher_pid=7201,
+        backend_pid=7202,
+        tui_pid=7203,
+        activity="idle",
+    )
+    _patch_spawn_cancel_runtime_resolution(
+        monkeypatch,
+        runtime_root=runtime_root,
+        spawn_id=spawn_id,
+    )
+    monkeypatch.setattr(
+        "meridian.lib.ops.spawn.api.is_process_alive",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr(
+        "meridian.lib.state.managed_primary.is_process_alive",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr("meridian.lib.ops.spawn.api._MANAGED_CANCEL_GRACE_SECS", 0.01)
+    monkeypatch.setattr("meridian.lib.ops.spawn.api._MANAGED_CANCEL_FALLBACK_WAIT_SECS", 0.01)
+    sent_signals: list[tuple[int, int]] = []
+    monkeypatch.setattr(
+        "meridian.lib.state.managed_primary.os.kill",
+        lambda pid, sig: sent_signals.append((pid, sig)),
+    )
+
+    output = spawn_api.spawn_cancel_sync(
+        SpawnCancelInput(
+            spawn_id=spawn_id,
+            project_root=tmp_path.as_posix(),
+        )
+    )
+
+    assert output.status == "failed"
+    assert output.exit_code == 1
+    assert sent_signals == []
+    latest = _get_spawn(runtime_root, spawn_id)
+    assert latest.status == "failed"
+    assert latest.error == "cancel_timeout"
+    assert latest.terminal_origin == "cancel"
