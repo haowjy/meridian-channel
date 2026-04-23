@@ -5,6 +5,7 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 - `MERIDIAN_DEPTH` parsing and nested-execution checks now share one core helper. CLI agent mode, doctor, reaper, work warnings, subrun events, and max-depth gates use same zero-based contract.
+- Docs and KB now spell out zero-based depth, immediate parent spawn linkage, and fail-closed root-only repair gates.
 
 ### Fixed
 - Primary launch preserves `MERIDIAN_DEPTH`; root sessions stay depth `0` while delegated spawns still increment.

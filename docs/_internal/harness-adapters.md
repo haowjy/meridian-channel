@@ -106,6 +106,9 @@ MERIDIAN_DEPTH=0 -> meridian spawn (child depth 1)
 ```
 
 `MERIDIAN_MAX_DEPTH` controls the ceiling. Default: `3`.
+Malformed non-empty `MERIDIAN_DEPTH` values are normalized to `0` for ordinary
+read/context paths, but root-only repair side effects fail closed and do not
+run unless depth is absent, empty, or a non-negative integer equal to `0`.
 
 ### Environment Propagation
 

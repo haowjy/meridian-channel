@@ -79,7 +79,7 @@ Canonical keys accepted by `meridian config set/get/reset`:
 
 | Key | Type | Purpose |
 |---|---|---|
-| `defaults.max_depth` | int | Max nested agent depth |
+| `defaults.max_depth` | int | Max zero-based delegated spawn depth |
 | `defaults.max_retries` | int | Retry attempts per run |
 | `defaults.retry_backoff_seconds` | float | Retry backoff multiplier |
 | `defaults.model` | str | Default model for spawn when unset |
@@ -328,11 +328,11 @@ Use `meridian models config init/show/get/set/reset` to manage this file from th
 | `MERIDIAN_FS_DIR` | Resolved shared filesystem path for the current repo state root |
 | `MERIDIAN_WORK_ID` | Active attached work item slug, when one exists |
 | `MERIDIAN_WORK_DIR` | Scratch/docs directory for the active work item, when one exists |
-| `MERIDIAN_SPAWN_ID` | Current spawn ID in nested execution |
-| `MERIDIAN_CHAT_ID` | Current chat/session id in nested execution |
-| `MERIDIAN_DEPTH` | Current nesting depth |
-| `MERIDIAN_MAX_DEPTH` | Max nesting depth override |
-| `MERIDIAN_PARENT_SPAWN_ID` | Parent spawn linkage for nested execution |
+| `MERIDIAN_SPAWN_ID` | Current run/spawn ID for primary and delegated execution |
+| `MERIDIAN_CHAT_ID` | Top-level chat/session id inherited across the spawn tree |
+| `MERIDIAN_DEPTH` | Zero-based delegation depth (`0` = primary/root, `1` = first delegated spawn) |
+| `MERIDIAN_MAX_DEPTH` | Max zero-based delegated spawn depth override |
+| `MERIDIAN_PARENT_SPAWN_ID` | Immediate parent spawn ID for nested execution |
 | `MERIDIAN_HARNESS_COMMAND` | Override harness command resolution |
 
 ### Config Overrides

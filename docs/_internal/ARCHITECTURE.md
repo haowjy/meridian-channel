@@ -364,8 +364,8 @@ Key env vars:
 | `MERIDIAN_HARNESS` | Default harness |
 | `MERIDIAN_FS_DIR` | Shared filesystem path (`.meridian/fs`) |
 | `MERIDIAN_SPAWN_ID` | Current spawn ID |
-| `MERIDIAN_PARENT_SPAWN_ID` | Parent spawn ID |
-| `MERIDIAN_DEPTH` | Nesting depth (0 = primary) |
+| `MERIDIAN_PARENT_SPAWN_ID` | Immediate parent spawn ID |
+| `MERIDIAN_DEPTH` | Zero-based delegation depth (`0` = primary/root) |
 | `MERIDIAN_PROJECT_DIR` | Repository root path |
 | `MERIDIAN_CHAT_ID` | Current session chat ID |
 
@@ -434,7 +434,7 @@ Authoritative-origin terminals are first-wins among themselves; a `succeeded` fr
 
 ### Reconciler gates
 
-- Reconciliation is skipped when `MERIDIAN_DEPTH > 0` (nested spawns run under a parent that has already reconciled — prevents false-positive orphan stamps from sandboxed child perspective).
+- Reconciliation runs only when depth clearly represents root (`MERIDIAN_DEPTH` absent, empty, or `0`). Nested spawns and malformed non-empty depth values skip root-only reaper side effects, preventing false-positive orphan stamps from sandboxed child perspectives.
 - Startup grace: 15 seconds after `started_at` before classifying missing-PID spawns.
 - Heartbeat window: 120 seconds. Activity from any artifact (`heartbeat`, `output.jsonl`, `stderr.log`, `report.md`) within that window suppresses reconciliation.
 - PID reuse margin: 30 seconds (protects against a recycled PID being misread as the original runner).
@@ -453,7 +453,7 @@ graph TD
     S1 --> S4["Spawn p4<br/>depth=2"]
 ```
 
-Context propagation per child: `MERIDIAN_FS_DIR`, `MERIDIAN_SPAWN_ID`, `MERIDIAN_PARENT_SPAWN_ID`, `MERIDIAN_DEPTH` (parent + 1). The shared filesystem at `fs/` enables data passing between siblings and across depths. `max_depth` config prevents runaway recursion.
+Context propagation per child: `MERIDIAN_FS_DIR`, `MERIDIAN_SPAWN_ID`, `MERIDIAN_PARENT_SPAWN_ID`, `MERIDIAN_DEPTH` (parent + 1). `MERIDIAN_CHAT_ID` stays pinned to the top-level chat/session while `MERIDIAN_PARENT_SPAWN_ID` records the immediate parent. The shared filesystem at `fs/` enables data passing between siblings and across depths. `max_depth` config prevents runaway recursion.
 
 ---
 
