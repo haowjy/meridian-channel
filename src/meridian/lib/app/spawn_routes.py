@@ -567,7 +567,7 @@ def register_spawn_query_routes(
         agent: str | None = Query(default=None, description="Filter by agent"),
         harness: str | None = Query(default=None, description="Filter by harness"),
         include_archived: bool = Query(default=False, description="Include archived spawns"),
-        limit: int = Query(default=20, ge=1, le=200, description="Page size"),
+        limit: int = Query(default=20, ge=1, le=100, description="Page size"),
         cursor: str | None = Query(default=None, description="Pagination cursor"),
     ) -> CursorEnvelope[SpawnProjection]:
         """List spawns with filtering and cursor-based pagination."""
