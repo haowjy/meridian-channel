@@ -13,12 +13,10 @@ import meridian.lib.ops.spawn.api as spawn_api
 from meridian.lib.launch.constants import PRIMARY_META_FILENAME
 from meridian.lib.ops.spawn.models import SpawnCancelInput
 from meridian.lib.state import spawn_store
+from meridian.lib.state.managed_primary import terminate_managed_primary_processes
 from meridian.lib.state.paths import resolve_runtime_paths
-from meridian.lib.state.reaper import (
-    PrimaryMetadata,
-    reconcile_active_spawn,
-    terminate_managed_primary_processes,
-)
+from meridian.lib.state.primary_meta import PrimaryMetadata
+from meridian.lib.state.reaper import reconcile_active_spawn
 
 _OLD_STARTED_AT = "2000-01-01T00:00:00Z"
 
@@ -236,7 +234,7 @@ def test_reconcile_active_spawn_managed_primary_idle_launcher_alive_skips(
     )
     record = _get_spawn(runtime_root, spawn_id)
     monkeypatch.setattr(
-        "meridian.lib.state.reaper.is_process_alive",
+        "meridian.lib.state.managed_primary.is_process_alive",
         lambda pid, created_after_epoch=None: pid == 7771,
     )
 
@@ -265,7 +263,7 @@ def test_reconcile_active_spawn_managed_primary_launcher_alive_skips_when_finali
     )
     record = _get_spawn(runtime_root, spawn_id)
     monkeypatch.setattr(
-        "meridian.lib.state.reaper.is_process_alive",
+        "meridian.lib.state.managed_primary.is_process_alive",
         lambda pid, created_after_epoch=None: pid == 7774,
     )
 
@@ -296,7 +294,7 @@ def test_reconcile_active_spawn_managed_primary_dead_launcher_marks_orphan_prima
     record = _get_spawn(runtime_root, spawn_id)
     monkeypatch.setattr(
         "meridian.lib.state.reaper.is_process_alive",
-        lambda pid, created_after_epoch=None: pid in {8882, 9992},
+        lambda *_args, **_kwargs: False,
     )
     monkeypatch.setattr(
         "meridian.lib.state.managed_primary.is_process_alive",
@@ -341,6 +339,10 @@ def test_reconcile_active_spawn_managed_primary_finalizing_activity_uses_report_
     record = _get_spawn(runtime_root, spawn_id)
     monkeypatch.setattr(
         "meridian.lib.state.reaper.is_process_alive",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr(
+        "meridian.lib.state.managed_primary.is_process_alive",
         lambda *_args, **_kwargs: False,
     )
     sent_signals: list[tuple[int, int]] = []

@@ -18,8 +18,12 @@ from meridian.lib.core.spawn_lifecycle import (
     resolve_reconciled_terminal_state,
 )
 from meridian.lib.state.liveness import is_process_alive
-from meridian.lib.state.managed_primary import terminate_managed_primary_processes
-from meridian.lib.state.primary_meta import PrimaryMetadata, read_primary_metadata
+from meridian.lib.state.managed_primary import (
+    ManagedPrimaryReconciliationStrategy,
+    ManagedPrimarySnapshot,
+    ReconciliationContext,
+    read_managed_primary_snapshot,
+)
 from meridian.lib.state.spawn_store import SpawnRecord
 
 logger = structlog.get_logger(__name__)
@@ -36,8 +40,6 @@ class ArtifactSnapshot:
     recent_activity_artifact: str | None
     durable_report_completion: bool
     runner_pid_alive: bool
-    primary_metadata: PrimaryMetadata | None
-    primary_launcher_pid_alive: bool
 
 
 @dataclass(frozen=True)
@@ -123,26 +125,8 @@ def _collect_artifact_snapshot(
         now,
     )
     report_text = _read_completion_report(runtime_root, record.id)
-    primary_metadata = read_primary_metadata(runtime_root, record.id)
     runner_pid_alive = False
-    primary_launcher_pid_alive = False
-    if (
-        primary_metadata is not None
-        and primary_metadata.managed_backend
-        and primary_metadata.launcher_pid is not None
-    ):
-        primary_launcher_pid_alive = is_process_alive(
-            primary_metadata.launcher_pid,
-            created_after_epoch=started_epoch,
-        )
-
-    if (
-        (primary_metadata is None or not primary_metadata.managed_backend)
-        and not primary_launcher_pid_alive
-        and record.status != "finalizing"
-        and record.runner_pid is not None
-        and record.runner_pid > 0
-    ):
+    if record.status != "finalizing" and record.runner_pid is not None and record.runner_pid > 0:
         runner_pid_alive = is_process_alive(
             record.runner_pid,
             created_after_epoch=started_epoch,
@@ -153,8 +137,6 @@ def _collect_artifact_snapshot(
         recent_activity_artifact=recent_activity_artifact,
         durable_report_completion=has_durable_report_completion(report_text),
         runner_pid_alive=runner_pid_alive,
-        primary_metadata=primary_metadata,
-        primary_launcher_pid_alive=primary_launcher_pid_alive,
     )
 
 
@@ -163,26 +145,11 @@ def _has_recent_activity(snapshot: ArtifactSnapshot) -> bool:
     return snapshot.recent_activity_artifact is not None
 
 
-def decide_reconciliation(
+def decide_generic_reconciliation(
     record: SpawnRecord,
     snapshot: ArtifactSnapshot,
     now: float,
 ) -> ReconciliationDecision:
-    primary_metadata = snapshot.primary_metadata
-    if primary_metadata is not None and primary_metadata.managed_backend:
-        if snapshot.primary_launcher_pid_alive:
-            return Skip(reason="primary_launcher_alive")
-        if primary_metadata.activity == "finalizing":
-            if _has_recent_activity(snapshot):
-                return Skip(reason="recent_activity")
-            if snapshot.durable_report_completion:
-                return FinalizeSucceededFromReport()
-            return FinalizeFailed(error="orphan_finalization")
-        return FinalizeFailed(
-            error="orphan_primary",
-            terminate_orphan_primary_children=True,
-        )
-
     if record.status == "finalizing":
         if _has_recent_activity(snapshot):
             return Skip(reason="recent_activity")
@@ -213,6 +180,32 @@ def decide_reconciliation(
     if snapshot.durable_report_completion:
         return FinalizeSucceededFromReport()
     return FinalizeFailed(error="orphan_run")
+
+
+def decide_reconciliation(
+    record: SpawnRecord,
+    generic_snapshot: ArtifactSnapshot,
+    managed_snapshot: ManagedPrimarySnapshot | None,
+    now: float,
+) -> ReconciliationDecision:
+    """Unified reconciliation dispatcher."""
+
+    strategy = ManagedPrimaryReconciliationStrategy()
+    if strategy.supports(managed_snapshot):
+        assert managed_snapshot is not None
+        context = ReconciliationContext(
+            record=record,
+            artifact_snapshot=generic_snapshot,
+            managed_snapshot=managed_snapshot,
+            now=now,
+        )
+        return strategy.decide(
+            context,
+            has_recent_activity=_has_recent_activity(generic_snapshot),
+            durable_report_completion=generic_snapshot.durable_report_completion,
+        )
+
+    return decide_generic_reconciliation(record, generic_snapshot, now)
 
 
 def _finalize_and_log(
@@ -291,19 +284,20 @@ def reconcile_active_spawn(runtime_root: Path, record: SpawnRecord) -> SpawnReco
         return record
 
     now = time.time()
-    snapshot = _collect_artifact_snapshot(runtime_root, record, now)
-    decision = decide_reconciliation(record, snapshot, now)
+    generic_snapshot = _collect_artifact_snapshot(runtime_root, record, now)
+    managed_snapshot = read_managed_primary_snapshot(
+        runtime_root,
+        record,
+        started_epoch=generic_snapshot.started_epoch,
+    )
+    decision = decide_reconciliation(record, generic_snapshot, managed_snapshot, now)
     if isinstance(decision, Skip):
         return record
     if isinstance(decision, FinalizeSucceededFromReport):
-        return _finalize_completed_report(runtime_root, record, snapshot, now)
-    if decision.terminate_orphan_primary_children:
-        terminate_managed_primary_processes(
-            snapshot.primary_metadata,
-            started_epoch=snapshot.started_epoch,
-            include_launcher=False,
-        )
-    return _finalize_failed(runtime_root, record, decision.error, snapshot, now)
+        return _finalize_completed_report(runtime_root, record, generic_snapshot, now)
+    if decision.terminate_orphan_primary_children and managed_snapshot is not None:
+        ManagedPrimaryReconciliationStrategy.cleanup(managed_snapshot)
+    return _finalize_failed(runtime_root, record, decision.error, generic_snapshot, now)
 
 
 def reconcile_spawns(runtime_root: Path, spawns: list[SpawnRecord]) -> list[SpawnRecord]:

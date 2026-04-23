@@ -6,10 +6,14 @@ import os
 import signal
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from meridian.lib.state.liveness import is_process_alive
 from meridian.lib.state.primary_meta import PrimaryMetadata, read_primary_metadata
 from meridian.lib.state.spawn_store import SpawnRecord
+
+if TYPE_CHECKING:
+    from meridian.lib.state.reaper import ArtifactSnapshot, ReconciliationDecision
 
 
 @dataclass(frozen=True)
@@ -19,6 +23,69 @@ class ManagedPrimarySnapshot:
     metadata: PrimaryMetadata
     launcher_pid_alive: bool
     started_epoch: float | None
+
+
+@dataclass(frozen=True)
+class ReconciliationContext:
+    """Context passed to reconciliation strategies."""
+
+    record: SpawnRecord
+    artifact_snapshot: ArtifactSnapshot
+    managed_snapshot: ManagedPrimarySnapshot
+    now: float
+
+
+class ManagedPrimaryReconciliationStrategy:
+    """Managed-primary reconciliation policy."""
+
+    @staticmethod
+    def supports(snapshot: ManagedPrimarySnapshot | None) -> bool:
+        """Return whether this strategy handles the given snapshot."""
+
+        return snapshot is not None and snapshot.metadata.managed_backend
+
+    @staticmethod
+    def decide(
+        context: ReconciliationContext,
+        *,
+        has_recent_activity: bool,
+        durable_report_completion: bool,
+    ) -> ReconciliationDecision:
+        """Decide reconciliation outcome for a managed primary."""
+
+        # Import here to avoid circular dependency.
+        from meridian.lib.state.reaper import (
+            FinalizeFailed,
+            FinalizeSucceededFromReport,
+            Skip,
+        )
+
+        managed = context.managed_snapshot
+
+        if managed.launcher_pid_alive:
+            return Skip(reason="primary_launcher_alive")
+
+        if managed.metadata.activity == "finalizing":
+            if has_recent_activity:
+                return Skip(reason="recent_activity")
+            if durable_report_completion:
+                return FinalizeSucceededFromReport()
+            return FinalizeFailed(error="orphan_finalization")
+
+        return FinalizeFailed(
+            error="orphan_primary",
+            terminate_orphan_primary_children=True,
+        )
+
+    @staticmethod
+    def cleanup(managed: ManagedPrimarySnapshot) -> tuple[int, ...]:
+        """Terminate orphan children if needed."""
+
+        return terminate_managed_primary_processes(
+            managed.metadata,
+            started_epoch=managed.started_epoch,
+            include_launcher=False,
+        )
 
 
 def read_managed_primary_snapshot(
@@ -99,7 +166,9 @@ def terminate_managed_primary_processes(
 
 
 __all__ = [
+    "ManagedPrimaryReconciliationStrategy",
     "ManagedPrimarySnapshot",
+    "ReconciliationContext",
     "read_managed_primary_snapshot",
     "terminate_managed_primary_processes",
 ]
