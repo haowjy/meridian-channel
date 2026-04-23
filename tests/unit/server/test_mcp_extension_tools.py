@@ -8,6 +8,7 @@ import pytest
 
 import meridian.server.main as server_main
 from meridian.lib.extensions.registry import build_first_party_registry
+from meridian.lib.extensions.types import ExtensionSurface
 from meridian.server.main import extension_invoke, extension_list_commands
 
 
@@ -15,15 +16,17 @@ class TestExtensionListCommands:
     """Tests for extension_list_commands MCP tool."""
 
     @pytest.mark.asyncio
-    async def test_returns_same_fqids_as_cli(self) -> None:
-        """EB3.8: Same fqids as CLI discovery."""
+    async def test_returns_mcp_surface_fqids(self) -> None:
+        """EB3.8: Lists registered commands exposed on the MCP surface."""
         mcp_result = await extension_list_commands()
         mcp_fqids = {command["fqid"] for command in mcp_result["commands"]}
 
         registry = build_first_party_registry()
-        cli_fqids = {spec.fqid for spec in registry.list_all()}
+        expected_fqids = {
+            spec.fqid for spec in registry.list_for_surface(ExtensionSurface.MCP)
+        }
 
-        assert mcp_fqids == cli_fqids
+        assert mcp_fqids == expected_fqids
 
 
 class TestExtensionInvoke:

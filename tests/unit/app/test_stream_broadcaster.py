@@ -86,19 +86,19 @@ async def test_spawn_multi_subscriber_manager_shares_underlying_subscription() -
         )
     )
 
-    expected = {
-        "type": "spawn.event",
-        "spawn_id": "p1",
-        "event_type": "token",
-        "harness_id": "codex",
-        "payload": {"delta": "hi"},
-    }
-
     first_event = await asyncio.wait_for(first_queue.get(), timeout=1)
     second_event = await asyncio.wait_for(second_queue.get(), timeout=1)
 
-    assert {key: first_event[key] for key in expected} == expected
-    assert {key: second_event[key] for key in expected} == expected
+    assert first_event == HarnessEvent(
+        event_type="token",
+        payload={"delta": "hi"},
+        harness_id="codex",
+    )
+    assert second_event == HarnessEvent(
+        event_type="token",
+        payload={"delta": "hi"},
+        harness_id="codex",
+    )
 
     await manager.unsubscribe(spawn_id, first_id)
     assert spawn_manager.unsubscribe_calls == []

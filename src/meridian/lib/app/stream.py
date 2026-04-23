@@ -1,4 +1,27 @@
-"""SSE streaming endpoint for multiplexed spawn and work updates."""
+"""SSE streaming endpoint for multiplexed spawn and work updates.
+
+Streaming Architecture
+----------------------
+Meridian has two streaming paths:
+
+**SSE (/api/stream)** - Low-rate lifecycle events
+- Spawn lifecycle (created, started, finalized, terminated)
+- Work item status changes
+- Multi-spawn overview for dashboard/list views
+- Read-only; no bidirectional control
+- Uses StreamBroadcaster for app-global event fan-out
+
+**WebSocket (/api/spawns/{id}/ws)** - High-rate per-spawn events
+- Real-time AG-UI protocol events (messages, tool calls, results)
+- Bidirectional control (user_message, interrupt, cancel)
+- Single-spawn focus for chat/detail views
+- Uses SpawnMultiSubscriberManager for per-spawn fan-out
+
+When adding new streaming features:
+- Lifecycle/status events -> SSE
+- Interactive spawn events -> WebSocket
+- High-volume kernel output -> WebSocket (per-spawn fan-out)
+"""
 
 from __future__ import annotations
 
@@ -86,23 +109,74 @@ class StreamBroadcaster:
         return len(self._subscribers)
 
 
+class _EventBroadcaster:
+    """Multi-subscriber broadcast manager for raw spawn HarnessEvent streams."""
+
+    def __init__(self, maxsize: int = 1000) -> None:
+        self._subscribers: dict[int, asyncio.Queue[HarnessEvent | None]] = {}
+        self._next_id = 0
+        self._lock = asyncio.Lock()
+        self._maxsize = maxsize
+
+    async def subscribe(self) -> tuple[int, asyncio.Queue[HarnessEvent | None]]:
+        """Create a new subscriber queue and return (subscriber_id, queue)."""
+        async with self._lock:
+            sub_id = self._next_id
+            self._next_id += 1
+            queue: asyncio.Queue[HarnessEvent | None] = asyncio.Queue(maxsize=self._maxsize)
+            self._subscribers[sub_id] = queue
+            return sub_id, queue
+
+    async def unsubscribe(self, subscriber_id: int) -> None:
+        """Remove a subscriber."""
+        async with self._lock:
+            self._subscribers.pop(subscriber_id, None)
+
+    def broadcast(self, event: HarnessEvent) -> None:
+        """Send one event to all subscribers, dropping oldest if queue is full."""
+        for queue in list(self._subscribers.values()):
+            try:
+                queue.put_nowait(event)
+            except asyncio.QueueFull:
+                with suppress(asyncio.QueueEmpty):
+                    queue.get_nowait()
+                with suppress(asyncio.QueueFull):
+                    queue.put_nowait(event)
+
+    def broadcast_close(self) -> None:
+        """Signal all subscribers to close."""
+        for queue in list(self._subscribers.values()):
+            while True:
+                try:
+                    queue.put_nowait(None)
+                    break
+                except asyncio.QueueFull:
+                    with suppress(asyncio.QueueEmpty):
+                        queue.get_nowait()
+
+    @property
+    def subscriber_count(self) -> int:
+        """Return current subscriber count."""
+        return len(self._subscribers)
+
+
 class SpawnMultiSubscriberManager:
-    """Wraps SpawnManager to support multiple SSE/WS subscribers per spawn.
+    """Wraps SpawnManager to support multiple subscribers per spawn.
     
     SpawnManager's native subscribe() only allows one subscriber per spawn.
     This manager creates a single subscription to SpawnManager and broadcasts
-    events to multiple StreamBroadcaster subscribers.
+    raw HarnessEvent objects to multiple subscribers.
     """
 
     def __init__(self, spawn_manager: SpawnManager) -> None:
         self._spawn_manager = spawn_manager
-        self._broadcasters: dict[SpawnId, StreamBroadcaster] = {}
+        self._broadcasters: dict[SpawnId, _EventBroadcaster] = {}
         self._pump_tasks: dict[SpawnId, asyncio.Task[None]] = {}
         self._lock = asyncio.Lock()
 
     async def subscribe(
         self, spawn_id: SpawnId
-    ) -> tuple[int, asyncio.Queue[dict[str, object] | None]] | None:
+    ) -> tuple[int, asyncio.Queue[HarnessEvent | None]] | None:
         """Subscribe to spawn events. Returns (subscriber_id, queue) or None if spawn not found."""
         async with self._lock:
             # Get or create broadcaster for this spawn
@@ -121,7 +195,7 @@ class SpawnMultiSubscriberManager:
                     return None
                 
                 # Create broadcaster and start pump task
-                broadcaster = StreamBroadcaster()
+                broadcaster = _EventBroadcaster()
                 self._broadcasters[spawn_id] = broadcaster
                 self._pump_tasks[spawn_id] = asyncio.create_task(
                     self._pump_loop(spawn_id, queue)
@@ -167,24 +241,18 @@ class SpawnMultiSubscriberManager:
                 if event is None:
                     broadcaster.broadcast_close()
                     return
-                
-                # Convert HarnessEvent to SSE-friendly dict
-                sse_event: dict[str, object] = {
-                    "type": "spawn.event",
-                    "spawn_id": str(spawn_id),
-                    "event_type": event.event_type,
-                    "harness_id": event.harness_id,
-                    "payload": event.payload,
-                    "timestamp": time.time(),
-                }
-                broadcaster.broadcast(sse_event)
+                broadcaster.broadcast(event)
         except asyncio.CancelledError:
             broadcaster.broadcast_close()
             raise
         finally:
             async with self._lock:
-                self._broadcasters.pop(spawn_id, None)
-                self._pump_tasks.pop(spawn_id, None)
+                # Only the currently-registered pump may clear state.
+                # This prevents a canceled old pump from clobbering a newer
+                # broadcaster/task installed by a concurrent re-subscribe.
+                if self._pump_tasks.get(spawn_id) is asyncio.current_task():
+                    self._broadcasters.pop(spawn_id, None)
+                    self._pump_tasks.pop(spawn_id, None)
 
 
 async def sse_event_generator(
@@ -242,9 +310,13 @@ def register_stream_routes(
     runtime_root: Path,
     multi_sub_manager: SpawnMultiSubscriberManager | None = None,
 ) -> StreamBroadcaster:
-    """Register SSE streaming routes on the FastAPI app.
-    
-    Returns the multi-subscriber manager for use by other routes.
+    """Register SSE streaming route for app-global lifecycle events.
+
+    Returns the app-global StreamBroadcaster for event fan-out.
+
+    Note: The multi_sub_manager, spawn_manager, and runtime_root parameters are
+    accepted for API consistency but not used by SSE routes. Per-spawn streaming
+    uses WebSocket endpoints registered separately via register_ws_routes().
     """
     from importlib import import_module
     

@@ -249,7 +249,7 @@ def create_app(
         register_spawn_routes,
         validate_spawn_id,
     )
-    from meridian.lib.app.stream import register_stream_routes
+    from meridian.lib.app.stream import SpawnMultiSubscriberManager, register_stream_routes
     from meridian.lib.app.work_routes import register_work_routes
     from meridian.lib.app.ws_endpoint import register_ws_routes
     from meridian.lib.core.types import SpawnId
@@ -277,6 +277,7 @@ def create_app(
         spawn_manager,
         runtime_root=runtime_root,
     )
+    multi_sub_manager = SpawnMultiSubscriberManager(spawn_manager)
 
     # Register spawn routes
     register_spawn_routes(
@@ -336,6 +337,7 @@ def create_app(
     register_ws_routes(
         app_obj,
         spawn_manager,
+        multi_sub_manager=multi_sub_manager,
         validate_spawn_id=_validate_spawn_id_wrapper,
     )
 

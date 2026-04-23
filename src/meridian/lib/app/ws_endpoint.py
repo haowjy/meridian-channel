@@ -1,4 +1,25 @@
-"""WebSocket endpoint for streaming one spawn over AG-UI event messages."""
+"""WebSocket endpoint for streaming one spawn over AG-UI event messages.
+
+This endpoint provides real-time streaming of AG-UI protocol events for a single
+spawn, plus bidirectional control. For lifecycle overview across multiple
+spawns, use the SSE endpoint at /api/stream instead.
+
+Client Protocol
+---------------
+- Connect: WS /api/spawns/{spawn_id}/ws
+- Server sends: AG-UI events (RunStartedEvent, TextMessageContentEvent, etc.)
+- Server sends: keepalive every 30s ({type:keepalive})
+- Client responds: pong ({type:pong}) or any control message to stay alive
+- Client sends: control messages (user_message, interrupt, cancel, pong)
+- Timeout: 90s without any inbound message closes the connection
+
+Control Messages
+----------------
+- {"type": "user_message", "text": "..."}  - inject user input
+- {"type": "interrupt"}                     - send interrupt signal
+- {"type": "cancel"}                        - request spawn cancellation
+- {"type": "pong"}                          - respond to keepalive
+"""
 
 from __future__ import annotations
 
@@ -6,8 +27,10 @@ import asyncio
 import json
 import logging
 import re
+import time
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, NotRequired, Protocol, TypedDict, cast
 
 from starlette.websockets import WebSocket
@@ -16,6 +39,7 @@ from ag_ui.core import BaseEvent, RunErrorEvent
 from meridian.lib.app.agui_mapping import get_agui_mapper
 from meridian.lib.app.agui_mapping.base import AGUIMapper
 from meridian.lib.app.agui_mapping.extensions import make_capabilities_event
+from meridian.lib.app.stream import SpawnMultiSubscriberManager
 from meridian.lib.core.types import SpawnId
 from meridian.lib.harness.connections.base import HarnessEvent
 from meridian.lib.streaming.signal_canceller import SignalCanceller
@@ -56,37 +80,93 @@ class FastAPIApp(Protocol):
 
 logger = logging.getLogger(__name__)
 _ALLOWED_ORIGIN_RE = re.compile(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$")
+_WS_HEARTBEAT_INTERVAL_SECONDS = 30.0
+_WS_HEARTBEAT_TIMEOUT_SECONDS = 90.0
+_WS_KEEPALIVE_MESSAGE = '{"type":"keepalive"}'
 
 
-async def spawn_websocket(websocket: WebSocketClient, spawn_id: str, manager: SpawnManager) -> None:
+@dataclass
+class _HeartbeatState:
+    """Track last pong timestamp for stale WS connection detection."""
+
+    last_pong: float = field(default_factory=time.monotonic)
+
+    def record_pong(self) -> None:
+        self.last_pong = time.monotonic()
+
+    def is_stale(self) -> bool:
+        return (time.monotonic() - self.last_pong) >= _WS_HEARTBEAT_TIMEOUT_SECONDS
+
+
+async def spawn_websocket(
+    websocket: WebSocketClient,
+    spawn_id: str,
+    manager: SpawnManager,
+    multi_sub_manager: SpawnMultiSubscriberManager | None = None,
+) -> None:
     """Bridge one active spawn's fan-out stream to one WebSocket client."""
 
     await websocket.accept()
+    typed_spawn_id = SpawnId(spawn_id)
 
-    connection = manager.get_connection(SpawnId(spawn_id))
+    connection = manager.get_connection(typed_spawn_id)
     if connection is None:
         await _send_error(websocket, f"spawn {spawn_id} not found")
         await websocket.close()
         return
 
-    event_queue = manager.subscribe(SpawnId(spawn_id))
-    if event_queue is None:
-        await _send_error(websocket, "another client is already connected")
-        await websocket.close()
-        return
+    unsubscribe_fn: Callable[[], Awaitable[None]]
+    if multi_sub_manager is not None:
+        subscription = await multi_sub_manager.subscribe(typed_spawn_id)
+        if subscription is None:
+            await _send_error(websocket, f"spawn {spawn_id} not found or unavailable")
+            await websocket.close()
+            return
+        subscriber_id, event_queue = subscription
+
+        async def _unsubscribe_multi() -> None:
+            await multi_sub_manager.unsubscribe(typed_spawn_id, subscriber_id)
+
+        unsubscribe_fn = _unsubscribe_multi
+
+    else:
+        event_queue = manager.subscribe(typed_spawn_id)
+        if event_queue is None:
+            await _send_error(websocket, "another client is already connected")
+            await websocket.close()
+            return
+
+        async def _unsubscribe_single() -> None:
+            manager.unsubscribe(typed_spawn_id)
+
+        unsubscribe_fn = _unsubscribe_single
 
     mapper = get_agui_mapper(connection.harness_id)
-    tracer = manager.get_tracer(SpawnId(spawn_id))
+    tracer = manager.get_tracer(typed_spawn_id)
 
     try:
         await _send_event(websocket, mapper.make_run_started(spawn_id))
         await _send_event(websocket, make_capabilities_event(connection.capabilities))
+        heartbeat_state = _HeartbeatState()
 
         outbound_task = asyncio.create_task(
-            _outbound_loop(websocket, event_queue, mapper, spawn_id, tracer)
+            _outbound_loop(
+                websocket,
+                event_queue,
+                mapper,
+                spawn_id,
+                tracer,
+                heartbeat_state=heartbeat_state,
+            )
         )
         inbound_task = asyncio.create_task(
-            _inbound_loop(websocket, SpawnId(spawn_id), manager, tracer)
+            _inbound_loop(
+                websocket,
+                typed_spawn_id,
+                manager,
+                tracer,
+                heartbeat_state=heartbeat_state,
+            )
         )
 
         done, pending = await asyncio.wait(
@@ -107,7 +187,7 @@ async def spawn_websocket(websocket: WebSocketClient, spawn_id: str, manager: Sp
                     if not _is_websocket_disconnect(exc):
                         logger.debug("WebSocket loop exited with error", exc_info=True)
     finally:
-        manager.unsubscribe(SpawnId(spawn_id))
+        await unsubscribe_fn()
 
 
 async def _outbound_loop(
@@ -116,10 +196,33 @@ async def _outbound_loop(
     mapper: AGUIMapper,
     spawn_id: str,
     tracer: DebugTracer | None = None,
+    heartbeat_state: _HeartbeatState | None = None,
 ) -> None:
     error_emitted = False
     while True:
-        event = await event_queue.get()
+        try:
+            event = await asyncio.wait_for(
+                event_queue.get(),
+                timeout=_WS_HEARTBEAT_INTERVAL_SECONDS,
+            )
+        except TimeoutError:
+            await websocket.send_text(_WS_KEEPALIVE_MESSAGE)
+            if tracer is not None:
+                tracer.emit(
+                    "websocket",
+                    "ws_send",
+                    direction="outbound",
+                    data={"event_type": "keepalive"},
+                )
+            if heartbeat_state is not None and heartbeat_state.is_stale():
+                logger.debug(
+                    "WebSocket heartbeat timeout, closing stale connection",
+                    extra={"spawn_id": spawn_id},
+                )
+                with suppress(Exception):
+                    await websocket.close()
+                return
+            continue
         if event is None:
             if not error_emitted:
                 await _send_event(websocket, mapper.make_run_finished(spawn_id))
@@ -160,6 +263,7 @@ async def _inbound_loop(
     spawn_id: SpawnId,
     manager: SpawnManager,
     tracer: DebugTracer | None = None,
+    heartbeat_state: _HeartbeatState | None = None,
 ) -> None:
     while True:
         message = await websocket.receive()
@@ -202,6 +306,13 @@ async def _inbound_loop(
                 "websocket", "control_dispatch", direction="inbound",
                 data={"message_type": message_type},
             )
+
+        # Any valid control message refreshes heartbeat liveness.
+        if heartbeat_state is not None:
+            heartbeat_state.record_pong()
+
+        if message_type == "pong":
+            continue
 
         if message_type == "user_message":
             text = payload.get("text")
@@ -260,6 +371,7 @@ def register_ws_routes(
     app: object,
     manager: SpawnManager,
     *,
+    multi_sub_manager: SpawnMultiSubscriberManager | None = None,
     validate_spawn_id: Callable[[str], SpawnId] | None = None,
 ) -> None:
     """Register WebSocket routes for app streaming APIs."""
@@ -289,7 +401,12 @@ def register_ws_routes(
                 return
             raise
         try:
-            await spawn_websocket(typed_websocket, str(typed_spawn_id), manager)
+            await spawn_websocket(
+                typed_websocket,
+                str(typed_spawn_id),
+                manager,
+                multi_sub_manager=multi_sub_manager,
+            )
         except Exception as exc:
             if _is_websocket_disconnect(exc):
                 logger.debug("WebSocket disconnected", extra={"spawn_id": spawn_id})
