@@ -28,6 +28,7 @@ export const chatManifest: ExtensionManifest = {
     {
       id: "switch-to-chat",
       label: "Switch to Chat",
+      category: "Modes",
       execute: () => {
         // Shell handles mode switching.
       },

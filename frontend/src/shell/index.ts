@@ -7,6 +7,7 @@ export {
 } from "./StatusBar"
 export { ModeViewport, type ModeViewportProps } from "./ModeViewport"
 export { AppShell, type AppShellProps } from "./AppShell"
+export { CommandPalette, type CommandPaletteProps } from "./CommandPalette"
 export {
   NavigationContext,
   useNavigation,

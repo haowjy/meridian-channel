@@ -19,6 +19,7 @@ export const sessionsManifest: ExtensionManifest = {
     {
       id: 'switch-to-sessions',
       label: 'Switch to Sessions',
+      category: 'Modes',
       execute: () => {
         // Shell handles mode switching
       },

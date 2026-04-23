@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { NewSessionDialog } from "@/components/molecules"
+import { CommandPalette } from "./CommandPalette"
 import { useSpawnStats } from "@/features/sessions/hooks"
 import { createSpawn } from "@/features/sessions/lib"
 import { ActivityBar } from "./ActivityBar"
@@ -70,6 +71,20 @@ export function AppShell({
   }, [reg, activeMode])
 
   const [newSessionOpen, setNewSessionOpen] = useState(false)
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
+
+  // Global ⌘K / Ctrl+K toggles the command palette. Attached at the document
+  // level so it works regardless of which panel has focus.
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault()
+        setCommandPaletteOpen((prev) => !prev)
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown)
+    return () => document.removeEventListener("keydown", handleKeyDown)
+  }, [])
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   // Handoff slot: navigateToChat records the requested spawn here, ChatPage
@@ -164,7 +179,7 @@ export function AppShell({
           <div style={{ gridColumn: "1 / -1", gridRow: "1" }}>
             <TopBar
               workItemName={workItemName}
-              onCommandPalette={() => console.log("command palette")}
+              onCommandPalette={() => setCommandPaletteOpen(true)}
               onOpenSettings={() => console.log("settings")}
             />
           </div>
@@ -190,6 +205,16 @@ export function AppShell({
             />
           </div>
         </div>
+
+        <CommandPalette
+          open={commandPaletteOpen}
+          onOpenChange={setCommandPaletteOpen}
+          onSwitchMode={setActiveMode}
+          onNewSession={() => {
+            setCommandPaletteOpen(false)
+            setNewSessionOpen(true)
+          }}
+        />
 
         <NewSessionDialog
           open={newSessionOpen}
