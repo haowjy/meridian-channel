@@ -736,3 +736,138 @@ def test_run_harness_process_managed_failure_falls_back_to_black_box(
     assert not (captured_spawn_dir / OUTPUT_FILENAME).exists()
     assert list(launch_context.runtime_root.rglob("tui.log")) == []
     assert outcome.exit_code == 0
+
+
+def test_run_harness_process_reuses_preview_seed_for_runtime_primary_launch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Fresh primary launch must use the same session ID in command and state."""
+    monkeypatch.delenv("MERIDIAN_CHAT_ID", raising=False)
+    project_root = tmp_path / "seed-reuse"
+    project_root.mkdir()
+    launch_context, harness_registry = _build_primary_launch_context(
+        project_root=project_root,
+        harness_id=HarnessId.CLAUDE,
+        model="claude-sonnet-4-5",
+    )
+    claude_adapter = harness_registry.get_subprocess_harness(HarnessId.CLAUDE)
+    preview_seed = launch_context.seed_harness_session_id
+    assert preview_seed, "Fresh primary must generate a seed"
+    captured: dict[str, object] = {}
+
+    def fake_run_primary_process_with_capture(**kwargs: object) -> tuple[int, int]:
+        command = tuple(kwargs["command"])
+        captured["command"] = command
+        if "--session-id" in command:
+            idx = command.index("--session-id")
+            captured["command_session_id"] = command[idx + 1]
+        started = kwargs.get("on_child_started")
+        assert callable(started)
+        started(555)
+        return (0, 555)
+
+    monkeypatch.setattr(
+        process,
+        "_run_primary_process_with_capture",
+        fake_run_primary_process_with_capture,
+    )
+    monkeypatch.setattr(claude_adapter, "observe_session_id", lambda **kwargs: None)
+    monkeypatch.setattr(process, "stop_session", lambda *args, **kwargs: None)
+    monkeypatch.setattr(process, "update_session_harness_id", lambda *args, **kwargs: None)
+
+    outcome = process.run_harness_process(launch_context, harness_registry)
+
+    # Command must use the same seed as preview
+    assert captured["command_session_id"] == preview_seed
+    # Outcome must report the same seed
+    assert outcome.resolved_harness_session_id == preview_seed
+    # Spawn state must record the same seed
+    events = [
+        json.loads(line)
+        for line in (launch_context.runtime_root / "spawns.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    start_events = [e for e in events if e.get("event") == "start"]
+    assert len(start_events) == 1
+    assert start_events[0]["harness_session_id"] == preview_seed
+
+
+def test_run_harness_process_repairs_state_when_observed_session_differs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Observation repairs state when harness uses a different session than persisted."""
+    monkeypatch.delenv("MERIDIAN_CHAT_ID", raising=False)
+    project_root = tmp_path / "seed-repair"
+    project_root.mkdir()
+    launch_context, harness_registry = _build_primary_launch_context(
+        project_root=project_root,
+        harness_id=HarnessId.CLAUDE,
+        model="claude-sonnet-4-5",
+    )
+    claude_adapter = harness_registry.get_subprocess_harness(HarnessId.CLAUDE)
+    preview_seed = launch_context.seed_harness_session_id
+    assert preview_seed, "Fresh primary must generate a seed"
+    observed_id = "observed-different-session"
+
+    def fake_run_primary_process_with_capture(**kwargs: object) -> tuple[int, int]:
+        started = kwargs.get("on_child_started")
+        assert callable(started)
+        started(666)
+        return (0, 666)
+
+    monkeypatch.setattr(
+        process,
+        "_run_primary_process_with_capture",
+        fake_run_primary_process_with_capture,
+    )
+    monkeypatch.setattr(
+        claude_adapter, "observe_session_id", lambda **kwargs: observed_id
+    )
+    monkeypatch.setattr(process, "stop_session", lambda *args, **kwargs: None)
+    monkeypatch.setattr(process, "update_session_harness_id", lambda *args, **kwargs: None)
+
+    outcome = process.run_harness_process(launch_context, harness_registry)
+
+    # State should be repaired to the observed session ID
+    assert outcome.resolved_harness_session_id == observed_id
+    # Spawn record should have the observed ID
+    events = [
+        json.loads(line)
+        for line in (launch_context.runtime_root / "spawns.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    update_events = [
+        e
+        for e in events
+        if e.get("event") == "update" and e.get("harness_session_id") == observed_id
+    ]
+    assert len(update_events) >= 1
+
+
+def test_run_harness_process_resume_does_not_inject_seed_args(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Resume launches must not inject seed session args into passthrough."""
+    monkeypatch.delenv("MERIDIAN_CHAT_ID", raising=False)
+    project_root = tmp_path / "seed-resume"
+    project_root.mkdir()
+    launch_context, harness_registry = _build_primary_launch_context(
+        project_root=project_root,
+        harness_id=HarnessId.CLAUDE,
+        model="claude-sonnet-4-5",
+        session=SessionRequest(
+            requested_harness_session_id="existing-session-id",
+            continue_chat_id="c42",
+            primary_session_mode=SessionMode.RESUME.value,
+        ),
+    )
+    # Resume path: adapter returns the existing session ID, no session_args injection
+    assert launch_context.seed_harness_session_args == ()
+    assert launch_context.seed_harness_session_id == "existing-session-id"

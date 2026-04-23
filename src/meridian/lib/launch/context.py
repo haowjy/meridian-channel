@@ -194,6 +194,7 @@ class LaunchContext:
     resolved_request: SpawnRequest
     projected_content: ProjectedContent | None = None
     seed_harness_session_id: str | None = None
+    seed_harness_session_args: tuple[str, ...] = ()
     is_bypass: bool = False
     # I-13: adapter input transformations surface here instead of silently mutating.
     warnings: tuple[CompositionWarning, ...] = ()
@@ -209,6 +210,7 @@ class _SurfaceResolution:
     profile_tools_for_deny_optout: tuple[str, ...]
     has_profile_for_deny_optout: bool
     projected_content: ProjectedContent | None
+    seed_session_args: tuple[str, ...] = ()
 
 
 def merge_env_overrides(
@@ -529,6 +531,7 @@ def _resolve_surface_request(
     user_turn_content: str | None = None
     projected_content: ProjectedContent | None = None
     seed_harness_session_id = resolved_continue_harness_session_id
+    seed_session_args: tuple[str, ...] = ()
     if runtime.composition_surface == LaunchCompositionSurface.PRIMARY:
         session_mode = (
             (request.session.primary_session_mode or "fresh").strip().lower()
@@ -545,6 +548,7 @@ def _resolve_surface_request(
             passthrough_args=request.extra_args,
         )
         seed_harness_session_id = seed.session_id
+        seed_session_args = seed.session_args
         seeded_passthrough_args = (*request.extra_args, *seed.session_args)
         override = (runtime.harness_command_override or "").strip()
         if override and resolved_continue_fork:
@@ -678,6 +682,7 @@ def _resolve_surface_request(
         profile_tools_for_deny_optout=profile_tools_for_deny_optout,
         has_profile_for_deny_optout=has_profile,
         projected_content=projected_content,
+        seed_session_args=seed_session_args,
     )
 
 
@@ -708,6 +713,7 @@ def build_launch_context(
     has_profile_for_deny_optout = False
     projected_content: ProjectedContent | None = None
     seed_harness_session_id = (request.session.requested_harness_session_id or "").strip() or None
+    seed_harness_session_args: tuple[str, ...] = ()
     if runtime.composition_surface != LaunchCompositionSurface.DIRECT:
         surface = _resolve_surface_request(
             request=request,
@@ -724,6 +730,7 @@ def build_launch_context(
         profile_tools_for_deny_optout = surface.profile_tools_for_deny_optout
         has_profile_for_deny_optout = surface.has_profile_for_deny_optout
         projected_content = surface.projected_content
+        seed_harness_session_args = surface.seed_session_args
     else:
         harness_id = _resolve_harness_id(request=request, runtime=runtime)
         harness = harness_registry.get_subprocess_harness(harness_id)
@@ -913,6 +920,7 @@ def build_launch_context(
         resolved_request=resolved_request,
         projected_content=projected_content,
         seed_harness_session_id=seed_harness_session_id,
+        seed_harness_session_args=seed_harness_session_args,
         is_bypass=is_bypass,
         warnings=composition_warnings,
     )

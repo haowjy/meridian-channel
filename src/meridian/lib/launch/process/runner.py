@@ -307,6 +307,7 @@ def _finalize_lifecycle_and_observe_session(
     primary_spawn_id: SpawnId | None,
     exit_code: int,
     resolved_harness_session_id: str,
+    initial_persisted_harness_session_id: str,
     harness_adapter: Any,
     artifacts: LocalStore,
     project_root: Path,
@@ -359,8 +360,14 @@ def _finalize_lifecycle_and_observe_session(
         if (
             observed_harness_session_id is not None
             and observed_harness_session_id.strip()
-            and observed_harness_session_id.strip() != resolved_harness_session_id.strip()
+            and observed_harness_session_id.strip()
+            != initial_persisted_harness_session_id.strip()
         ):
+            logger.warning(
+                "Harness session ID diverged: persisted=%s observed=%s",
+                initial_persisted_harness_session_id,
+                observed_harness_session_id.strip(),
+            )
             resolved_harness_session_id = observed_harness_session_id.strip()
             managed.record_harness_session_id(resolved_harness_session_id)
             if primary_spawn_id is not None:
@@ -527,6 +534,7 @@ def run_harness_process(
     session_mode = resolve_primary_session_mode(preview_context)
     session_metadata = build_session_metadata(preview_request)
     resolved_harness_session_id = preview_context.seed_harness_session_id or ""
+    initial_persisted_harness_session_id = resolved_harness_session_id
     session_scope_harness_session_id = resolved_harness_session_id
     if session_mode == SessionMode.FORK:
         session_scope_harness_session_id = (
@@ -619,12 +627,17 @@ def run_harness_process(
                         }
                     )
                     resolved_harness_session_id = forked_session_id
+                initial_persisted_harness_session_id = resolved_harness_session_id
                 log_dir = resolve_spawn_log_dir(project_root, primary_spawn_id)
                 primary_started = time.monotonic()
                 primary_started_epoch = time.time()
                 primary_started_local_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+                preview_seed_args = preview_context.seed_harness_session_args
                 runtime_request = spawn_request.model_copy(
-                    update={"work_id_hint": attached_work_id}
+                    update={
+                        "extra_args": (*spawn_request.extra_args, *preview_seed_args),
+                        "work_id_hint": attached_work_id,
+                    }
                 )
                 runtime = preview_context.runtime.model_copy(
                     update={
@@ -714,6 +727,7 @@ def run_harness_process(
                     primary_spawn_id=primary_spawn_id,
                     exit_code=exit_code,
                     resolved_harness_session_id=resolved_harness_session_id,
+                    initial_persisted_harness_session_id=initial_persisted_harness_session_id,
                     harness_adapter=harness_adapter,
                     artifacts=artifacts,
                     project_root=project_root,
