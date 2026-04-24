@@ -125,18 +125,17 @@ workspace_app = App(
     ),
     help_formatter="plain",
 )
-kb_app = App(
-    name="kb",
+kg_app = App(
+    name="kg",
     help=(
-        "Knowledge base analysis: document relationships, broken links,\n"
-        "orphaned files, missing backlinks, source coverage."
+        "Knowledge graph analysis: document relationships, broken links,\n"
+        "orphaned files, missing backlinks, clusters."
     ),
     help_epilogue=(
         "Examples:\n\n"
-        "  meridian kb graph\n\n"
-        "  meridian kb graph --source src/\n\n"
-        "  meridian kb graph --source src/ --resolve-symbols\n\n"
-        "  meridian kb check README.md\n"
+        "  meridian kg graph\n\n"
+        "  meridian kg graph docs/\n\n"
+        "  meridian kg check\n"
     ),
     help_formatter="plain",
 )
@@ -151,7 +150,7 @@ app.command(models_app, name="models")
 app.command(streaming_app, name="streaming")
 app.command(config_app, name="config")
 app.command(workspace_app, name="workspace")
-app.command(kb_app, name="kb")
+app.command(kg_app, name="kg")
 app.command(completion_app, name="completion")
 
 __all__ = [
@@ -161,7 +160,7 @@ __all__ = [
     "config_app",
     "ext_app",
     "hooks_app",
-    "kb_app",
+    "kg_app",
     "models_app",
     "report_app",
     "session_app",

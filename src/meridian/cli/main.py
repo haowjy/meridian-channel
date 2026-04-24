@@ -634,10 +634,10 @@ def _register_group_commands() -> None:
     register_config_commands(config_app, emit)
     register_workspace_commands(workspace_app, emit)
     register_doctor_command(app, emit)
-    # kb commands register via @kb_app.command decorators at import time.
-    import meridian.cli.kb_cmd as _kb_cmd
+    # kg commands register via @kg_app.command decorators at import time.
+    import meridian.cli.kg_cmd as _kg_cmd
 
-    _ = _kb_cmd
+    _ = _kg_cmd
 
 
 def _operation_error_message(exc: Exception) -> str:

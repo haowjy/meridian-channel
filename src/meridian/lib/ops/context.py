@@ -57,9 +57,9 @@ class ContextOutput(BaseModel):
             lines.append(f"  resolved: {self.kb_resolved}")
             return "\n".join(lines)
 
-        lines.append(f"work: {self.work_path} ({self.work_source})")
-        lines.append(f"  archive: {self.work_archive}")
-        lines.append(f"kb: {self.kb_path} ({self.kb_source})")
+        lines.append(f"work: {self.work_resolved} ({self.work_source})")
+        lines.append(f"  archive: {self.work_archive_resolved}")
+        lines.append(f"kb: {self.kb_resolved} ({self.kb_source})")
         return "\n".join(lines)
 
     def resolve_name(self, name: str) -> str:

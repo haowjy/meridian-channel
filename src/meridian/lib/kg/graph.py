@@ -1,4 +1,4 @@
-"""KB graph analysis — build AnalysisResult from markdown files."""
+"""KG graph analysis — build AnalysisResult from markdown files."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import os
 from collections import deque
 from pathlib import Path
 
-from meridian.lib.kb.types import AnalysisResult, CoverageResult, GraphEdge, GraphNode
+from meridian.lib.kg.types import AnalysisResult, GraphEdge, GraphNode
 from meridian.lib.markdown.extract import extract_file
 from meridian.lib.markdown.types import ExtractedLink
 
@@ -20,23 +20,17 @@ _EXTERNAL_PREFIXES = ("http://", "https://", "mailto:", "#")
 def build_analysis(
     root: Path,
     *,
-    source_dirs: list[Path] | None = None,
-    source_exts: list[str] | None = None,
-    resolve_symbols: bool = False,
     include_backlinks: bool = True,
     include_clusters: bool = True,
     targeted_path: Path | None = None,
 ) -> AnalysisResult:
-    """Build complete KB analysis from a root directory.
+    """Build complete KG analysis from a root directory.
 
     Args:
         root: Root directory to scan for .md files
-        source_dirs: Directories to scan for source coverage analysis
-        source_exts: File extensions to include in coverage (default: .py, .rs, .ts, .go, .js)
-        resolve_symbols: Whether to use AST to resolve Python symbols
         include_backlinks: Whether to compute missing backlinks
         include_clusters: Whether to compute connected clusters
-        targeted_path: If set, only analyze this file/directory (for kb check)
+        targeted_path: If set, only analyze this file/directory (for kg check)
 
     Returns:
         AnalysisResult with nodes, edges, broken_links, orphans, etc.
@@ -107,18 +101,6 @@ def build_analysis(
     if include_clusters:
         clusters = _compute_clusters(nodes, inbound)
 
-    # Coverage analysis
-    coverage: CoverageResult | None = None
-    if source_dirs:
-        from meridian.lib.kb.coverage import compute_coverage
-
-        coverage = compute_coverage(
-            nodes=nodes,
-            source_dirs=source_dirs,
-            source_exts=source_exts,
-            resolve_symbols=resolve_symbols,
-        )
-
     return AnalysisResult(
         nodes=nodes,
         edges=edges,
@@ -126,7 +108,6 @@ def build_analysis(
         orphans=orphans,
         missing_backlinks=missing_backlinks,
         clusters=clusters,
-        coverage=coverage,
     )
 
 
@@ -173,7 +154,6 @@ def _make_edge(
         kind=ref.kind,
         resolved=resolved,
         line=ref.line,
-        confidence=1.0,
     )
 
 

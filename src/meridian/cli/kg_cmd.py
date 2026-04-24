@@ -1,6 +1,6 @@
-"""CLI handlers for `meridian kb` commands.
+"""CLI handlers for `meridian kg` commands.
 
-Registers `kb graph` and `kb check` on the shared `kb_app` via
+Registers `kg graph` and `kg check` on the shared `kg_app` via
 decorator-at-import. Import this module from ``_register_group_commands``
 in ``cli/main.py`` to activate the commands.
 """
@@ -13,31 +13,15 @@ from typing import Annotated
 
 from cyclopts import Parameter
 
-from meridian.cli.app_tree import kb_app
+from meridian.cli.app_tree import kg_app
 
 
-@kb_app.command(name="graph")
-def cmd_kb_graph(
+@kg_app.command(name="graph")
+def cmd_kg_graph(
     root: Annotated[
         Path,
         Parameter(help="Root directory to analyze (default: cwd)."),
     ] = Path("."),
-    source: Annotated[
-        tuple[Path, ...],
-        Parameter(
-            name="--source",
-            help="Source directory for coverage analysis (repeatable).",
-            negative_iterable=(),
-        ),
-    ] = (),
-    source_ext: Annotated[
-        tuple[str, ...],
-        Parameter(
-            name="--source-ext",
-            help="Additional file extensions for coverage (repeatable).",
-            negative_iterable=(),
-        ),
-    ] = (),
     no_backlinks: Annotated[
         bool,
         Parameter(name="--no-backlinks", help="Skip missing-backlink analysis."),
@@ -46,22 +30,11 @@ def cmd_kb_graph(
         bool,
         Parameter(name="--no-clusters", help="Skip connected-cluster analysis."),
     ] = False,
-    resolve_symbols: Annotated[
-        bool,
-        Parameter(
-            name="--resolve-symbols",
-            help="Use Python AST for symbol-level coverage (requires --source).",
-        ),
-    ] = False,
 ) -> None:
-    """Analyze document relationships, broken links, orphans, and source coverage."""
+    """Analyze document relationships, broken links, orphans, and clusters."""
 
-    from meridian.lib.kb.graph import build_analysis
-    from meridian.lib.kb.report import format_report
-
-    if resolve_symbols and not source:
-        print("Warning: --resolve-symbols requires --source; ignoring flag.", file=sys.stderr)
-        resolve_symbols = False
+    from meridian.lib.kg.graph import build_analysis
+    from meridian.lib.kg.report import format_report
 
     root_resolved = root.resolve()
     if not root_resolved.exists():
@@ -71,14 +44,8 @@ def cmd_kb_graph(
         print(f"Error: root is not a directory: {root}", file=sys.stderr)
         raise SystemExit(2)
 
-    source_dirs = [s.resolve() for s in source] or None
-    source_exts = list(source_ext) or None
-
     result = build_analysis(
         root=root_resolved,
-        source_dirs=source_dirs,
-        source_exts=source_exts,
-        resolve_symbols=resolve_symbols,
         include_backlinks=not no_backlinks,
         include_clusters=not no_clusters,
     )
@@ -86,39 +53,47 @@ def cmd_kb_graph(
     raise SystemExit(1 if result.broken_links else 0)
 
 
-@kb_app.command(name="check")
-def cmd_kb_check(
+@kg_app.command(name="check")
+def cmd_kg_check(
     path: Annotated[
         Path,
-        Parameter(help="File or directory to analyze."),
-    ],
+        Parameter(help="File or directory to check for broken links."),
+    ] = Path("."),
 ) -> None:
-    """Quick analysis of a single file or directory.
+    """Check for broken links. Exit 0 if clean, exit 1 if broken links found."""
 
-    Reports broken links, outbound links, and fenced blocks for the
-    targeted path.
-    """
-
-    from meridian.lib.kb.graph import build_analysis
-    from meridian.lib.kb.report import format_report
+    from meridian.lib.kg.graph import build_analysis
 
     resolved = path.resolve()
     if not resolved.exists():
         print(f"Error: path not found: {path}", file=sys.stderr)
         raise SystemExit(2)
+    if not resolved.is_dir():
+        resolved = resolved.parent
 
-    root = resolved if resolved.is_dir() else resolved.parent
     result = build_analysis(
-        root=root,
-        source_dirs=None,
-        targeted_path=resolved,
+        root=resolved,
         include_backlinks=False,
+        include_clusters=False,
     )
-    print(format_report(result, root=root, targeted=True))
-    raise SystemExit(1 if result.broken_links else 0)
+
+    if not result.broken_links:
+        print(f"No broken links ({len(result.nodes)} files, {len(result.edges)} links)")
+        raise SystemExit(0)
+
+    for bl in result.broken_links:
+        src_rel = bl.src.relative_to(resolved) if bl.src.is_relative_to(resolved) else bl.src
+        print(f"  {src_rel}:{bl.line} -> {bl.dst} [{bl.kind}]")
+
+    print(
+        f"\n{len(result.broken_links)} broken links "
+        f"({len(result.nodes)} files, {len(result.edges)} links)",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
 
 
 __all__ = [
-    "cmd_kb_check",
-    "cmd_kb_graph",
+    "cmd_kg_check",
+    "cmd_kg_graph",
 ]

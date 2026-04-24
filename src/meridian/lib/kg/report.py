@@ -1,10 +1,10 @@
-"""Plain-text report formatting for KB analysis results."""
+"""Plain-text report formatting for KG analysis results."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from meridian.lib.kb.types import AnalysisResult
+from meridian.lib.kg.types import AnalysisResult
 
 
 def format_report(
@@ -26,7 +26,7 @@ def format_report(
     lines: list[str] = []
 
     # Header
-    lines.append(f"## KB Analysis: {root.as_posix()}")
+    lines.append(f"## KG Analysis: {root.as_posix()}")
     lines.append(f"Files scanned: {len(result.nodes)}")
     lines.append(f"Total links: {len(result.edges)}")
     lines.append("")
@@ -70,34 +70,6 @@ def format_report(
                 lines.append(f"    - {_rel(member, root)}")
         lines.append("")
 
-    # Source Coverage section
-    if result.coverage:
-        cov = result.coverage
-        total = len(cov.covered) + len(cov.uncovered)
-        pct = round(len(cov.covered) / total * 100, 1) if total > 0 else 0.0
-
-        lines.append("## Source Coverage")
-        lines.append(f"  Source roots: {', '.join(sr.as_posix() for sr in cov.source_roots)}")
-        lines.append(f"  Coverage: {len(cov.covered)}/{total} files ({pct}%)")
-        lines.append("")
-
-        if cov.uncovered:
-            lines.append("  Uncovered files:")
-            for path in cov.uncovered:
-                # Show relative to first source root if possible
-                rel = _rel_to_any(path, cov.source_roots)
-                lines.append(f"    - {rel}")
-            lines.append("")
-
-        # Symbol edges
-        if cov.symbol_edges:
-            lines.append("## Symbol References")
-            for se in cov.symbol_edges:
-                doc_rel = _rel(se.doc_path, root)
-                src_rel = _rel_to_any(se.src_file, cov.source_roots)
-                lines.append(f"  {doc_rel} -> {src_rel}:{se.symbol_name} (line {se.symbol_line})")
-            lines.append("")
-
     # Summary
     lines.append("## Summary")
     lines.append(f"  Total files: {len(result.nodes)}")
@@ -107,10 +79,6 @@ def format_report(
     if not targeted:
         lines.append(f"  Missing backlinks: {len(result.missing_backlinks)}")
         lines.append(f"  Clusters: {len(result.clusters)}")
-    if result.coverage:
-        total = len(result.coverage.covered) + len(result.coverage.uncovered)
-        pct = round(len(result.coverage.covered) / total * 100, 1) if total > 0 else 0.0
-        lines.append(f"  Source coverage: {pct}%")
 
     return "\n".join(lines)
 
@@ -121,16 +89,6 @@ def _rel(path: Path, root: Path) -> str:
         return path.relative_to(root).as_posix()
     except ValueError:
         return path.as_posix()
-
-
-def _rel_to_any(path: Path, roots: list[Path]) -> str:
-    """Get path relative to any of the given roots."""
-    for root in roots:
-        try:
-            return path.relative_to(root).as_posix()
-        except ValueError:
-            continue
-    return path.as_posix()
 
 
 __all__ = ["format_report"]
