@@ -1,7 +1,7 @@
 """Inspector: deterministic artifact extraction for thread events, tool calls, and token usage.
 
 Event IDs are encoded as ``{spawn_id}:{line_index}`` where ``line_index`` is the
-0-based index of the raw JSON line in ``output.jsonl``.  Because the artifact is
+0-based index of the raw JSON line in ``history.jsonl``.  Because the artifact is
 file-authoritative and append-only, these IDs survive restarts.
 
 Tool-call IDs share the same scheme: the line that carries the tool_use payload
@@ -10,15 +10,14 @@ gets its position used as the call_id.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import cast
 
 from meridian.lib.core.domain import TokenUsage
 from meridian.lib.core.types import SpawnId
 from meridian.lib.harness.common import extract_usage_from_artifacts, unwrap_event_payload
-from meridian.lib.launch.constants import OUTPUT_FILENAME
 from meridian.lib.state.artifact_store import LocalStore
+from meridian.lib.state.history import read_spawn_events, strip_seq_envelope
 
 _SEP = ":"
 
@@ -54,27 +53,15 @@ def parse_event_id(event_id: str) -> tuple[str, int] | None:
 
 
 def read_raw_output_lines(artifact_root: Path, spawn_id: str) -> list[dict[str, object]]:
-    """Read all non-empty parsed JSON lines from ``output.jsonl`` for *spawn_id*.
+    """Read all parsed JSON lines from ``history.jsonl`` for *spawn_id*.
 
-    Lines that fail JSON parsing are silently skipped — they may be partial
-    writes from a still-running process.
+    Legacy ``output.jsonl`` files are accepted when no history file exists.
     """
-    output_path = artifact_root / spawn_id / OUTPUT_FILENAME
-    if not output_path.is_file():
-        return []
-    lines: list[dict[str, object]] = []
-    with output_path.open("r", encoding="utf-8", errors="ignore") as handle:
-        for line in handle:
-            stripped = line.strip()
-            if not stripped:
-                continue
-            try:
-                obj = json.loads(stripped)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(obj, dict):
-                lines.append(cast("dict[str, object]", obj))
-    return lines
+    spawn_dir = artifact_root / spawn_id
+    return [
+        cast("dict[str, object]", strip_seq_envelope(event))
+        for event in read_spawn_events(spawn_dir)
+    ]
 
 
 # ---------------------------------------------------------------------------

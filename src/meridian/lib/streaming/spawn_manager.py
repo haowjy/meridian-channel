@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,8 +19,7 @@ from meridian.lib.harness.connections.base import HarnessEvent
 from meridian.lib.harness.errors import HarnessBinaryNotFound
 from meridian.lib.launch.launch_types import ResolvedLaunchSpec
 from meridian.lib.state import spawn_store
-from meridian.lib.state.atomic import append_text_line
-from meridian.lib.state.paths import spawn_output_path
+from meridian.lib.state.history import HarnessHistoryWriter
 from meridian.lib.streaming.control_socket import ControlSocketServer
 from meridian.lib.streaming.drain_policy import (
     TURN_BOUNDARY_EVENT_TYPE,
@@ -128,6 +126,7 @@ class SpawnManager:
         self._completion_futures: dict[SpawnId, asyncio.Future[DrainOutcome]] = {}
         self._cleanup_tasks: set[asyncio.Task[None]] = set()
         self._heartbeat_tasks: dict[SpawnId, asyncio.Task[None]] = {}
+        self._history_writers: dict[SpawnId, HarnessHistoryWriter] = {}
 
     @property
     def runtime_root(self) -> Path:
@@ -218,6 +217,7 @@ class SpawnManager:
             raise
 
         resolved_policy = drain_policy if drain_policy is not None else SingleTurnDrainPolicy()
+        self._history_writers[spawn_id] = HarnessHistoryWriter(self._history_path(spawn_id))
         drain_task = asyncio.create_task(
             self._drain_loop(
                 spawn_id,
@@ -267,7 +267,7 @@ class SpawnManager:
     ) -> None:
         """Durably append each harness event and fan out to the active subscriber.
 
-        Writes a stable event envelope to output.jsonl so event type and harness
+        Writes a stable event envelope to history.jsonl so event type and harness
         identity are preserved even when the payload itself omits that metadata.
         """
 
@@ -289,13 +289,10 @@ class SpawnManager:
                         direction="inbound",
                         data={"event_type": event.event_type, "harness_id": event.harness_id},
                     )
-                envelope: dict[str, object] = {
-                    "event_type": event.event_type,
-                    "harness_id": event.harness_id,
-                    "payload": event.payload,
-                }
                 try:
-                    await self._append_jsonl(self._output_log_path(spawn_id), envelope)
+                    write_result = self._history_writers[spawn_id].write(event)
+                    if not write_result.success:
+                        raise RuntimeError(write_result.error or "history write failed")
                     consecutive_write_failures = 0
                     if tracer is not None:
                         tracer.emit(
@@ -572,6 +569,7 @@ class SpawnManager:
         self._fan_out_event(spawn_id, None)
         self._sessions.pop(spawn_id, None)
         self._completion_futures.pop(spawn_id, None)
+        self._history_writers.pop(spawn_id, None)
         drop_lock(spawn_id)
         return outcome
 
@@ -594,13 +592,10 @@ class SpawnManager:
             harness_id=session.connection.harness_id.value,
             raw_text=None,
         )
-        envelope: dict[str, object] = {
-            "event_type": terminal_event.event_type,
-            "harness_id": terminal_event.harness_id,
-            "payload": terminal_event.payload,
-        }
-        with suppress(Exception):
-            await self._append_jsonl(self._output_log_path(spawn_id), envelope)
+        history_writer = self._history_writers.get(spawn_id)
+        if history_writer is not None:
+            with suppress(Exception):
+                history_writer.write(terminal_event)
         self._fan_out_event(spawn_id, terminal_event)
 
     async def _fan_out_turn_boundary(
@@ -620,20 +615,16 @@ class SpawnManager:
             },
             raw_text=None,
         )
-        envelope: dict[str, object] = {
-            "event_type": synthetic.event_type,
-            "harness_id": synthetic.harness_id,
-            "payload": synthetic.payload,
-            "synthetic": True,
-        }
-        try:
-            await self._append_jsonl(self._output_log_path(spawn_id), envelope)
-        except Exception as persist_exc:
-            logger.warning(
-                "Failed to persist turn boundary event for spawn %s: %s",
-                spawn_id,
-                persist_exc,
-            )
+        history_writer = self._history_writers.get(spawn_id)
+        if history_writer is not None:
+            try:
+                history_writer.write(synthetic)
+            except Exception as persist_exc:
+                logger.warning(
+                    "Failed to persist turn boundary event for spawn %s: %s",
+                    spawn_id,
+                    persist_exc,
+                )
         self._fan_out_event(spawn_id, synthetic)
 
     async def shutdown(
@@ -655,15 +646,12 @@ class SpawnManager:
         for spawn_id in list(self._heartbeat_tasks):
             await self._stop_heartbeat(spawn_id)
         self._completion_futures.clear()
+        self._history_writers.clear()
 
     def list_spawns(self) -> list[SpawnId]:
         """List active spawn IDs."""
 
         return list(self._sessions)
-
-    async def _append_jsonl(self, path: Path, payload: Mapping[str, object]) -> None:
-        line = json.dumps(payload, separators=(",", ":"), sort_keys=True) + "\n"
-        await asyncio.to_thread(append_text_line, path, line)
 
     def _count_jsonl_lines(self, path: Path) -> int:
         if not path.exists():
@@ -704,8 +692,8 @@ class SpawnManager:
     def _spawn_dir(self, spawn_id: SpawnId) -> Path:
         return self._runtime_root / "spawns" / str(spawn_id)
 
-    def _output_log_path(self, spawn_id: SpawnId) -> Path:
-        return spawn_output_path(self._runtime_root, spawn_id)
+    def _history_path(self, spawn_id: SpawnId) -> Path:
+        return self._spawn_dir(spawn_id) / "history.jsonl"
 
     def _inbound_log_path(self, spawn_id: SpawnId) -> Path:
         return self._spawn_dir(spawn_id) / "inbound.jsonl"
@@ -730,6 +718,7 @@ class SpawnManager:
             await session.connection.stop()
         with suppress(Exception):
             await session.control_server.stop()
+        self._history_writers.pop(spawn_id, None)
         drop_lock(spawn_id)
 
     def _resolve_completion_future(

@@ -1,13 +1,13 @@
 """Integration tests for GET /api/spawns/{spawn_id}/events pagination.
 
 Tests verify:
-  - Empty spawn (no output.jsonl) returns []
+  - Empty spawn (no history.jsonl) returns []
   - since=N skips the first N lines
   - tail=N returns the last N events
   - since + tail compose correctly
   - Many events (>100) paginated with since
   - Invalid JSON lines are silently skipped
-  - Blank lines in output.jsonl are silently skipped
+  - Blank lines in history.jsonl are silently skipped
   - since out of range returns empty list
   - Spawn not found returns 404
 """
@@ -57,8 +57,8 @@ def _register_spawn(project_root: Path, spawn_id: str, status: str = "succeeded"
 
 
 def _write_output(project_root: Path, spawn_id: str, lines: list[str]) -> None:
-    """Write arbitrary text lines to output.jsonl."""
-    output_path = _state_root(project_root) / "spawns" / spawn_id / "output.jsonl"
+    """Write arbitrary text lines to history.jsonl."""
+    output_path = _state_root(project_root) / "spawns" / spawn_id / "history.jsonl"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -66,7 +66,7 @@ def _write_output(project_root: Path, spawn_id: str, lines: list[str]) -> None:
 def _write_events(
     project_root: Path, spawn_id: str, events: list[dict[str, object]]
 ) -> None:
-    """Write valid JSON events to output.jsonl."""
+    """Write valid JSON events to history.jsonl."""
     _write_output(project_root, spawn_id, [json.dumps(e) for e in events])
 
 
@@ -78,10 +78,10 @@ def _write_events(
 def test_events_empty_spawn_no_output_file(
     app_client: tuple[TestClient, Path],
 ) -> None:
-    """Spawn with no output.jsonl file returns an empty list, not an error."""
+    """Spawn with no history.jsonl file returns an empty list, not an error."""
     client, project_root = app_client
     _register_spawn(project_root, "p1")
-    # Deliberately do NOT write any output.jsonl
+    # Deliberately do NOT write any history.jsonl
 
     resp = client.get("/api/spawns/p1/events")
 
@@ -262,7 +262,7 @@ def test_events_since_and_tail_compose(
 
 
 # ---------------------------------------------------------------------------
-# Robustness: invalid/empty lines in output.jsonl
+# Robustness: invalid/empty lines in history.jsonl
 # ---------------------------------------------------------------------------
 
 
@@ -290,16 +290,16 @@ def test_events_invalid_json_lines_are_skipped(
     assert data[0]["text"] == "good0"
     assert data[0]["_line"] == 0
     assert data[1]["text"] == "good2"
-    assert data[1]["_line"] == 2
+    assert data[1]["_line"] == 1
 
 
 def test_events_blank_lines_are_skipped(
     app_client: tuple[TestClient, Path],
 ) -> None:
-    """Blank/whitespace-only lines in output.jsonl must be silently skipped."""
+    """Blank/whitespace-only lines in history.jsonl must be silently skipped."""
     client, project_root = app_client
     _register_spawn(project_root, "p1")
-    output_path = _state_root(project_root) / "spawns" / "p1" / "output.jsonl"
+    output_path = _state_root(project_root) / "spawns" / "p1" / "history.jsonl"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     # Manually write with blank lines interspersed
     output_path.write_text(
@@ -338,8 +338,8 @@ def test_events_large_output_all_returned(
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 200
-    assert data[0]["seq"] == 0
-    assert data[199]["seq"] == 199
+    assert data[0]["_line"] == 0
+    assert data[199]["_line"] == 199
 
 
 def test_events_large_output_with_since(
@@ -356,5 +356,5 @@ def test_events_large_output_with_since(
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 10
-    assert data[0]["seq"] == 190
-    assert data[-1]["seq"] == 199
+    assert data[0]["_line"] == 190
+    assert data[-1]["_line"] == 199

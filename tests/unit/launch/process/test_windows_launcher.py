@@ -101,7 +101,7 @@ def test_windows_console_launcher_forces_console_inheritance(
         command=("meridian-harness", "--run"),
         cwd=tmp_path,
         env={"MERIDIAN_TEST": "1"},
-        output_log_path=tmp_path / "output.jsonl",
+        output_log_path=tmp_path / "history.jsonl",
         on_child_started=child_started.append,
     )
 

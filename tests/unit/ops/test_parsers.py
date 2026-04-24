@@ -13,7 +13,7 @@ def _jsonl(*events: dict[str, object]) -> str:
 
 
 def _parse_messages(tmp_path, raw: str) -> list[tuple[str, str]]:
-    output_path = tmp_path / "output.jsonl"
+    output_path = tmp_path / "history.jsonl"
     output_path.write_text(raw + "\n", encoding="utf-8")
     segments, _ = parse_session_file(output_path)
     return [(item.role, item.content) for item in segments[0]]
@@ -55,7 +55,7 @@ def test_extract_last_assistant_message_handles_markers_and_json_events() -> Non
 
 
 def test_session_log_parser_handles_structured_harness_events(tmp_path) -> None:
-    output_path = tmp_path / "output.jsonl"
+    output_path = tmp_path / "history.jsonl"
     output_path.write_text(
         _jsonl(
             {

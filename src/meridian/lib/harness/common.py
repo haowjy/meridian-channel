@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict
 from meridian.lib.core.domain import TokenUsage
 from meridian.lib.core.types import ArtifactKey, SpawnId
 from meridian.lib.harness.adapter import ArtifactStore, StreamEvent
-from meridian.lib.launch.constants import OUTPUT_FILENAME
+from meridian.lib.launch.constants import HISTORY_FILENAME, OUTPUT_FILENAME
 
 # ---------------------------------------------------------------------------
 # Shared helpers (from _common.py)
@@ -291,7 +291,12 @@ def _iter_json_lines_artifact(
 ) -> list[dict[str, object]]:
     artifact_key = ArtifactKey(f"{spawn_id}/{filename}")
     if not artifacts.exists(artifact_key):
-        return []
+        if filename == OUTPUT_FILENAME:
+            artifact_key = ArtifactKey(f"{spawn_id}/{HISTORY_FILENAME}")
+            if not artifacts.exists(artifact_key):
+                return []
+        else:
+            return []
 
     raw = artifacts.get(artifact_key)
     decoded = raw.decode("utf-8", errors="ignore")

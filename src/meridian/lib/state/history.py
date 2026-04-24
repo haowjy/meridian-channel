@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from meridian.lib.harness.connections.base import HarnessEvent
+from meridian.lib.launch.constants import HISTORY_FILENAME, OUTPUT_FILENAME
 from meridian.lib.state.atomic import append_text_line
 
 
@@ -114,10 +115,36 @@ def strip_seq_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in envelope.items() if key not in ("seq", "byte_offset")}
 
 
+def _read_legacy_output_events(path: Path) -> Iterator[dict[str, Any]]:
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            payload = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            yield payload
+
+
+def read_spawn_events(spawn_dir: Path) -> Iterator[dict[str, Any]]:
+    """Read spawn events from history.jsonl, falling back to output.jsonl."""
+
+    history_path = spawn_dir / HISTORY_FILENAME
+    if history_path.exists():
+        yield from iter_history_events(history_path)
+        return
+    yield from _read_legacy_output_events(spawn_dir / OUTPUT_FILENAME)
+
+
 __all__ = [
     "HarnessHistoryWriter",
     "WriteResult",
     "iter_history_events",
     "read_history_range",
+    "read_spawn_events",
     "strip_seq_envelope",
 ]

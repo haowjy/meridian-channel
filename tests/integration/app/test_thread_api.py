@@ -65,10 +65,10 @@ def _write_artifact_output(
     spawn_id: str,
     events: list[dict[str, object]],
 ) -> None:
-    """Write output.jsonl into the artifact store used by the inspector."""
+    """Write history.jsonl into the artifact store used by the inspector."""
     artifact_dir = _state_root(project_root) / "artifacts" / spawn_id
     artifact_dir.mkdir(parents=True, exist_ok=True)
-    output_path = artifact_dir / "output.jsonl"
+    output_path = artifact_dir / "history.jsonl"
     output_path.write_text(
         "".join(json.dumps(event) + "\n" for event in events),
         encoding="utf-8",
@@ -380,7 +380,7 @@ def test_token_usage_works_with_tokens_json(
     """APP-THREAD-03: Token usage from tokens.json artifact is also supported."""
     client, project_root = app_client
     _write_spawn(project_root, spawn_id="p1", chat_id="c1")
-    # Write tokens.json artifact instead of embedding in output.jsonl
+    # Write tokens.json artifact instead of embedding in history.jsonl
     artifact_dir = _state_root(project_root) / "artifacts" / "p1"
     artifact_dir.mkdir(parents=True, exist_ok=True)
     (artifact_dir / "tokens.json").write_text(

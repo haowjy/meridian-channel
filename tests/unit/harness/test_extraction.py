@@ -113,7 +113,7 @@ def test_adapters_extract_usage_from_cross_harness_payloads() -> None:
 
     run_opencode = SpawnId("r-opencode")
     artifacts.put(
-        make_artifact_key(run_opencode, "output.jsonl"),
+        make_artifact_key(run_opencode, "history.jsonl"),
         b'{"event":"response.completed","usage":{"input":9,"output":3},"cost":{"total_cost_usd":"0.015"}}\n',
     )
     opencode_usage = OpenCodeAdapter().extract_usage(artifacts, run_opencode)
@@ -123,7 +123,7 @@ def test_adapters_extract_usage_from_cross_harness_payloads() -> None:
 
     wrapped_opencode = SpawnId("r-opencode-wrapped")
     artifacts.put(
-        make_artifact_key(wrapped_opencode, "output.jsonl"),
+        make_artifact_key(wrapped_opencode, "history.jsonl"),
         b'{"event_type":"response.completed","payload":{"event":"response.completed","usage":{"input":7,"output":2},"cost":{"total_cost_usd":"0.01"}}}\n',
     )
     wrapped_usage = OpenCodeAdapter().extract_usage(artifacts, wrapped_opencode)
@@ -137,7 +137,7 @@ def test_extract_session_ids_from_resume_text_and_json_aliases() -> None:
 
     codex_spawn = SpawnId("r-codex-resume-text")
     artifacts.put(
-        make_artifact_key(codex_spawn, "output.jsonl"),
+        make_artifact_key(codex_spawn, "history.jsonl"),
         b"To continue this session, run codex resume 019cb8d4-8d62-79d3-a925-d329f8310c5d\n",
     )
     assert (
@@ -147,7 +147,7 @@ def test_extract_session_ids_from_resume_text_and_json_aliases() -> None:
 
     opencode_json_spawn = SpawnId("r-opencode-sessionid-json")
     artifacts.put(
-        make_artifact_key(opencode_json_spawn, "output.jsonl"),
+        make_artifact_key(opencode_json_spawn, "history.jsonl"),
         b'{"type":"session.updated","sessionID":"oc_session_abc123"}\n',
     )
     assert (
@@ -156,7 +156,7 @@ def test_extract_session_ids_from_resume_text_and_json_aliases() -> None:
 
     opencode_text_spawn = SpawnId("r-opencode-sessionid-text")
     artifacts.put(
-        make_artifact_key(opencode_text_spawn, "output.jsonl"),
+        make_artifact_key(opencode_text_spawn, "history.jsonl"),
         b"Continue with: opencode --session oc_session_xyz789\n",
     )
     assert (
@@ -165,7 +165,7 @@ def test_extract_session_ids_from_resume_text_and_json_aliases() -> None:
 
     wrapped_opencode = SpawnId("r-opencode-wrapped-sessionid")
     artifacts.put(
-        make_artifact_key(wrapped_opencode, "output.jsonl"),
+        make_artifact_key(wrapped_opencode, "history.jsonl"),
         b'{"event_type":"session.updated","payload":{"type":"session.updated","sessionID":"oc_wrapped_session"}}\n',
     )
     assert OpenCodeAdapter().extract_session_id(artifacts, wrapped_opencode) == "oc_wrapped_session"
@@ -175,7 +175,7 @@ def test_harness_extract_report_uses_last_useful_assistant_output() -> None:
     artifacts = InMemoryStore()
     codex_spawn = SpawnId("r-codex-report-last")
     artifacts.put(
-        make_artifact_key(codex_spawn, "output.jsonl"),
+        make_artifact_key(codex_spawn, "history.jsonl"),
         b'{"type":"item.completed","item":{"type":"agent_message","text":"first"}}\n'
         b'{"type":"item.completed","item":{"type":"command_execution","aggregated_output":"ignored"}}\n'
         b'{"type":"item.completed","item":{"type":"agent_message","text":"second"}}\n',
@@ -184,7 +184,7 @@ def test_harness_extract_report_uses_last_useful_assistant_output() -> None:
 
     claude_spawn = SpawnId("r-claude-report-result-preferred")
     artifacts.put(
-        make_artifact_key(claude_spawn, "output.jsonl"),
+        make_artifact_key(claude_spawn, "history.jsonl"),
         b'{"type":"assistant","content":[{"type":"text","text":"assistant fallback"}]}\n'
         b'{"type":"result","result":"final result report"}\n',
     )
@@ -192,7 +192,7 @@ def test_harness_extract_report_uses_last_useful_assistant_output() -> None:
 
     opencode_spawn = SpawnId("r-opencode-report-last")
     artifacts.put(
-        make_artifact_key(opencode_spawn, "output.jsonl"),
+        make_artifact_key(opencode_spawn, "history.jsonl"),
         b'{"type":"assistant","message":"first message"}\n'
         b'{"type":"tool.call","message":"ignored"}\n'
         b'{"type":"assistant","message":"final message"}\n',
@@ -201,7 +201,7 @@ def test_harness_extract_report_uses_last_useful_assistant_output() -> None:
 
     wrapped_codex = SpawnId("r-codex-envelope")
     artifacts.put(
-        make_artifact_key(wrapped_codex, "output.jsonl"),
+        make_artifact_key(wrapped_codex, "history.jsonl"),
         (
             b'{"event_type":"item.completed","payload":{"type":"item.completed","item":'
             b'{"type":"agent_message","text":"wrapped codex report"}}}\n'
@@ -211,14 +211,14 @@ def test_harness_extract_report_uses_last_useful_assistant_output() -> None:
 
     wrapped_claude = SpawnId("r-claude-envelope")
     artifacts.put(
-        make_artifact_key(wrapped_claude, "output.jsonl"),
+        make_artifact_key(wrapped_claude, "history.jsonl"),
         b'{"event_type":"result","payload":{"type":"result","result":"wrapped claude report"}}\n',
     )
     assert ClaudeAdapter().extract_report(artifacts, wrapped_claude) == "wrapped claude report"
 
     wrapped_opencode = SpawnId("r-opencode-envelope")
     artifacts.put(
-        make_artifact_key(wrapped_opencode, "output.jsonl"),
+        make_artifact_key(wrapped_opencode, "history.jsonl"),
         (
             b'{"event_type":"assistant","payload":{"type":"assistant",'
             b'"message":"wrapped opencode report"}}\n'
@@ -234,7 +234,7 @@ def test_extract_or_fallback_report_tolerates_adapter_errors_and_bad_jsonl() -> 
     artifacts = InMemoryStore()
     failing_spawn = SpawnId("r-report-adapter-raises")
     artifacts.put(
-        make_artifact_key(failing_spawn, "output.jsonl"),
+        make_artifact_key(failing_spawn, "history.jsonl"),
         b'{"role":"assistant","content":"generic fallback"}\n',
     )
     extracted = extract_or_fallback_report(
@@ -247,7 +247,7 @@ def test_extract_or_fallback_report_tolerates_adapter_errors_and_bad_jsonl() -> 
 
     malformed_spawn = SpawnId("r-codex-report-malformed-lines")
     artifacts.put(
-        make_artifact_key(malformed_spawn, "output.jsonl"),
+        make_artifact_key(malformed_spawn, "history.jsonl"),
         b'{"type":"item.completed","item":{"type":"agent_message","text":"first"}}\n'
         b"{this is not valid json}\n"
         b'{"type":"item.completed","item":{"type":"agent_message","text":"second"}}\n'
@@ -257,7 +257,7 @@ def test_extract_or_fallback_report_tolerates_adapter_errors_and_bad_jsonl() -> 
 
     whitespace_spawn = SpawnId("r-report-adapter-whitespace")
     artifacts.put(
-        make_artifact_key(whitespace_spawn, "output.jsonl"),
+        make_artifact_key(whitespace_spawn, "history.jsonl"),
         b'{"role":"assistant","content":"generic fallback"}\n',
     )
     blank_extracted = extract_or_fallback_report(
@@ -284,7 +284,7 @@ def test_extract_written_files_prefers_explicit_artifacts_only() -> None:
         b"scripts/finalize.sh\nsrc/kept.py\n",
     )
     artifacts.put(
-        make_artifact_key(spawn_id, "output.jsonl"),
+        make_artifact_key(spawn_id, "history.jsonl"),
         b'{"type":"tool.call","tool":"read","path":"src/should_not_leak.py"}\n',
     )
     artifacts.put(
@@ -303,7 +303,7 @@ def test_extract_written_files_ignores_report_and_output_without_explicit_signal
     artifacts = InMemoryStore()
     spawn_id = SpawnId("r-files-no-fallback")
     artifacts.put(
-        make_artifact_key(spawn_id, "output.jsonl"),
+        make_artifact_key(spawn_id, "history.jsonl"),
         b'{"type":"tool.call","tool":"read","path":"src/read_only.py"}\n',
     )
     artifacts.put(
@@ -318,7 +318,7 @@ def test_extract_or_fallback_report_handles_streaming_codex_terminal_frames() ->
     artifacts = InMemoryStore()
     codex_spawn = SpawnId("r-codex-streaming-report")
     artifacts.put(
-        make_artifact_key(codex_spawn, "output.jsonl"),
+        make_artifact_key(codex_spawn, "history.jsonl"),
         (
             b'{"event_type":"item/completed","payload":{"item":{"id":"msg-1",'
             b'"type":"agentMessage","text":"streamed report"}}}\n'
@@ -337,7 +337,7 @@ def test_extract_or_fallback_report_ignores_cancelled_control_frame_fallback() -
     artifacts = InMemoryStore()
     spawn_id = SpawnId("r-report-cancel-control-frame")
     artifacts.put(
-        make_artifact_key(spawn_id, "output.jsonl"),
+        make_artifact_key(spawn_id, "history.jsonl"),
         b'{"event_type":"cancelled","payload":{"status":"cancelled","exit_code":143,"error":"cancelled"}}\n',
     )
 

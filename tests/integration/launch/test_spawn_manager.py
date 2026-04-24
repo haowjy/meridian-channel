@@ -40,7 +40,7 @@ def _build_spec() -> CodexLaunchSpec:
 
 
 def _read_output_event_types(runtime_root: Path, spawn_id: SpawnId) -> list[str]:
-    output_path = runtime_root / "spawns" / str(spawn_id) / "output.jsonl"
+    output_path = runtime_root / "spawns" / str(spawn_id) / "history.jsonl"
     if not output_path.exists():
         return []
     events: list[str] = []

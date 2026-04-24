@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.core.types import SpawnId
 from meridian.lib.harness.adapter import SpawnExtractor
-from meridian.lib.launch.constants import OUTPUT_FILENAME
+from meridian.lib.launch.constants import HISTORY_FILENAME, OUTPUT_FILENAME
 from meridian.lib.state.artifact_store import ArtifactStore
 
 from .artifact_io import read_artifact_text
@@ -138,6 +138,23 @@ def _extract_last_assistant_message(output_lines: str) -> str | None:
     return last_text_line
 
 
+def _normalized_history_lines(raw_lines: str) -> str:
+    normalized: list[str] = []
+    for line in raw_lines.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            payload_obj = json.loads(stripped)
+        except json.JSONDecodeError:
+            normalized.append(stripped)
+            continue
+        if isinstance(payload_obj, dict) and "seq" in payload_obj and "payload" in payload_obj:
+            payload_obj = payload_obj["payload"]
+        normalized.append(json.dumps(payload_obj, separators=(",", ":"), sort_keys=True))
+    return "\n".join(normalized)
+
+
 def extract_or_fallback_report(
     artifacts: ArtifactStore,
     spawn_id: SpawnId,
@@ -164,7 +181,11 @@ def extract_or_fallback_report(
             if adapted_text and not _is_terminal_control_frame(adapted_text):
                 return ExtractedReport(content=adapted_text, source="assistant_message")
 
-    output_lines = read_artifact_text(artifacts, spawn_id, OUTPUT_FILENAME)
+    output_lines = read_artifact_text(artifacts, spawn_id, HISTORY_FILENAME).strip()
+    if not output_lines:
+        output_lines = read_artifact_text(artifacts, spawn_id, OUTPUT_FILENAME)
+    else:
+        output_lines = _normalized_history_lines(output_lines)
     assistant_message = _extract_last_assistant_message(output_lines)
     assistant_report = assistant_message.strip() if assistant_message else ""
     if not assistant_report or _is_terminal_control_frame(assistant_report):

@@ -32,7 +32,7 @@ from meridian.lib.harness.connections.base import ConnectionConfig, HarnessConne
 from meridian.lib.harness.extractor import StreamingExtractor
 from meridian.lib.launch.constants import (
     DEFAULT_INFRA_EXIT_CODE,
-    OUTPUT_FILENAME,
+    HISTORY_FILENAME,
     REPORT_FILENAME,
     REPORT_WATCHDOG_GRACE_SECONDS,
     REPORT_WATCHDOG_POLL_SECONDS,
@@ -153,7 +153,7 @@ def _remove_signal_handlers(
 
 def _truncate_attempt_logs(log_dir: Path) -> None:
     for name in (
-        OUTPUT_FILENAME,
+        HISTORY_FILENAME,
         STDERR_FILENAME,
         TOKENS_FILENAME,
         REPORT_FILENAME,
@@ -170,12 +170,12 @@ def _persist_attempt_artifacts(
     log_dir: Path,
     secrets: tuple[SecretSpec, ...],
 ) -> None:
-    for name in (OUTPUT_FILENAME, STDERR_FILENAME, TOKENS_FILENAME):
+    for name in (HISTORY_FILENAME, STDERR_FILENAME, TOKENS_FILENAME):
         source = log_dir / name
         if not source.exists():
             continue
         payload = source.read_bytes()
-        if name in {OUTPUT_FILENAME, STDERR_FILENAME}:
+        if name in {HISTORY_FILENAME, STDERR_FILENAME}:
             payload = redact_secret_bytes(payload, secrets)
         artifacts.put(make_artifact_key(spawn_id, name), payload)
 
@@ -730,7 +730,7 @@ async def execute_with_streaming(
         )
     )
     log_dir = resolve_spawn_log_dir(project_root, run.spawn_id)
-    output_log_path = log_dir / OUTPUT_FILENAME
+    output_log_path = log_dir / HISTORY_FILENAME
     report_path = launch_context.report_output_path
 
     timeout_seconds = (
@@ -1027,7 +1027,7 @@ async def execute_with_streaming(
                     if _artifact_is_zero_bytes(
                         artifacts=artifacts,
                         spawn_id=run.spawn_id,
-                        filename=OUTPUT_FILENAME,
+                        filename=HISTORY_FILENAME,
                     ) and _artifact_is_zero_bytes(
                         artifacts=artifacts,
                         spawn_id=run.spawn_id,

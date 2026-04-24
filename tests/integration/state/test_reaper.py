@@ -515,7 +515,7 @@ def test_reconcile_active_spawn_treats_exact_heartbeat_window_boundary_as_recent
     assert latest.error is None
 
 
-@pytest.mark.parametrize("artifact_name", ["heartbeat", "output.jsonl", "stderr.log", "report.md"])
+@pytest.mark.parametrize("artifact_name", ["heartbeat", "history.jsonl", "stderr.log", "report.md"])
 def test_reconcile_active_spawn_dead_runner_recent_activity_skips_across_artifact_matrix(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

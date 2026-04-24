@@ -6,14 +6,11 @@ Orchestrates: backend connection (owner: connection class) + TUI subprocess + me
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import socket
-import time
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
-from io import BufferedWriter
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -21,8 +18,8 @@ from typing import Any
 from meridian.lib.core.types import SpawnId
 from meridian.lib.harness.connections.base import ConnectionConfig, HarnessConnection, HarnessEvent
 from meridian.lib.harness.connections.errors import PortBindError
-from meridian.lib.launch.constants import OUTPUT_FILENAME
 from meridian.lib.launch.launch_types import ResolvedLaunchSpec
+from meridian.lib.state.history import HarnessHistoryWriter
 from meridian.lib.state.primary_meta import ActivityState, PrimaryMetadata, write_primary_metadata
 
 from .ports import ProcessLauncher
@@ -89,7 +86,7 @@ class PrimaryAttachLauncher:
         self._on_running = on_running
         self._metadata = _LauncherMetadata()
         self._metadata_lock = Lock()
-        self._output_handle: BufferedWriter | None = None
+        self._history_writer: HarnessHistoryWriter | None = None
         self._event_writer_task: asyncio.Task[None] | None = None
 
     async def run(
@@ -103,6 +100,7 @@ class PrimaryAttachLauncher:
         """Execute the full primary attach lifecycle."""
 
         self._spawn_dir.mkdir(parents=True, exist_ok=True)
+        self._history_writer = HarnessHistoryWriter(self._spawn_dir / "history.jsonl")
         connection_started = False
         session_id: str | None = None
 
@@ -202,25 +200,17 @@ class PrimaryAttachLauncher:
         write_primary_metadata(self._spawn_dir, metadata)
 
     async def _run_event_writer(self) -> None:
-        """Stream connection events to output.jsonl."""
+        """Stream connection events to history.jsonl."""
 
-        output_path = self._spawn_dir / OUTPUT_FILENAME
-        output_handle = output_path.open("ab")
-        self._output_handle = output_handle
+        writer = self._history_writer
+        if writer is None:
+            raise RuntimeError("primary attach history writer is not initialized")
         try:
             async for event in self._connection.events():
                 self._update_activity_from_event(event)
-                payload = {
-                    "type": event.event_type,
-                    "payload": event.payload,
-                    "ts": time.time(),
-                }
-                line = json.dumps(payload, separators=(",", ":"), default=str) + "\n"
-                output_handle.write(line.encode("utf-8"))
-                output_handle.flush()
+                writer.write(event)
         finally:
-            output_handle.close()
-            self._output_handle = None
+            self._history_writer = None
 
     def _update_activity_from_event(self, event: HarnessEvent) -> None:
         """Update activity state based on connection events."""

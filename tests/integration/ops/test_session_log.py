@@ -27,7 +27,7 @@ def _write_spawn_output(
     artifact: bool = False,
 ) -> None:
     base_dir = "artifacts" if artifact else "spawns"
-    output_path = runtime_root / base_dir / spawn_id / "output.jsonl"
+    output_path = runtime_root / base_dir / spawn_id / "history.jsonl"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(json.dumps(event) for event in events) + "\n")
 

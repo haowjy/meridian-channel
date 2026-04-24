@@ -78,7 +78,7 @@ def _build_primary_launch_context(
 
 
 def test_subprocess_launcher_captures_output_log(tmp_path: Path) -> None:
-    output_log_path = tmp_path / "output.jsonl"
+    output_log_path = tmp_path / "history.jsonl"
     launched = SubprocessProcessLauncher().launch(
         command=(
             sys.executable,

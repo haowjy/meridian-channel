@@ -33,7 +33,7 @@ from meridian.lib.spawn.archive import (
     read_archived_spawns,
 )
 from meridian.lib.state import spawn_store
-from meridian.lib.state.paths import spawn_output_path
+from meridian.lib.state.history import read_spawn_events, strip_seq_envelope
 from meridian.lib.streaming.signal_canceller import SignalCanceller
 from meridian.lib.streaming.spawn_manager import SpawnManager
 
@@ -668,7 +668,7 @@ def register_spawn_query_routes(
         since: int | None = Query(default=None, ge=0, description="Start from line number"),
         tail: int | None = Query(default=None, ge=1, le=1000, description="Last N events"),
     ) -> list[dict[str, object]]:
-        """Get events from a spawn's output.jsonl."""
+        """Get events from a spawn's history.jsonl."""
         typed_spawn_id = validate_spawn_id(spawn_id, http_exception)
         
         # Check spawn exists
@@ -676,24 +676,14 @@ def register_spawn_query_routes(
         if record is None:
             raise http_exception(status_code=404, detail="spawn not found")
 
-        output_path = spawn_output_path(runtime_root, typed_spawn_id)
-        if not output_path.exists():
-            return []
-
+        spawn_dir = runtime_root / "spawns" / str(typed_spawn_id)
         events: list[dict[str, object]] = []
-        with output_path.open() as f:
-            for i, line in enumerate(f):
-                if since is not None and i < since:
-                    continue
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    event = json_module.loads(line)
-                    event["_line"] = i
-                    events.append(event)
-                except json_module.JSONDecodeError:
-                    continue
+        for i, event in enumerate(read_spawn_events(spawn_dir)):
+            if since is not None and i < since:
+                continue
+            payload = strip_seq_envelope(event)
+            payload["_line"] = i
+            events.append(payload)
 
         if tail is not None:
             events = events[-tail:]
