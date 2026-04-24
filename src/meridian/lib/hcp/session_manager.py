@@ -203,6 +203,13 @@ class HcpSessionManager:
             )
             result = await self._spawn_manager.inject(p_id, text, source="hcp")
             if not result.success:
+                self._active_processes.pop(c_id, None)
+                self._chat_states[c_id] = ChatState.IDLE
+                await self._write_lifecycle_event(
+                    c_id,
+                    "state_change",
+                    {"state": ChatState.IDLE.value, "reason": "inject_failed"},
+                )
                 raise HcpError(
                     HcpErrorCategory.HARNESS_CRASHED,
                     result.error or f"failed to prompt chat {c_id}",

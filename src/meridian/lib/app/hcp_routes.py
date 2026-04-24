@@ -53,8 +53,13 @@ class ChatDetailResponse(BaseModel):
     state: str
     harness: str
     model: str
+    title: str | None = None
     created_at: str
-    active_spawn_id: str | None = None
+    updated_at: str | None = None
+    active_p_id: str | None = None
+    spawns: list[dict[str, object]] = Field(
+        default_factory=lambda: list[dict[str, object]]()
+    )
 
 
 class PromptRequest(BaseModel):
@@ -104,13 +109,17 @@ def _chat_detail(
 
     state = manager.get_chat_state(c_id)
     active_spawn_id = manager.get_active_p_id(c_id)
+    spawns = _chat_spawns(runtime_root, c_id)
     return ChatDetailResponse(
         chat_id=record.chat_id,
         state=state.value if state is not None else "idle",
         harness=record.harness,
         model=record.model,
+        title=None,
         created_at=record.started_at,
-        active_spawn_id=str(active_spawn_id) if active_spawn_id is not None else None,
+        updated_at=None,
+        active_p_id=str(active_spawn_id) if active_spawn_id is not None else None,
+        spawns=[_spawn_summary(spawn) for spawn in spawns],
     )
 
 
@@ -124,6 +133,42 @@ def _spawn_summary(record: spawn_store.SpawnRecord) -> dict[str, object]:
         "created_at": record.started_at or "",
         "started_at": record.started_at,
         "finished_at": record.finished_at,
+    }
+
+
+def _chat_spawns(runtime_root: Path, c_id: str) -> list[spawn_store.SpawnRecord]:
+    return spawn_store.list_spawns(runtime_root, filters={"chat_id": c_id})
+
+
+def _chat_history_response(
+    *,
+    raw_events_by_spawn: list[tuple[spawn_store.SpawnRecord, list[dict[str, Any]]]],
+    start_seq: int,
+    limit: int | None,
+) -> dict[str, object]:
+    agui_events: list[dict[str, Any]] = []
+    for spawn, raw_events in raw_events_by_spawn:
+        if not spawn.harness:
+            continue
+        for event in replay_events_to_agui(raw_events, HarnessId(spawn.harness), spawn.id):
+            agui_events.append(_agui_event_to_json(event))
+
+    bounded_start = max(start_seq, 0)
+    bounded_limit = max(limit, 0) if limit is not None else None
+    end = None if bounded_limit is None else bounded_start + bounded_limit
+    page = agui_events[bounded_start:end]
+    events = [
+        {
+            "seq": bounded_start + offset,
+            "type": str(event.get("type", "")),
+            "data": event,
+            "timestamp": str(event.get("timestamp", "")),
+        }
+        for offset, event in enumerate(page)
+    ]
+    return {
+        "events": events,
+        "has_more": end is not None and end < len(agui_events),
     }
 
 
@@ -250,7 +295,7 @@ def register_hcp_routes(
             http_exception=http_exception,
         )
 
-    async def prompt_chat(c_id: str, body: PromptRequest) -> dict[str, bool]:
+    async def prompt_chat(c_id: str, body: PromptRequest) -> ChatDetailResponse:
         _require_chat(c_id)
         text = body.text.strip()
         if not text:
@@ -259,7 +304,12 @@ def register_hcp_routes(
             await _manager().prompt(c_id, text)
         except HcpError as exc:
             _handle_hcp_error(exc)
-        return {"ok": True}
+        return _chat_detail(
+            runtime_root=runtime_root,
+            manager=_manager(),
+            c_id=c_id,
+            http_exception=http_exception,
+        )
 
     async def cancel_chat(c_id: str) -> dict[str, bool]:
         _require_chat(c_id)
@@ -281,22 +331,24 @@ def register_hcp_routes(
         c_id: str,
         start_seq: int = 0,
         limit: int | None = None,
-    ) -> list[dict[str, Any]]:
-        record = _require_chat(c_id)
-        raw_events = read_history_range(
-            paths.chat_history_path(c_id),
+    ) -> dict[str, object]:
+        _require_chat(c_id)
+        raw_events_by_spawn = [
+            (
+                spawn,
+                read_history_range(paths.spawn_history_path(spawn.id)),
+            )
+            for spawn in _chat_spawns(runtime_root, c_id)
+        ]
+        return _chat_history_response(
+            raw_events_by_spawn=raw_events_by_spawn,
             start_seq=start_seq,
             limit=limit,
         )
-        agui_events = replay_events_to_agui(raw_events, HarnessId(record.harness), c_id)
-        return [_agui_event_to_json(event) for event in agui_events]
 
     async def list_chat_spawns(c_id: str) -> list[dict[str, object]]:
         _require_chat(c_id)
-        return [
-            _spawn_summary(record)
-            for record in spawn_store.list_spawns(runtime_root, filters={"chat_id": c_id})
-        ]
+        return [_spawn_summary(record) for record in _chat_spawns(runtime_root, c_id)]
 
     async def get_spawn_history(
         p_id: str,

@@ -28,6 +28,7 @@ class FakeSpawnManager:
         self.stopped: list[SpawnId] = []
         self.heartbeats: list[SpawnId] = []
         self.inject_gate: asyncio.Event | None = None
+        self.inject_result = InjectResult(success=True)
         self.start_error: Exception | None = None
 
     async def start_spawn(
@@ -58,7 +59,7 @@ class FakeSpawnManager:
         self.injected.append((spawn_id, message, source))
         if self.inject_gate is not None:
             await self.inject_gate.wait()
-        return InjectResult(success=True)
+        return self.inject_result
 
     async def stop_spawn(
         self,
@@ -225,6 +226,32 @@ async def test_chat_state_transitions_create_cancel_close(tmp_path: Path) -> Non
 
     await manager.close_chat(c_id)
     assert manager.get_chat_state(c_id) == ChatState.CLOSED
+
+
+@pytest.mark.asyncio
+async def test_prompt_failure_clears_active_process_and_marks_idle(tmp_path: Path) -> None:
+    manager, fake, runtime_root = _manager(tmp_path)
+    c_id, p_id = await manager.create_chat(
+        "hello",
+        model="gpt-test",
+        harness="codex",
+        config=_config(tmp_path),
+        spec=_spec(),
+    )
+    fake.inject_result = InjectResult(success=False, error="socket closed")
+
+    with pytest.raises(HcpError) as exc_info:
+        await manager.prompt(c_id, "continue")
+
+    assert exc_info.value.category == HcpErrorCategory.HARNESS_CRASHED
+    assert manager.get_chat_state(c_id) == ChatState.IDLE
+    assert manager.get_active_p_id(c_id) is None
+    assert fake.injected == [(p_id, "continue", "hcp")]
+    assert _read_lifecycle(runtime_root, c_id)[-1]["data"] == {
+        "reason": "inject_failed",
+        "state": "idle",
+    }
+    await manager.close_chat(c_id)
 
 
 @pytest.mark.asyncio

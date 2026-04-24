@@ -129,7 +129,10 @@ def test_create_list_get_prompt_cancel_and_close_chat(tmp_path: Path) -> None:
     assert created["state"] == "active"
     assert created["harness"] == "codex"
     assert created["model"] == "gpt-5.4"
-    assert created["active_spawn_id"] == "p1"
+    assert created["active_p_id"] == "p1"
+    assert created["title"] is None
+    assert created["updated_at"] is None
+    assert created["spawns"][0]["spawn_id"] == "p1"
 
     list_response = client.get("/api/chats")
     assert list_response.status_code == 200
@@ -137,11 +140,11 @@ def test_create_list_get_prompt_cancel_and_close_chat(tmp_path: Path) -> None:
 
     detail_response = client.get("/api/chats/c1")
     assert detail_response.status_code == 200
-    assert detail_response.json()["active_spawn_id"] == "p1"
+    assert detail_response.json()["active_p_id"] == "p1"
 
     prompt_response = client.post("/api/chats/c1/prompt", json={"text": "continue"})
     assert prompt_response.status_code == 200
-    assert prompt_response.json() == {"ok": True}
+    assert prompt_response.json()["active_p_id"] == "p1"
     assert manager.prompts == [("c1", "continue")]
 
     cancel_response = client.post("/api/chats/c1/cancel")
@@ -176,7 +179,7 @@ def test_prompt_maps_concurrent_prompt_to_409(tmp_path: Path) -> None:
 def test_chat_history_paginates_and_replays_agui_events(tmp_path: Path) -> None:
     client, _manager, runtime_root = _make_client(tmp_path)
     _create_chat(client)
-    history_path = RuntimePaths.from_root_dir(runtime_root).chat_history_path("c1")
+    history_path = RuntimePaths.from_root_dir(runtime_root).spawn_history_path("p1")
     writer = HarnessHistoryWriter(history_path)
     writer.write(
         HarnessEvent(
@@ -193,16 +196,17 @@ def test_chat_history_paginates_and_replays_agui_events(tmp_path: Path) -> None:
         )
     )
 
-    response = client.get("/api/chats/c1/history", params={"start_seq": 1, "limit": 1})
+    response = client.get("/api/chats/c1/history", params={"start_seq": 1, "limit": 2})
 
     assert response.status_code == 200
-    event_types = [event["type"] for event in response.json()]
+    body = response.json()
+    event_types = [event["type"] for event in body["events"]]
     assert event_types == [
-        "RUN_STARTED",
         "TEXT_MESSAGE_START",
         "TEXT_MESSAGE_CONTENT",
-        "RUN_FINISHED",
     ]
+    assert body["events"][0]["seq"] == 1
+    assert body["has_more"] is True
 
 
 def test_chat_spawns_and_spawn_history(tmp_path: Path) -> None:
