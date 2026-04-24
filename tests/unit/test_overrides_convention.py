@@ -105,3 +105,51 @@ def test_spawn_config_layer_does_not_set_harness() -> None:
     assert overrides.model == "gpt-5.4"
     assert overrides.agent is None
     assert overrides.harness is None
+
+
+# --- RuntimeOverrides.from_alias_entry ---
+
+
+def test_from_alias_entry_returns_empty_overrides_without_alias_defaults() -> None:
+    from meridian.lib.catalog.model_aliases import AliasEntry
+    from meridian.lib.core.overrides import RuntimeOverrides
+    from meridian.lib.core.types import ModelId
+
+    assert RuntimeOverrides.from_alias_entry(None) == RuntimeOverrides()
+    assert RuntimeOverrides.from_alias_entry(
+        AliasEntry(alias="sonnet", model_id=ModelId("claude-sonnet-4"))
+    ) == RuntimeOverrides()
+
+
+def test_from_alias_entry_exposes_alias_defaults_as_runtime_overrides() -> None:
+    from meridian.lib.catalog.model_aliases import AliasEntry
+    from meridian.lib.core.overrides import RuntimeOverrides
+    from meridian.lib.core.types import ModelId
+
+    overrides = RuntimeOverrides.from_alias_entry(
+        AliasEntry(
+            alias="gpt",
+            model_id=ModelId("gpt-5.5"),
+            default_effort="low",
+            default_autocompact=20,
+        )
+    )
+
+    assert overrides == RuntimeOverrides(effort="low", autocompact=20)
+
+
+def test_from_alias_entry_treats_auto_effort_as_unset() -> None:
+    from meridian.lib.catalog.model_aliases import AliasEntry
+    from meridian.lib.core.overrides import RuntimeOverrides
+    from meridian.lib.core.types import ModelId
+
+    overrides = RuntimeOverrides.from_alias_entry(
+        AliasEntry(
+            alias="gpt",
+            model_id=ModelId("gpt-5.5"),
+            default_effort="auto",
+            default_autocompact=30,
+        )
+    )
+
+    assert overrides == RuntimeOverrides(autocompact=30)

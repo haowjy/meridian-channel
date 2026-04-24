@@ -79,11 +79,27 @@ def resolve_model(name_or_alias: str, project_root: Path | None = None) -> Alias
                 # Mars resolved the alias but didn't provide harness -> pattern fallback
                 resolved_harness = pattern_fallback_harness(model_id.strip())
 
+            raw_default_effort = mars_result.get("default_effort")
+            raw_default_autocompact = mars_result.get("autocompact")
+            default_effort = (
+                raw_default_effort.strip()
+                if isinstance(raw_default_effort, str) and raw_default_effort.strip()
+                else None
+            )
+            default_autocompact = (
+                raw_default_autocompact
+                if isinstance(raw_default_autocompact, int)
+                and not isinstance(raw_default_autocompact, bool)
+                else None
+            )
+
             return AliasEntry(
                 alias=str(mars_result.get("name", "") or ""),
                 model_id=ModelId(model_id.strip()),
                 resolved_harness=resolved_harness,
                 description=str(mars_result.get("description", "") or "") or None,
+                default_effort=default_effort,
+                default_autocompact=default_autocompact,
             )
 
     # Step 2: Raw model ID -> pattern-based harness fallback

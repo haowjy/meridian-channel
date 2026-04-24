@@ -10,111 +10,11 @@ from unittest.mock import patch
 import pytest
 
 from meridian.lib.catalog.model_aliases import (
-    _mars_list_to_entries,
-    _mars_merged_to_entries,
-    entry,
     load_mars_aliases,
     load_mars_descriptions,
     run_mars_models_list_all,
     run_mars_models_resolve,
 )
-
-# --- entry() helper ---
-
-
-class TestEntry:
-    def test_creates_alias_entry(self) -> None:
-        e = entry(alias="opus", model_id="claude-opus-4-6")
-        assert e.alias == "opus"
-        assert e.model_id == "claude-opus-4-6"
-        assert e.resolved_harness is None
-
-    def test_with_harness(self) -> None:
-        e = entry(alias="opus", model_id="claude-opus-4-6", harness="claude")
-        assert e.resolved_harness is not None
-        assert str(e.resolved_harness) == "claude"
-
-    def test_with_description(self) -> None:
-        e = entry(alias="opus", model_id="claude-opus-4-6", description="A strong model.")
-        assert e.description == "A strong model."
-
-
-# --- _mars_list_to_entries ---
-
-
-class TestMarsListToEntries:
-    def test_converts_valid_entries(self) -> None:
-        raw = [
-            {
-                "name": "opus",
-                "harness": "claude",
-                "mode": "pinned",
-                "resolved_model": "claude-opus-4-6",
-                "description": "Strong orchestrator.",
-            },
-            {
-                "name": "gpt",
-                "harness": "codex",
-                "mode": "auto-resolve",
-                "resolved_model": "gpt-5.4",
-                "description": None,
-            },
-        ]
-        entries = _mars_list_to_entries(raw)
-        assert len(entries) == 2
-        by_name = {e.alias: e for e in entries}
-        assert by_name["opus"].model_id == "claude-opus-4-6"
-        assert by_name["gpt"].model_id == "gpt-5.4"
-
-    def test_skips_unresolved_aliases(self) -> None:
-        raw = [
-            {
-                "name": "opus",
-                "harness": "claude",
-                "mode": "auto-resolve",
-                "resolved_model": "",
-                "description": "Strong orchestrator.",
-            },
-        ]
-        entries = _mars_list_to_entries(raw)
-        assert len(entries) == 0
-
-    def test_skips_missing_name(self) -> None:
-        raw = [{"harness": "claude", "resolved_model": "claude-opus-4-6"}]
-        entries = _mars_list_to_entries(raw)
-        assert len(entries) == 0
-
-
-# --- _mars_merged_to_entries ---
-
-
-class TestMarsMergedToEntries:
-    def test_pinned_alias(self) -> None:
-        merged = {
-            "opus": {
-                "harness": "claude",
-                "model": "claude-opus-4-6",
-                "description": "Strong.",
-            },
-        }
-        entries = _mars_merged_to_entries(merged)
-        assert len(entries) == 1
-        assert entries[0].alias == "opus"
-        assert entries[0].model_id == "claude-opus-4-6"
-        assert entries[0].description == "Strong."
-
-    def test_auto_resolve_skipped(self) -> None:
-        merged = {
-            "opus": {
-                "harness": "claude",
-                "provider": "anthropic",
-                "match": ["opus"],
-                "description": "Strong.",
-            },
-        }
-        entries = _mars_merged_to_entries(merged)
-        assert len(entries) == 0
-
 
 # --- run_mars_models_resolve ---
 

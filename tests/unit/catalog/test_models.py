@@ -1,7 +1,9 @@
-"""Unit coverage for catalog model resolution and superseding policy."""
+"""Unit coverage for catalog model resolution, superseding policy, and AgentModelEntry."""
 
 import pytest
+from pydantic import ValidationError
 
+from meridian.lib.catalog.agent import AgentModelEntry
 from meridian.lib.catalog.model_policy import (
     _model_lineage,
     compute_superseded_ids,
@@ -34,6 +36,35 @@ def test_resolve_model_returns_concrete_model_id(
     assert str(result.model_id) == "gpt-5.3-codex"
     assert result.alias == "codex"
     assert result.harness == HarnessId.CODEX
+    assert result.default_effort is None
+    assert result.default_autocompact is None
+
+
+def test_resolve_model_copies_alias_defaults_from_mars(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def mock_mars_resolve(
+        name: str, project_root: object = None
+    ) -> dict[str, object] | None:
+        if name == "gpt":
+            return {
+                "name": "gpt",
+                "model_id": "gpt-5.5",
+                "harness": "codex",
+                "default_effort": "low",
+                "autocompact": 65,
+            }
+        return None
+
+    monkeypatch.setattr(
+        "meridian.lib.catalog.models.run_mars_models_resolve",
+        mock_mars_resolve,
+    )
+    result = resolve_model("gpt")
+    assert str(result.model_id) == "gpt-5.5"
+    assert result.alias == "gpt"
+    assert result.default_effort == "low"
+    assert result.default_autocompact == 65
 
 
 def test_resolve_model_raw_model_id_pattern_fallback(
@@ -52,6 +83,8 @@ def test_resolve_model_raw_model_id_pattern_fallback(
     assert str(result.model_id) == "claude-opus-4-6"
     assert result.alias == ""
     assert result.harness == HarnessId.CLAUDE
+    assert result.default_effort is None
+    assert result.default_autocompact is None
 
 
 def test_resolve_model_unknown_raises(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -134,3 +167,38 @@ def test_compute_superseded_ids_respects_lineage_and_provider_boundaries() -> No
     )
 
     assert superseded == frozenset({"gpt-5.1", "gpt-5.2"})
+
+
+# --- AgentModelEntry validation ---
+
+
+class TestAgentModelEntry:
+    def test_model_entry_normalizes_effort_and_keeps_supported_fields(self) -> None:
+        entry = AgentModelEntry.model_validate(
+            {
+                "effort": "  high  ",
+                "autocompact": 50,
+                "lane": "correctness",
+            }
+        )
+
+        assert entry.effort == "high"
+        assert entry.autocompact == 50
+
+    @pytest.mark.parametrize("effort", ["auto", "ultra"])
+    def test_invalid_effort_raises(self, effort: str) -> None:
+        with pytest.raises(ValidationError, match="expected one of"):
+            AgentModelEntry(effort=effort)
+
+    @pytest.mark.parametrize("value", [1, 100])
+    def test_autocompact_accepts_supported_bounds(self, value: int) -> None:
+        assert AgentModelEntry(autocompact=value).autocompact == value
+
+    def test_autocompact_bool_raises(self) -> None:
+        with pytest.raises(ValidationError, match="boolean"):
+            AgentModelEntry(autocompact=True)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("value", [0, 101])
+    def test_autocompact_out_of_range_raises(self, value: int) -> None:
+        with pytest.raises(ValidationError, match="autocompact"):
+            AgentModelEntry(autocompact=value)

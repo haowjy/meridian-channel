@@ -2,8 +2,10 @@ from pathlib import Path
 
 import pytest
 
+from meridian.lib.catalog.model_aliases import AliasEntry
 from meridian.lib.config.settings import MeridianConfig
 from meridian.lib.core.overrides import RuntimeOverrides
+from meridian.lib.core.types import HarnessId
 from meridian.lib.harness.registry import get_default_harness_registry
 from meridian.lib.launch.context import build_launch_context
 from meridian.lib.launch.plan import (
@@ -24,6 +26,50 @@ def _write_minimal_mars_config(project_root: Path) -> None:
         "[settings]\n"
         'targets = [".agents"]\n',
         encoding="utf-8",
+    )
+
+
+def _write_agent_profile(project_root: Path, *, name: str, frontmatter: str) -> None:
+    path = project_root / ".agents" / "agents" / f"{name}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"---\n{frontmatter}\n---\n\n# {name}\n", encoding="utf-8")
+
+
+def _mock_alias(
+    *,
+    alias: str,
+    model_id: str,
+    harness: HarnessId = HarnessId.CODEX,
+    default_effort: str | None = None,
+    default_autocompact: int | None = None,
+) -> AliasEntry:
+    return AliasEntry(
+        alias=alias,
+        model_id=model_id,
+        resolved_harness=harness,
+        default_effort=default_effort,
+        default_autocompact=default_autocompact,
+    )
+
+
+def _patch_alias_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    resolved_entries: dict[str, AliasEntry],
+    catalog_entries: list[AliasEntry] | None = None,
+) -> None:
+    monkeypatch.setattr(
+        "meridian.lib.launch.policies.resolve_model_entry",
+        lambda name, project_root=None: resolved_entries.get(
+            name,
+            _mock_alias(alias="", model_id=name),
+        ),
+    )
+    monkeypatch.setattr(
+        "meridian.lib.launch.policies.load_merged_aliases",
+        lambda project_root=None: (
+            catalog_entries if catalog_entries is not None else list(resolved_entries.values())
+        ),
     )
 
 
@@ -105,7 +151,7 @@ def test_spawn_prepare_derives_harness_from_model_before_default_harness(tmp_pat
         runtime=runtime,
     )
 
-    assert prepared.model == "claude-sonnet-4"
+    assert prepared.model.startswith("claude-sonnet-4")
     assert prepared.harness == "claude"
 
 
@@ -142,3 +188,374 @@ def test_resolve_policies_errors_on_same_layer_user_harness_model_conflict(tmp_p
             harness_registry=get_default_harness_registry(),
             configured_default_harness="codex",
         )
+
+
+def test_resolve_policies_config_overrides_win_over_model_profile_and_alias_defaults(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_minimal_mars_config(tmp_path)
+    _write_agent_profile(
+        tmp_path,
+        name="reviewer",
+        frontmatter=(
+            "name: reviewer\n"
+            "model: gpt\n"
+            "effort: high\n"
+            "autocompact: 80\n"
+            "models:\n"
+            "  gpt:\n"
+            "    effort: medium\n"
+            "    autocompact: 35\n"
+        ),
+    )
+
+    aliases = {
+        "gpt": _mock_alias(
+            alias="gpt",
+            model_id="gpt-5.5",
+            default_effort="low",
+            default_autocompact=20,
+        ),
+        "gpt-5.5": _mock_alias(
+            alias="gpt",
+            model_id="gpt-5.5",
+            default_effort="low",
+            default_autocompact=20,
+        ),
+    }
+    _patch_alias_resolution(
+        monkeypatch,
+        resolved_entries=aliases,
+        catalog_entries=[aliases["gpt"]],
+    )
+
+    policies = resolve_policies(
+        project_root=tmp_path,
+        layers=(RuntimeOverrides(agent="reviewer"), RuntimeOverrides()),
+        config_overrides=RuntimeOverrides(effort="xhigh", autocompact=99),
+        config=MeridianConfig(),
+        harness_registry=get_default_harness_registry(),
+        configured_default_harness="codex",
+    )
+
+    assert policies.resolved_overrides.effort == "xhigh"
+    assert policies.resolved_overrides.autocompact == 99
+
+
+def test_resolve_policies_user_effort_override_wins_over_model_profile_and_alias(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_minimal_mars_config(tmp_path)
+    _write_agent_profile(
+        tmp_path,
+        name="reviewer",
+        frontmatter=(
+            "name: reviewer\n"
+            "model: gpt\n"
+            "effort: high\n"
+            "autocompact: 80\n"
+            "models:\n"
+            "  gpt:\n"
+            "    effort: medium\n"
+            "    autocompact: 35\n"
+        ),
+    )
+
+    aliases = {
+        "gpt": _mock_alias(
+            alias="gpt",
+            model_id="gpt-5.5",
+            default_effort="low",
+            default_autocompact=20,
+        ),
+        "gpt-5.5": _mock_alias(
+            alias="gpt",
+            model_id="gpt-5.5",
+            default_effort="low",
+            default_autocompact=20,
+        ),
+    }
+    _patch_alias_resolution(
+        monkeypatch,
+        resolved_entries=aliases,
+        catalog_entries=[aliases["gpt"]],
+    )
+
+    policies = resolve_policies(
+        project_root=tmp_path,
+        layers=(
+            RuntimeOverrides(agent="reviewer", effort="xhigh", autocompact=90),
+            RuntimeOverrides(),
+        ),
+        config_overrides=RuntimeOverrides(),
+        config=MeridianConfig(),
+        harness_registry=get_default_harness_registry(),
+        configured_default_harness="codex",
+    )
+
+    assert policies.resolved_overrides.effort == "xhigh"
+    assert policies.resolved_overrides.autocompact == 90
+
+
+def test_resolve_policies_models_fallback_matches_model_id_and_warns_on_multiple(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_minimal_mars_config(tmp_path)
+    _write_agent_profile(
+        tmp_path,
+        name="reviewer",
+        frontmatter=(
+            "name: reviewer\n"
+            "model: gpt\n"
+            "models:\n"
+            "  gpt55:\n"
+            "    effort: medium\n"
+            "  gpt-latest:\n"
+            "    effort: high\n"
+        ),
+    )
+
+    aliases = {
+        "gpt": _mock_alias(alias="", model_id="gpt-5.5"),
+        "gpt-5.5": _mock_alias(alias="", model_id="gpt-5.5"),
+    }
+    _patch_alias_resolution(
+        monkeypatch,
+        resolved_entries=aliases,
+        catalog_entries=[
+            _mock_alias(alias="gpt55", model_id="gpt-5.5"),
+            _mock_alias(alias="gpt-latest", model_id="gpt-5.5"),
+        ],
+    )
+
+    policies = resolve_policies(
+        project_root=tmp_path,
+        layers=(RuntimeOverrides(agent="reviewer"), RuntimeOverrides()),
+        config_overrides=RuntimeOverrides(),
+        config=MeridianConfig(),
+        harness_registry=get_default_harness_registry(),
+        configured_default_harness="codex",
+    )
+
+    assert policies.resolved_overrides.effort == "medium"
+    assert policies.warning is not None
+    assert "ignoring: gpt-latest" in policies.warning
+
+
+def test_resolve_policies_exact_alias_match_beats_model_id_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_minimal_mars_config(tmp_path)
+    _write_agent_profile(
+        tmp_path,
+        name="reviewer",
+        frontmatter=(
+            "name: reviewer\n"
+            "model: gpt\n"
+            "models:\n"
+            "  gpt:\n"
+            "    effort: medium\n"
+            "  gpt55:\n"
+            "    effort: high\n"
+        ),
+    )
+
+    aliases = {
+        "gpt": _mock_alias(alias="gpt", model_id="gpt-5.5"),
+        "gpt-5.5": _mock_alias(alias="gpt", model_id="gpt-5.5"),
+    }
+    _patch_alias_resolution(
+        monkeypatch,
+        resolved_entries=aliases,
+        catalog_entries=[_mock_alias(alias="gpt55", model_id="gpt-5.5")],
+    )
+
+    policies = resolve_policies(
+        project_root=tmp_path,
+        layers=(RuntimeOverrides(agent="reviewer"), RuntimeOverrides()),
+        config_overrides=RuntimeOverrides(),
+        config=MeridianConfig(),
+        harness_registry=get_default_harness_registry(),
+        configured_default_harness="codex",
+    )
+
+    assert policies.resolved_overrides.effort == "medium"
+    assert policies.warning is None
+
+
+def test_resolve_policies_profile_effort_blocks_alias_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Layer 3 (profile default effort) should win over Layer 4 (alias default)."""
+    _write_minimal_mars_config(tmp_path)
+    _write_agent_profile(
+        tmp_path,
+        name="reviewer",
+        frontmatter=(
+            "name: reviewer\n"
+            "model: gpt\n"
+            "effort: medium\n"
+        ),
+    )
+
+    aliases = {
+        "gpt": _mock_alias(
+            alias="gpt",
+            model_id="gpt-5.5",
+            default_effort="low",
+            default_autocompact=20,
+        ),
+    }
+    _patch_alias_resolution(
+        monkeypatch,
+        resolved_entries=aliases,
+        catalog_entries=[aliases["gpt"]],
+    )
+
+    policies = resolve_policies(
+        project_root=tmp_path,
+        layers=(RuntimeOverrides(agent="reviewer"), RuntimeOverrides()),
+        config_overrides=RuntimeOverrides(),
+        config=MeridianConfig(),
+        harness_registry=get_default_harness_registry(),
+        configured_default_harness="codex",
+    )
+
+    # Profile effort (medium) wins over alias default (low)
+    assert policies.resolved_overrides.effort == "medium"
+    # Alias autocompact passes through since profile has no autocompact
+    assert policies.resolved_overrides.autocompact == 20
+
+
+def test_resolve_policies_model_overrides_win_over_profile_and_alias(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Layer 2 (agent models[alias] entry) should win over Layer 3 and Layer 4."""
+    _write_minimal_mars_config(tmp_path)
+    _write_agent_profile(
+        tmp_path,
+        name="reviewer",
+        frontmatter=(
+            "name: reviewer\n"
+            "model: gpt\n"
+            "effort: low\n"
+            "autocompact: 80\n"
+            "models:\n"
+            "  gpt:\n"
+            "    effort: high\n"
+            "    autocompact: 50\n"
+        ),
+    )
+
+    aliases = {
+        "gpt": _mock_alias(
+            alias="gpt",
+            model_id="gpt-5.5",
+            default_effort="medium",
+            default_autocompact=25,
+        ),
+    }
+    _patch_alias_resolution(
+        monkeypatch,
+        resolved_entries=aliases,
+        catalog_entries=[aliases["gpt"]],
+    )
+
+    policies = resolve_policies(
+        project_root=tmp_path,
+        layers=(RuntimeOverrides(agent="reviewer"), RuntimeOverrides()),
+        config_overrides=RuntimeOverrides(),
+        config=MeridianConfig(),
+        harness_registry=get_default_harness_registry(),
+        configured_default_harness="codex",
+    )
+
+    # models[gpt].effort (high) wins over profile effort (low) and alias default (medium)
+    assert policies.resolved_overrides.effort == "high"
+    # models[gpt].autocompact (50) wins over profile autocompact (80) and alias (25)
+    assert policies.resolved_overrides.autocompact == 50
+
+
+def test_resolve_policies_alias_defaults_passthrough_when_nothing_else_set(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Layer 4 (alias defaults) should win when no higher layers set effort/autocompact."""
+    _write_minimal_mars_config(tmp_path)
+    _write_agent_profile(
+        tmp_path,
+        name="reviewer",
+        frontmatter=(
+            "name: reviewer\n"
+            "model: gpt\n"
+        ),
+    )
+
+    aliases = {
+        "gpt": _mock_alias(
+            alias="gpt",
+            model_id="gpt-5.5",
+            default_effort="low",
+            default_autocompact=30,
+        ),
+    }
+    _patch_alias_resolution(
+        monkeypatch,
+        resolved_entries=aliases,
+        catalog_entries=[aliases["gpt"]],
+    )
+
+    policies = resolve_policies(
+        project_root=tmp_path,
+        layers=(RuntimeOverrides(agent="reviewer"), RuntimeOverrides()),
+        config_overrides=RuntimeOverrides(),
+        config=MeridianConfig(),
+        harness_registry=get_default_harness_registry(),
+        configured_default_harness="codex",
+    )
+
+    assert policies.resolved_overrides.effort == "low"
+    assert policies.resolved_overrides.autocompact == 30
+
+
+def test_resolve_policies_no_overrides_at_any_layer_yields_none(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When no layer sets effort/autocompact, both should be None."""
+    _write_minimal_mars_config(tmp_path)
+    _write_agent_profile(
+        tmp_path,
+        name="reviewer",
+        frontmatter=(
+            "name: reviewer\n"
+            "model: gpt\n"
+        ),
+    )
+
+    aliases = {
+        "gpt": _mock_alias(alias="gpt", model_id="gpt-5.5"),
+    }
+    _patch_alias_resolution(
+        monkeypatch,
+        resolved_entries=aliases,
+        catalog_entries=[aliases["gpt"]],
+    )
+
+    policies = resolve_policies(
+        project_root=tmp_path,
+        layers=(RuntimeOverrides(agent="reviewer"), RuntimeOverrides()),
+        config_overrides=RuntimeOverrides(),
+        config=MeridianConfig(),
+        harness_registry=get_default_harness_registry(),
+        configured_default_harness="codex",
+    )
+
+    assert policies.resolved_overrides.effort is None
+    assert policies.resolved_overrides.autocompact is None

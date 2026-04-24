@@ -1,44 +1,61 @@
-# Meridian Smoke Tests
+# Meridian E2E Tests (Manual)
 
-Smoke tests are short, LLM-executed manual checks for the `meridian` CLI. They validate the command surface, state files under `.meridian/`, and harness integration without turning the suite into a large unit-test matrix.
+Manual end-to-end tests for flows that require a working harness, network access,
+or human judgment. **Most CLI behavior is now covered by automated smoke tests
+in `tests/smoke/`.**
 
-## How to run
+## When to Use Manual E2E Tests
 
-1. Pick one file under `tests/smoke/`.
+Use these guides when the test:
+- Requires a working harness (Claude, Codex, OpenCode) running live
+- Involves network/cache freshness behavior
+- Is intentionally open-ended or exploratory
+- Tests harness-specific transport or lineage behavior
+
+## Remaining Manual Guides
+
+| Guide | What it tests |
+|-------|---------------|
+| `adversarial.md` | Intentionally open-ended adversarial exploration |
+| `fork.md` | Real harness lineage with --fork (partially automatable via dry-run) |
+| `models-cache-auto-refresh.md` | Network/cache freshness behavior |
+| `state-integrity.md` | Reconciliation after manual state corruption |
+| `streaming-adapter-parity.md` | Cross-harness streaming behavior |
+| `spawn/lifecycle.md` | Background spawn lifecycle with working harness |
+| `spawn/context-from.md` | Live --from with real sessions |
+| `spawn/skill-injection.md` | Harness-specific skill transport |
+| `hooks/git-autosync.md` | Real git push/rebase integration |
+
+## Migrated to Automated Smoke Tests
+
+The following guides have been migrated to `tests/smoke/` and deleted from here:
+
+- `quick-sanity.md` → `test_sanity.py`
+- `agent-mode.md` → `test_agent_mode.py`
+- `config/init-show-set.md` → `test_config.py`
+- `output-formats.md` → `test_output_formats.py`
+- `spawn/dry-run.md` → `test_spawn_dry_run.py`
+- `spawn/error-paths.md` → `test_spawn_errors.py`
+- `workspace/init-inspection.md` → `test_workspace.py`
+- `work-items.md` → `test_work_items.py`
+- `hooks/cli.md` → `test_hooks.py`
+
+## How to Run
+
+1. Pick one file from the remaining guides.
 2. Run each bash block exactly as written.
 3. Treat any `FAIL` line, traceback, or hang as a test failure.
 
-Every markdown file here is independent. You can hand a single file to an agent and expect it to work without opening the rest of the smoke suite.
+## Setup
 
-## Command surface
-
-Always invoke the CLI through the checked-out source tree:
+For scratch repo setup, see the individual guide preambles. Most guides expect:
 
 ```bash
-export REPO_ROOT=/abs/path/to/meridian-channel
-cd "$REPO_ROOT"
-uv run meridian --help >/dev/null && echo "PASS: meridian CLI is runnable" || echo "FAIL: meridian CLI is not runnable"
-```
-
-## Scratch repo setup
-
-When a smoke test needs isolated state, override both environment variables below. This matters because `MERIDIAN_RUNTIME_DIR` wins over repo-root discovery, and `uv run` resets the working directory back to the source checkout.
-
-```bash
-export REPO_ROOT=/abs/path/to/meridian-channel
-export SMOKE_REPO="$(mktemp -d /tmp/meridian-smoke.XXXXXX)"
+export REPO_ROOT=/abs/path/to/meridian-cli
+export SMOKE_REPO="$(mktemp -d)"
 git -C "$SMOKE_REPO" init --quiet
 for var in $(env | awk -F= '/^MERIDIAN_/ {print $1}'); do unset "$var"; done
 export MERIDIAN_PROJECT_DIR="$SMOKE_REPO"
 export MERIDIAN_RUNTIME_DIR="$SMOKE_REPO/.meridian"
-test "$MERIDIAN_RUNTIME_DIR" = "$SMOKE_REPO/.meridian" && echo "PASS: scratch repo env is isolated" || echo "FAIL: scratch repo env is wrong"
+cd "$REPO_ROOT"
 ```
-
-## Conventions
-
-- Priorities use `[CRITICAL]`, `[IMPORTANT]`, and `[NICE-TO-HAVE]`.
-- Every bash block is copy-pasteable and should end with `PASS` or `FAIL`.
-- Prefer absolute paths in setup blocks.
-- Keep `.meridian/` writes inside the scratch repo unless the file explicitly says otherwise.
-- Spawn lifecycle smoke tests require a working harness in the current session.
-- Use `timeout` when probing risky or adversarial behavior.

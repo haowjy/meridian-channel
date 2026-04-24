@@ -14,6 +14,8 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Per-spawn details endpoint, infinite scroll.
 
 ### Changed
+- `mars-agents` 0.1.17 → 0.1.18. Mars alias defaults (`default_effort`, `autocompact`) now flow into Meridian model resolution.
+- Manual e2e guides for repeatable CLI checks migrated to automated `tests/smoke/` tests. `tests/e2e/README.md` now lists only remaining manual harness/network guides.
 - `mars-agents` 0.1.16 → 0.1.17. Three-step resolve, three-tier list, user wildcards.
 - `lib/kb` → `lib/kg`. Coverage/symbol analysis removed.
 - `BroadcastHub[T]` extracted from duplicated broadcasters.
