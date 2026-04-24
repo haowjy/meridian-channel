@@ -7,8 +7,10 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 - `meridian models list --all` — delegates to mars, shows all alias-filter candidates.
 - `meridian test chat` — single-spawn browser chat.
-- `lib/mermaid` — diagram validation via bundled JS parser.
-- `lib/kg` — graph tree view, link topology, `.kgignore`, depth control. Renamed from `lib/kb`.
+- `meridian kg` — knowledge graph analysis CLI. `kg` bare shows stats + hints. `kg graph` shows link topology tree with box-drawing connectors, `--depth N` (default 3), `--external`, `--exclude`, `--format json`. `kg check` broken-link CI gate (exit 0/1). `.kgignore` for persistent exclusions via `pathspec`. Renamed from `lib/kb` → `lib/kg`.
+- `meridian mermaid check` — mermaid diagram validation. Python heuristic parser (default), optional JS strict parser with Node.js. Scans `.md`, `.mmd`, `.mermaid` files. `--depth`, `--exclude`, `--format json`, `.mermaidignore`. Catches unknown diagram types, unclosed directives, mismatched blocks.
+- `lib/ignores.py` — shared gitignore-style pattern loader (used by kg and mermaid).
+- `pathspec` dependency for gitignore-style ignore file matching.
 - Per-spawn details endpoint, infinite scroll.
 
 ### Changed
