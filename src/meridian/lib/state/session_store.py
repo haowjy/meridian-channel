@@ -12,6 +12,7 @@ from meridian.lib.platform import IS_WINDOWS, fcntl
 from meridian.lib.platform.locking import lock_file
 from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.event_store import append_event, read_events, utc_now_iso
+from meridian.lib.state.liveness import is_process_alive
 from meridian.lib.state.paths import RuntimePaths
 
 _SESSION_LOCK_HANDLES: dict[tuple[Path, str], tuple[BinaryIO, str]] = {}
@@ -142,21 +143,30 @@ def _generation_matches(expected: str, actual: str) -> bool:
     return normalized_expected == normalized_actual
 
 
-def _read_session_lease(paths: RuntimePaths, chat_id: str) -> tuple[bool, str]:
+def _read_session_lease_data(paths: RuntimePaths, chat_id: str) -> tuple[bool, str, int | None]:
     lease_path = _session_lease_path(paths, chat_id)
     if not lease_path.is_file():
-        return (False, "")
+        return (False, "", None)
     try:
         payload = json.loads(lease_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
-        return (False, "")
+        return (False, "", None)
     if not isinstance(payload, dict):
-        return (False, "")
+        return (False, "", None)
     payload_dict = cast("dict[str, Any]", payload)
     generation = payload_dict.get("session_instance_id")
+    owner_pid = payload_dict.get("owner_pid")
+    parsed_owner_pid = (
+        owner_pid if isinstance(owner_pid, int) and not isinstance(owner_pid, bool) else None
+    )
     if isinstance(generation, str):
-        return (True, generation)
-    return (True, "")
+        return (True, generation, parsed_owner_pid)
+    return (True, "", parsed_owner_pid)
+
+
+def _read_session_lease(paths: RuntimePaths, chat_id: str) -> tuple[bool, str]:
+    lease_exists, generation, _owner_pid = _read_session_lease_data(paths, chat_id)
+    return (lease_exists, generation)
 
 
 def _write_session_lease(paths: RuntimePaths, chat_id: str, session_instance_id: str) -> None:
@@ -540,6 +550,18 @@ def list_active_session_records(runtime_root: Path) -> list[SessionRecord]:
     ]
 
 
+def list_all_session_records(runtime_root: Path) -> list[SessionRecord]:
+    """Return all materialized records, including stopped sessions."""
+
+    return list(_records_by_session(runtime_root).values())
+
+
+def get_session_record(runtime_root: Path, chat_id: str) -> SessionRecord | None:
+    """Return a materialized record for one chat ID, if present."""
+
+    return _records_by_session(runtime_root).get(chat_id)
+
+
 def list_active_sessions_for_work_id(runtime_root: Path, work_id: str) -> list[str]:
     """Return active session IDs currently attached to a work item."""
 
@@ -702,8 +724,16 @@ def cleanup_stale_sessions(runtime_root: Path) -> StaleSessionCleanup:
         stopped_at = utc_now_iso()
         for chat_id, _lock_path, _ in stale:
             existing = records.get(chat_id)
-            lease_exists, lease_session_instance_id = _read_session_lease(paths, chat_id)
-            if existing is not None and existing.kind == "primary":
+            lease_exists, lease_session_instance_id, lease_owner_pid = _read_session_lease_data(
+                paths, chat_id
+            )
+            if (
+                existing is not None
+                and existing.kind == "primary"
+                and lease_exists
+                and lease_owner_pid is not None
+                and is_process_alive(lease_owner_pid)
+            ):
                 continue
             stop_session_instance_id = lease_session_instance_id
             if not lease_exists and existing is not None:
