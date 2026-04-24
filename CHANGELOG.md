@@ -5,10 +5,29 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
-- **`meridian models list --all`** delegates to `mars models list --all` — shows all models matching alias filters, not just winners. Mars owns filtering; meridian formats.
+- `meridian models list --all` — delegates to mars, shows all alias-filter candidates.
+- `meridian test chat` — single-spawn browser chat.
+- `lib/mermaid` — diagram validation via bundled JS parser.
+- `lib/kg` — graph tree view, link topology, `.kgignore`, depth control. Renamed from `lib/kb`.
+- Per-spawn details endpoint, infinite scroll.
+
+### Changed
+- `mars-agents` 0.1.16 → 0.1.17. Three-step resolve, three-tier list, user wildcards.
+- `lib/kb` → `lib/kg`. Coverage/symbol analysis removed.
+- `BroadcastHub[T]` extracted from duplicated broadcasters.
+- Runner split into phase helpers (#97). Reaper split via strategy (#96). Observer into connection contract. `primary_meta.py` + `managed_primary.py` extracted.
 
 ### Fixed
-- `resolve_model` uses mars-resolved `model_id` for alias-prefix results (e.g. `opus-4-6` → `claude-opus-4-6` passed to harness, not raw `opus-4-6`).
+- `resolve_model` passes mars-resolved `model_id` to harness (`opus-4-6` → `claude-opus-4-6`).
+- Watchdog flag reconcile on early completion.
+- Observer mode stale flag on restart.
+- Spawn fallback respects finalizing for `live_first`.
+- Drain loop grace period before force-cancel.
+- Leaked subprocess on launcher death.
+- OpenCode `turn_active` mapping.
+- Finalizing prefers transcript over stale live output.
+- Session seed double-seeding.
+- Hide attempt exit fields on active spawns.
 
 ### Added
 - **Extension system**: `meridian ext list|show|commands|run` CLI commands and `extension_list_commands`/`extension_invoke` MCP tools. Offline discovery works without app server; app-bound invocation uses locator + token auth. Exit codes: 2=no server, 3=stale, 7=invalid args.
