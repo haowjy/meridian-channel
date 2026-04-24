@@ -1,11 +1,13 @@
 """Catalog discovery operations for models and skills."""
 
 from pathlib import Path
+from typing import cast
 
 from pydantic import BaseModel, ConfigDict, model_serializer
 
 from meridian.lib.catalog.model_aliases import (
     load_mars_descriptions,
+    run_mars_models_list_all,
 )
 from meridian.lib.catalog.model_policy import DEFAULT_MODEL_VISIBILITY, ModelVisibilityConfig
 from meridian.lib.catalog.models import (
@@ -42,7 +44,7 @@ class CatalogModel(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     model_id: ModelId
-    harness: HarnessId
+    harness: HarnessId | None
     aliases: tuple[AliasEntry, ...] = ()
     name: str | None = None
     family: str | None = None
@@ -61,7 +63,7 @@ class CatalogModel(BaseModel):
         """Compact JSON projection for model listings."""
         wire: dict[str, object] = {
             "model_id": str(self.model_id),
-            "harness": str(self.harness),
+            "harness": str(self.harness) if self.harness is not None else None,
         }
 
         aliases = [alias.model_dump(exclude_none=True) for alias in self.aliases]
@@ -104,7 +106,7 @@ class CatalogModel(BaseModel):
         capabilities = ", ".join(self.capabilities) or None
         pairs: list[tuple[str, str | None]] = [
             ("Model", str(self.model_id)),
-            ("Harness", str(self.harness)),
+            ("Harness", _display_harness(self.harness)),
             ("Name", self.name),
             ("Family", self.family),
             ("Provider", self.provider),
@@ -142,7 +144,7 @@ class ModelsListOutput(BaseModel):
         for model in self.models:
             rows.append([
                 str(model.model_id),
-                str(model.harness),
+                _display_harness(model.harness),
                 ",".join(alias.alias for alias in model.aliases),
                 model.provider or "",
                 model.cost_tier or "",
@@ -203,6 +205,143 @@ def _format_int(value: int | None) -> str | None:
 
 def _format_alias_detail(alias: AliasEntry) -> str:
     return alias.alias
+
+
+def _display_harness(harness: HarnessId | None) -> str:
+    return str(harness) if harness is not None else "—"
+
+
+def _parse_optional_str(value: object) -> str | None:
+    if isinstance(value, str):
+        normalized = value.strip()
+        if normalized:
+            return normalized
+    return None
+
+
+def _parse_optional_float(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return None
+        try:
+            return float(normalized)
+        except ValueError:
+            return None
+    return None
+
+
+def _parse_optional_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return None
+        try:
+            return int(float(normalized))
+        except ValueError:
+            return None
+    return None
+
+
+def _parse_capabilities(value: object) -> tuple[str, ...]:
+    raw_values: list[object]
+    if isinstance(value, str):
+        raw_values = [value]
+    elif isinstance(value, list):
+        raw_values = cast("list[object]", value)
+    elif isinstance(value, tuple):
+        raw_values = list(cast("tuple[object, ...]", value))
+    elif isinstance(value, set):
+        raw_values = list(cast("set[object]", value))
+    else:
+        return ()
+
+    capabilities: set[str] = set()
+    for raw in raw_values:
+        if not isinstance(raw, str):
+            continue
+        normalized = raw.strip().lower()
+        if normalized:
+            capabilities.add(normalized)
+    return tuple(sorted(capabilities))
+
+
+def _parse_harness(value: object) -> HarnessId | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    try:
+        return HarnessId(normalized)
+    except ValueError:
+        return None
+
+
+def _parse_matched_aliases(
+    *,
+    model_id: ModelId,
+    harness: HarnessId | None,
+    raw_aliases: object,
+) -> tuple[AliasEntry, ...]:
+    if not isinstance(raw_aliases, list):
+        return ()
+
+    aliases: list[AliasEntry] = []
+    for raw_alias in cast("list[object]", raw_aliases):
+        alias_name = _parse_optional_str(raw_alias)
+        if alias_name is None:
+            continue
+        aliases.append(
+            AliasEntry(
+                alias=alias_name,
+                model_id=model_id,
+                resolved_harness=harness,
+            )
+        )
+    return tuple(sorted(aliases, key=lambda alias: alias.alias))
+
+
+def _mars_all_entry_to_catalog_model(entry: dict[str, object]) -> CatalogModel | None:
+    model_id_value = _parse_optional_str(entry.get("id"))
+    if model_id_value is None:
+        return None
+
+    model_id = ModelId(model_id_value)
+    harness = _parse_harness(entry.get("harness"))
+    cost_input = _parse_optional_float(entry.get("cost_input"))
+
+    return CatalogModel(
+        model_id=model_id,
+        harness=harness,
+        aliases=_parse_matched_aliases(
+            model_id=model_id,
+            harness=harness,
+            raw_aliases=entry.get("matched_aliases"),
+        ),
+        name=_parse_optional_str(entry.get("name")),
+        family=_parse_optional_str(entry.get("family")),
+        provider=_parse_optional_str(entry.get("provider")),
+        cost_input=cost_input,
+        cost_output=_parse_optional_float(entry.get("cost_output")),
+        context_limit=_parse_optional_int(entry.get("context_limit")),
+        output_limit=_parse_optional_int(entry.get("output_limit")),
+        capabilities=_parse_capabilities(entry.get("capabilities")),
+        release_date=_parse_optional_str(entry.get("release_date")),
+        cost_tier=_cost_tier(cost_input),
+        description=_parse_optional_str(entry.get("description")),
+        pinned=bool(entry.get("pinned")),
+    )
 
 
 def _build_catalog_model(
@@ -278,6 +417,17 @@ def _cost_tier(cost_input: float | None) -> str | None:
 
 def models_list_sync(payload: ModelsListInput) -> ModelsListOutput:
     root = _project_root(payload.project_root)
+
+    if payload.all:
+        mars_models = run_mars_models_list_all(project_root=root)
+        if mars_models is not None:
+            catalog_models = [
+                model
+                for entry in mars_models
+                if (model := _mars_all_entry_to_catalog_model(entry)) is not None
+            ]
+            return ModelsListOutput(models=tuple(catalog_models))
+
     aliases = load_merged_aliases(project_root=root)
     visibility = DEFAULT_MODEL_VISIBILITY
     discovered = load_discovered_models()

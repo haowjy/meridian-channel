@@ -15,6 +15,7 @@ from meridian.lib.catalog.model_aliases import (
     entry,
     load_mars_aliases,
     load_mars_descriptions,
+    run_mars_models_list_all,
     run_mars_models_resolve,
 )
 
@@ -113,6 +114,110 @@ class TestMarsMergedToEntries:
         }
         entries = _mars_merged_to_entries(merged)
         assert len(entries) == 0
+
+
+# --- run_mars_models_resolve ---
+
+
+class TestRunMarsModelsListAll:
+    def test_extracts_models_and_forwards_root(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        monkeypatch.setattr(
+            "meridian.lib.catalog.model_aliases._resolve_mars_binary",
+            lambda: "/usr/bin/mars",
+        )
+
+        captured_cmd: list[str] = []
+        captured_timeout: int | None = None
+
+        def fake_run(
+            cmd: list[str],
+            *,
+            capture_output: bool,
+            text: bool,
+            timeout: int,
+        ) -> subprocess.CompletedProcess[str]:
+            nonlocal captured_cmd, captured_timeout
+            assert capture_output is True
+            assert text is True
+            captured_cmd = cmd
+            captured_timeout = timeout
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout='{"models":[{"id":"gpt-5.4"}]}',
+                stderr="",
+            )
+
+        monkeypatch.setattr("meridian.lib.catalog.model_aliases.subprocess.run", fake_run)
+
+        result = run_mars_models_list_all(tmp_path)
+
+        assert captured_cmd == [
+            "/usr/bin/mars",
+            "models",
+            "list",
+            "--all",
+            "--json",
+            "--root",
+            str(tmp_path),
+        ]
+        assert captured_timeout == 60
+        assert result == [{"id": "gpt-5.4"}]
+
+    def test_returns_none_on_nonzero_exit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "meridian.lib.catalog.model_aliases._resolve_mars_binary",
+            lambda: "/usr/bin/mars",
+        )
+        monkeypatch.setattr(
+            "meridian.lib.catalog.model_aliases.subprocess.run",
+            lambda *args, **kwargs: subprocess.CompletedProcess(
+                args=args[0],
+                returncode=2,
+                stdout="",
+                stderr="failed",
+            ),
+        )
+
+        assert run_mars_models_list_all() is None
+
+    def test_returns_none_on_invalid_json(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "meridian.lib.catalog.model_aliases._resolve_mars_binary",
+            lambda: "/usr/bin/mars",
+        )
+        monkeypatch.setattr(
+            "meridian.lib.catalog.model_aliases.subprocess.run",
+            lambda *args, **kwargs: subprocess.CompletedProcess(
+                args=args[0],
+                returncode=0,
+                stdout="{invalid",
+                stderr="",
+            ),
+        )
+
+        assert run_mars_models_list_all() is None
+
+    def test_returns_none_when_models_key_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "meridian.lib.catalog.model_aliases._resolve_mars_binary",
+            lambda: "/usr/bin/mars",
+        )
+        monkeypatch.setattr(
+            "meridian.lib.catalog.model_aliases.subprocess.run",
+            lambda *args, **kwargs: subprocess.CompletedProcess(
+                args=args[0],
+                returncode=0,
+                stdout='{"aliases":[]}',
+                stderr="",
+            ),
+        )
+
+        assert run_mars_models_list_all() is None
 
 
 # --- run_mars_models_resolve ---

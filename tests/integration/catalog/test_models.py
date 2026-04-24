@@ -154,3 +154,104 @@ def test_models_list_aliased_model_survives_superseded(
     model_ids = {str(model.model_id) for model in output.models}
     assert "gpt-5.4" in model_ids
     assert "gpt-5.2" in model_ids
+
+
+def test_models_list_all_delegates_to_mars_without_meridian_filters(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "repo"
+    _init_repo(project_root)
+
+    monkeypatch.setattr(
+        "meridian.lib.ops.catalog.run_mars_models_list_all",
+        lambda project_root=None: [
+            {
+                "id": "gpt-5.4",
+                "harness": "codex",
+                "provider": "openai",
+                "release_date": date.today().isoformat(),
+                "matched_aliases": ["gpt", "latest"],
+            },
+            {
+                "id": "gpt-5.2",
+                "harness": "codex",
+                "provider": "openai",
+                "release_date": (date.today() - timedelta(days=30)).isoformat(),
+                "matched_aliases": ["stable"],
+            },
+        ],
+    )
+
+    def _unexpected(*args: object, **kwargs: object) -> object:
+        raise AssertionError("default-path loaders must not run for --all")
+
+    monkeypatch.setattr("meridian.lib.ops.catalog.load_discovered_models", _unexpected)
+    monkeypatch.setattr("meridian.lib.ops.catalog.load_merged_aliases", _unexpected)
+    monkeypatch.setattr("meridian.lib.ops.catalog.load_mars_descriptions", _unexpected)
+
+    output = models_list_sync(
+        ModelsListInput(project_root=project_root.as_posix(), all=True)
+    )
+    model_ids = [str(model.model_id) for model in output.models]
+    assert model_ids == ["gpt-5.4", "gpt-5.2"]
+    assert [alias.alias for alias in output.models[0].aliases] == ["gpt", "latest"]
+
+
+def test_models_list_all_preserves_null_harness(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "repo"
+    _init_repo(project_root)
+
+    monkeypatch.setattr(
+        "meridian.lib.ops.catalog.run_mars_models_list_all",
+        lambda project_root=None: [
+            {
+                "id": "gpt-5.4",
+                "harness": None,
+                "provider": "openai",
+                "matched_aliases": ["gpt"],
+                "description": "No harness installed.",
+            },
+        ],
+    )
+
+    output = models_list_sync(
+        ModelsListInput(project_root=project_root.as_posix(), all=True)
+    )
+    assert len(output.models) == 1
+    model = output.models[0]
+    assert str(model.model_id) == "gpt-5.4"
+    assert model.harness is None
+    assert model.to_wire()["harness"] is None
+    assert "—" in output.format_text()
+
+
+def test_models_list_default_path_does_not_call_mars_all(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "repo"
+    _init_repo(project_root)
+
+    def _unexpected(*args: object, **kwargs: object) -> object:
+        raise AssertionError("mars --all helper must not run for default list")
+
+    monkeypatch.setattr("meridian.lib.ops.catalog.run_mars_models_list_all", _unexpected)
+    monkeypatch.setattr(
+        "meridian.lib.ops.catalog.load_discovered_models",
+        lambda: [_model("gpt-5.4")],
+    )
+    monkeypatch.setattr(
+        "meridian.lib.ops.catalog.load_merged_aliases",
+        lambda project_root=None: [],
+    )
+    monkeypatch.setattr(
+        "meridian.lib.ops.catalog.load_mars_descriptions",
+        lambda project_root=None: {},
+    )
+
+    output = models_list_sync(ModelsListInput(project_root=project_root.as_posix()))
+    assert [str(model.model_id) for model in output.models] == ["gpt-5.4"]

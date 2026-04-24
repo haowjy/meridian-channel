@@ -131,6 +131,50 @@ def _run_mars_models_list(project_root: Path | None = None) -> list[dict[str, ob
     return cast("list[dict[str, object]]", aliases)
 
 
+def run_mars_models_list_all(project_root: Path | None = None) -> list[dict[str, object]] | None:
+    """Call ``mars models list --all --json`` and return the model entries.
+
+    Returns *None* when the mars binary is unavailable or the command fails.
+    """
+    mars_bin = _resolve_mars_binary()
+    if mars_bin is None:
+        return None
+
+    cmd = [mars_bin, "models", "list", "--all", "--json"]
+    if project_root is not None:
+        cmd.extend(["--root", str(project_root)])
+
+    try:
+        # mars may do a cold models.dev fetch in ensure_fresh(Auto); mars caps each HTTP
+        # phase at 15s (connect + recv-response + recv-body), so worst-case cold fetch is
+        # ~45s. 60s leaves a small headroom for first-boot DNS, slow disks, and startup.
+        # Keep timeout aligned with other mars model list/resolve paths.
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        logger.debug("mars binary not available or timed out", exc_info=True)
+        return None
+
+    if result.returncode != 0:
+        logger.debug("mars models list --all failed (rc=%d): %s", result.returncode, result.stderr)
+        return None
+
+    try:
+        payload = json.loads(result.stdout)
+    except (json.JSONDecodeError, ValueError):
+        logger.debug("mars models list --all returned invalid JSON")
+        return None
+
+    models = payload.get("models")
+    if not isinstance(models, list):
+        return None
+    return cast("list[dict[str, object]]", models)
+
+
 def _extract_mars_error_message(raw_output: str) -> str | None:
     """Extract a readable error message from mars stdout/stderr text."""
     output = raw_output.strip()
