@@ -163,9 +163,9 @@ def test_context_output_text_formats_default_and_verbose() -> None:
 
     assert (
         output.format_text()
-        == "work: .meridian/work (local)\n"
-        "  archive: .meridian/archive/work\n"
-        "kb: .meridian/kb (local)"
+        == "work: /repo/.meridian/work (local)\n"
+        "  archive: /repo/.meridian/archive/work\n"
+        "kb: /repo/.meridian/kb (local)"
     )
 
     verbose_output = output.model_copy(update={"render_verbose": True})
