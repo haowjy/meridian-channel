@@ -4,6 +4,7 @@ from enum import StrEnum
 
 
 class HcpErrorCategory(StrEnum):
+    CHAT_NOT_FOUND = "chat_not_found"
     HARNESS_NOT_FOUND = "harness_not_found"
     HARNESS_CRASHED = "harness_crashed"
     HARNESS_AUTH_FAILED = "harness_auth_failed"

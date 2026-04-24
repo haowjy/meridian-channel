@@ -36,7 +36,7 @@ class _AppState(Protocol):
     """App state payload carrying shared runtime singletons."""
 
     spawn_manager: SpawnManager
-    hcp_session_manager: object
+    hcp_session_manager: object | None
     stream_broadcaster: object
     project_uuid: str
     instance_id: str
@@ -252,6 +252,7 @@ def create_app(
     app.state.project_uuid = project_uuid
     app.state.instance_id = ""
     app.state.instance_token = secrets.token_hex(32)
+    app.state.hcp_session_manager = None
 
     async def health_check() -> dict[str, str]:
         return {
@@ -333,6 +334,18 @@ def create_app(
         project_state_dir=project_state_dir,
         project_root=project_paths.project_root,
         event_broadcaster=event_broadcaster,
+        http_exception=http_exception,
+    )
+
+    # Register HCP chat routes. The session manager is constructed during
+    # FastAPI lifespan startup, so routes resolve app.state per request.
+    from meridian.lib.app.hcp_routes import register_hcp_routes
+
+    register_hcp_routes(
+        app_obj,
+        hcp_session_manager=None,
+        runtime_root=runtime_root,
+        project_paths=project_paths,
         http_exception=http_exception,
     )
 
