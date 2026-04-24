@@ -3,16 +3,13 @@
  *
  * Shows identity (status dot, spawn id, agent, model) on the left and
  * streaming controls (interrupt, cancel) plus a close-column button on
- * the right. Designed to sit above SpawnActivityView inside ThreadColumn
- * at a fixed 36px height so multiple columns line up visually.
+ * the right. When the spawn belongs to a chat, a subtle chat-context
+ * indicator shows which chat this spawn is attached to.
  *
  * The header never drives its own data — it's a pure presentational slice
- * that receives spawn identity + callbacks from ThreadColumn. Button
- * affordances follow the Composer convention: Pause (interrupt) while
- * streaming, Square (cancel) for any non-terminal spawn, X (close column)
- * always available.
+ * that receives spawn identity + callbacks from ThreadColumn.
  */
-import { Pause, Square, X } from "@phosphor-icons/react"
+import { ChatCircle, Pause, Square, X } from "@phosphor-icons/react"
 
 import { MonoId, StatusDot } from "@/components/atoms"
 import { Button } from "@/components/ui/button"
@@ -31,6 +28,9 @@ export interface SpawnHeaderProps {
   model: string | null
   harness: string
   isStreaming: boolean
+  /** Optional chat context — when present, shows a chat badge. */
+  chatId?: string | null
+  chatTitle?: string | null
   onInterrupt?: () => void
   onCancel?: () => void
   onClose?: () => void
@@ -50,6 +50,8 @@ export function SpawnHeader({
   model,
   harness,
   isStreaming,
+  chatId,
+  chatTitle,
   onInterrupt,
   onCancel,
   onClose,
@@ -89,6 +91,25 @@ export function SpawnHeader({
           {modelLabel}
         </span>
       ) : null}
+
+      {/* Chat context badge */}
+      {chatId && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="flex shrink-0 items-center gap-1 rounded bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent-foreground/70">
+              <ChatCircle weight="fill" className="size-2.5" />
+              {chatTitle ? (
+                <span className="max-w-[60px] truncate">{chatTitle}</span>
+              ) : (
+                <span className="font-mono">{chatId.slice(0, 6)}</span>
+              )}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={4}>
+            Part of chat {chatId}
+          </TooltipContent>
+        </Tooltip>
+      )}
 
       <div className="flex-1" />
 

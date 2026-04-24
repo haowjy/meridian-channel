@@ -8,9 +8,7 @@ import { ThreadColumn } from "./ThreadColumn"
 /**
  * Stories pin `detailsOverride` so `fetchSpawns` never hits the network.
  * `useThreadStreaming` still opens a websocket — in Storybook that fails
- * silently and the column renders in its idle empty state, which is
- * representative of the real first-paint experience before any frames
- * arrive from the spawn.
+ * silently and the column renders in its idle empty state.
  */
 
 const meta: Meta<typeof ThreadColumn> = {

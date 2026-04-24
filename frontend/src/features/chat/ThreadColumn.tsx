@@ -3,19 +3,16 @@
  *
  * Each column owns its own WS connection to the spawn via
  * `useThreadStreaming`. That keeps columns independent: cancelling,
- * streaming, or closing one doesn't disturb siblings. The column is a
- * thin shell that composes existing pieces — SpawnHeader, SpawnActivityView,
- * Composer — and wires a StreamController bridge from the SpawnChannel
- * instance to the Composer's transport-neutral interface.
+ * streaming, or closing one doesn't disturb siblings.
+ *
+ * Now chat-aware: when the column's spawn belongs to the currently
+ * selected chat, the SpawnHeader shows a chat-context badge.
  *
  * Spawn identity (agent / model / harness / status) is fetched lazily via
- * the `/api/spawns/{id}/details` endpoint which returns the full projection.
- * Stories supply `detailsOverride` to skip the fetch entirely.
+ * the `/api/spawns/{id}/details` endpoint. Stories supply `detailsOverride`.
  *
- * Focus feedback is deliberately restrained: a 2px accent bar slides in
- * along the top edge of the focused column. Unfocused columns fade
- * slightly so the eye's attention tracks the composer target without
- * obscuring the streaming content in the others.
+ * Focus feedback: a 2px accent bar slides along the top edge of the
+ * focused column. Unfocused columns fade slightly.
  */
 import { useCallback, useEffect, useMemo, useState } from "react"
 
@@ -31,6 +28,7 @@ import { parseStatus, type SpawnStatus } from "@/types/spawn"
 import { cn } from "@/lib/utils"
 
 import { SpawnHeader } from "./SpawnHeader"
+import { useChat } from "./ChatContext"
 
 export interface ThreadColumnSpawnDetails {
   status: SpawnStatus
@@ -72,11 +70,11 @@ export function ThreadColumn({
   const { state, capabilities, channel, connectionState } =
     useThreadStreaming(spawnId)
 
+  const chatCtx = useChat()
+
   const [fetchedDetails, setFetchedDetails] =
     useState<ThreadColumnSpawnDetails | null>(null)
 
-  // Resolve spawn identity. Override wins; otherwise fetch from the list
-  // endpoint and filter client-side. We re-fetch when the id changes.
   useEffect(() => {
     if (detailsOverride) {
       setFetchedDetails(null)
@@ -109,6 +107,11 @@ export function ThreadColumn({
     }
 
   const isStreaming = Boolean(state.isStreaming)
+
+  // Resolve chat context for this spawn
+  const chatId = chatCtx.selectedChat?.activeSpawnId === spawnId
+    ? chatCtx.selectedChat.chatId
+    : null
 
   const controller = useMemo<StreamController>(
     () => ({
@@ -149,7 +152,7 @@ export function ThreadColumn({
         className,
       )}
     >
-      {/* Focus accent — a thin bar that slides in along the top edge. */}
+      {/* Focus accent bar */}
       <div
         aria-hidden
         className={cn(
@@ -166,6 +169,7 @@ export function ThreadColumn({
         model={details.model}
         harness={details.harness}
         isStreaming={isStreaming}
+        chatId={chatId}
         onInterrupt={handleInterrupt}
         onCancel={handleCancel}
         onClose={onClose}

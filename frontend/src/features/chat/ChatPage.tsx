@@ -1,29 +1,27 @@
 /**
- * ChatPage — top-level view for Chat mode.
+ * ChatPage — top-level view for Chat mode, now chat-first.
  *
- * Composes the sidebar `SessionList` with a column area that renders up to
- * {@link MAX_COLUMNS} `ThreadColumn`s side-by-side. Column state lives in
- * {@link ChatProvider}; this component is a thin shell that wires layout,
- * the sidebar collapse toggle, and the `initialSpawnId` mount behaviour.
+ * The page has two display modes:
+ * 1. **Chat thread view**: When a chat is selected (or the user starts a new
+ *    chat from the empty state), the main area shows the conversation thread
+ *    with a composer at the bottom. Active spawns under the chat stream
+ *    their output inline.
+ * 2. **Spawn column view**: When a spawn is opened directly (from the sidebar
+ *    or cross-mode navigation), the multi-column layout is used as before.
  *
- * Layout choices:
- * - Columns evenly split available width via a CSS grid (`repeat(N, 1fr)`).
- *   `minmax(0, 1fr)` prevents content from pushing a column past its share.
- * - A slim chrome bar above the grid holds the sidebar toggle and a compact
- *   capacity indicator. It stays present even when the sidebar is expanded
- *   so the toggle control doesn't jump around.
- * - The empty state is a deliberately quiet composition — hairline frame,
- *   muted glyph, uppercase tracking — matching the tone of the SessionList
- *   header rather than a loud hero treatment.
- *
- * The `initialSpawnId` prop is honoured once per mount; subsequent changes
- * to the prop don't re-open the spawn (that belongs to the caller that's
- * navigating). Storybook pins overrides on `SessionList`/`ThreadColumn` so
- * stories never touch the network.
+ * Layout choices preserved from before:
+ * - Sidebar collapse toggle + capacity indicator chrome bar.
+ * - Columns evenly split via CSS grid.
+ * - Empty state is a quiet composition inviting the user to start a chat.
  */
 
-import { useEffect, useRef, useState } from "react"
-import { ChatCircle, List, SidebarSimple } from "@phosphor-icons/react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import {
+  ChatCircle,
+  List,
+  PaperPlaneTilt,
+  SidebarSimple,
+} from "@phosphor-icons/react"
 
 import { Button } from "@/components/ui/button"
 import { ErrorBoundary } from "@/components/ErrorBoundary"
@@ -37,6 +35,7 @@ import { useNavigation } from "@/shell/NavigationContext"
 
 import { ChatProvider, MAX_COLUMNS, useChat } from "./ChatContext"
 import { SessionList, type SessionListDataOverride } from "./SessionList"
+import { ChatThreadView } from "./ChatThreadView"
 import {
   ThreadColumn,
   type ThreadColumnSpawnDetails,
@@ -49,40 +48,18 @@ import {
 export interface ChatPageProps {
   /**
    * Spawn to open on mount. Honoured once per ChatProvider instance.
-   * Subsequent changes are ignored — if you need to switch spawns, call
-   * `openSpawn` via `useChat` or remount with a new provider.
    */
   initialSpawnId?: string | null
   className?: string
-  /**
-   * Storybook/test override for the session list data source.
-   * When provided, forwards to {@link SessionList}.
-   */
   sessionListOverride?: SessionListDataOverride
-  /**
-   * Storybook/test override for per-column spawn identity. Keyed by
-   * spawn id; columns without a matching entry fall back to the live
-   * fetch in {@link ThreadColumn}.
-   */
   threadDetailsOverride?: Record<string, ThreadColumnSpawnDetails>
-  /**
-   * Storybook/test override: pre-open these spawn ids as columns and
-   * pin the first one as focused. Applied once on mount.
-   */
   initialColumns?: readonly string[]
-  /**
-   * Storybook/test override: pin the focused column on mount. Must match
-   * one of `initialColumns` or `initialSpawnId`.
-   */
   initialFocus?: string
-  /**
-   * Storybook/test override: start with the sidebar collapsed.
-   */
   initialSidebarCollapsed?: boolean
 }
 
 // ---------------------------------------------------------------------------
-// Entry point — supplies the provider, delegates to <ChatPageContent />.
+// Entry point
 // ---------------------------------------------------------------------------
 
 export function ChatPage(props: ChatPageProps) {
@@ -106,17 +83,12 @@ function ChatPageContent({
   initialFocus,
   initialSidebarCollapsed,
 }: ChatPageProps) {
-  const { state, openSpawn, closeColumn, focusColumn } = useChat()
+  const { selectedChat, columnState, openSpawn, closeColumn, focusColumn } = useChat()
   const { pendingChatSpawnId, clearPendingChatSpawnId } = useNavigation()
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     Boolean(initialSidebarCollapsed),
   )
 
-  // Open the initial spawn — and any storybook-seeded columns — exactly once.
-  // `openSpawn` is stable (useCallback with empty deps inside ChatProvider),
-  // but we guard with a ref flag so a parent re-render can't reopen them,
-  // even if the seed props change after mount (they're launch hints, not
-  // reactive bindings).
   const didSeed = useRef(false)
 
   useEffect(() => {
@@ -130,19 +102,17 @@ function ChatPageContent({
     if (initialFocus) focusColumn(initialFocus)
   }, [initialColumns, initialSpawnId, initialFocus, openSpawn, focusColumn])
 
-  // Cross-mode navigation handoff: AppShell stashes a spawn id into
-  // NavigationContext when navigateToChat fires. Consume it here (on mount
-  // or whenever a new id arrives), then clear so the same id can't be
-  // re-opened on an unrelated re-render. Subsequent navigateToChat calls
-  // after mount still land — openSpawn is idempotent (no-op if the column
-  // is already open) and focuses the matching column.
   useEffect(() => {
     if (!pendingChatSpawnId) return
     openSpawn(pendingChatSpawnId)
     clearPendingChatSpawnId()
   }, [pendingChatSpawnId, openSpawn, clearPendingChatSpawnId])
 
-  const columnCount = state.columns.length
+  const columnCount = columnState.columns.length
+  const hasChatSelected = selectedChat !== null
+  // Show chat thread view when a chat is selected and no columns are open,
+  // OR when no columns are open and no chat is selected (show new-chat prompt).
+  const showThreadView = hasChatSelected && columnCount === 0
 
   return (
     <div
@@ -159,9 +129,6 @@ function ChatPageContent({
         )}
         aria-hidden={sidebarCollapsed}
       >
-        {/* SessionList is fixed-width (w-60) internally; keeping it mounted
-            while the aside collapses preserves scroll position and avoids a
-            remount flash when the user re-expands. */}
         <div className="absolute inset-y-0 right-0 w-60">
           <SessionList dataOverride={sessionListOverride} />
         </div>
@@ -172,9 +139,12 @@ function ChatPageContent({
           sidebarCollapsed={sidebarCollapsed}
           onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
           columnCount={columnCount}
+          hasChatSelected={hasChatSelected}
         />
 
-        {columnCount === 0 ? (
+        {showThreadView ? (
+          <ChatThreadView chatId={selectedChat.chatId} />
+        ) : columnCount === 0 ? (
           <EmptyColumnState sidebarCollapsed={sidebarCollapsed} />
         ) : (
           <div
@@ -183,11 +153,11 @@ function ChatPageContent({
               gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))`,
             }}
           >
-            {state.columns.map((spawnId) => (
+            {columnState.columns.map((spawnId) => (
               <ErrorBoundary key={spawnId}>
                 <ThreadColumn
                   spawnId={spawnId}
-                  isFocused={state.focusedColumn === spawnId}
+                  isFocused={columnState.focusedColumn === spawnId}
                   onClose={() => closeColumn(spawnId)}
                   onFocus={() => focusColumn(spawnId)}
                   detailsOverride={threadDetailsOverride?.[spawnId]}
@@ -202,49 +172,64 @@ function ChatPageContent({
 }
 
 // ---------------------------------------------------------------------------
-// Chrome bar (sidebar toggle + capacity indicator)
+// Chrome bar
 // ---------------------------------------------------------------------------
 
 interface ColumnAreaChromeProps {
   sidebarCollapsed: boolean
   onToggleSidebar: () => void
   columnCount: number
+  hasChatSelected: boolean
 }
 
 function ColumnAreaChrome({
   sidebarCollapsed,
   onToggleSidebar,
   columnCount,
+  hasChatSelected,
 }: ColumnAreaChromeProps) {
   const ToggleIcon = sidebarCollapsed ? List : SidebarSimple
   const tooltip = sidebarCollapsed ? "Show sessions" : "Hide sessions"
 
   return (
     <div className="flex h-9 items-center justify-between border-b border-border/60 pl-1 pr-3">
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            onClick={onToggleSidebar}
-            aria-label={tooltip}
-            aria-pressed={!sidebarCollapsed}
-            className="text-muted-foreground hover:text-foreground"
-          >
-            <ToggleIcon weight="regular" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="right">{tooltip}</TooltipContent>
-      </Tooltip>
+      <div className="flex items-center gap-1">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              onClick={onToggleSidebar}
+              aria-label={tooltip}
+              aria-pressed={!sidebarCollapsed}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <ToggleIcon weight="regular" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="right">{tooltip}</TooltipContent>
+        </Tooltip>
+
+        {hasChatSelected && (
+          <span className="flex items-center gap-1 text-[10px] font-medium text-accent-foreground/70">
+            <ChatCircle weight="fill" className="size-3 text-accent-fill" />
+            Chat
+          </span>
+        )}
+      </div>
 
       <div className="flex items-center gap-2">
-        <span className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground/70">
-          Columns
-        </span>
-        <CapacityDots count={columnCount} />
-        <span className="font-mono text-[10px] tabular-nums text-muted-foreground/60">
-          {columnCount}/{MAX_COLUMNS}
-        </span>
+        {columnCount > 0 && (
+          <>
+            <span className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground/70">
+              Columns
+            </span>
+            <CapacityDots count={columnCount} />
+            <span className="font-mono text-[10px] tabular-nums text-muted-foreground/60">
+              {columnCount}/{MAX_COLUMNS}
+            </span>
+          </>
+        )}
       </div>
     </div>
   )
@@ -267,14 +252,24 @@ function CapacityDots({ count }: { count: number }) {
 }
 
 // ---------------------------------------------------------------------------
-// Empty state
+// Empty state — now invites starting a new chat
 // ---------------------------------------------------------------------------
 
 function EmptyColumnState({ sidebarCollapsed }: { sidebarCollapsed: boolean }) {
+  const { selectChat } = useChat()
+  const [composerValue, setComposerValue] = useState("")
+
+  const handleNewChat = useCallback(() => {
+    if (!composerValue.trim()) return
+    // Start a new chat — selectChat will open the thread view
+    // once the API responds. For now, we set a placeholder that
+    // the ChatThreadView will pick up as an initial prompt.
+    selectChat("__new__", "active")
+  }, [composerValue, selectChat])
+
   return (
     <div className="relative flex min-h-0 flex-1 items-center justify-center p-8">
-      {/* Hairline grid backdrop — quiet texture that disappears at a glance
-          but keeps the empty state from reading as a flat blank canvas. */}
+      {/* Hairline grid backdrop */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 opacity-[0.35]"
@@ -289,7 +284,7 @@ function EmptyColumnState({ sidebarCollapsed }: { sidebarCollapsed: boolean }) {
         }}
       />
 
-      <div className="relative flex max-w-sm flex-col items-center text-center">
+      <div className="relative flex max-w-md flex-col items-center text-center">
         <div
           className={cn(
             "mb-5 flex size-14 items-center justify-center rounded-full",
@@ -301,25 +296,63 @@ function EmptyColumnState({ sidebarCollapsed }: { sidebarCollapsed: boolean }) {
         </div>
 
         <p className="mb-2 text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground/70">
-          No column selected
+          Start a conversation
         </p>
         <h2 className="mb-2 text-lg font-semibold tracking-tight text-foreground">
-          Pick a session to start chatting
+          What would you like to work on?
         </h2>
-        <p className="text-sm leading-relaxed text-muted-foreground">
+        <p className="mb-6 text-sm leading-relaxed text-muted-foreground">
           {sidebarCollapsed ? (
             <>
-              Re-open the sidebar or switch to Sessions mode to choose a
-              spawn. Up to {MAX_COLUMNS} spawns can run side by side.
+              Start a new chat or re-open the sidebar to resume an existing
+              conversation.
             </>
           ) : (
             <>
-              Select a session from the list, or head to Sessions mode for
-              the full filter surface. Up to {MAX_COLUMNS} spawns can run
-              side by side.
+              Type your first message below, or pick an existing chat from the
+              sidebar. Spawns run side-by-side in columns.
             </>
           )}
         </p>
+
+        {/* Inline quick-start composer */}
+        <div className="flex w-full items-center gap-2">
+          <div className="relative flex-1">
+            <input
+              type="text"
+              value={composerValue}
+              onChange={(e) => setComposerValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault()
+                  handleNewChat()
+                }
+              }}
+              placeholder="Ask anything..."
+              className={cn(
+                "h-10 w-full rounded-lg border border-border bg-card px-4 pr-10",
+                "text-sm text-foreground placeholder:text-muted-foreground/50",
+                "focus:outline-none focus:ring-2 focus:ring-ring/50",
+                "transition-shadow",
+              )}
+            />
+            <button
+              type="button"
+              onClick={handleNewChat}
+              disabled={!composerValue.trim()}
+              className={cn(
+                "absolute right-2 top-1/2 -translate-y-1/2",
+                "flex size-6 items-center justify-center rounded-md",
+                "text-muted-foreground hover:text-foreground",
+                "disabled:opacity-30 disabled:pointer-events-none",
+                "transition-colors",
+              )}
+              aria-label="Start chat"
+            >
+              <PaperPlaneTilt weight="fill" className="size-4" />
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   )

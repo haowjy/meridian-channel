@@ -1,32 +1,43 @@
 /**
- * Shared state for the chat mode's multi-column layout.
+ * Chat-first context — manages the selected chat and spawn column state.
  *
- * The chat mode renders up to four spawns side-by-side as columns. This
- * context is the single source of truth for which spawns are visible and
- * which column currently has focus (receives keyboard input, highlights
- * in the UI).
+ * Two layers of selection:
+ * 1. **Chat selection**: which HCP chat is active. Drives the sidebar
+ *    highlight and the main thread view. At most one chat is selected.
+ * 2. **Spawn column**: within a chat (or for legacy direct-spawn viewing),
+ *    which spawn columns are open in the multi-column layout.
  *
- * Column lifecycle:
+ * Column lifecycle (preserved from before):
  * - `openSpawn` adds a spawn as a new column, or focuses it if already open.
  *   When the column cap is reached the least-recently-focused column is
- *   evicted — focus order is tracked via a recency stack so the "LRU"
- *   semantic survives arbitrary focus/open sequences.
- * - `closeColumn` removes a spawn and, if it was focused, hands focus to
- *   the most recently focused surviving column (or null if none remain).
+ *   evicted.
+ * - `closeColumn` removes a spawn and hands focus to the MRU survivor.
  * - `focusColumn` just updates focus and bumps the recency stack.
  *
- * Outside a `ChatProvider`, `useChat` throws — unlike NavigationContext's
- * console fallback, chat state is meaningless without a provider and a
- * silent stub would mask wiring bugs.
+ * Chat lifecycle (new):
+ * - `selectChat` sets the active chat and optionally opens its active spawn.
+ * - `clearChat` deselects the current chat without closing columns.
+ * - `setChatState` / `setActiveSpawnId` for live updates from WS.
+ *
+ * Outside a `ChatProvider`, `useChat` throws — chat state is meaningless
+ * without a provider and a silent stub would mask wiring bugs.
  */
 
 import { createContext, useCallback, useContext, useMemo, useState } from "react"
 import type { ReactNode } from "react"
 
+import type { ChatState as ApiChatState } from "@/features/sessions/lib/api"
+
 /** Maximum number of columns that can be open simultaneously. */
 export const MAX_COLUMNS = 4
 
-export interface ChatState {
+export interface ChatSelection {
+  chatId: string
+  chatState: ApiChatState
+  activeSpawnId: string | null
+}
+
+export interface ColumnState {
   /** Ordered list of spawn IDs shown as columns. At most {@link MAX_COLUMNS}. */
   columns: string[]
   /** The active/focused column (receives keyboard input). */
@@ -34,7 +45,18 @@ export interface ChatState {
 }
 
 export interface ChatContextValue {
-  state: ChatState
+  /** Currently selected chat, or null for no chat / direct-spawn viewing. */
+  selectedChat: ChatSelection | null
+  /** Column layout state. */
+  columnState: ColumnState
+  /** Select a chat. Opens its active spawn as a column if provided. */
+  selectChat: (chatId: string, chatState: ApiChatState, activeSpawnId?: string | null) => void
+  /** Clear the selected chat. */
+  clearChat: () => void
+  /** Update the live state of the selected chat (from WS or polling). */
+  setChatState: (chatState: ApiChatState) => void
+  /** Update the active spawn of the selected chat (when new spawn starts). */
+  setActiveSpawnId: (spawnId: string | null) => void
   /** Open a spawn in a new column (or focus existing). */
   openSpawn: (spawnId: string) => void
   /** Close a column. */
@@ -62,28 +84,19 @@ function bumpRecency(stack: string[], spawnId: string): string[] {
 export function ChatProvider({ children }: ChatProviderProps) {
   const [columns, setColumns] = useState<string[]>([])
   const [focusedColumn, setFocusedColumn] = useState<string | null>(null)
-  // Recency stack: most-recently-focused first. Only contains IDs currently
-  // in `columns`. Maintained in step with focus changes and column removals.
-  // Only the setter is used — we always read via functional updates so the
-  // computed state reflects the latest recency even across batched renders.
   const [, setRecency] = useState<string[]>([])
+  const [selectedChat, setSelectedChat] = useState<ChatSelection | null>(null)
 
   const openSpawn = useCallback((spawnId: string) => {
-    // Drive both `columns` and `recency` from a single functional update
-    // so the eviction choice stays consistent across concurrent React
-    // renders. We piggyback on `setRecency` as the outer update and nest
-    // `setColumns` inside so both observe the same `prevRecency`.
     setRecency((prevRecency) => {
       let nextRecency = prevRecency
       setColumns((prevColumns) => {
         if (prevColumns.includes(spawnId)) {
-          // Already open — just re-focus (recency bump below).
           return prevColumns
         }
         if (prevColumns.length < MAX_COLUMNS) {
           return [...prevColumns, spawnId]
         }
-        // At capacity: evict least-recently-focused column.
         const evictTarget = prevRecency.at(-1) ?? prevColumns[0]
         nextRecency = prevRecency.filter((id) => id !== evictTarget)
         return [...prevColumns.filter((id) => id !== evictTarget), spawnId]
@@ -102,8 +115,6 @@ export function ChatProvider({ children }: ChatProviderProps) {
         const nextRecency = prevRecency.filter((id) => id !== spawnId)
         setFocusedColumn((prevFocus) => {
           if (prevFocus !== spawnId) return prevFocus
-          // Closed column had focus — hand off to the most recently
-          // focused survivor, or null if none remain.
           return nextRecency[0] ?? null
         })
         return nextRecency
@@ -122,15 +133,82 @@ export function ChatProvider({ children }: ChatProviderProps) {
     })
   }, [])
 
+  const selectChat = useCallback(
+    (chatId: string, chatState: ApiChatState, activeSpawnId?: string | null) => {
+      setSelectedChat({
+        chatId,
+        chatState,
+        activeSpawnId: activeSpawnId ?? null,
+      })
+      // If there's an active spawn, open it as a column
+      if (activeSpawnId) {
+        // Defer to openSpawn to handle LRU eviction etc.
+        // We call it inline here rather than in an effect to avoid an
+        // extra render cycle.
+        setRecency((prevRecency) => {
+          let nextRecency = prevRecency
+          setColumns((prevColumns) => {
+            if (prevColumns.includes(activeSpawnId)) {
+              return prevColumns
+            }
+            if (prevColumns.length < MAX_COLUMNS) {
+              return [...prevColumns, activeSpawnId]
+            }
+            const evictTarget = prevRecency.at(-1) ?? prevColumns[0]
+            nextRecency = prevRecency.filter((id) => id !== evictTarget)
+            return [...prevColumns.filter((id) => id !== evictTarget), activeSpawnId]
+          })
+          return bumpRecency(nextRecency, activeSpawnId)
+        })
+        setFocusedColumn(activeSpawnId)
+      }
+    },
+    [],
+  )
+
+  const clearChat = useCallback(() => {
+    setSelectedChat(null)
+  }, [])
+
+  const setChatState = useCallback((chatState: ApiChatState) => {
+    setSelectedChat((prev) => {
+      if (!prev) return prev
+      return { ...prev, chatState }
+    })
+  }, [])
+
+  const setActiveSpawnId = useCallback((spawnId: string | null) => {
+    setSelectedChat((prev) => {
+      if (!prev) return prev
+      return { ...prev, activeSpawnId: spawnId }
+    })
+  }, [])
+
   const value = useMemo<ChatContextValue>(
     () => ({
-      state: { columns, focusedColumn },
+      selectedChat,
+      columnState: { columns, focusedColumn },
+      selectChat,
+      clearChat,
+      setChatState,
+      setActiveSpawnId,
       openSpawn,
       closeColumn,
       focusColumn,
       isMaxColumns: columns.length >= MAX_COLUMNS,
     }),
-    [columns, focusedColumn, openSpawn, closeColumn, focusColumn],
+    [
+      selectedChat,
+      columns,
+      focusedColumn,
+      selectChat,
+      clearChat,
+      setChatState,
+      setActiveSpawnId,
+      openSpawn,
+      closeColumn,
+      focusColumn,
+    ],
   )
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>

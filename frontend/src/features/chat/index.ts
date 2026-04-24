@@ -2,7 +2,7 @@
 
 export { ChatPage } from "./ChatPage"
 export type { ChatPageProps } from "./ChatPage"
-export type { ChatContextValue, ChatState } from "./ChatContext"
+export type { ChatContextValue, ChatSelection, ColumnState } from "./ChatContext"
 export { ChatContext, ChatProvider, MAX_COLUMNS, useChat } from "./ChatContext"
 export { chatManifest } from "./manifest"
 export { SessionList } from "./SessionList"
@@ -14,3 +14,5 @@ export type {
   ThreadColumnProps,
   ThreadColumnSpawnDetails,
 } from "./ThreadColumn"
+export { ChatThreadView } from "./ChatThreadView"
+export type { ChatThreadViewProps } from "./ChatThreadView"

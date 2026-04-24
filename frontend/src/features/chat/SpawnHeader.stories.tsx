@@ -99,3 +99,16 @@ export const LongAgentName: Story = {
     model: "claude-opus-4-7",
   },
 }
+
+export const WithChatContext: Story = {
+  args: {
+    chatId: "c001",
+    chatTitle: "Auth middleware",
+  },
+}
+
+export const WithChatContextNoTitle: Story = {
+  args: {
+    chatId: "c001abc",
+  },
+}

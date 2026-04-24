@@ -1,16 +1,15 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 
 import { TooltipProvider } from "@/components/ui/tooltip"
-import type { SpawnProjection } from "@/features/sessions/lib/api"
+import type { SpawnProjection, ChatProjection } from "@/features/sessions/lib/api"
 
 import { ChatProvider } from "./ChatContext"
 import { SessionList } from "./SessionList"
 
 /**
- * Stories pin `dataOverride` so the live `useSessions` hook never hits the
- * network. The component still mounts inside a `ChatProvider` (its
- * `useChat` call requires one) but the override also bypasses the chat
- * context for active-column rendering.
+ * Stories pin `dataOverride` so live hooks never hit the network.
+ * The component still mounts inside a `ChatProvider` (its `useChat`
+ * call requires one) but the override bypasses the chat context.
  */
 
 const meta: Meta<typeof SessionList> = {
@@ -62,7 +61,46 @@ function makeSpawn(overrides: Partial<SpawnProjection> = {}): SpawnProjection {
   }
 }
 
-const POPULATED_SPAWNS: SpawnProjection[] = [
+const CHATS: ChatProjection[] = [
+  {
+    chat_id: "c001",
+    state: "active",
+    title: "Build the login page",
+    model: "opus-4-7",
+    active_p_id: "p201",
+    created_at: iso(-2 * 60_000),
+    updated_at: iso(-30_000),
+  },
+  {
+    chat_id: "c002",
+    state: "idle",
+    title: "Review auth middleware",
+    model: "sonnet-4-6",
+    active_p_id: null,
+    created_at: iso(-20 * 60_000),
+    updated_at: iso(-15 * 60_000),
+  },
+  {
+    chat_id: "c003",
+    state: "draining",
+    title: "Fix Windows path issue",
+    model: "opus-4-7",
+    active_p_id: "p301",
+    created_at: iso(-45 * 60_000),
+    updated_at: iso(-5 * 60_000),
+  },
+  {
+    chat_id: "c004",
+    state: "closed",
+    title: "Initial project setup",
+    model: "sonnet-4-6",
+    active_p_id: null,
+    created_at: iso(-3 * 3600_000),
+    updated_at: iso(-2 * 3600_000),
+  },
+]
+
+const SPAWNS: SpawnProjection[] = [
   makeSpawn({
     spawn_id: "p201",
     status: "running",
@@ -78,25 +116,11 @@ const POPULATED_SPAWNS: SpawnProjection[] = [
     started_at: iso(-90_000),
   }),
   makeSpawn({
-    spawn_id: "p205",
-    status: "finalizing",
-    agent: "coder",
-    desc: "Apply review fixes",
-    started_at: iso(-4 * 60_000),
-  }),
-  makeSpawn({
     spawn_id: "p301",
     status: "running",
     agent: "frontend-coder",
     desc: "Restyle metrics cards",
     started_at: iso(-12 * 60_000),
-  }),
-  makeSpawn({
-    spawn_id: "p304",
-    status: "running",
-    agent: "coder",
-    desc: "Wire live stats hook",
-    started_at: iso(-25 * 60_000),
   }),
   makeSpawn({
     spawn_id: "p501",
@@ -114,14 +138,6 @@ const POPULATED_SPAWNS: SpawnProjection[] = [
     finished_at: iso(-25 * 60_000),
   }),
   makeSpawn({
-    spawn_id: "p302",
-    status: "succeeded",
-    agent: "frontend-designer",
-    desc: "Ship spec revisions",
-    started_at: iso(-2 * 3600_000),
-    finished_at: iso(-90 * 60_000),
-  }),
-  makeSpawn({
     spawn_id: "p204",
     status: "failed",
     agent: "verifier",
@@ -129,28 +145,49 @@ const POPULATED_SPAWNS: SpawnProjection[] = [
     started_at: iso(-55 * 60_000),
     finished_at: iso(-50 * 60_000),
   }),
-  makeSpawn({
-    spawn_id: "p303",
-    status: "cancelled",
-    agent: "browser-tester",
-    desc: "Smoke test filter bar",
-    started_at: iso(-3 * 3600_000),
-    finished_at: iso(-2.5 * 3600_000),
-  }),
 ]
+
+const logSelect = (id: string) => {
+  // eslint-disable-next-line no-console
+  console.log("[story] select spawn", id)
+}
+
+const logSelectChat = (id: string, state: string) => {
+  // eslint-disable-next-line no-console
+  console.log("[story] select chat", id, state)
+}
 
 // ---------------------------------------------------------------------------
 // Stories
 // ---------------------------------------------------------------------------
 
-export const Populated: Story = {
+export const WithChatsAndSpawns: Story = {
   args: {
     dataOverride: {
-      spawns: POPULATED_SPAWNS,
-      onSelect: (id) => {
-        // eslint-disable-next-line no-console
-        console.log("[story] open", id)
-      },
+      chats: CHATS,
+      spawns: SPAWNS,
+      onSelectChat: logSelectChat,
+      onSelectSpawn: logSelect,
+    },
+  },
+}
+
+export const ChatsOnly: Story = {
+  args: {
+    dataOverride: {
+      chats: CHATS,
+      spawns: [],
+      onSelectChat: logSelectChat,
+    },
+  },
+}
+
+export const SpawnsOnly: Story = {
+  args: {
+    dataOverride: {
+      chats: [],
+      spawns: SPAWNS,
+      onSelectSpawn: logSelect,
     },
   },
 }
@@ -158,6 +195,7 @@ export const Populated: Story = {
 export const Empty: Story = {
   args: {
     dataOverride: {
+      chats: [],
       spawns: [],
     },
   },
@@ -166,6 +204,7 @@ export const Empty: Story = {
 export const Loading: Story = {
   args: {
     dataOverride: {
+      chats: [],
       spawns: [],
       isLoading: true,
     },
@@ -176,31 +215,21 @@ export const ErrorState: Story = {
   name: "Error",
   args: {
     dataOverride: {
+      chats: [],
       spawns: [],
-      error: "ECONNREFUSED http://localhost:7707/api/spawns/list",
+      error: "ECONNREFUSED http://localhost:7707/api/chats",
     },
   },
 }
 
-export const Scrolling: Story = {
+export const SelectedChat: Story = {
   args: {
     dataOverride: {
-      spawns: Array.from({ length: 40 }).map<SpawnProjection>((_, i) =>
-        makeSpawn({
-          spawn_id: `p${600 + i}`,
-          status: (
-            ["running", "queued", "succeeded", "failed", "cancelled", "finalizing"] as const
-          )[i % 6],
-          agent: ["coder", "reviewer", "planner", "verifier", "explorer", "smoke-tester"][i % 6],
-          desc: `Long-running task #${i + 1} with a description that may be truncated`,
-          started_at: iso(-(i + 1) * 90_000),
-          finished_at: i % 6 === 2 ? iso(-(i + 1) * 60_000) : null,
-        }),
-      ),
-      onSelect: (id) => {
-        // eslint-disable-next-line no-console
-        console.log("[story] open", id)
-      },
+      chats: CHATS,
+      spawns: SPAWNS,
+      selectedChatId: "c001",
+      onSelectChat: logSelectChat,
+      onSelectSpawn: logSelect,
     },
   },
 }
@@ -208,13 +237,12 @@ export const Scrolling: Story = {
 export const WithActiveColumns: Story = {
   args: {
     dataOverride: {
-      spawns: POPULATED_SPAWNS,
+      chats: CHATS,
+      spawns: SPAWNS,
       activeColumns: ["p301", "p202", "p501"],
       focusedColumn: "p202",
-      onSelect: (id) => {
-        // eslint-disable-next-line no-console
-        console.log("[story] open", id)
-      },
+      onSelectChat: logSelectChat,
+      onSelectSpawn: logSelect,
     },
   },
 }

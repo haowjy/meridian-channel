@@ -1,17 +1,14 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 
 import { TooltipProvider } from "@/components/ui/tooltip"
-import type { SpawnProjection } from "@/features/sessions/lib/api"
+import type { SpawnProjection, ChatProjection } from "@/features/sessions/lib/api"
 
 import { ChatPage } from "./ChatPage"
 import type { ThreadColumnSpawnDetails } from "./ThreadColumn"
 
 /**
  * Stories pin both the session-list data source and per-column spawn
- * details via overrides so nothing touches the network. `ThreadColumn`
- * still opens a websocket internally — Storybook just lets it fail and
- * the column renders its idle empty state, which is representative of
- * the first-paint experience before frames arrive.
+ * details via overrides so nothing touches the network.
  */
 
 const meta: Meta<typeof ChatPage> = {
@@ -22,8 +19,6 @@ const meta: Meta<typeof ChatPage> = {
   },
   decorators: [
     (Story) => (
-      // Pin the page to the viewport so flex-based layouts resolve.
-      // Borders above/below match the real AppShell chrome context.
       <TooltipProvider>
         <div className="flex h-screen w-full flex-col bg-background">
           <div className="min-h-0 flex-1 border-y border-border">
@@ -63,6 +58,36 @@ function makeSpawn(overrides: Partial<SpawnProjection> = {}): SpawnProjection {
     ...overrides,
   }
 }
+
+const CHATS: ChatProjection[] = [
+  {
+    chat_id: "c001",
+    state: "active",
+    title: "Implement auth middleware",
+    model: "opus-4-7",
+    active_p_id: "p1019",
+    created_at: iso(-3 * 60_000),
+    updated_at: iso(-30_000),
+  },
+  {
+    chat_id: "c002",
+    state: "idle",
+    title: "Review design changes",
+    model: "sonnet-4-6",
+    active_p_id: null,
+    created_at: iso(-25 * 60_000),
+    updated_at: iso(-10 * 60_000),
+  },
+  {
+    chat_id: "c003",
+    state: "closed",
+    title: "Debug Windows path handling",
+    model: "opus-4-7",
+    active_p_id: null,
+    created_at: iso(-2 * 3600_000),
+    updated_at: iso(-90 * 60_000),
+  },
+]
 
 const SPAWNS: SpawnProjection[] = [
   makeSpawn({
@@ -161,6 +186,7 @@ const THREAD_DETAILS: Record<string, ThreadColumnSpawnDetails> = {
 
 const baseArgs = {
   sessionListOverride: {
+    chats: CHATS,
     spawns: SPAWNS,
   },
   threadDetailsOverride: THREAD_DETAILS,
@@ -206,5 +232,28 @@ export const CollapsedSidebar: Story = {
     initialColumns: ["p1019", "p1024"],
     initialFocus: "p1019",
     initialSidebarCollapsed: true,
+  },
+}
+
+export const ChatsOnly: Story = {
+  name: "Chats Only (No Spawns)",
+  args: {
+    sessionListOverride: {
+      chats: CHATS,
+      spawns: [],
+    },
+    threadDetailsOverride: THREAD_DETAILS,
+  },
+}
+
+export const SpawnsOnly: Story = {
+  name: "Spawns Only (No Chats)",
+  args: {
+    sessionListOverride: {
+      chats: [],
+      spawns: SPAWNS,
+    },
+    threadDetailsOverride: THREAD_DETAILS,
+    initialSpawnId: "p1019",
   },
 }
