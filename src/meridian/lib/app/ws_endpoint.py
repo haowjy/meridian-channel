@@ -103,6 +103,7 @@ async def spawn_websocket(
     spawn_id: str,
     manager: SpawnManager,
     multi_sub_manager: SpawnMultiSubscriberManager | None = None,
+    on_user_message: Callable[[], None] | None = None,
 ) -> None:
     """Bridge one active spawn's fan-out stream to one WebSocket client."""
 
@@ -166,6 +167,7 @@ async def spawn_websocket(
                 manager,
                 tracer,
                 heartbeat_state=heartbeat_state,
+                on_user_message=on_user_message,
             )
         )
 
@@ -264,6 +266,7 @@ async def _inbound_loop(
     manager: SpawnManager,
     tracer: DebugTracer | None = None,
     heartbeat_state: _HeartbeatState | None = None,
+    on_user_message: Callable[[], None] | None = None,
 ) -> None:
     while True:
         message = await websocket.receive()
@@ -320,6 +323,8 @@ async def _inbound_loop(
                 await _send_error(websocket, "user_message requires text")
                 continue
             result = await manager.inject(spawn_id, message=text, source="app_ws")
+            if result.success and on_user_message is not None:
+                on_user_message()
         elif message_type == "interrupt":
             result = await manager.interrupt(spawn_id, source="app_ws")
         elif message_type == "cancel":
@@ -373,14 +378,21 @@ def register_ws_routes(
     *,
     multi_sub_manager: SpawnMultiSubscriberManager | None = None,
     validate_spawn_id: Callable[[str], SpawnId] | None = None,
+    extra_origins: list[str] | None = None,
+    on_user_message: Callable[[], None] | None = None,
 ) -> None:
     """Register WebSocket routes for app streaming APIs."""
 
     typed_app = cast("FastAPIApp", app)
+    allowed_origins_set: frozenset[str] = frozenset(extra_origins) if extra_origins else frozenset()
 
     async def _spawn_ws_route(websocket: WebSocket, spawn_id: str) -> None:
         origin = websocket.headers.get("origin")
-        if origin is not None and not _ALLOWED_ORIGIN_RE.match(origin):
+        if (
+            origin is not None
+            and not _ALLOWED_ORIGIN_RE.match(origin)
+            and origin not in allowed_origins_set
+        ):
             await websocket.close(code=4403)
             return
 
@@ -406,6 +418,7 @@ def register_ws_routes(
                 str(typed_spawn_id),
                 manager,
                 multi_sub_manager=multi_sub_manager,
+                on_user_message=on_user_message,
             )
         except Exception as exc:
             if _is_websocket_disconnect(exc):

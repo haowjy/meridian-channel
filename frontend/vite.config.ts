@@ -19,5 +19,11 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, "index.html"),
+        "test-chat": path.resolve(__dirname, "test-chat.html"),
+      },
+    },
   },
 })

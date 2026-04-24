@@ -3,9 +3,41 @@
 from __future__ import annotations
 
 import importlib
+import json
+import logging
+import subprocess
 from pathlib import Path
 
 from meridian.lib.platform import IS_WINDOWS
+
+logger = logging.getLogger(__name__)
+
+
+def _detect_tailscale_origins(port: int) -> list[str]:
+    """Try to detect the local Tailscale FQDN and return origin URLs.
+
+    Returns an empty list if Tailscale is not installed or not running.
+    """
+    try:
+        result = subprocess.run(
+            ["tailscale", "status", "--self", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        if result.returncode != 0:
+            return []
+        data = json.loads(result.stdout)
+        dns_name: str = data.get("Self", {}).get("DNSName", "")
+        if not dns_name:
+            return []
+        # Tailscale returns FQDN with trailing dot — strip it.
+        hostname = dns_name.rstrip(".")
+        if not hostname:
+            return []
+        return [f"http://{hostname}:{port}"]
+    except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
+        return []
 
 
 def run_app(
@@ -14,9 +46,16 @@ def run_app(
     host: str = "127.0.0.1",
     proxy: str | None = None,
     debug: bool = False,
+    cors_origins: list[str] | None = None,
+    tailscale: bool = False,
     allow_unsafe_no_permissions: bool = False,
 ) -> None:
     """Start the Meridian app server."""
+
+    # Configure logging early so pre-uvicorn messages (e.g. Tailscale
+    # detection) are visible. Uvicorn reconfigures on start, so this
+    # only covers the startup preamble.
+    logging.basicConfig(level=logging.INFO, format="%(levelname)-5s:     %(message)s")
 
     uvicorn_module = importlib.import_module("uvicorn")
 
@@ -35,6 +74,27 @@ def run_app(
     use_tcp = IS_WINDOWS or port is not None or host != "127.0.0.1"
     if use_tcp:
         resolved_port = port if port is not None else 7676
+
+        all_origins = list(cors_origins or [])
+
+        # --tailscale: auto-detect local Tailscale FQDN via `tailscale status`
+        # and whitelist it as a CORS + WebSocket origin. This lets you access
+        # the app from other devices on your tailnet without manually passing
+        # --cors-origin. Warns if detection fails (tailscale not installed,
+        # not logged in, etc.).
+        if tailscale:
+            ts_origins = _detect_tailscale_origins(resolved_port)
+            if ts_origins:
+                for origin in ts_origins:
+                    if origin not in all_origins:
+                        all_origins.append(origin)
+                logger.info("Tailscale origin: %s", ts_origins[0])
+            else:
+                logger.warning(
+                    "--tailscale was set but could not detect Tailscale hostname. "
+                    "Is Tailscale installed and running? (`tailscale status`)"
+                )
+
         app = create_app(
             manager,
             project_uuid=project_uuid,
@@ -42,6 +102,7 @@ def run_app(
             transport="tcp",
             host=host,
             port=resolved_port,
+            cors_origins=all_origins,
             allow_unsafe_no_permissions=allow_unsafe_no_permissions,
         )
         port_file = runtime_root / "app.port"
@@ -63,6 +124,7 @@ def run_app(
         runtime_root=runtime_root,
         transport="uds",
         socket_path=str(resolved_socket_path),
+        cors_origins=cors_origins or [],
         allow_unsafe_no_permissions=allow_unsafe_no_permissions,
     )
 

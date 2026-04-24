@@ -858,7 +858,7 @@ def test_run_harness_process_resume_does_not_inject_seed_args(
     monkeypatch.delenv("MERIDIAN_CHAT_ID", raising=False)
     project_root = tmp_path / "seed-resume"
     project_root.mkdir()
-    launch_context, harness_registry = _build_primary_launch_context(
+    launch_context, _harness_registry = _build_primary_launch_context(
         project_root=project_root,
         harness_id=HarnessId.CLAUDE,
         model="claude-sonnet-4-5",

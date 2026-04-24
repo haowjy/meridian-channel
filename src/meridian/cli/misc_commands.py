@@ -28,6 +28,7 @@ def register_misc_commands(
     app: App,
     completion_app: App,
     streaming_app: App,
+    test_app: App,
     emit: Callable[[object], None],
     get_global_options: Callable[[], _GlobalOptionsLike],
 ) -> None:
@@ -68,6 +69,27 @@ def register_misc_commands(
             bool,
             Parameter(name="--debug", help="Enable wire-level debug tracing."),
         ] = False,
+        cors_origin: Annotated[
+            list[str] | None,
+            Parameter(
+                name="--cors-origin",
+                help=(
+                    "Additional allowed CORS/WebSocket origins "
+                    "(e.g. http://myhost.ts.net:7676). Repeatable."
+                ),
+            ),
+        ] = None,
+        tailscale: Annotated[
+            bool,
+            Parameter(
+                name="--tailscale",
+                help=(
+                    "Auto-detect the local Tailscale hostname and whitelist it "
+                    "as a CORS/WebSocket origin. Allows access from other devices "
+                    "on your tailnet."
+                ),
+            ),
+        ] = False,
         allow_unsafe_no_permissions: Annotated[
             bool,
             Parameter(
@@ -89,6 +111,8 @@ def register_misc_commands(
             host=host,
             proxy=proxy,
             debug=debug,
+            cors_origins=cors_origin or [],
+            tailscale=tailscale,
             allow_unsafe_no_permissions=allow_unsafe_no_permissions,
         )
 
@@ -177,6 +201,62 @@ def register_misc_commands(
                 agent=agent,
                 debug=debug,
             )
+        )
+
+    @test_app.command(name="chat")
+    def test_chat_cmd(
+        harness: Annotated[
+            str,
+            Parameter(help="Harness id: claude, codex, or opencode."),
+        ],
+        port: Annotated[
+            int,
+            Parameter(name="--port", help="TCP port for the test chat server."),
+        ] = 7778,
+        host: Annotated[
+            str,
+            Parameter(name="--host", help="Host/IP to bind (default: 127.0.0.1)."),
+        ] = "127.0.0.1",
+        model: Annotated[
+            str | None,
+            Parameter(name=["--model", "-m"], help="Optional model override."),
+        ] = None,
+        system_prompt: Annotated[
+            str | None,
+            Parameter(
+                name="--system-prompt",
+                help="Initial prompt used to create the test chat spawn.",
+            ),
+        ] = None,
+        idle_timeout: Annotated[
+            int,
+            Parameter(
+                name="--idle-timeout",
+                help="Cancel the spawn and stop the server after N idle seconds. Use 0 to disable.",
+            ),
+        ] = 3600,
+        no_open_browser: Annotated[
+            bool,
+            Parameter(name="--no-open-browser", help="Print the URL without opening a browser."),
+        ] = False,
+        debug: Annotated[
+            bool,
+            Parameter(name="--debug", help="Enable wire-level debug tracing."),
+        ] = False,
+    ) -> None:
+        """Start a single-spawn browser chat session."""
+
+        from meridian.cli.test_chat_cmd import run_test_chat
+
+        run_test_chat(
+            harness=harness,
+            port=port,
+            host=host,
+            model=model,
+            system_prompt=system_prompt,
+            idle_timeout=idle_timeout,
+            no_open_browser=no_open_browser,
+            debug=debug,
         )
 
     @app.command(name="context")

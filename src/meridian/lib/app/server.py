@@ -9,7 +9,7 @@ import os
 import secrets
 import shutil
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from importlib import import_module
@@ -94,7 +94,12 @@ def create_app(
     host: str | None = None,
     port: int | None = None,
     socket_path: str | None = None,
+    cors_origins: list[str] | None = None,
     allow_unsafe_no_permissions: bool = False,
+    startup_hook: Callable[[_FastAPIApp], Awaitable[None]] | None = None,
+    shutdown_hook: Callable[[_FastAPIApp], Awaitable[None]] | None = None,
+    on_user_message: Callable[[], None] | None = None,
+    pre_static_routes: Callable[[_FastAPIApp], None] | None = None,
 ) -> object:
     """Create the FastAPI application for Meridian app."""
 
@@ -147,9 +152,13 @@ def create_app(
 
         # SpawnManager lifecycle is owned by caller for startup.
         try:
+            if startup_hook is not None:
+                await startup_hook(app_ctx_fastapi)
             yield
         finally:
             shutil.rmtree(instance_dir, ignore_errors=True)
+            if shutdown_hook is not None:
+                await shutdown_hook(app_ctx_fastapi)
             await spawn_manager.shutdown()
             if background_finalize_tasks:
                 await asyncio.gather(*tuple(background_finalize_tasks), return_exceptions=True)
@@ -182,13 +191,26 @@ def create_app(
     )
     json_response_cls = cast("Callable[..., object]", responses_module.JSONResponse)
 
-    app.add_middleware(
-        cors.CORSMiddleware,
-        allow_origins=[],
-        allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    extra_origins = cors_origins or []
+    if extra_origins:
+        # Explicit origins provided — allow localhost + those origins.
+        app.add_middleware(
+            cors.CORSMiddleware,
+            allow_origins=[
+                *extra_origins,
+            ],
+            allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+    else:
+        app.add_middleware(
+            cors.CORSMiddleware,
+            allow_origins=[],
+            allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
     async def _validation_error_handler(request: object, exc: Exception) -> object:
         error_factory = getattr(exc, "errors", None)
@@ -322,10 +344,10 @@ def create_app(
         http_exception=http_exception,
     )
 
-    # Register KB analysis routes
-    from meridian.lib.app.kb_routes import register_kb_routes
+    # Register KG analysis routes
+    from meridian.lib.app.kg_routes import register_kg_routes
 
-    register_kb_routes(
+    register_kg_routes(
         app_obj,
         project_root=project_paths.project_root,
         http_exception=http_exception,
@@ -350,6 +372,8 @@ def create_app(
         spawn_manager,
         multi_sub_manager=multi_sub_manager,
         validate_spawn_id=_validate_spawn_id_wrapper,
+        extra_origins=extra_origins,
+        on_user_message=on_user_message,
     )
 
     # Register extension discovery + invoke routes before static mount.
@@ -386,6 +410,9 @@ def create_app(
         for route in invoke_routes:
             route_methods = sorted(route.methods) if route.methods else None
             app.add_route(route.path, route.endpoint, methods=route_methods)
+
+    if pre_static_routes is not None:
+        pre_static_routes(app)
 
     frontend_dist = Path(__file__).resolve().parents[4] / "frontend" / "dist"
     if frontend_dist.is_dir():

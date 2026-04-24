@@ -4,8 +4,7 @@ import { Badge } from "@/components/ui/badge"
 import { CollapsibleTrigger } from "@/components/ui/collapsible"
 import { cn } from "@/lib/utils"
 
-import { RotatingText } from "./RotatingText"
-import { STREAMING_STATUS_MESSAGES, getActivitySummary } from "./tool-utils"
+import { getActivitySummary, getToolLineTitle } from "./tool-utils"
 import type { ActivityItem } from "./types"
 
 type ActivityBlockHeaderProps = {
@@ -24,6 +23,7 @@ export function ActivityBlockHeader({
   className,
 }: ActivityBlockHeaderProps) {
   const summary = getActivitySummary(items)
+  const liveSummary = getLiveActivitySummary(items)
 
   return (
     <CollapsibleTrigger
@@ -39,7 +39,7 @@ export function ActivityBlockHeader({
           {isWaitingSubagents ? (
             "Waiting for agents..."
           ) : isStreaming ? (
-            <RotatingText messages={STREAMING_STATUS_MESSAGES} className="italic" />
+            <span className="italic">{liveSummary}</span>
           ) : (
             summary
           )}
@@ -73,4 +73,21 @@ export function ActivityBlockHeader({
       </div>
     </CollapsibleTrigger>
   )
+}
+
+function getLiveActivitySummary(items: ActivityItem[]): string {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index]
+    if (item.kind === "tool") {
+      return getToolLineTitle(item)
+    }
+    if (item.kind === "thinking") {
+      return "Thinking..."
+    }
+    if (item.kind === "content" && item.text.trim()) {
+      return "Writing..."
+    }
+  }
+
+  return "Thinking..."
 }
