@@ -168,7 +168,7 @@ export function ActivityBlock({
                         ) : item.kind === "thinking" ? (
                           <ThinkingRow
                             item={item}
-                            expanded={expandedTools.has(item.id)}
+                            expanded={isStreaming || expandedTools.has(item.id)}
                             onToggle={() => toggleExpanded(item.id)}
                           />
                         ) : (
