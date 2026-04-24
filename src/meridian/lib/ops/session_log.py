@@ -735,7 +735,7 @@ def _resolve_from_spawn_id(
                 runtime_root,
                 display_id=spawn_id,
                 spawn_id=spawn_id,
-                live_first=True,
+                live_first=(row.status == "running"),
             )
             if output_target is not None:
                 return output_target
