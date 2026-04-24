@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import pytest
 
@@ -74,7 +74,7 @@ def _manager(tmp_path: Path) -> tuple[HcpSessionManager, FakeSpawnManager, Path]
     runtime_root = resolve_runtime_paths(tmp_path).root_dir
     fake = FakeSpawnManager(runtime_root, tmp_path)
     return (
-        HcpSessionManager(cast(Any, fake), runtime_root, idle_timeout_secs=60.0),
+        HcpSessionManager(fake, runtime_root, idle_timeout_secs=60.0),
         fake,
         runtime_root,
     )
