@@ -42,160 +42,160 @@ export function mapWsEventToStreamEvents(
       })
       break
     case EventType.TEXT_MESSAGE_START:
-      if (!started.text.has(event.message_id)) {
-        started.text.add(event.message_id)
-        mappedEvents.push({ type: "TEXT_MESSAGE_START", messageId: event.message_id })
+      if (!started.text.has(event.messageId)) {
+        started.text.add(event.messageId)
+        mappedEvents.push({ type: "TEXT_MESSAGE_START", messageId: event.messageId })
       }
       break
     case EventType.TEXT_MESSAGE_CONTENT:
-      if (!started.text.has(event.message_id)) {
-        started.text.add(event.message_id)
-        mappedEvents.push({ type: "TEXT_MESSAGE_START", messageId: event.message_id })
+      if (!started.text.has(event.messageId)) {
+        started.text.add(event.messageId)
+        mappedEvents.push({ type: "TEXT_MESSAGE_START", messageId: event.messageId })
       }
       mappedEvents.push({
         type: "TEXT_MESSAGE_CONTENT",
-        messageId: event.message_id,
+        messageId: event.messageId,
         delta: event.delta,
       })
       break
     case EventType.TEXT_MESSAGE_END:
-      if (started.text.has(event.message_id)) {
-        mappedEvents.push({ type: "TEXT_MESSAGE_END", messageId: event.message_id })
+      if (started.text.has(event.messageId)) {
+        mappedEvents.push({ type: "TEXT_MESSAGE_END", messageId: event.messageId })
       }
       break
     case EventType.TEXT_MESSAGE_CHUNK:
-      if (!event.message_id) {
+      if (!event.messageId) {
         break
       }
-      if (!started.text.has(event.message_id)) {
-        started.text.add(event.message_id)
-        mappedEvents.push({ type: "TEXT_MESSAGE_START", messageId: event.message_id })
+      if (!started.text.has(event.messageId)) {
+        started.text.add(event.messageId)
+        mappedEvents.push({ type: "TEXT_MESSAGE_START", messageId: event.messageId })
       }
       if (event.delta) {
         mappedEvents.push({
           type: "TEXT_MESSAGE_CONTENT",
-          messageId: event.message_id,
+          messageId: event.messageId,
           delta: event.delta,
         })
       }
       break
     case EventType.REASONING_START:
     case EventType.REASONING_MESSAGE_START:
-      if (!started.thinking.has(event.message_id)) {
-        started.thinking.add(event.message_id)
-        mappedEvents.push({ type: "THINKING_START", thinkingId: event.message_id })
+      if (!started.thinking.has(event.messageId)) {
+        started.thinking.add(event.messageId)
+        mappedEvents.push({ type: "THINKING_START", thinkingId: event.messageId })
         mappedEvents.push({
           type: "THINKING_TEXT_MESSAGE_START",
-          thinkingId: event.message_id,
+          thinkingId: event.messageId,
         })
       }
       break
     case EventType.REASONING_MESSAGE_CONTENT:
-      if (!started.thinking.has(event.message_id)) {
-        started.thinking.add(event.message_id)
-        mappedEvents.push({ type: "THINKING_START", thinkingId: event.message_id })
+      if (!started.thinking.has(event.messageId)) {
+        started.thinking.add(event.messageId)
+        mappedEvents.push({ type: "THINKING_START", thinkingId: event.messageId })
         mappedEvents.push({
           type: "THINKING_TEXT_MESSAGE_START",
-          thinkingId: event.message_id,
+          thinkingId: event.messageId,
         })
       }
       mappedEvents.push({
         type: "THINKING_TEXT_MESSAGE_CONTENT",
-        thinkingId: event.message_id,
+        thinkingId: event.messageId,
         delta: event.delta,
       })
       break
     case EventType.REASONING_MESSAGE_CHUNK:
-      if (!event.message_id) {
+      if (!event.messageId) {
         break
       }
-      if (!started.thinking.has(event.message_id)) {
-        started.thinking.add(event.message_id)
-        mappedEvents.push({ type: "THINKING_START", thinkingId: event.message_id })
+      if (!started.thinking.has(event.messageId)) {
+        started.thinking.add(event.messageId)
+        mappedEvents.push({ type: "THINKING_START", thinkingId: event.messageId })
         mappedEvents.push({
           type: "THINKING_TEXT_MESSAGE_START",
-          thinkingId: event.message_id,
+          thinkingId: event.messageId,
         })
       }
       if (event.delta) {
         mappedEvents.push({
           type: "THINKING_TEXT_MESSAGE_CONTENT",
-          thinkingId: event.message_id,
+          thinkingId: event.messageId,
           delta: event.delta,
         })
       }
       break
     case EventType.REASONING_END:
     case EventType.REASONING_MESSAGE_END:
-      if (started.thinking.has(event.message_id)) {
+      if (started.thinking.has(event.messageId)) {
         mappedEvents.push({
           type: "THINKING_TEXT_MESSAGE_END",
-          thinkingId: event.message_id,
+          thinkingId: event.messageId,
         })
       }
       break
     case EventType.TOOL_CALL_START:
-      if (!started.tool.has(event.tool_call_id)) {
-        started.tool.add(event.tool_call_id)
+      if (!started.tool.has(event.toolCallId)) {
+        started.tool.add(event.toolCallId)
         mappedEvents.push({
           type: "TOOL_CALL_START",
-          toolCallId: event.tool_call_id,
-          toolCallName: event.tool_call_name,
+          toolCallId: event.toolCallId,
+          toolCallName: event.toolCallName,
         })
       }
       break
     case EventType.TOOL_CALL_ARGS:
-      if (!started.tool.has(event.tool_call_id)) {
-        started.tool.add(event.tool_call_id)
+      if (!started.tool.has(event.toolCallId)) {
+        started.tool.add(event.toolCallId)
         mappedEvents.push({
           type: "TOOL_CALL_START",
-          toolCallId: event.tool_call_id,
+          toolCallId: event.toolCallId,
           toolCallName: "Tool",
         })
       }
       mappedEvents.push({
         type: "TOOL_CALL_ARGS",
-        toolCallId: event.tool_call_id,
+        toolCallId: event.toolCallId,
         delta: event.delta,
       })
       break
     case EventType.TOOL_CALL_CHUNK:
-      if (!event.tool_call_id) {
+      if (!event.toolCallId) {
         break
       }
-      if (!started.tool.has(event.tool_call_id)) {
-        started.tool.add(event.tool_call_id)
+      if (!started.tool.has(event.toolCallId)) {
+        started.tool.add(event.toolCallId)
         mappedEvents.push({
           type: "TOOL_CALL_START",
-          toolCallId: event.tool_call_id,
-          toolCallName: event.tool_call_name ?? "Tool",
+          toolCallId: event.toolCallId,
+          toolCallName: event.toolCallName ?? "Tool",
         })
       }
       if (event.delta) {
         mappedEvents.push({
           type: "TOOL_CALL_ARGS",
-          toolCallId: event.tool_call_id,
+          toolCallId: event.toolCallId,
           delta: event.delta,
         })
       }
       break
     case EventType.TOOL_CALL_END:
-      if (started.tool.has(event.tool_call_id)) {
-        mappedEvents.push({ type: "TOOL_CALL_END", toolCallId: event.tool_call_id })
+      if (started.tool.has(event.toolCallId)) {
+        mappedEvents.push({ type: "TOOL_CALL_END", toolCallId: event.toolCallId })
       }
       break
     case EventType.TOOL_CALL_RESULT:
-      if (!started.tool.has(event.tool_call_id)) {
-        started.tool.add(event.tool_call_id)
+      if (!started.tool.has(event.toolCallId)) {
+        started.tool.add(event.toolCallId)
         mappedEvents.push({
           type: "TOOL_CALL_START",
-          toolCallId: event.tool_call_id,
+          toolCallId: event.toolCallId,
           toolCallName: "Tool",
         })
       }
       mappedEvents.push({
         type: "TOOL_CALL_RESULT",
-        toolCallId: event.tool_call_id,
+        toolCallId: event.toolCallId,
         content: event.content,
       })
       break

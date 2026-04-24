@@ -73,7 +73,7 @@ export type EventTypeName = (typeof EventType)[keyof typeof EventType]
 
 interface BaseEvent {
   timestamp?: number
-  raw_event?: unknown
+  rawEvent?: unknown
 }
 
 // ---------------------------------------------------------------------------
@@ -81,27 +81,27 @@ interface BaseEvent {
 // ---------------------------------------------------------------------------
 
 export interface RunAgentInput {
-  thread_id?: string
-  run_id?: string
+  threadId?: string
+  runId?: string
   state?: unknown
   messages?: unknown[]
   tools?: unknown[]
   context?: unknown[]
-  forwarded_props?: Record<string, unknown>
+  forwardedProps?: Record<string, unknown>
 }
 
 export interface RunStartedEvent extends BaseEvent {
   type: typeof EventType.RUN_STARTED
-  thread_id: string
-  run_id: string
-  parent_run_id?: string
+  threadId: string
+  runId: string
+  parent_runId?: string
   input?: RunAgentInput
 }
 
 export interface RunFinishedEvent extends BaseEvent {
   type: typeof EventType.RUN_FINISHED
-  thread_id: string
-  run_id: string
+  threadId: string
+  runId: string
   result?: unknown
 }
 
@@ -117,25 +117,25 @@ export interface RunErrorEvent extends BaseEvent {
 
 export interface TextMessageStartEvent extends BaseEvent {
   type: typeof EventType.TEXT_MESSAGE_START
-  message_id: string
+  messageId: string
   role: MessageRole
   name?: string
 }
 
 export interface TextMessageContentEvent extends BaseEvent {
   type: typeof EventType.TEXT_MESSAGE_CONTENT
-  message_id: string
+  messageId: string
   delta: string
 }
 
 export interface TextMessageEndEvent extends BaseEvent {
   type: typeof EventType.TEXT_MESSAGE_END
-  message_id: string
+  messageId: string
 }
 
 export interface TextMessageChunkEvent extends BaseEvent {
   type: typeof EventType.TEXT_MESSAGE_CHUNK
-  message_id?: string
+  messageId?: string
   role?: MessageRole
   delta?: string
   name?: string
@@ -147,42 +147,42 @@ export interface TextMessageChunkEvent extends BaseEvent {
 
 export interface ReasoningMessageStartEvent extends BaseEvent {
   type: typeof EventType.REASONING_MESSAGE_START
-  message_id: string
+  messageId: string
   role: "reasoning"
 }
 
 export interface ReasoningMessageContentEvent extends BaseEvent {
   type: typeof EventType.REASONING_MESSAGE_CONTENT
-  message_id: string
+  messageId: string
   delta: string
 }
 
 export interface ReasoningMessageEndEvent extends BaseEvent {
   type: typeof EventType.REASONING_MESSAGE_END
-  message_id: string
+  messageId: string
 }
 
 export interface ReasoningMessageChunkEvent extends BaseEvent {
   type: typeof EventType.REASONING_MESSAGE_CHUNK
-  message_id?: string
+  messageId?: string
   delta?: string
 }
 
 export interface ReasoningStartEvent extends BaseEvent {
   type: typeof EventType.REASONING_START
-  message_id: string
+  messageId: string
 }
 
 export interface ReasoningEndEvent extends BaseEvent {
   type: typeof EventType.REASONING_END
-  message_id: string
+  messageId: string
 }
 
 export interface ReasoningEncryptedValueEvent extends BaseEvent {
   type: typeof EventType.REASONING_ENCRYPTED_VALUE
   subtype: "tool-call" | "message"
-  entity_id: string
-  encrypted_value: string
+  entityId: string
+  encryptedValue: string
 }
 
 // ---------------------------------------------------------------------------
@@ -191,34 +191,34 @@ export interface ReasoningEncryptedValueEvent extends BaseEvent {
 
 export interface ToolCallStartEvent extends BaseEvent {
   type: typeof EventType.TOOL_CALL_START
-  tool_call_id: string
-  tool_call_name: string
-  parent_message_id?: string
+  toolCallId: string
+  toolCallName: string
+  parentMessageId?: string
 }
 
 export interface ToolCallArgsEvent extends BaseEvent {
   type: typeof EventType.TOOL_CALL_ARGS
-  tool_call_id: string
+  toolCallId: string
   delta: string
 }
 
 export interface ToolCallEndEvent extends BaseEvent {
   type: typeof EventType.TOOL_CALL_END
-  tool_call_id: string
+  toolCallId: string
 }
 
 export interface ToolCallChunkEvent extends BaseEvent {
   type: typeof EventType.TOOL_CALL_CHUNK
-  tool_call_id?: string
-  tool_call_name?: string
-  parent_message_id?: string
+  toolCallId?: string
+  toolCallName?: string
+  parentMessageId?: string
   delta?: string
 }
 
 export interface ToolCallResultEvent extends BaseEvent {
   type: typeof EventType.TOOL_CALL_RESULT
-  message_id: string
-  tool_call_id: string
+  messageId: string
+  toolCallId: string
   content: string
   role?: ToolRole
 }
@@ -229,12 +229,12 @@ export interface ToolCallResultEvent extends BaseEvent {
 
 export interface StepStartedEvent extends BaseEvent {
   type: typeof EventType.STEP_STARTED
-  step_name: string
+  stepName: string
 }
 
 export interface StepFinishedEvent extends BaseEvent {
   type: typeof EventType.STEP_FINISHED
-  step_name: string
+  stepName: string
 }
 
 // ---------------------------------------------------------------------------
@@ -262,16 +262,16 @@ export interface MessagesSnapshotEvent extends BaseEvent {
 
 export interface ActivitySnapshotEvent extends BaseEvent {
   type: typeof EventType.ACTIVITY_SNAPSHOT
-  message_id: string
-  activity_type: string
+  messageId: string
+  activityType: string
   content: unknown
   replace: boolean
 }
 
 export interface ActivityDeltaEvent extends BaseEvent {
   type: typeof EventType.ACTIVITY_DELTA
-  message_id: string
-  activity_type: string
+  messageId: string
+  activityType: string
   patch: unknown[]
 }
 

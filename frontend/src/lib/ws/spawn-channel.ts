@@ -200,7 +200,7 @@ export class SpawnChannel {
 
     // Track run ID
     if (event.type === EventType.RUN_STARTED) {
-      this._runId = (event as { run_id: string }).run_id
+      this._runId = (event as { runId: string }).runId
     }
 
     this.callbacks.onEvent?.(event)
