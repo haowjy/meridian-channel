@@ -5,6 +5,12 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **`meridian models list --all`** delegates to `mars models list --all` — shows all models matching alias filters, not just winners. Mars owns filtering; meridian formats.
+
+### Fixed
+- `resolve_model` uses mars-resolved `model_id` for alias-prefix results (e.g. `opus-4-6` → `claude-opus-4-6` passed to harness, not raw `opus-4-6`).
+
+### Added
 - **Extension system**: `meridian ext list|show|commands|run` CLI commands and `extension_list_commands`/`extension_invoke` MCP tools. Offline discovery works without app server; app-bound invocation uses locator + token auth. Exit codes: 2=no server, 3=stale, 7=invalid args.
 - **Extension registry CLI generation**: All CLI command modules switched from `registration.py` to registry-based `ext_registration.py`. Handler keys now fully qualified (e.g. `meridian.work.start`). Old `registration.py` deleted.
 - **`ExtensionCommandSpec` augmentation**: `cli_group`, `cli_name`, `agent_default_format`, `sync_handler` fields. `from_op()` factory wraps op-style handlers. Registry gains `get_by_cli()` and `list_for_cli_group()`.
