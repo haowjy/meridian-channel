@@ -637,6 +637,20 @@ async def _run_streaming_attempt(
         if drain_outcome is not None and terminal_outcome is None:
             drain_exit_code = drain_outcome.exit_code
             drain_error = drain_outcome.error
+
+        # The watchdog resolves the completion future mid-flight inside
+        # stop_spawn(), so completion_task can finish before watchdog_task.
+        # Give the watchdog a brief window to land and reconcile the flag.
+        if not terminated_by_report_watchdog:
+            if watchdog_task.done():
+                with suppress(Exception):
+                    terminated_by_report_watchdog = bool(watchdog_task.result())
+            elif drain_outcome is not None and drain_outcome.error == "report_watchdog":
+                try:
+                    await asyncio.wait_for(asyncio.shield(watchdog_task), timeout=2.0)
+                    terminated_by_report_watchdog = bool(watchdog_task.result())
+                except (TimeoutError, asyncio.CancelledError):
+                    pass
         with suppress(Exception):
             lifecycle_service.record_exited(
                 str(run.spawn_id),
