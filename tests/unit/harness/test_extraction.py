@@ -17,6 +17,7 @@ from meridian.lib.harness.extractors.base import HarnessExtractor
 from meridian.lib.harness.ids import TransportId
 from meridian.lib.harness.launch_spec import CodexLaunchSpec, ResolvedLaunchSpec
 from meridian.lib.harness.opencode import OpenCodeAdapter
+from meridian.lib.launch.extract import enrich_finalize
 from meridian.lib.launch.report import extract_or_fallback_report
 from meridian.lib.launch.written_files import extract_written_files
 from meridian.lib.safety.permissions import UnsafeNoOpPermissionResolver
@@ -169,6 +170,33 @@ def test_extract_session_ids_from_resume_text_and_json_aliases() -> None:
         b'{"event_type":"session.updated","payload":{"type":"session.updated","sessionID":"oc_wrapped_session"}}\n',
     )
     assert OpenCodeAdapter().extract_session_id(artifacts, wrapped_opencode) == "oc_wrapped_session"
+
+
+def test_extract_session_id_prefers_history_and_falls_back_to_legacy_output() -> None:
+    artifacts = InMemoryStore()
+
+    history_spawn = SpawnId("r-session-history-preferred")
+    artifacts.put(
+        make_artifact_key(history_spawn, "history.jsonl"),
+        b'{"type":"session.updated","sessionID":"history_session"}\n',
+    )
+    artifacts.put(
+        make_artifact_key(history_spawn, "output.jsonl"),
+        b'{"type":"session.updated","sessionID":"legacy_session"}\n',
+    )
+
+    assert OpenCodeAdapter().extract_session_id(artifacts, history_spawn) == "history_session"
+
+    legacy_spawn = SpawnId("r-session-legacy-output")
+    artifacts.put(
+        make_artifact_key(legacy_spawn, "output.jsonl"),
+        b"To continue this session, run codex resume 019cb8d4-8d62-79d3-a925-d329f8310c5d\n",
+    )
+
+    assert (
+        CodexAdapter().extract_session_id(artifacts, legacy_spawn)
+        == "019cb8d4-8d62-79d3-a925-d329f8310c5d"
+    )
 
 
 def test_harness_extract_report_uses_last_useful_assistant_output() -> None:
@@ -345,6 +373,42 @@ def test_extract_or_fallback_report_ignores_cancelled_control_frame_fallback() -
 
     assert extracted.content is None
     assert extracted.source is None
+
+
+def test_enrich_finalize_treats_history_as_output(tmp_path: Path) -> None:
+    artifacts = InMemoryStore()
+    spawn_id = SpawnId("r-finalize-history-output")
+    artifacts.put(
+        make_artifact_key(spawn_id, "history.jsonl"),
+        b'{"event_type":"tool.call","payload":{"name":"shell"}}\n',
+    )
+
+    finalized = enrich_finalize(
+        artifacts=artifacts,
+        extractor=_StubHarnessExtractor(),
+        spawn_id=spawn_id,
+        log_dir=tmp_path,
+    )
+
+    assert finalized.output_is_empty is False
+
+
+def test_enrich_finalize_falls_back_to_legacy_output_for_empty_check(tmp_path: Path) -> None:
+    artifacts = InMemoryStore()
+    spawn_id = SpawnId("r-finalize-legacy-output")
+    artifacts.put(
+        make_artifact_key(spawn_id, "output.jsonl"),
+        b'{"event_type":"tool.call","payload":{"name":"shell"}}\n',
+    )
+
+    finalized = enrich_finalize(
+        artifacts=artifacts,
+        extractor=_StubHarnessExtractor(),
+        spawn_id=spawn_id,
+        log_dir=tmp_path,
+    )
+
+    assert finalized.output_is_empty is False
 
 
 def test_streaming_extractor_prefers_live_connection_session_id() -> None:

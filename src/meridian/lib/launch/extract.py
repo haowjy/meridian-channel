@@ -9,6 +9,7 @@ from meridian.lib.core.types import ArtifactKey, SpawnId
 from meridian.lib.harness.adapter import SpawnExtractor
 from meridian.lib.launch.artifact_io import read_artifact_text
 from meridian.lib.launch.constants import (
+    HISTORY_FILENAME,
     OUTPUT_FILENAME,
     REPORT_FILENAME,
     STDERR_FILENAME,
@@ -85,6 +86,9 @@ def _is_empty_output(
     extracted_report: ExtractedReport,
 ) -> bool:
     if extracted_report.content and extracted_report.content.strip():
+        return False
+    history_text = read_artifact_text(artifacts, spawn_id, HISTORY_FILENAME)
+    if history_text.strip():
         return False
     output_text = read_artifact_text(artifacts, spawn_id, OUTPUT_FILENAME)
     return not output_text.strip()

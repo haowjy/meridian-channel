@@ -169,7 +169,7 @@ def _read_json_artifact(
 
 
 def unwrap_event_payload(line: dict[str, object]) -> dict[str, object]:
-    """Extract the effective payload from an output.jsonl line.
+    """Extract the effective payload from a harness JSONL artifact line.
 
     Handles both envelope format (streaming drain) and raw format (legacy).
     """
