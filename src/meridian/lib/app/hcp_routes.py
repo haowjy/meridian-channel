@@ -65,16 +65,20 @@ class PromptRequest(BaseModel):
     text: str
 
 
-def _http_status_for_hcp_error(error: HcpError) -> int:
-    if error.category == HcpErrorCategory.CONCURRENT_PROMPT:
-        return 409
-    if error.category == HcpErrorCategory.CHAT_NOT_FOUND:
-        return 404
-    if error.category == HcpErrorCategory.HARNESS_CRASHED:
-        return 502
-    if error.category == HcpErrorCategory.RESUME_FAILED and "no active process" in error.message:
-        return 404
-    return 500
+def _http_status_for_hcp_error(category: HcpErrorCategory) -> int:
+    mapping = {
+        HcpErrorCategory.CONCURRENT_PROMPT: 409,
+        HcpErrorCategory.CHAT_NOT_FOUND: 404,
+        HcpErrorCategory.HARNESS_CRASHED: 502,
+        HcpErrorCategory.RESUME_FAILED: 502,
+        HcpErrorCategory.HARNESS_NOT_FOUND: 404,
+        HcpErrorCategory.HARNESS_AUTH_FAILED: 401,
+        HcpErrorCategory.SESSION_EXPIRED: 410,
+        HcpErrorCategory.PERMISSION_DENIED: 403,
+        HcpErrorCategory.PROMPT_TOO_LARGE: 413,
+        HcpErrorCategory.FAILED_PERSISTENCE: 500,
+    }
+    return mapping.get(category, 500)
 
 
 def _agui_event_to_json(event: object) -> dict[str, Any]:
@@ -150,7 +154,10 @@ def register_hcp_routes(
         return record
 
     def _handle_hcp_error(error: HcpError) -> NoReturn:
-        raise http_exception(status_code=_http_status_for_hcp_error(error), detail=error.message)
+        raise http_exception(
+            status_code=_http_status_for_hcp_error(error.category),
+            detail=error.message,
+        )
 
     async def create_chat(body: ChatCreateRequest) -> ChatDetailResponse:
         prompt = body.prompt.strip()

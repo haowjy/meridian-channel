@@ -8,6 +8,7 @@ import time
 from collections.abc import Mapping
 from pathlib import Path
 
+from meridian.lib.core.lifecycle import SpawnLifecycleService, create_lifecycle_service
 from meridian.lib.core.types import SpawnId
 from meridian.lib.harness.connections.base import ConnectionConfig, HarnessEvent
 from meridian.lib.launch.launch_types import ResolvedLaunchSpec
@@ -27,9 +28,14 @@ class HcpSessionManager:
         spawn_manager: SpawnManager,
         runtime_root: Path,
         idle_timeout_secs: float = 3600.0,
+        lifecycle_service: SpawnLifecycleService | None = None,
     ) -> None:
         self._spawn_manager = spawn_manager
         self._runtime_root = runtime_root
+        self._lifecycle_service = lifecycle_service or create_lifecycle_service(
+            spawn_manager.project_root,
+            runtime_root,
+        )
         self._idle_timeout = idle_timeout_secs
         self._active_processes: dict[str, SpawnId] = {}
         self._chat_states: dict[str, ChatState] = {}
@@ -84,21 +90,22 @@ class HcpSessionManager:
             execution_cwd=execution_cwd,
             kind="primary",
         )
-        p_id = spawn_store.start_spawn(
-            self._runtime_root,
-            chat_id=c_id,
-            model=resolved_model,
-            agent=agent,
-            agent_path=agent_path or None,
-            skills=skills,
-            skill_paths=skill_paths,
-            harness=harness,
-            kind="hcp",
-            prompt=prompt,
-            spawn_id=config.spawn_id,
-            harness_session_id=harness_session_id or None,
-            execution_cwd=execution_cwd,
-            launch_mode="app",
+        p_id = SpawnId(
+            self._lifecycle_service.start(
+                chat_id=c_id,
+                model=resolved_model,
+                agent=agent,
+                agent_path=agent_path or None,
+                skills=skills,
+                skill_paths=skill_paths,
+                harness=harness,
+                kind="hcp",
+                prompt=prompt,
+                spawn_id=config.spawn_id,
+                harness_session_id=harness_session_id or None,
+                execution_cwd=execution_cwd,
+                launch_mode="app",
+            )
         )
         self._active_processes[c_id] = p_id
         self._chat_states[c_id] = ChatState.ACTIVE
@@ -126,8 +133,7 @@ class HcpSessionManager:
         except Exception:
             self._active_processes.pop(c_id, None)
             self._chat_states[c_id] = ChatState.IDLE
-            spawn_store.finalize_spawn(
-                self._runtime_root,
+            self._lifecycle_service.finalize(
                 p_id,
                 "failed",
                 1,
