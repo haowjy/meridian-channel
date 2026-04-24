@@ -67,6 +67,33 @@ def test_resolve_model_copies_alias_defaults_from_mars(
     assert result.default_autocompact == 65
 
 
+def test_resolve_model_keeps_unavailable_explicit_harness_from_mars(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def mock_mars_resolve(
+        name: str, project_root: object = None
+    ) -> dict[str, object] | None:
+        if name == "sonnet":
+            return {
+                "name": "sonnet",
+                "model_id": "claude-sonnet-4-6",
+                "harness": "claude",
+                "harness_source": "unavailable",
+                "harness_candidates": ["claude", "opencode", "gemini"],
+            }
+        return None
+
+    monkeypatch.setattr(
+        "meridian.lib.catalog.models.run_mars_models_resolve",
+        mock_mars_resolve,
+    )
+
+    result = resolve_model("sonnet")
+
+    assert str(result.model_id) == "claude-sonnet-4-6"
+    assert result.harness == HarnessId.CLAUDE
+
+
 def test_resolve_model_raw_model_id_pattern_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -101,7 +128,7 @@ def test_resolve_model_unknown_raises(monkeypatch: pytest.MonkeyPatch) -> None:
         resolve_model("some-unknown-model")
 
 
-def test_resolve_model_unavailable_harness_raises(
+def test_resolve_model_unavailable_harness_without_explicit_route_uses_pattern_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def mock_mars_resolve(
@@ -119,8 +146,11 @@ def test_resolve_model_unavailable_harness_raises(
         "meridian.lib.catalog.models.run_mars_models_resolve",
         mock_mars_resolve,
     )
-    with pytest.raises(ValueError, match="No installed harness"):
-        resolve_model("opus")
+
+    result = resolve_model("opus")
+
+    assert str(result.model_id) == "claude-opus-4-6"
+    assert result.harness == HarnessId.CLAUDE
 
 
 def test_resolve_model_empty_raises() -> None:

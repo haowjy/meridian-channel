@@ -57,23 +57,12 @@ def resolve_model(name_or_alias: str, project_root: Path | None = None) -> Alias
     if mars_result is not None:
         model_id = mars_result.get("model_id")
         harness = mars_result.get("harness")
-        harness_source = mars_result.get("harness_source", "")
 
         if isinstance(model_id, str) and model_id.strip():
             resolved_harness: HarnessId | None = None
             if isinstance(harness, str) and harness.strip():
                 with suppress(ValueError):
                     resolved_harness = HarnessId(harness.strip())
-
-            if harness_source == "unavailable":
-                candidates = mars_result.get("harness_candidates", [])
-                candidate_list: list[object] = []
-                if isinstance(candidates, list):
-                    candidate_list = cast("list[object]", candidates)
-                raise ValueError(
-                    f"No installed harness for model '{normalized}'. "
-                    f"Install one of: {', '.join(str(c) for c in candidate_list)}"
-                )
 
             if resolved_harness is None:
                 # Mars resolved the alias but didn't provide harness -> pattern fallback
