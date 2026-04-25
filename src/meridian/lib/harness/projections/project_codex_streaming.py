@@ -183,6 +183,12 @@ def project_codex_spec_to_thread_request(
 
     payload: dict[str, object] = {"cwd": cwd}
 
+    if spec.base_instructions:
+        payload["baseInstructions"] = spec.base_instructions
+
+    if spec.developer_instructions:
+        payload["developerInstructions"] = spec.developer_instructions
+
     if spec.model:
         payload["model"] = spec.model
 
