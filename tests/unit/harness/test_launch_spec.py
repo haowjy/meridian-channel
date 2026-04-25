@@ -76,12 +76,19 @@ def test_codex_resolve_launch_spec_uses_permission_config_values() -> None:
         prompt="test prompt",
         model=ModelId("gpt-5.3-codex"),
         effort="xhigh",
+        adhoc_agent_payload="base instructions",
+        appended_system_prompt="developer instructions",
+        user_turn_content="user turn",
     )
 
     spec = CodexAdapter().resolve_launch_spec(run, resolver)
 
     assert spec.model == "gpt-5.3-codex"
     assert spec.effort == "xhigh"
+    assert spec.prompt == "user turn"
+    assert spec.base_instructions == "base instructions"
+    assert spec.developer_instructions == "developer instructions"
+    assert spec.user_turn_content == "user turn"
     assert spec.permission_resolver.config.approval == "confirm"
     assert spec.permission_resolver.config.sandbox == "workspace-write"
 

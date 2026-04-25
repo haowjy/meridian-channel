@@ -43,6 +43,14 @@ _METHOD_SELECTION_FIELDS: frozenset[str] = frozenset(
     }
 )
 
+_INSTRUCTION_FIELDS: frozenset[str] = frozenset(
+    {
+        "base_instructions",
+        "developer_instructions",
+        "user_turn_content",
+    }
+)
+
 _LIFECYCLE_FIELDS: frozenset[str] = frozenset(
     {
         "prompt",
@@ -54,6 +62,7 @@ _ACCOUNTED_FIELDS: frozenset[str] = (
     _APP_SERVER_ARG_FIELDS
     | _JSONRPC_PARAM_FIELDS
     | _METHOD_SELECTION_FIELDS
+    | _INSTRUCTION_FIELDS
     | _LIFECYCLE_FIELDS
 )
 _PROJECTED_FIELDS: frozenset[str] = _ACCOUNTED_FIELDS
@@ -213,6 +222,7 @@ __all__ = [
     "_ACCOUNTED_FIELDS",
     "_APP_SERVER_ARG_FIELDS",
     "_DELEGATED_FIELDS",
+    "_INSTRUCTION_FIELDS",
     "_JSONRPC_PARAM_FIELDS",
     "_LIFECYCLE_FIELDS",
     "_METHOD_SELECTION_FIELDS",

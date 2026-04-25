@@ -20,6 +20,7 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Model alias resolution no longer fails dry-run/policy paths when mars reports the target harness binary is unavailable on the host. Explicit mars harness route still used.
 - HCP chat launch failure now finalizes spawn and stops session. Active HCP chats get heartbeat. Restore skips stopped chats.
 - HCP adapters no longer start harness connections; SpawnManager owns lifecycle.
+- Codex launch spec now carries base, developer, user-turn instruction channels for managed websocket plumbing.
 - OpenCode streaming now sends system instructions via message `system`, user/context via `parts`.
 - OpenCode HTTP connection: removed dead API path probing (`/sessions`, `/api/health`, cancel/stop variants), HTML workaround code, and speculative payload variants. Paths now match known opencode API surface.
 - Spawn finalization now treats `history.jsonl` as output before legacy `output.jsonl`.

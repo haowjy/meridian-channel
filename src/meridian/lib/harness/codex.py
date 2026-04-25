@@ -36,6 +36,14 @@ from meridian.lib.harness.launch_spec import CodexLaunchSpec
 from meridian.lib.harness.projections.project_codex_subprocess import (
     project_codex_spec_to_cli_args,
 )
+from meridian.lib.launch.composition import (
+    ComposedLaunchContent,
+    ProjectedContent,
+    ProjectionChannels,
+    build_reference_routing,
+    join_content_blocks,
+    render_task_context,
+)
 from meridian.lib.launch.constants import (
     BASE_COMMAND_CODEX_SUBPROCESS,
     PRIMARY_BASE_COMMAND_CODEX,
@@ -294,10 +302,13 @@ class CodexAdapter(BaseHarnessAdapter[CodexLaunchSpec]):
             "mcp_tools",
             "report_output_path",
             "project_root",
+            "adhoc_agent_payload",
+            "appended_system_prompt",
+            "user_turn_content",
         }
     )
     _EXPLICITLY_IGNORED_FIELDS: ClassVar[frozenset[str]] = frozenset(
-        {"skills", "agent", "adhoc_agent_payload", "appended_system_prompt", "user_turn_content"}
+        {"skills", "agent"}
     )
 
     @property
@@ -320,6 +331,7 @@ class CodexAdapter(BaseHarnessAdapter[CodexLaunchSpec]):
             supports_session_resume=True,
             supports_session_fork=True,
             supports_native_skills=True,
+            supports_native_agents=True,
             supports_primary_launch=True,
             supports_native_file_injection=False,
         )
@@ -327,12 +339,16 @@ class CodexAdapter(BaseHarnessAdapter[CodexLaunchSpec]):
     def run_prompt_policy(self) -> RunPromptPolicy:
         return RunPromptPolicy()
 
+    def build_adhoc_agent_payload(self, *, name: str, description: str, prompt: str) -> str:
+        _ = name, description
+        return prompt.strip()
+
     def resolve_launch_spec(self, run: SpawnParams, perms: PermissionResolver) -> CodexLaunchSpec:
         continue_session_id = (run.continue_harness_session_id or "").strip() or None
         return CodexLaunchSpec(
             model=str(run.model).strip() if run.model else None,
             effort=run.effort,
-            prompt=run.prompt,
+            prompt=run.user_turn_content or run.prompt,
             continue_session_id=continue_session_id,
             continue_fork=run.continue_fork and continue_session_id is not None,
             permission_resolver=perms,
@@ -340,6 +356,9 @@ class CodexAdapter(BaseHarnessAdapter[CodexLaunchSpec]):
             report_output_path=run.report_output_path,
             interactive=run.interactive,
             mcp_tools=run.mcp_tools,
+            base_instructions=run.adhoc_agent_payload.strip() or None,
+            developer_instructions=run.appended_system_prompt,
+            user_turn_content=run.user_turn_content,
         )
 
     def build_command(self, run: SpawnParams, perms: PermissionResolver) -> list[str]:
@@ -351,6 +370,39 @@ class CodexAdapter(BaseHarnessAdapter[CodexLaunchSpec]):
         # MCP injection is off by default — agents use the CLI instead.
         # Users who want always-on MCP can configure it in their harness settings.
         return None
+
+    def project_content(self, content: ComposedLaunchContent) -> ProjectedContent:
+        """Codex projection: separate developer instructions from user input.
+
+        Agent profile content is delivered through ``base_instructions`` via
+        ``build_adhoc_agent_payload``. The shared ProjectedContent model carries
+        developer instructions and user-turn content for later launch-spec
+        resolution.
+        """
+        reference_routing = build_reference_routing(content.reference_items)
+        developer_instructions = join_content_blocks(
+            content.skill_injection,
+            content.report_instruction,
+            content.inventory_prompt,
+            *content.passthrough_system_fragments,
+        )
+        task_context = render_task_context(
+            content.reference_items,
+            reference_routing,
+            content.prior_output,
+        )
+        user_turn = join_content_blocks(task_context, content.user_task_prompt)
+
+        return ProjectedContent(
+            system_prompt=developer_instructions,
+            user_turn_content=user_turn,
+            reference_routing=reference_routing,
+            channels=ProjectionChannels(
+                system_instruction="system-field" if developer_instructions.strip() else "none",
+                user_task_prompt="user-turn",
+                task_context="user-turn",
+            ),
+        )
 
     def env_overrides(self, config: PermissionConfig) -> dict[str, str]:
         _ = config

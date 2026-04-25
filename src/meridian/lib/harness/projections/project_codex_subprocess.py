@@ -32,7 +32,13 @@ _PROJECTED_FIELDS: frozenset[str] = frozenset(
     }
 )
 
-_DELEGATED_FIELDS: frozenset[str] = frozenset()
+_DELEGATED_FIELDS: frozenset[str] = frozenset(
+    {
+        "base_instructions",
+        "developer_instructions",
+        "user_turn_content",
+    }
+)
 
 
 def _coerce_permission_flags(raw: object) -> tuple[str, ...]:

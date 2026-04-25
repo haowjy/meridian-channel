@@ -73,10 +73,10 @@ def test_claude_project_content_routes_system_separately_from_user_turn() -> Non
         assert sentinel in projected.user_turn_content
 
 
-def test_codex_project_content_keeps_required_inline_ordering() -> None:
+def test_codex_project_content_separates_developer_instructions_from_user_turn() -> None:
     projected = CodexAdapter().project_content(_content())
 
-    assert projected.system_prompt == ""
+    assert projected.system_prompt
     assert [route.to_dict() for route in projected.reference_routing] == [
         {
             "path": "/repo/ref.txt",
@@ -86,23 +86,29 @@ def test_codex_project_content_keeps_required_inline_ordering() -> None:
         }
     ]
     assert projected.channel_manifest() == {
-        "system_instruction": "inline",
-        "user_task_prompt": "inline",
-        "task_context": "inline",
+        "system_instruction": "system-field",
+        "user_task_prompt": "user-turn",
+        "task_context": "user-turn",
     }
     _assert_ordered(
-        projected.user_turn_content,
+        projected.system_prompt,
         (
             "SYSTEM: skill content",
-            "SYSTEM: profile body",
             "SYSTEM: report instruction",
             "SYSTEM: agent inventory",
             "SYSTEM: passthrough fragment",
+        ),
+    )
+    assert "SYSTEM: profile body" not in projected.system_prompt
+    _assert_ordered(
+        projected.user_turn_content,
+        (
             "CONTEXT: reference file",
             "CONTEXT: prior output",
             "USER: task prompt",
         ),
     )
+    assert "SYSTEM: profile body" not in projected.user_turn_content
 
 
 def test_opencode_project_content_routes_system_via_message_system_field() -> None:

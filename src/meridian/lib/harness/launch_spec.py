@@ -25,6 +25,9 @@ class CodexLaunchSpec(ResolvedLaunchSpec):
     """Codex-specific resolved launch spec."""
 
     report_output_path: str | None = None
+    base_instructions: str | None = None
+    developer_instructions: str | None = None
+    user_turn_content: str | None = None
 
 
 class OpenCodeLaunchSpec(ResolvedLaunchSpec):
