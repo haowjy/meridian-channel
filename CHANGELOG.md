@@ -4,11 +4,14 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.0.45] - 2026-04-25
+
 ### Changed
 - `mars-agents` 0.1.18 -> 0.1.19. Mars model listing now uses harness-aware runnable visibility and OpenCode provider/model availability.
 - Background spawn note trimmed. `meridian spawn --bg` now returns a short "Backgrounded. Spawn id: ... Collect later with \`meridian spawn wait\`." hint instead of a long immediate-wait warning.
 - `meridian models list` now fails fast. Use `meridian mars models list`.
 - Codex managed primary stabilized. `meridian codex` fresh, resume, and fork sessions all use managed `app-server` path — no silent black-box fallback. Fresh sessions gate TUI attach on rollout materialization (`session_meta` present, not full turn completion). Startup telemetry phases shown on stderr: `Starting Codex app-server...` → `Connecting managed observer...` → `Creating fresh Codex thread...` → `Materializing rollout...` → `Attaching Codex TUI...`. Managed startup failure is loud — not silent. See [codex-tui-passthrough.md](docs/codex-tui-passthrough.md).
+- App server TCP launch now auto-increments default port when `7676` busy.
 
 ### Added
 - `state.retention_days` config key. TTL for stale state pruning: `-1` never prune, `0` prune immediately, positive = days. Default 30. Env var `MERIDIAN_STATE_RETENTION_DAYS`.
@@ -16,6 +19,8 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Background doctor cache. `meridian` / `meridian app` launch kicks scan after 24h; next text command shows one-line cleanup hint.
 - Session-scoped `MERIDIAN_HOME` test isolation. Tests no longer leak project dirs into user state.
 - AG-UI replay cursor pagination core. Raw seq cursor, lazy history iterator, invalid cursor errors.
+- WebSocket replay attach flow. Client sends `replay_ack` cursor; live stream skips already replayed events and keeps terminal sentinel.
+- `meridian spawn cancel-all`. Cancels all running spawns, optionally scoped to work item.
 - HCP core skeleton: capabilities, errors, lifecycle types, session manager. App lifespan restores HCP chats.
 - HCP harness adapters for Claude, Codex, OpenCode. HCP chats persist native session IDs from connection or stream events.
 
