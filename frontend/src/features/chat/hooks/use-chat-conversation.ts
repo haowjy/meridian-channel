@@ -1,60 +1,54 @@
 /**
  * useChatConversation — unified hook for chat conversation state.
  *
- * Combines three data sources into a single ConversationEntry[] model:
- * 1. History loaded from getChatHistory on mount → replayed through reducer
- * 2. Live streaming via SpawnChannel when activeSpawnId is set
- * 3. Chat API lifecycle (create, prompt, cancel)
+ * Wires the pure chat state machine (chat-conversation-machine.ts) to
+ * the effect runner (chat-conversation-effects.ts), producing the same
+ * return contract that ChatThreadView consumes.
  *
- * This is the main state owner for ChatThreadView. The component becomes
- * a thin rendering shell consuming entries + currentActivity.
+ * Architecture:
+ * 1. useReducer holds the ChatMachineContext
+ * 2. A wrapper reducer captures emitted commands in a ref
+ * 3. A post-dispatch effect flushes captured commands to the effect runner
+ * 4. The effect runner executes I/O and dispatches response events back
+ *
+ * This replaces the original ad-hoc useEffect/useState approach with an
+ * explicit phase machine and command model.
  */
 
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useReducer, useRef } from "react"
 
-import {
-  EventType,
-  SpawnChannel,
-  type StreamEvent as WsStreamEvent,
-  type WsState,
-} from "@/lib/ws"
-import { mapWsEventToStreamEvents } from "@/features/activity-stream/streaming/map-ws-event"
+import type { WsState } from "@/lib/ws"
 import type { StreamController } from "../transport-types"
 import type { ConversationEntry } from "../conversation-types"
 import type { ActivityBlockData } from "@/features/activity-stream/types"
-import {
-  conversationReducer,
-  createInitialConversationState,
-  type ConversationAction,
-  type ConversationState,
-} from "../conversation-reducer"
-import { useChatHistory } from "./use-chat-history"
-import {
-  createChat,
-  promptChat,
-  cancelChat,
-  getChat,
-  fetchSpawnReplay,
-  ApiError,
-  type ChatState as ApiChatState,
-  type ChatDetailResponse,
-  type CreateChatOptions,
+import type {
+  ChatState as ApiChatState,
+  ChatDetailResponse,
+  CreateChatOptions,
 } from "@/lib/api"
 
-import { transformHistoryToEntries } from "./transform-history"
+import {
+  chatMachineReducer,
+  createInitialMachineContext,
+  deriveChatState,
+} from "./chat-conversation-machine"
+import type {
+  ChatCommand,
+  ChatEvent,
+  ChatMachineContext,
+  TransitionResult,
+} from "./chat-conversation-types"
+import { useEffectRunner } from "./chat-conversation-effects"
 
 // ---------------------------------------------------------------------------
-// Types
+// Types (public contract — unchanged from the original hook)
 // ---------------------------------------------------------------------------
 
 export interface UseChatConversationOptions {
   chatId: string
-  activeSpawnId: string | null
   initialPrompt?: string | null
   createChatOptions?: CreateChatOptions
   onChatCreated?: (detail: ChatDetailResponse) => void
-  onSpawnStarted?: (spawnId: string) => void
-  onChatStateChange?: (state: ApiChatState) => void
 }
 
 export interface UseChatConversationReturn {
@@ -68,31 +62,36 @@ export interface UseChatConversationReturn {
   controller: StreamController
   chatState: ApiChatState | null
   chatDetail: ChatDetailResponse | null
+  activeSpawnId: string | null
   error: string | null
   sendMessage: (text: string) => Promise<void>
   cancel: () => Promise<void>
 }
 
 // ---------------------------------------------------------------------------
-// Reducer wrapper — extends ConversationAction with SEED_HISTORY
+// Wrapper reducer — captures commands in a ref for the effect runner
 // ---------------------------------------------------------------------------
 
-type ExtendedAction =
-  | ConversationAction
-  | { type: "SEED_HISTORY"; entries: ConversationEntry[] }
+/**
+ * We can't execute side effects inside a reducer, so we wrap the
+ * machine reducer to stash emitted commands in a mutable ref. The
+ * hook reads and flushes this ref after each dispatch via useEffect.
+ */
+type CommandSink = { current: ChatCommand[] }
 
-function extendedReducer(
-  state: ConversationState,
-  action: ExtendedAction,
-): ConversationState {
-  if (action.type === "SEED_HISTORY") {
-    return {
-      ...state,
-      entries: action.entries,
-      turnSeq: action.entries.length,
+function createWrappedReducer(commandSink: CommandSink) {
+  return function wrappedReducer(
+    ctx: ChatMachineContext,
+    event: ChatEvent,
+  ): ChatMachineContext {
+    const result: TransitionResult = chatMachineReducer(ctx, event)
+    // Append commands — multiple dispatches in a single render batch
+    // accumulate into the same array, flushed once in useEffect.
+    if (result.commands.length > 0) {
+      commandSink.current = [...commandSink.current, ...result.commands]
     }
+    return result.context
   }
-  return conversationReducer(state, action as ConversationAction)
 }
 
 // ---------------------------------------------------------------------------
@@ -101,420 +100,178 @@ function extendedReducer(
 
 export function useChatConversation({
   chatId,
-  activeSpawnId,
   initialPrompt,
   createChatOptions,
   onChatCreated,
-  onSpawnStarted,
-  onChatStateChange,
 }: UseChatConversationOptions): UseChatConversationReturn {
-  const [state, dispatch] = useReducer(extendedReducer, createInitialConversationState())
-  const [connectionState, setConnectionState] = useState<WsState>("idle")
-  const [chatState, setChatState] = useState<ApiChatState | null>(null)
-  const [chatDetail, setChatDetail] = useState<ChatDetailResponse | null>(null)
-  const [isCreating, setIsCreating] = useState(false)
-  const [isSending, setIsSending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  // ---- Command capture ----
+  // Stable ref survives re-renders; the wrapped reducer appends here.
+  const commandSinkRef = useRef<ChatCommand[]>([])
+  const wrappedReducer = useMemo(
+    () => createWrappedReducer(commandSinkRef),
+    [],
+  )
 
-  const channelRef = useRef<SpawnChannel | null>(null)
-  const receivedTerminalRef = useRef(false)
-  const generationRef = useRef(0)
-  const startedTextRef = useRef<Set<string>>(new Set())
-  const startedThinkingRef = useRef<Set<string>>(new Set())
-  const startedToolRef = useRef<Set<string>>(new Set())
-  const didAutoSend = useRef(false)
-  // Only connect WS when the chat is actively streaming. For idle/closed
-  // chats loaded from sidebar, history REST is sufficient — no WS needed
-  // until the user sends a message or the chat is known to be active.
-  const [wsEnabled, setWsEnabled] = useState(false)
+  const [ctx, rawDispatch] = useReducer(wrappedReducer, undefined, createInitialMachineContext)
 
-  // Stable refs for callbacks/options to avoid stale closures in SpawnChannel
-  const createChatOptionsRef = useRef(createChatOptions)
-  createChatOptionsRef.current = createChatOptions
+  // ---- Stable callback refs ----
   const onChatCreatedRef = useRef(onChatCreated)
   onChatCreatedRef.current = onChatCreated
-  const onSpawnStartedRef = useRef(onSpawnStarted)
-  onSpawnStartedRef.current = onSpawnStarted
-  const onChatStateChangeRef = useRef(onChatStateChange)
-  onChatStateChangeRef.current = onChatStateChange
 
-  const resetStartedSets = useCallback(() => {
-    startedTextRef.current.clear()
-    startedThinkingRef.current.clear()
-    startedToolRef.current.clear()
-    receivedTerminalRef.current = false
-  }, [])
+  // ---- Effect runner ----
+  const effectRunner = useEffectRunner(rawDispatch, {
+    createChatOptions,
+    callbacks: {
+      onChatCreated: (detail) => onChatCreatedRef.current?.(detail),
+    },
+  })
+
+  // ---- Flush commands after each render that produced them ----
+  // useEffect runs after React commits the state update, so ctx is
+  // consistent with the commands being flushed.
+  useEffect(() => {
+    const commands = commandSinkRef.current
+    if (commands.length === 0) return
+    commandSinkRef.current = []
+    effectRunner.executeCommands(commands)
+  })
 
   // -----------------------------------------------------------------------
-  // 0. Reset state when chatId changes (prevents stale entries on switch)
-  //    Exception: __new__ → real ID is the same conversation (chat creation),
-  //    so preserve the USER_SENT entry and streaming state.
+  // Chat selection — translate external chatId into machine events
   // -----------------------------------------------------------------------
 
-  const prevChatIdRef = useRef(chatId)
+  const prevChatIdRef = useRef<string | null>(null)
+  const didMount = useRef(false)
 
   useEffect(() => {
+    if (!didMount.current) {
+      // First mount — fire the initial selection event
+      didMount.current = true
+      prevChatIdRef.current = chatId
+
+      if (chatId === "__new__") {
+        rawDispatch({ type: "SELECT_ZERO" })
+      } else {
+        rawDispatch({ type: "SELECT_CHAT", chatId })
+      }
+      return
+    }
+
+    // Subsequent chatId changes
     if (prevChatIdRef.current === chatId) return
     const wasNew = prevChatIdRef.current === "__new__"
     prevChatIdRef.current = chatId
 
-    // When transitioning from zero state to a created chat, keep the
-    // conversation entries (the user's first message) and streaming refs.
-    // Only clear transient API state so the detail fetch picks up the real chat.
+    // Transition from __new__ → real ID means the create succeeded and
+    // the machine already has the right state. Don't re-select.
     if (wasNew && chatId !== "__new__") {
-      didSeedHistory.current = chatId // Skip re-seeding — entries are live
-      setError(null)
       return
     }
 
-    dispatch({ type: "RESET" })
-    didSeedHistory.current = null
-    didAutoSend.current = false
-    setWsEnabled(false)
-    setError(null)
-    setChatState(null)
-    setChatDetail(null)
-    resetStartedSets()
-  }, [chatId, resetStartedSets])
+    if (chatId === "__new__") {
+      rawDispatch({ type: "SELECT_ZERO" })
+    } else {
+      rawDispatch({ type: "SELECT_CHAT", chatId })
+    }
+  }, [chatId, rawDispatch])
 
   // -----------------------------------------------------------------------
-  // 1. Load chat detail on mount (for existing chats)
+  // Auto-send initial prompt for new chats
   // -----------------------------------------------------------------------
+
+  const didAutoSend = useRef(false)
+  const prevInitialPrompt = useRef(initialPrompt)
 
   useEffect(() => {
-    if (chatId === "__new__") return
+    if (!initialPrompt) return
+    if (chatId !== "__new__") return
+    // Only auto-send once per initialPrompt value
+    if (didAutoSend.current && prevInitialPrompt.current === initialPrompt) return
 
-    let cancelled = false
-    getChat(chatId)
-      .then((detail) => {
-        if (cancelled) return
-        setChatState(detail.state)
-        setChatDetail(detail)
-        onChatStateChangeRef.current?.(detail.state)
-        // Only connect WS if the chat is actively running — idle/closed
-        // chats just show history from REST, no WS needed.
-        const isActive = detail.state === "active" || detail.state === "draining"
-        if (isActive && detail.active_p_id) {
-          setWsEnabled(true)
-          onSpawnStartedRef.current?.(detail.active_p_id)
-        }
-      })
-      .catch((err) => {
-        if (cancelled) return
-        setError(err instanceof Error ? err.message : String(err))
-      })
+    didAutoSend.current = true
+    prevInitialPrompt.current = initialPrompt
 
-    return () => {
-      cancelled = true
-    }
+    rawDispatch({
+      type: "SEND_MESSAGE",
+      text: initialPrompt,
+      id: `user-${Date.now()}`,
+      sentAt: new Date(),
+    })
+  }, [initialPrompt, chatId, rawDispatch])
+
+  // Reset auto-send flag when chatId changes
+  useEffect(() => {
+    didAutoSend.current = false
   }, [chatId])
 
   // -----------------------------------------------------------------------
-  // 2. Load and transform history
-  // -----------------------------------------------------------------------
-
-  const { events: historyEvents, isLoading: historyLoading } = useChatHistory(
-    chatId !== "__new__" ? chatId : null,
-  )
-
-  const didSeedHistory = useRef<string | null>(null)
-
-  useEffect(() => {
-    if (historyEvents.length === 0) return
-    if (didSeedHistory.current === chatId) return // Already seeded this chat
-    didSeedHistory.current = chatId
-
-    const entries = transformHistoryToEntries(historyEvents)
-    dispatch({ type: "SEED_HISTORY", entries })
-  }, [historyEvents, chatId])
-
-  // -----------------------------------------------------------------------
-  // 3. Auto-send initial prompt for new chats
+  // Cleanup on unmount
   // -----------------------------------------------------------------------
 
   useEffect(() => {
-    if (!initialPrompt || didAutoSend.current) return
-    if (chatId !== "__new__") return
-    didAutoSend.current = true
-
-    // Add user message immediately
-    dispatch({
-      type: "USER_SENT",
-      id: `user-${Date.now()}`,
-      text: initialPrompt,
-    })
-
-    // Create the chat
-    setIsCreating(true)
-    setError(null)
-
-    createChat(initialPrompt, createChatOptionsRef.current)
-      .then((detail) => {
-        setChatState(detail.state)
-        setChatDetail(detail)
-        onChatCreatedRef.current?.(detail)
-      })
-      .catch((err) => {
-        setError(err instanceof Error ? err.message : String(err))
-      })
-      .finally(() => {
-        setIsCreating(false)
-      })
-  }, [initialPrompt, chatId])
-
-  // -----------------------------------------------------------------------
-  // 4. WebSocket streaming — connect only when wsEnabled AND activeSpawnId set.
-  //    For idle/closed chats, history REST is sufficient. WS connects when:
-  //    - Chat detail shows active/draining state (loaded from sidebar)
-  //    - Chat just created (zero state → first message)
-  //    - Follow-up message sent to idle chat
-  //    Uses Connect-Then-Replay protocol for existing chats (EARS-R011)
-  // -----------------------------------------------------------------------
-
-  useEffect(() => {
-    if (!activeSpawnId || !wsEnabled) {
-      channelRef.current?.destroy()
-      channelRef.current = null
-      setConnectionState("idle")
-      resetStartedSets()
-      return
-    }
-
-    // Freeze any previous streaming state before connecting new spawn
-    if (state.current !== null) {
-      dispatch({ type: "SESSION_ENDED" })
-    }
-
-    resetStartedSets()
-    setConnectionState("connecting")
-
-    const currentGeneration = ++generationRef.current
-    const currentSpawnId = activeSpawnId
-
-    // Determine if we should use replay mode (for existing chats, not new ones)
-    const useReplayMode = chatId !== "__new__"
-
-    const channel = new SpawnChannel(
-      currentSpawnId,
-      {
-        onEvent: (event: WsStreamEvent) => {
-          if (generationRef.current !== currentGeneration) {
-            return
-          }
-
-          // Skip capabilities events
-          if (event.type === EventType.CUSTOM && (event as { name: string }).name === "capabilities") {
-            return
-          }
-
-          for (const mapped of mapWsEventToStreamEvents(event, {
-            text: startedTextRef.current,
-            thinking: startedThinkingRef.current,
-            tool: startedToolRef.current,
-          })) {
-            dispatch({ type: "STREAM_EVENT", event: mapped })
-
-            if (mapped.type === "RUN_ERROR") {
-              receivedTerminalRef.current = true
-            }
-          }
-        },
-        onClose: () => {
-          if (generationRef.current !== currentGeneration) return
-
-          if (receivedTerminalRef.current) {
-            dispatch({ type: "SESSION_ENDED" })
-          }
-        },
-        onStateChange: (nextState) => {
-          if (generationRef.current !== currentGeneration) return
-          setConnectionState(nextState)
-        },
-      },
-      // Pass replay query param for existing chats (EARS-R006)
-      useReplayMode ? { queryParams: { replay: "1" } } : {},
-    )
-
-    channel.connect()
-    channelRef.current = channel
-
-    // If using replay mode, fetch replay snapshot and seed conversation (EARS-R011)
-    if (useReplayMode) {
-      ;(async () => {
-        try {
-          const snapshot = await fetchSpawnReplay(currentSpawnId)
-          if (generationRef.current !== currentGeneration) return
-
-          // Transform replay events into conversation entries
-          // The events are already in the same format as history events
-          const entries = transformHistoryToEntries(snapshot.events)
-
-          // Interleave inbound user messages (EARS-R012)
-          // K-th inbound entry is inserted before K-th assistant turn
-          if (snapshot.inbound.length > 0) {
-            const entriesWithInbound: ConversationEntry[] = []
-            let inboundIdx = 0
-            for (const entry of entries) {
-              // Insert user message before each assistant entry (turn boundary)
-              if (entry.kind === "assistant" && inboundIdx < snapshot.inbound.length) {
-                const inbound = snapshot.inbound[inboundIdx]
-                entriesWithInbound.push({
-                  kind: "user",
-                  id: `replay-user-${inbound.seq}`,
-                  text: inbound.text,
-                  sentAt: new Date(inbound.ts * 1000),
-                })
-                inboundIdx++
-              }
-              entriesWithInbound.push(entry)
-            }
-            // Add any remaining inbound messages (shouldn't happen normally)
-            while (inboundIdx < snapshot.inbound.length) {
-              const inbound = snapshot.inbound[inboundIdx]
-              entriesWithInbound.push({
-                kind: "user",
-                id: `replay-user-${inbound.seq}`,
-                text: inbound.text,
-                sentAt: new Date(inbound.ts * 1000),
-              })
-              inboundIdx++
-            }
-            dispatch({ type: "SEED_HISTORY", entries: entriesWithInbound })
-          } else {
-            dispatch({ type: "SEED_HISTORY", entries })
-          }
-
-          // Send replay acknowledgment to unblock WS streaming (EARS-R011 step 4)
-          channel.sendReplayAck(snapshot.cursor)
-        } catch (err) {
-          // Replay fetch failed — fall back to current behavior (EARS-R015)
-          // The WS will timeout and send all events from subscription time
-          console.warn("Replay fetch failed, falling back to live-only mode:", err)
-        }
-      })()
-    }
-
     return () => {
-      channel.destroy()
-      if (channelRef.current === channel) {
-        channelRef.current = null
-      }
+      effectRunner.destroy()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSpawnId, wsEnabled, resetStartedSets, chatId])
+  }, [])
 
   // -----------------------------------------------------------------------
-  // 5. Send message
+  // User actions
   // -----------------------------------------------------------------------
 
   const sendMessage = useCallback(
     async (text: string) => {
-      const trimmed = text.trim()
-      if (!trimmed) return
-
-      setError(null)
-
-      // Append user message immediately
-      dispatch({
-        type: "USER_SENT",
+      rawDispatch({
+        type: "SEND_MESSAGE",
+        text,
         id: `user-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        text: trimmed,
+        sentAt: new Date(),
       })
-
-      if (chatId === "__new__") {
-        setIsCreating(true)
-        try {
-          const detail = await createChat(trimmed, createChatOptionsRef.current)
-          setChatState(detail.state)
-          setWsEnabled(true) // Chat just created — connect WS for streaming
-          onChatCreatedRef.current?.(detail)
-        } catch (err) {
-          setError(err instanceof Error ? err.message : String(err))
-        } finally {
-          setIsCreating(false)
-        }
-      } else {
-        setIsSending(true)
-        try {
-          const detail = await promptChat(chatId, trimmed)
-          setChatState(detail.state)
-          setChatDetail(detail)
-          setWsEnabled(true) // Follow-up sent — connect WS for streaming
-          onChatStateChangeRef.current?.(detail.state)
-          if (detail.active_p_id) {
-            onSpawnStartedRef.current?.(detail.active_p_id)
-          }
-        } catch (err) {
-          if (err instanceof ApiError && err.status === 409) {
-            setError("Chat is busy — waiting for the current response to complete.")
-          } else {
-            setError(err instanceof Error ? err.message : String(err))
-          }
-        } finally {
-          setIsSending(false)
-        }
-      }
     },
-    [chatId],
+    [rawDispatch],
   )
 
-  // -----------------------------------------------------------------------
-  // 6. Cancel
-  // -----------------------------------------------------------------------
-
   const cancel = useCallback(async () => {
-    if (chatId === "__new__") return
-
-    // Optimistically show draining state
-    setChatState("draining")
-    onChatStateChangeRef.current?.("draining")
-
-    try {
-      await cancelChat(chatId)
-      // Refetch to get the settled state
-      const detail = await getChat(chatId)
-      setChatState(detail.state)
-      setChatDetail(detail)
-      onChatStateChangeRef.current?.(detail.state)
-    } catch {
-      // Cancel is best-effort — state will settle via WS
-    }
-  }, [chatId])
+    rawDispatch({ type: "CANCEL" })
+  }, [rawDispatch])
 
   // -----------------------------------------------------------------------
-  // 7. Stream controller (WS-based interrupt/cancel)
+  // Stream controller
   // -----------------------------------------------------------------------
 
   const controller = useMemo<StreamController>(
     () => ({
-      sendMessage: (msg) => channelRef.current?.sendMessage(msg) ?? false,
-      interrupt: () => channelRef.current?.interrupt() ?? false,
+      sendMessage: (msg) => effectRunner.getChannel()?.sendMessage(msg) ?? false,
+      interrupt: () => effectRunner.getChannel()?.interrupt() ?? false,
       cancel: () => {
-        channelRef.current?.cancel()
+        effectRunner.getChannel()?.cancel()
       },
     }),
-    [],
+    [effectRunner],
   )
 
   // -----------------------------------------------------------------------
-  // 8. Derived state
+  // Derived state
   // -----------------------------------------------------------------------
 
-  const isStreaming = Boolean(state.current?.activity.isStreaming)
-  const currentActivity = state.current?.activity ?? null
+  const derived = deriveChatState(ctx)
+
+  // Map machine transportState to the WsState the view expects
+  const connectionState: WsState = ctx.transportState
 
   return {
-    entries: state.entries,
-    currentActivity,
-    isStreaming,
-    isLoading: historyLoading,
-    isCreating,
-    isSending,
+    entries: ctx.entries,
+    currentActivity: derived.currentActivity,
+    isStreaming: derived.isStreaming,
+    isLoading: derived.isLoading,
+    isCreating: derived.isCreating,
+    isSending: derived.isSending,
     connectionState,
     controller,
-    chatState,
-    chatDetail,
-    error,
+    chatState: ctx.chatState,
+    chatDetail: ctx.chatDetail,
+    activeSpawnId: ctx.activeSpawnId,
+    error: ctx.error,
     sendMessage,
     cancel,
   }

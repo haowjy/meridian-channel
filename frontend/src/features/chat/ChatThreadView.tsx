@@ -45,15 +45,12 @@ export interface ChatThreadViewProps {
 export function ChatThreadView({ chatId, className }: ChatThreadViewProps) {
   const {
     selectedChat,
-    setChatState,
-    setActiveSpawnId,
     selectChat,
     clearChat,
     modelSelection,
     setModelSelection,
   } = useChat()
 
-  const activeSpawnId = selectedChat?.active_p_id ?? null
   const initialPrompt = selectedChat?.initialPrompt ?? null
 
   // Fetch model catalog for the picker
@@ -79,42 +76,35 @@ export function ChatThreadView({ chatId, className }: ChatThreadViewProps) {
     isSending,
     connectionState,
     controller,
-    chatState: hookChatState,
+    chatState,
     chatDetail,
+    activeSpawnId,
     error,
     sendMessage: rawSendMessage,
     cancel,
   } = useChatConversation({
     chatId,
-    activeSpawnId,
     initialPrompt,
     // Pass model selection as createChatOptions for new chats
     createChatOptions: modelSelection
       ? { model: modelSelection.modelId, harness: modelSelection.harness }
       : undefined,
     onChatCreated: (detail) => {
+      // Update selection identity so the page knows which chat is active.
+      // Lifecycle state (chatState, activeSpawnId) is owned by the machine.
       selectChat(detail, { initialPrompt: null })
-      setActiveSpawnId(detail.active_p_id)
-    },
-    onSpawnStarted: (spawnId) => {
-      setActiveSpawnId(spawnId)
-    },
-    onChatStateChange: (state) => {
-      setChatState(state)
     },
   })
 
-  const chatState = selectedChat?.state ?? hookChatState ?? "idle"
   const uiState = deriveChatUIState(chatId, chatDetail, chatState)
 
   const composerDisabled = isCreating || isSending || uiState === "readonly" || uiState === "loading"
   const threadTitle = selectedChat?.title ?? "New chat"
-  const threadModel = chatDetail?.model ?? selectedChat?.model ?? null
+  const threadModel = chatDetail?.model ?? null
   const threadHarness = useMemo(() => {
-    const spawnId = selectedChat?.active_p_id ?? null
-    if (!spawnId) return null
-    return chatDetail?.spawns.find((spawn) => spawn.spawn_id === spawnId)?.harness ?? null
-  }, [chatDetail, selectedChat?.active_p_id])
+    if (!activeSpawnId) return null
+    return chatDetail?.spawns.find((spawn) => spawn.spawn_id === activeSpawnId)?.harness ?? null
+  }, [chatDetail, activeSpawnId])
 
   const handleCancel = useCallback(async () => {
     await cancel()

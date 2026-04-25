@@ -1,17 +1,15 @@
 /**
  * Chat-only context.
  *
- * The shell now shows chats, not spawns, so this provider only tracks the
- * selected chat and the live chat state needed by the thread view.
+ * Tracks which chat is selected (navigation identity) and model picker state.
+ * Lifecycle state (chatState, activeSpawnId, chatDetail) is owned by the
+ * chat conversation machine — not duplicated here.
  */
 
 import { createContext, useCallback, useContext, useMemo, useState } from "react"
 import type { ReactNode } from "react"
 
-import type {
-  ChatProjection,
-  ChatState as ApiChatState,
-} from "@/lib/api"
+import type { ChatProjection } from "@/lib/api"
 
 export interface ChatSelection extends ChatProjection {
   initialPrompt: string | null
@@ -30,8 +28,6 @@ export interface ChatContextValue {
     options?: { initialPrompt?: string | null },
   ) => void
   clearChat: () => void
-  setChatState: (chatState: ApiChatState) => void
-  setActiveSpawnId: (spawnId: string | null) => void
   modelSelection: ModelSelection | null
   setModelSelection: (selection: ModelSelection | null) => void
 }
@@ -61,31 +57,15 @@ export function ChatProvider({ children }: ChatProviderProps) {
     setSelectedChat(null)
   }, [])
 
-  const setChatState = useCallback((chatState: ApiChatState) => {
-    setSelectedChat((prev) => {
-      if (!prev) return prev
-      return { ...prev, state: chatState }
-    })
-  }, [])
-
-  const setActiveSpawnId = useCallback((spawnId: string | null) => {
-    setSelectedChat((prev) => {
-      if (!prev) return prev
-      return { ...prev, active_p_id: spawnId }
-    })
-  }, [])
-
   const value = useMemo<ChatContextValue>(
     () => ({
       selectedChat,
       selectChat,
       clearChat,
-      setChatState,
-      setActiveSpawnId,
       modelSelection,
       setModelSelection,
     }),
-    [selectedChat, selectChat, clearChat, setChatState, setActiveSpawnId, modelSelection],
+    [selectedChat, selectChat, clearChat, modelSelection],
   )
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>
