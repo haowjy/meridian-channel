@@ -338,6 +338,11 @@ def test_run_harness_process_writes_codex_inline_primary_projection_manifest(
             extra_args=(
                 f"--append-system-prompt={harness_id.value} passthrough system prompt",
             ),
+            session=SessionRequest(
+                requested_harness_session_id="existing-codex-session",
+                continue_chat_id="c-codex",
+                primary_session_mode=SessionMode.RESUME.value,
+            ),
         ),
         runtime=LaunchRuntime(
             argv_intent=LaunchArgvIntent.REQUIRED,
@@ -424,6 +429,11 @@ def test_run_harness_process_writes_opencode_system_field_primary_projection_man
             harness=harness_id.value,
             extra_args=(
                 f"--append-system-prompt={harness_id.value} passthrough system prompt",
+            ),
+            session=SessionRequest(
+                requested_harness_session_id="existing-opencode-session",
+                continue_chat_id="c-opencode",
+                primary_session_mode=SessionMode.RESUME.value,
             ),
         ),
         runtime=LaunchRuntime(
@@ -523,6 +533,11 @@ def test_run_harness_process_codex_primary_routes_to_managed_path(
         project_root=project_root,
         harness_id=HarnessId.CODEX,
         model="gpt-5.4",
+        session=SessionRequest(
+            requested_harness_session_id="existing-codex-session",
+            continue_chat_id="c-codex",
+            primary_session_mode=SessionMode.RESUME.value,
+        ),
     )
     codex_adapter = harness_registry.get_subprocess_harness(HarnessId.CODEX)
     captured: dict[str, object] = {}
@@ -572,6 +587,11 @@ def test_run_harness_process_managed_marks_running_before_attach_returns(
         project_root=project_root,
         harness_id=HarnessId.CODEX,
         model="gpt-5.4",
+        session=SessionRequest(
+            requested_harness_session_id="existing-codex-session",
+            continue_chat_id="c-codex",
+            primary_session_mode=SessionMode.RESUME.value,
+        ),
     )
     codex_adapter = harness_registry.get_subprocess_harness(HarnessId.CODEX)
     captured: dict[str, object] = {}
@@ -633,6 +653,11 @@ def test_run_harness_process_opencode_primary_routes_to_managed_path(
         project_root=project_root,
         harness_id=HarnessId.OPENCODE,
         model="gemini-2.5-pro",
+        session=SessionRequest(
+            requested_harness_session_id="existing-opencode-session",
+            continue_chat_id="c-opencode",
+            primary_session_mode=SessionMode.RESUME.value,
+        ),
     )
     opencode_adapter = harness_registry.get_subprocess_harness(HarnessId.OPENCODE)
     captured: dict[str, object] = {}
@@ -764,6 +789,11 @@ def test_run_harness_process_managed_failure_falls_back_to_black_box(
         project_root=project_root,
         harness_id=HarnessId.CODEX,
         model="gpt-5.4",
+        session=SessionRequest(
+            requested_harness_session_id="existing-codex-session",
+            continue_chat_id="c-codex",
+            primary_session_mode=SessionMode.RESUME.value,
+        ),
     )
     codex_adapter = harness_registry.get_subprocess_harness(HarnessId.CODEX)
     managed_calls = 0
