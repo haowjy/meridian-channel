@@ -58,8 +58,15 @@ export interface EffectRunnerHandle {
   /** Get the current SpawnChannel (for StreamController delegation). */
   getChannel: () => SpawnChannel | null
 
-  /** Tear down all resources (WS, pending fetches). */
+  /** Tear down all resources (WS, pending fetches). Dispatches WS_CLOSED. */
   destroy: () => void
+
+  /**
+   * Tear down all resources WITHOUT dispatching any events.
+   * Used during deactivation to freeze state — the channel is destroyed
+   * but the machine context remains untouched.
+   */
+  destroySilently: () => void
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -102,6 +109,23 @@ export function useEffectRunner(
 
   function destroyChannel() {
     channelRef.current?.destroy()
+    channelRef.current = null
+    startedSetsRef.current = freshStartedSets()
+  }
+
+  /**
+   * Tear down the channel without triggering any event dispatch.
+   * Temporarily replaces the dispatch ref with a no-op so that
+   * synchronous onClose callbacks from channel.destroy() are silenced.
+   */
+  function destroyChannelSilently() {
+    const savedDispatch = dispatchRef.current
+    dispatchRef.current = () => {} // swallow all events during teardown
+    try {
+      channelRef.current?.destroy()
+    } finally {
+      dispatchRef.current = savedDispatch
+    }
     channelRef.current = null
     startedSetsRef.current = freshStartedSets()
   }
@@ -339,7 +363,12 @@ export function useEffectRunner(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  return { executeCommands, getChannel, destroy }
+  const destroySilently = useCallback(() => {
+    destroyChannelSilently()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  return { executeCommands, getChannel, destroy, destroySilently }
 }
 
 // ═══════════════════════════════════════════════════════════════════

@@ -46,6 +46,7 @@ import { useEffectRunner } from "./chat-conversation-effects"
 
 export interface UseChatConversationOptions {
   chatId: string
+  isActive?: boolean // Default true — when false, all side effects are suppressed
   initialPrompt?: string | null
   createChatOptions?: CreateChatOptions
   onChatCreated?: (detail: ChatDetailResponse) => void
@@ -100,6 +101,7 @@ function createWrappedReducer(commandSink: CommandSink) {
 
 export function useChatConversation({
   chatId,
+  isActive = true,
   initialPrompt,
   createChatOptions,
   onChatCreated,
@@ -118,18 +120,64 @@ export function useChatConversation({
   const onChatCreatedRef = useRef(onChatCreated)
   onChatCreatedRef.current = onChatCreated
 
+  // ---- Inactive dispatch gate ----
+  // When inactive, async callbacks (WS onClose, fetch .then) must not
+  // mutate the machine context. We gate dispatch through a ref that
+  // checks isActive before forwarding. This ensures state is truly
+  // frozen while the conversation is dormant.
+  const isActiveRef = useRef(isActive)
+  isActiveRef.current = isActive
+
+  const gatedDispatch = useCallback(
+    (event: ChatEvent) => {
+      if (!isActiveRef.current) return // Drop events while inactive
+      rawDispatch(event)
+    },
+    [rawDispatch],
+  )
+
   // ---- Effect runner ----
-  const effectRunner = useEffectRunner(rawDispatch, {
+  // Uses gatedDispatch so async callbacks from destroyed channels
+  // (WS_CLOSED, in-flight fetch responses) are silently dropped
+  // when the conversation is inactive.
+  const effectRunner = useEffectRunner(gatedDispatch, {
     createChatOptions,
     callbacks: {
       onChatCreated: (detail) => onChatCreatedRef.current?.(detail),
     },
   })
 
+  // ---- Active state transitions (deactivation + reactivation) ----
+  // Single effect handles both directions to avoid split-ref races.
+  const wasActiveRef = useRef(isActive)
+  const didReactivate = useRef(false)
+
+  useEffect(() => {
+    const wasActive = wasActiveRef.current
+    wasActiveRef.current = isActive
+
+    if (wasActive && !isActive) {
+      // Active → inactive: tear down WS silently (no WS_CLOSED dispatch),
+      // drop queued commands. Machine context stays frozen.
+      commandSinkRef.current = []
+      effectRunner.destroySilently()
+    } else if (!wasActive && isActive) {
+      // Inactive → active: flag reactivation so the chat-selection effect
+      // re-bootstraps (fetch detail, reconnect WS, etc.).
+      // Skip on initial mount — the chat-selection effect handles that.
+      didReactivate.current = true
+    }
+  }, [isActive, effectRunner])
+
   // ---- Flush commands after each render that produced them ----
   // useEffect runs after React commits the state update, so ctx is
   // consistent with the commands being flushed.
   useEffect(() => {
+    if (!isActive) {
+      // Inactive: silently discard any commands the reducer emitted.
+      commandSinkRef.current = []
+      return
+    }
     const commands = commandSinkRef.current
     if (commands.length === 0) return
     commandSinkRef.current = []
@@ -144,9 +192,12 @@ export function useChatConversation({
   const didMount = useRef(false)
 
   useEffect(() => {
-    if (!didMount.current) {
-      // First mount — fire the initial selection event
+    if (!isActive) return // Suppress selection while dormant
+
+    if (!didMount.current || didReactivate.current) {
+      // First mount OR reactivation — fire the initial selection event
       didMount.current = true
+      didReactivate.current = false
       prevChatIdRef.current = chatId
 
       if (chatId === "__new__") {
@@ -173,7 +224,7 @@ export function useChatConversation({
     } else {
       rawDispatch({ type: "SELECT_CHAT", chatId })
     }
-  }, [chatId, rawDispatch])
+  }, [chatId, isActive, rawDispatch])
 
   // -----------------------------------------------------------------------
   // Auto-send initial prompt for new chats
@@ -183,6 +234,7 @@ export function useChatConversation({
   const prevInitialPrompt = useRef(initialPrompt)
 
   useEffect(() => {
+    if (!isActive) return // Suppress auto-send while dormant
     if (!initialPrompt) return
     if (chatId !== "__new__") return
     // Only auto-send once per initialPrompt value
@@ -197,7 +249,7 @@ export function useChatConversation({
       id: `user-${Date.now()}`,
       sentAt: new Date(),
     })
-  }, [initialPrompt, chatId, rawDispatch])
+  }, [initialPrompt, chatId, isActive, rawDispatch])
 
   // Reset auto-send flag when chatId changes
   useEffect(() => {
