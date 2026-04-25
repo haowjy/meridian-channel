@@ -26,6 +26,7 @@
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-markdown": "^10.1.0",
+    "react-virtuoso": "^4.18.6",
     "shadcn": "^4.0.7",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.5.0",
