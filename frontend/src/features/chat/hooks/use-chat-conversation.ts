@@ -123,6 +123,10 @@ export function useChatConversation({
   const startedThinkingRef = useRef<Set<string>>(new Set())
   const startedToolRef = useRef<Set<string>>(new Set())
   const didAutoSend = useRef(false)
+  // Only connect WS when the chat is actively streaming. For idle/closed
+  // chats loaded from sidebar, history REST is sufficient — no WS needed
+  // until the user sends a message or the chat is known to be active.
+  const [wsEnabled, setWsEnabled] = useState(false)
 
   // Stable refs for callbacks/options to avoid stale closures in SpawnChannel
   const createChatOptionsRef = useRef(createChatOptions)
@@ -142,18 +146,31 @@ export function useChatConversation({
   }, [])
 
   // -----------------------------------------------------------------------
-  // 0. Reset all state when chatId changes (prevents stale entries on switch)
+  // 0. Reset state when chatId changes (prevents stale entries on switch)
+  //    Exception: __new__ → real ID is the same conversation (chat creation),
+  //    so preserve the USER_SENT entry and streaming state.
   // -----------------------------------------------------------------------
 
   const prevChatIdRef = useRef(chatId)
 
   useEffect(() => {
     if (prevChatIdRef.current === chatId) return
+    const wasNew = prevChatIdRef.current === "__new__"
     prevChatIdRef.current = chatId
+
+    // When transitioning from zero state to a created chat, keep the
+    // conversation entries (the user's first message) and streaming refs.
+    // Only clear transient API state so the detail fetch picks up the real chat.
+    if (wasNew && chatId !== "__new__") {
+      didSeedHistory.current = chatId // Skip re-seeding — entries are live
+      setError(null)
+      return
+    }
 
     dispatch({ type: "RESET" })
     didSeedHistory.current = null
     didAutoSend.current = false
+    setWsEnabled(false)
     setError(null)
     setChatState(null)
     setChatDetail(null)
@@ -174,7 +191,11 @@ export function useChatConversation({
         setChatState(detail.state)
         setChatDetail(detail)
         onChatStateChangeRef.current?.(detail.state)
-        if (detail.active_p_id) {
+        // Only connect WS if the chat is actively running — idle/closed
+        // chats just show history from REST, no WS needed.
+        const isActive = detail.state === "active" || detail.state === "draining"
+        if (isActive && detail.active_p_id) {
+          setWsEnabled(true)
           onSpawnStartedRef.current?.(detail.active_p_id)
         }
       })
@@ -242,12 +263,16 @@ export function useChatConversation({
   }, [initialPrompt, chatId])
 
   // -----------------------------------------------------------------------
-  // 4. WebSocket streaming — connect when activeSpawnId changes
+  // 4. WebSocket streaming — connect only when wsEnabled AND activeSpawnId set.
+  //    For idle/closed chats, history REST is sufficient. WS connects when:
+  //    - Chat detail shows active/draining state (loaded from sidebar)
+  //    - Chat just created (zero state → first message)
+  //    - Follow-up message sent to idle chat
   //    Uses Connect-Then-Replay protocol for existing chats (EARS-R011)
   // -----------------------------------------------------------------------
 
   useEffect(() => {
-    if (!activeSpawnId) {
+    if (!activeSpawnId || !wsEnabled) {
       channelRef.current?.destroy()
       channelRef.current = null
       setConnectionState("idle")
@@ -376,7 +401,7 @@ export function useChatConversation({
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSpawnId, resetStartedSets, chatId])
+  }, [activeSpawnId, wsEnabled, resetStartedSets, chatId])
 
   // -----------------------------------------------------------------------
   // 5. Send message
@@ -401,6 +426,7 @@ export function useChatConversation({
         try {
           const detail = await createChat(trimmed, createChatOptionsRef.current)
           setChatState(detail.state)
+          setWsEnabled(true) // Chat just created — connect WS for streaming
           onChatCreatedRef.current?.(detail)
         } catch (err) {
           setError(err instanceof Error ? err.message : String(err))
@@ -413,6 +439,7 @@ export function useChatConversation({
           const detail = await promptChat(chatId, trimmed)
           setChatState(detail.state)
           setChatDetail(detail)
+          setWsEnabled(true) // Follow-up sent — connect WS for streaming
           onChatStateChangeRef.current?.(detail.state)
           if (detail.active_p_id) {
             onSpawnStartedRef.current?.(detail.active_p_id)
