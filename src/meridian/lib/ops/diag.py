@@ -33,6 +33,7 @@ class DoctorInput(BaseModel):
 
     project_root: str | None = None
     prune: bool = False
+    global_: bool = False
 
 
 class DoctorOutput(BaseModel):
@@ -111,7 +112,11 @@ def doctor_sync(payload: DoctorInput) -> DoctorOutput:
     }
     retention_days = surface.resolved_config.state.retention_days
     now = time.time()
-    orphan_project_dirs = scan_orphan_project_dirs(get_user_home(), retention_days, now)
+    orphan_project_dirs = (
+        scan_orphan_project_dirs(get_user_home(), retention_days, now)
+        if payload.global_
+        else []
+    )
     stale_spawn_artifacts = scan_stale_spawn_artifacts(
         runtime_root,
         retention_days,
@@ -158,7 +163,7 @@ def doctor_sync(payload: DoctorInput) -> DoctorOutput:
                 code="stale_orphan_project_dirs",
                 message=(
                     f"{len(orphan_project_dirs)} stale project dir(s) would be pruned "
-                    "with --prune."
+                    "with --prune --global."
                 ),
                 payload={
                     "project_uuids": [item.uuid for item in orphan_project_dirs],

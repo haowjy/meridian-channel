@@ -334,10 +334,14 @@ def test_doctor_skips_model_resolution_for_config_surface(
     assert result.project_root == project_root.as_posix()
 
 
-def test_doctor_prunes_current_project_artifacts_and_global_orphans_only(
+def _seed_pruning_layout(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
+) -> tuple[Path, Path, Path, Path]:
+    """Create a project root with stale spawn artifacts and orphan project dirs.
+
+    Returns (project_root, current_spawn, orphan_root, other_spawn).
+    """
     project_root = _create_project_root(tmp_path)
     _create_agent_skill_dirs(project_root)
     user_home = tmp_path / "user-home"
@@ -368,7 +372,39 @@ def test_doctor_prunes_current_project_artifacts_and_global_orphans_only(
     _set_tree_mtime(other_spawn, 1_600_000_000.0)
     _set_path_mtime(other_root, 1_900_000_000.0)
 
+    return project_root, current_spawn, orphan_root, other_spawn
+
+
+def test_doctor_prune_only_prunes_current_project_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root, current_spawn, orphan_root, other_spawn = _seed_pruning_layout(
+        tmp_path, monkeypatch
+    )
+
     result = doctor_sync(DoctorInput(project_root=project_root.as_posix(), prune=True))
+
+    assert result.pruned_orphan_dirs == 0
+    assert result.pruned_spawn_artifacts == 1
+    assert result.orphan_project_dirs == ()
+    assert result.stale_spawn_artifacts and result.stale_spawn_artifacts[0].spawn_id == "p1"
+    assert not current_spawn.exists()
+    assert orphan_root.exists(), "orphan dir should NOT be pruned without --global"
+    assert other_spawn.exists()
+
+
+def test_doctor_prune_with_global_also_prunes_global_orphan_dirs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root, current_spawn, orphan_root, other_spawn = _seed_pruning_layout(
+        tmp_path, monkeypatch
+    )
+
+    result = doctor_sync(
+        DoctorInput(project_root=project_root.as_posix(), prune=True, global_=True)
+    )
 
     assert result.pruned_orphan_dirs == 1
     assert result.pruned_spawn_artifacts == 1
