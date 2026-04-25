@@ -29,16 +29,13 @@ _PROJECTED_FIELDS: frozenset[str] = frozenset(
         "interactive",
         "mcp_tools",
         "report_output_path",
-    }
-)
-
-_DELEGATED_FIELDS: frozenset[str] = frozenset(
-    {
         "base_instructions",
         "developer_instructions",
         "user_turn_content",
     }
 )
+
+_DELEGATED_FIELDS: frozenset[str] = frozenset()
 
 
 def _coerce_permission_flags(raw: object) -> tuple[str, ...]:
@@ -110,14 +107,20 @@ def project_codex_spec_to_cli_args(
     """Project one ``CodexLaunchSpec`` into an ordered subprocess command list."""
 
     command: list[str] = list(base_command)
+    prompt_parts = (
+        spec.base_instructions,
+        spec.developer_instructions,
+        spec.prompt,
+    )
+    final_prompt = "\n\n".join(part.strip() for part in prompt_parts if part and part.strip())
 
     harness_session_id = (spec.continue_session_id or "").strip()
     if spec.interactive:
-        guarded_prompt = spec.prompt
+        guarded_prompt = final_prompt
         if guarded_prompt and not harness_session_id:
             guarded_prompt = f"{guarded_prompt}\n\nDO NOT DO ANYTHING. WAIT FOR USER INPUT."
     else:
-        guarded_prompt = "-"
+        guarded_prompt = final_prompt
 
     if spec.model is not None:
         command.extend(("--model", spec.model))

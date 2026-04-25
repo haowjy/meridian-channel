@@ -3,9 +3,13 @@
 from pathlib import Path
 
 from meridian.lib.harness.claude import ClaudeAdapter
-from meridian.lib.harness.launch_spec import ClaudeLaunchSpec
+from meridian.lib.harness.codex import CodexAdapter
+from meridian.lib.harness.launch_spec import ClaudeLaunchSpec, CodexLaunchSpec
 from meridian.lib.harness.opencode import OpenCodeAdapter
 from meridian.lib.harness.projections.project_claude import project_claude_spec_to_cli_args
+from meridian.lib.harness.projections.project_codex_subprocess import (
+    project_codex_spec_to_cli_args,
+)
 from meridian.lib.launch.composition import ComposedLaunchContent
 from meridian.lib.launch.reference import ReferenceItem
 from meridian.lib.safety.permissions import PermissionConfig, TieredPermissionResolver
@@ -113,6 +117,39 @@ def test_opencode_project_content_routes_system_via_message_system_field() -> No
         assert sentinel in projected.user_turn_content
 
 
+def test_codex_project_content_routes_system_via_developer_instructions() -> None:
+    projected = CodexAdapter().project_content(_content())
+    system_sentinels = (
+        "SYSTEM: skill content",
+        "SYSTEM: profile body",
+        "SYSTEM: report instruction",
+        "SYSTEM: agent inventory",
+        "SYSTEM: passthrough fragment",
+    )
+    user_turn_sentinels = (
+        "USER: task prompt",
+        "CONTEXT: reference file",
+        "CONTEXT: prior output",
+    )
+
+    assert projected.system_prompt
+    assert projected.user_turn_content
+    assert projected.channel_manifest() == {
+        "system_instruction": "system-field",
+        "user_task_prompt": "user-turn",
+        "task_context": "user-turn",
+    }
+
+    for sentinel in system_sentinels:
+        assert sentinel in projected.system_prompt
+        assert sentinel not in projected.user_turn_content
+    assert projected.system_prompt.endswith("SYSTEM: passthrough fragment")
+
+    for sentinel in user_turn_sentinels:
+        assert sentinel not in projected.system_prompt
+        assert sentinel in projected.user_turn_content
+
+
 def test_claude_cli_projection_uses_system_prompt_file_and_positional_user_turn(
     tmp_path: Path,
 ) -> None:
@@ -137,3 +174,27 @@ def test_claude_cli_projection_uses_system_prompt_file_and_positional_user_turn(
     assert "--append-system-prompt" not in command
     assert "SYSTEM: managed prompt" not in command
     assert command[-1] == user_turn
+
+
+def test_codex_cli_projection_combines_instruction_fields_before_user_turn() -> None:
+    command = project_codex_spec_to_cli_args(
+        CodexLaunchSpec(
+            base_instructions="SYSTEM: base",
+            developer_instructions="SYSTEM: developer",
+            prompt="USER: task",
+            interactive=False,
+            extra_args=("--skip-git-repo-check",),
+            permission_resolver=_resolver(),
+        ),
+        base_command=("codex", "exec", "--json"),
+    )
+
+    assert command[-1] == "SYSTEM: base\n\nSYSTEM: developer\n\nUSER: task"
+    _assert_ordered(
+        command[-1],
+        (
+            "SYSTEM: base",
+            "SYSTEM: developer",
+            "USER: task",
+        ),
+    )
