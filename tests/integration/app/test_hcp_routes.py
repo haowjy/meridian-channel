@@ -15,6 +15,7 @@ from meridian.lib.hcp.types import ChatState
 from meridian.lib.state import session_store, spawn_store
 from meridian.lib.state.history import HarnessHistoryWriter
 from meridian.lib.state.paths import RuntimePaths, resolve_runtime_paths
+from meridian.lib.streaming.drain_policy import TURN_BOUNDARY_EVENT_TYPE
 
 
 class FakeHcpSessionManager:
@@ -120,6 +121,38 @@ def _create_chat(client: TestClient) -> dict[str, Any]:
     return response.json()
 
 
+def _event_types(events: list[dict[str, Any]]) -> list[str]:
+    return [str(event["type"]) for event in events]
+
+
+def _paginate_cursor_history(
+    client: TestClient,
+    path: str,
+    *,
+    followup_limit: int | None = None,
+) -> list[dict[str, Any]]:
+    pages: list[dict[str, Any]] = []
+    cursor: str | None = None
+
+    while True:
+        params: dict[str, str] = {}
+        if cursor is not None:
+            params["cursor"] = cursor
+            if followup_limit is not None:
+                params["limit"] = str(followup_limit)
+        response = client.get(path, params=params)
+        assert response.status_code == 200
+        body = response.json()
+        pages.append(body)
+        if not body["has_more"]:
+            assert body["next_cursor"] is None
+            break
+        assert body["next_cursor"] is not None
+        cursor = body["next_cursor"]
+
+    return pages
+
+
 def test_create_list_get_prompt_cancel_and_close_chat(tmp_path: Path) -> None:
     client, manager, _runtime_root = _make_client(tmp_path)
 
@@ -207,6 +240,66 @@ def test_chat_history_paginates_and_replays_agui_events(tmp_path: Path) -> None:
     ]
     assert body["events"][0]["seq"] == 1
     assert body["has_more"] is True
+
+
+def test_spawn_history_cursor_paginates_without_gaps_or_duplicates(tmp_path: Path) -> None:
+    client, _manager, runtime_root = _make_client(tmp_path)
+    _create_chat(client)
+    history_path = RuntimePaths.from_root_dir(runtime_root).spawn_history_path("p1")
+    writer = HarnessHistoryWriter(history_path)
+    for turn in range(20):
+        writer.write(
+            HarnessEvent(
+                event_type="item/agentMessage",
+                harness_id="codex",
+                payload={"text": f"turn {turn}"},
+            )
+        )
+        writer.write(
+            HarnessEvent(
+                event_type="item/completed",
+                harness_id="codex",
+                payload={"item": {"type": "agentMessage"}},
+            )
+        )
+        writer.write(
+            HarnessEvent(
+                event_type=TURN_BOUNDARY_EVENT_TYPE,
+                harness_id="codex",
+                payload={},
+            )
+        )
+    writer.write(
+        HarnessEvent(
+            event_type="item/agentMessage",
+            harness_id="codex",
+            payload={"text": "turn 20"},
+        )
+    )
+    writer.write(
+        HarnessEvent(
+            event_type="item/completed",
+            harness_id="codex",
+            payload={"item": {"type": "agentMessage"}},
+        )
+    )
+
+    pages = _paginate_cursor_history(
+        client,
+        "/api/spawns/p1/history",
+        followup_limit=4,
+    )
+    legacy_response = client.get(
+        "/api/spawns/p1/history",
+        params={"start_seq": 0, "limit": 1000},
+    )
+    assert legacy_response.status_code == 200
+
+    paginated_events = [event for page in pages for event in page["events"]]
+    assert _event_types(paginated_events) == _event_types(legacy_response.json())
+    assert len(pages[0]["events"]) == 100
+    assert pages[0]["events"][-1]["type"] == "RUN_FINISHED"
+    assert pages[1]["events"][0]["type"] == "RUN_STARTED"
 
 
 def test_chat_spawns_and_spawn_history(tmp_path: Path) -> None:
@@ -302,13 +395,28 @@ def test_chat_history_cursor_paginates_across_spawns(tmp_path: Path) -> None:
     _create_chat(client)
     runtime_paths = RuntimePaths.from_root_dir(runtime_root)
     writer_1 = HarnessHistoryWriter(runtime_paths.spawn_history_path("p1"))
-    writer_1.write(
-        HarnessEvent(
-            event_type="item/agentMessage",
-            harness_id="codex",
-            payload={"text": "one"},
+    for turn in range(15):
+        writer_1.write(
+            HarnessEvent(
+                event_type="item/agentMessage",
+                harness_id="codex",
+                payload={"text": f"first spawn {turn}"},
+            )
         )
-    )
+        writer_1.write(
+            HarnessEvent(
+                event_type="item/completed",
+                harness_id="codex",
+                payload={"item": {"type": "agentMessage"}},
+            )
+        )
+        writer_1.write(
+            HarnessEvent(
+                event_type=TURN_BOUNDARY_EVENT_TYPE,
+                harness_id="codex",
+                payload={},
+            )
+        )
     spawn_store.start_spawn(
         runtime_root,
         chat_id="c1",
@@ -323,38 +431,108 @@ def test_chat_history_cursor_paginates_across_spawns(tmp_path: Path) -> None:
         launch_mode="app",
     )
     writer_2 = HarnessHistoryWriter(runtime_paths.spawn_history_path("p2"))
-    writer_2.write(
+    for turn in range(12):
+        writer_2.write(
+            HarnessEvent(
+                event_type="item/agentMessage",
+                harness_id="codex",
+                payload={"text": f"second spawn {turn}"},
+            )
+        )
+        writer_2.write(
+            HarnessEvent(
+                event_type="item/completed",
+                harness_id="codex",
+                payload={"item": {"type": "agentMessage"}},
+            )
+        )
+        if turn < 11:
+            writer_2.write(
+                HarnessEvent(
+                    event_type=TURN_BOUNDARY_EVENT_TYPE,
+                    harness_id="codex",
+                    payload={},
+                )
+            )
+
+    pages = _paginate_cursor_history(
+        client,
+        "/api/chats/c1/history",
+        followup_limit=4,
+    )
+    legacy_response = client.get(
+        "/api/chats/c1/history",
+        params={"start_seq": 0, "limit": 1000},
+    )
+    assert legacy_response.status_code == 200
+
+    paginated_events = [event for page in pages for event in page["events"]]
+    assert _event_types(paginated_events) == _event_types(legacy_response.json()["events"])
+    assert len(pages[0]["events"]) == 100
+    assert pages[0]["events"][-1]["type"] == "RUN_FINISHED"
+    assert pages[1]["events"][0]["type"] == "RUN_STARTED"
+
+
+def test_chat_history_cursor_keeps_turn_boundaries_consistent_across_pages(
+    tmp_path: Path,
+) -> None:
+    client, _manager, runtime_root = _make_client(tmp_path)
+    _create_chat(client)
+    history_path = RuntimePaths.from_root_dir(runtime_root).spawn_history_path("p1")
+    writer = HarnessHistoryWriter(history_path)
+    for turn in range(20):
+        writer.write(
+            HarnessEvent(
+                event_type="item/agentMessage",
+                harness_id="codex",
+                payload={"text": f"turn {turn}"},
+            )
+        )
+        writer.write(
+            HarnessEvent(
+                event_type="item/completed",
+                harness_id="codex",
+                payload={"item": {"type": "agentMessage"}},
+            )
+        )
+        writer.write(
+            HarnessEvent(
+                event_type=TURN_BOUNDARY_EVENT_TYPE,
+                harness_id="codex",
+                payload={},
+            )
+        )
+    writer.write(
         HarnessEvent(
             event_type="item/agentMessage",
             harness_id="codex",
-            payload={"text": "two"},
+            payload={"text": "turn 20"},
+        )
+    )
+    writer.write(
+        HarnessEvent(
+            event_type="item/completed",
+            harness_id="codex",
+            payload={"item": {"type": "agentMessage"}},
         )
     )
 
-    seen_types: list[str] = []
-    cursor: str | None = None
-    while True:
-        params = {} if cursor is None else {"limit": "3", "cursor": cursor}
-        response = client.get("/api/chats/c1/history", params=params)
-        assert response.status_code == 200
-        body = response.json()
-        seen_types.extend(event["type"] for event in body["events"])
-        if not body["has_more"]:
-            assert body["next_cursor"] is None
-            break
-        assert body["next_cursor"] is not None
-        cursor = body["next_cursor"]
+    pages = _paginate_cursor_history(
+        client,
+        "/api/chats/c1/history",
+        followup_limit=4,
+    )
+    legacy_response = client.get(
+        "/api/chats/c1/history",
+        params={"start_seq": 0, "limit": 1000},
+    )
+    assert legacy_response.status_code == 200
 
-    assert seen_types == [
-        "RUN_STARTED",
-        "TEXT_MESSAGE_START",
-        "TEXT_MESSAGE_CONTENT",
-        "RUN_FINISHED",
-        "RUN_STARTED",
-        "TEXT_MESSAGE_START",
-        "TEXT_MESSAGE_CONTENT",
-        "RUN_FINISHED",
-    ]
+    assert len(pages[0]["events"]) == 100
+    assert pages[0]["events"][-1]["type"] == "RUN_FINISHED"
+    assert pages[1]["events"][0]["type"] == "RUN_STARTED"
+    paginated_events = [event for page in pages for event in page["events"]]
+    assert _event_types(paginated_events) == _event_types(legacy_response.json()["events"])
 
 
 def test_history_routes_reject_invalid_cursor(tmp_path: Path) -> None:
