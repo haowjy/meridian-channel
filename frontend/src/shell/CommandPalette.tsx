@@ -20,7 +20,7 @@ export interface CommandPaletteProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSwitchMode: (modeId: string) => void
-  onNewSession: () => void
+  onNewSession?: () => void
 }
 
 const DEFAULT_CATEGORY = "Commands"
@@ -34,7 +34,7 @@ interface ResolvedCommand extends CommandContribution {
 /**
  * Shell-level command palette.
  *
- * Aggregates registry-contributed commands with shell built-ins (new session,
+ * Aggregates registry-contributed commands with shell built-ins (new chat,
  * toggle theme) and exposes fuzzy search through cmdk. Mode-switch commands
  * (id prefix `switch-to-`) are enriched with the rail icon of the matching
  * extension so they read consistently with the activity bar.
@@ -67,14 +67,6 @@ export function CommandPalette({
 
     const builtins: ResolvedCommand[] = [
       {
-        id: "new-session",
-        label: "New Session",
-        shortcut: "⌘N",
-        category: "Actions",
-        icon: Plus,
-        execute: onNewSession,
-      },
-      {
         id: "toggle-theme",
         label:
           resolvedTheme === "dark"
@@ -84,6 +76,17 @@ export function CommandPalette({
         execute: () => setTheme(resolvedTheme === "dark" ? "light" : "dark"),
       },
     ]
+
+    if (onNewSession) {
+      builtins.unshift({
+        id: "new-chat",
+        label: "New Chat",
+        shortcut: "⌘N",
+        category: "Actions",
+        icon: Plus,
+        execute: onNewSession,
+      })
+    }
 
     const resolved: ResolvedCommand[] = registryCommands.map((cmd) => {
       const category = cmd.category ?? DEFAULT_CATEGORY

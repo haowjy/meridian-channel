@@ -95,7 +95,7 @@ export const AllShortcuts: Story = {
   render: () => (
     <div className="grid grid-cols-2 gap-4 max-w-md">
       <div className="flex justify-between items-center">
-        <span className="text-sm">New session</span>
+        <span className="text-sm">New chat</span>
         <KeymapHint keys="⌘N" />
       </div>
       <div className="flex justify-between items-center">

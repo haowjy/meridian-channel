@@ -8,7 +8,7 @@ export interface ActivityBarProps {
   activeMode: string
   /** Fires when a rail icon is clicked. */
   onModeChange: (id: string) => void
-  /** Fires when the `+` action is clicked (opens NewSessionDialog). */
+  /** Fires when the `+` action is clicked. */
   onNewSession?: () => void
   /** Fires when the settings gear is clicked. */
   onOpenSettings?: () => void
@@ -17,7 +17,7 @@ export interface ActivityBarProps {
 
 /**
  * Left-edge vertical rail. Hosts mode entry points contributed through the
- * extension registry, plus pinned actions (new session, settings) at the
+ * extension registry, plus pinned actions (new chat, settings) at the
  * bottom. Width is fixed at 48px so the grid parent can reserve the column.
  */
 export function ActivityBar({
@@ -52,12 +52,14 @@ export function ActivityBar({
         ))}
       </div>
       <div className="flex flex-col border-t border-border/60">
-        <ModeIcon
-          icon={Plus}
-          label="New session"
-          isActive={false}
-          onClick={() => onNewSession?.()}
-        />
+        {onNewSession ? (
+          <ModeIcon
+            icon={Plus}
+            label="New chat"
+            isActive={false}
+            onClick={() => onNewSession()}
+          />
+        ) : null}
         <ModeIcon
           icon={GearSix}
           label="Settings"

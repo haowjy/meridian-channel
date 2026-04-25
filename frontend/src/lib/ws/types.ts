@@ -350,7 +350,12 @@ export interface CancelControl {
   type: "cancel"
 }
 
-export type ControlMessage = UserMessageControl | InterruptControl | CancelControl
+export interface ReplayAckControl {
+  type: "replay_ack"
+  cursor: number
+}
+
+export type ControlMessage = UserMessageControl | InterruptControl | CancelControl | ReplayAckControl
 
 // ---------------------------------------------------------------------------
 // Connection capabilities (received via CUSTOM event with name="capabilities")

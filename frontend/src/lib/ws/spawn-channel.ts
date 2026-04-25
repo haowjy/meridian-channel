@@ -50,22 +50,38 @@ export interface SpawnChannelOptions {
   /** Auto-reconnect on unexpected close? Default: false for spawn channels
    *  (spawns are ephemeral — reconnecting to a finished spawn makes no sense). */
   autoReconnect?: boolean
+
+  /** Query parameters to append to the WS URL (e.g., { replay: "1" }). */
+  queryParams?: Record<string, string>
 }
 
 // ---------------------------------------------------------------------------
 // URL builder
 // ---------------------------------------------------------------------------
 
-function buildSpawnWsUrl(spawnId: string, baseUrl?: string): string {
+function buildSpawnWsUrl(
+  spawnId: string,
+  baseUrl?: string,
+  queryParams?: Record<string, string>,
+): string {
+  let url: string
   if (baseUrl) {
     const base = baseUrl.replace(/\/$/, "")
-    return `${base}/api/spawns/${spawnId}/ws`
+    url = `${base}/api/spawns/${spawnId}/ws`
+  } else {
+    // Derive from current page origin
+    const loc = window.location
+    const protocol = loc.protocol === "https:" ? "wss:" : "ws:"
+    url = `${protocol}//${loc.host}/api/spawns/${spawnId}/ws`
   }
 
-  // Derive from current page origin
-  const loc = window.location
-  const protocol = loc.protocol === "https:" ? "wss:" : "ws:"
-  return `${protocol}//${loc.host}/api/spawns/${spawnId}/ws`
+  // Append query parameters if provided
+  if (queryParams && Object.keys(queryParams).length > 0) {
+    const params = new URLSearchParams(queryParams)
+    url = `${url}?${params.toString()}`
+  }
+
+  return url
 }
 
 // ---------------------------------------------------------------------------
@@ -99,7 +115,7 @@ export class SpawnChannel {
     this.spawnId = spawnId
     this.callbacks = callbacks
 
-    const url = buildSpawnWsUrl(spawnId, options.baseUrl)
+    const url = buildSpawnWsUrl(spawnId, options.baseUrl, options.queryParams)
 
     this.client = new WsClient(
       {
@@ -153,6 +169,11 @@ export class SpawnChannel {
   /** Request cancellation of the spawn. */
   cancel(): boolean {
     return this.sendControl({ type: "cancel" })
+  }
+
+  /** Send replay acknowledgment with cursor position. */
+  sendReplayAck(cursor: number): boolean {
+    return this.sendControl({ type: "replay_ack", cursor })
   }
 
   /** Close the channel gracefully. */

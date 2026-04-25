@@ -208,7 +208,7 @@ function Harness({
         open={open}
         onOpenChange={setOpen}
         onSwitchMode={(id) => console.log("switch mode:", id)}
-        onNewSession={() => console.log("new session")}
+        onNewSession={() => console.log("new chat")}
         /* re-mount trick: key by search so CommandInput honours defaultValue */
         key={search}
       />

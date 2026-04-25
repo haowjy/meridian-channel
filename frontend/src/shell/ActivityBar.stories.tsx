@@ -68,7 +68,7 @@ function Demo({ withBadge = false }: { withBadge?: boolean }) {
     <ActivityBar
       activeMode={active}
       onModeChange={setActive}
-      onNewSession={() => console.log("new session")}
+      onNewSession={() => console.log("new chat")}
       onOpenSettings={() => console.log("settings")}
     />
   )

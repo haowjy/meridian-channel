@@ -1,4 +1,3 @@
-import { SpawnCountBar } from "@/components/atoms"
 import { cn } from "@/lib/utils"
 
 export interface SpawnCounts {
@@ -29,8 +28,8 @@ const CONNECTION_LABEL: Record<ShellStatusBarProps["connectionStatus"], string> 
 }
 
 /**
- * 24px status strip anchored at the bottom of the shell grid. Left side holds
- * the spawn-count summary; right side reports backend health and bound port.
+ * 24px status strip anchored at the bottom of the shell grid. It now reports
+ * backend health and the bound port only.
  */
 export function StatusBar({
   counts,
@@ -38,6 +37,7 @@ export function StatusBar({
   port,
   className,
 }: ShellStatusBarProps) {
+  void counts
   return (
     <footer
       className={cn(
@@ -46,8 +46,6 @@ export function StatusBar({
         className,
       )}
     >
-      {counts ? <SpawnCountBar counts={counts} /> : <span className="text-muted-foreground">no spawns</span>}
-
       <div className="flex-1" />
 
       <div className="flex items-center gap-1.5">
