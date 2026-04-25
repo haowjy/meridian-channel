@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react"
+import { useCallback, useEffect, useMemo } from "react"
 import {
   Spinner,
   WarningCircle,
@@ -58,6 +58,17 @@ export function ChatThreadView({ chatId, className }: ChatThreadViewProps) {
 
   // Fetch model catalog for the picker
   const { catalog } = useModelCatalog()
+
+  // Seed default model selection from catalog when zero-state loads
+  useEffect(() => {
+    if (modelSelection === null && catalog?.defaultModel) {
+      setModelSelection({
+        modelId: catalog.defaultModel.modelId,
+        harness: catalog.defaultModel.harness,
+        displayName: catalog.defaultModel.displayName,
+      })
+    }
+  }, [catalog, modelSelection, setModelSelection])
 
   const {
     entries,

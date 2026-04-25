@@ -437,10 +437,20 @@ export function useChatConversation({
 
   const cancel = useCallback(async () => {
     if (chatId === "__new__") return
+
+    // Optimistically show draining state
+    setChatState("draining")
+    onChatStateChangeRef.current?.("draining")
+
     try {
       await cancelChat(chatId)
+      // Refetch to get the settled state
+      const detail = await getChat(chatId)
+      setChatState(detail.state)
+      setChatDetail(detail)
+      onChatStateChangeRef.current?.(detail.state)
     } catch {
-      // Cancellation is best-effort
+      // Cancel is best-effort — state will settle via WS
     }
   }, [chatId])
 
