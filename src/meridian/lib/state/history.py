@@ -103,14 +103,28 @@ def iter_history_from_seq(
     """
 
     yielded = 0
-    for envelope in iter_history_events(path):
-        seq = envelope.get("seq", -1)
-        if not isinstance(seq, int) or seq < start_seq:
-            continue
-        yield envelope
-        yielded += 1
-        if limit is not None and yielded >= limit:
-            break
+    if not path.exists():
+        return
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                envelope = json.loads(stripped)
+            except json.JSONDecodeError:
+                # Crash-only tolerance for truncated/corrupt trailing lines.
+                continue
+            if not isinstance(envelope, dict):
+                continue
+
+            seq = envelope.get("seq", -1)
+            if not isinstance(seq, int) or seq < start_seq:
+                continue
+            yield envelope
+            yielded += 1
+            if limit is not None and yielded >= limit:
+                break
 
 
 def read_history_range(
