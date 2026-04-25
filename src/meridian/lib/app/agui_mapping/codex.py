@@ -179,10 +179,18 @@ class CodexAGUIMapper:
         item_id = _coerce_str(item_dict.get("id"))
 
         if item_type == "commandExecution":
+            tool_call_id: str | None = None
             if item_id and item_id in self._active_items:
-                del self._active_items[item_id]
+                info = self._active_items.pop(item_id)
+                tool_call_id = info.get("tool_call_id")
 
-            tool_call_id = item_id or f"tool-{uuid4()}"
+            if tool_call_id is None:
+                tool_call_id = f"tool-{uuid4()}"
+                if item_id is None:
+                    logger.warning(
+                        "Codex item/completed missing item.id; lifecycle IDs will not match"
+                    )
+
             aggregated = item_dict.get("aggregatedOutput")
             result_content = aggregated if isinstance(aggregated, str) else ""
 
@@ -230,7 +238,12 @@ class CodexAGUIMapper:
             return []
 
         delta = payload.get("delta")
-        delta_str = delta if isinstance(delta, str) else _stringify(delta) if delta else ""
+        if delta is None:
+            delta_str = ""
+        elif isinstance(delta, str):
+            delta_str = delta
+        else:
+            delta_str = _stringify(delta)
 
         return [ToolCallArgsEvent(tool_call_id=tool_call_id, delta=delta_str)]
 
