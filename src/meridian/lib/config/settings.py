@@ -278,6 +278,31 @@ def _normalize_output_table(raw_value: object, *, source: str) -> dict[str, obje
     return values
 
 
+def _normalize_state_table(raw_value: object, *, source: str) -> dict[str, object]:
+    if not isinstance(raw_value, dict):
+        raise ValueError(f"Invalid value for '{source}': expected table.")
+
+    values: dict[str, object] = {}
+    for key, value in cast("dict[str, object]", raw_value).items():
+        if key == "retention_days":
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(
+                    f"Invalid value for '{source}.retention_days': expected int, got "
+                    f"{type(value).__name__} ({value!r})."
+                )
+            if value < -1:
+                raise ValueError(
+                    f"Invalid value for '{source}.retention_days': expected int >= -1, got "
+                    f"{value!r}."
+                )
+            values[key] = value
+            continue
+
+        logger.warning("Ignoring unknown Meridian config key '%s.%s'.", source, key)
+
+    return values
+
+
 def _normalize_primary_table(raw_value: object, *, source: str) -> dict[str, object]:
     if not isinstance(raw_value, dict):
         raise ValueError(f"Invalid value for '{source}': expected table.")
@@ -632,6 +657,12 @@ def _normalize_toml_payload(
                 _normalize_output_table(raw_value, source="output"),
             )
             continue
+        if key == "state":
+            normalized["state"] = _merge_nested_dicts(
+                cast("dict[str, object]", normalized.get("state", {})),
+                _normalize_state_table(raw_value, source="state"),
+            )
+            continue
         if key == "primary":
             normalized["primary"] = _merge_nested_dicts(
                 cast("dict[str, object]", normalized.get("primary", {})),
@@ -721,6 +752,7 @@ def _env_alias_overrides(project_root: Path) -> dict[str, object]:
         ("MERIDIAN_HARNESS_MODEL_CLAUDE", ("harness", "claude"), "str"),
         ("MERIDIAN_HARNESS_MODEL_CODEX", ("harness", "codex"), "str"),
         ("MERIDIAN_HARNESS_MODEL_OPENCODE", ("harness", "opencode"), "str"),
+        ("MERIDIAN_STATE_RETENTION_DAYS", ("state", "retention_days"), "int"),
         ("MERIDIAN_AGENT", ("primary", "agent"), "str"),
         ("MERIDIAN_FORMAT", ("output", "format"), "str"),
     )
@@ -783,6 +815,24 @@ class OutputConfig(BaseModel):
     @classmethod
     def _validate_format(cls, value: str) -> str:
         return _normalize_required_string(value, source="output.format")
+
+
+class StateConfig(BaseModel):
+    """State retention settings for project and spawn artifacts."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    retention_days: int = 30
+
+    @field_validator("retention_days")
+    @classmethod
+    def _validate_retention_days(cls, value: int) -> int:
+        if isinstance(value, bool) or value < -1:
+            raise ValueError(
+                "Invalid value for 'state.retention_days': expected int >= -1, "
+                f"got {value!r}."
+            )
+        return value
 
 
 class PrimaryConfig(BaseModel):
@@ -928,6 +978,7 @@ class MeridianConfig(BaseSettings):
     harness: HarnessConfig = Field(default_factory=HarnessConfig)
     primary: PrimaryConfig = Field(default_factory=PrimaryConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
+    state: StateConfig = Field(default_factory=StateConfig)
 
     @field_validator("default_model")
     @classmethod

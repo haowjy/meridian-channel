@@ -92,6 +92,17 @@ def test_config_show_json_workspace_includes_path_when_present(tmp_path: Path) -
     }
 
 
+def test_config_show_includes_state_retention_days_default(tmp_path: Path) -> None:
+    project_root = _repo(tmp_path)
+
+    result = config_show_sync(ConfigShowInput(project_root=project_root.as_posix()))
+    retention = next(item for item in result.values if item.key == "state.retention_days")
+
+    assert retention.value == 30
+    assert retention.source == "builtin"
+    assert load_config(project_root).state.retention_days == 30
+
+
 @pytest.mark.parametrize(
     ("source", "expected_source"),
     [

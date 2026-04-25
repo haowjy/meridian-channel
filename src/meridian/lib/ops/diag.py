@@ -1,6 +1,7 @@
 """Doctor operation for file-authoritative state health and repair."""
 
 import asyncio
+import time
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
@@ -13,15 +14,25 @@ from meridian.lib.harness.ids import HarnessId
 from meridian.lib.ops.config import ensure_runtime_state_bootstrap_sync
 from meridian.lib.ops.config_surface import build_config_surface
 from meridian.lib.ops.mars import check_upgrade_availability, format_upgrade_availability
+from meridian.lib.ops.pruning import (
+    OrphanProjectDir,
+    StaleSpawnArtifact,
+    prune_orphan_project_dirs,
+    prune_stale_spawn_artifacts,
+    scan_orphan_project_dirs,
+    scan_stale_spawn_artifacts,
+)
 from meridian.lib.ops.runtime import resolve_runtime_root
 from meridian.lib.state import spawn_store
 from meridian.lib.state.session_store import cleanup_stale_sessions
+from meridian.lib.state.user_paths import get_user_home
 
 
 class DoctorInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     project_root: str | None = None
+    prune: bool = False
 
 
 class DoctorOutput(BaseModel):
@@ -32,6 +43,10 @@ class DoctorOutput(BaseModel):
     runs_checked: int
     agents_dir: str
     skills_dir: str
+    orphan_project_dirs: tuple[OrphanProjectDir, ...] = ()
+    stale_spawn_artifacts: tuple[StaleSpawnArtifact, ...] = ()
+    pruned_orphan_dirs: int = 0
+    pruned_spawn_artifacts: int = 0
     warnings: tuple["DoctorWarning", ...] = ()
     repaired: tuple[str, ...] = ()
 
@@ -46,6 +61,10 @@ class DoctorOutput(BaseModel):
             ("runs_checked", str(self.runs_checked)),
             ("agents_dir", self.agents_dir),
             ("skills_dir", self.skills_dir),
+            ("orphan_project_dirs", str(len(self.orphan_project_dirs))),
+            ("stale_spawn_artifacts", str(len(self.stale_spawn_artifacts))),
+            ("pruned_orphan_dirs", str(self.pruned_orphan_dirs)),
+            ("pruned_spawn_artifacts", str(self.pruned_spawn_artifacts)),
             ("repaired", ", ".join(self.repaired) if self.repaired else "none"),
         ]
         result = kv_block(pairs)
@@ -60,10 +79,6 @@ class DoctorWarning(BaseModel):
     code: str
     message: str
     payload: dict[str, object] | None = None
-
-
-def _count_runs(project_root: Path) -> int:
-    return len(spawn_store.list_spawns(resolve_runtime_root(project_root)))
 
 
 def _repair_stale_session_locks(project_root: Path) -> int:
@@ -89,8 +104,32 @@ def doctor_sync(payload: DoctorInput) -> DoctorOutput:
     surface = build_config_surface(resolve_project_root(explicit_root))
     project_root = surface.project_root
     ensure_runtime_state_bootstrap_sync(project_root)
+    runtime_root = resolve_runtime_root(project_root)
+    spawns = spawn_store.list_spawns(runtime_root)
+    active_spawn_ids = {
+        spawn.id for spawn in spawns if is_active_spawn_status(spawn.status)
+    }
+    retention_days = surface.resolved_config.state.retention_days
+    now = time.time()
+    orphan_project_dirs = scan_orphan_project_dirs(get_user_home(), retention_days, now)
+    stale_spawn_artifacts = scan_stale_spawn_artifacts(
+        runtime_root,
+        retention_days,
+        active_spawn_ids,
+        now,
+    )
 
+    pruned_orphan_dirs = 0
+    pruned_spawn_artifacts = 0
     repaired: list[str] = []
+    if payload.prune:
+        pruned_orphan_dirs = prune_orphan_project_dirs(orphan_project_dirs)
+        pruned_spawn_artifacts = prune_stale_spawn_artifacts(stale_spawn_artifacts)
+        if pruned_orphan_dirs > 0:
+            repaired.append("orphan_project_dirs")
+        if pruned_spawn_artifacts > 0:
+            repaired.append("spawn_artifacts")
+
     stale_locks = _repair_stale_session_locks(project_root)
     if stale_locks > 0:
         repaired.append("stale_session_locks")
@@ -111,6 +150,34 @@ def doctor_sync(payload: DoctorInput) -> DoctorOutput:
             DoctorWarning(
                 code="missing_project_root",
                 message=surface.warning,
+            )
+        )
+    if not payload.prune and orphan_project_dirs:
+        warnings.append(
+            DoctorWarning(
+                code="stale_orphan_project_dirs",
+                message=(
+                    f"{len(orphan_project_dirs)} stale project dir(s) would be pruned "
+                    "with --prune."
+                ),
+                payload={
+                    "project_uuids": [item.uuid for item in orphan_project_dirs],
+                    "paths": [item.path for item in orphan_project_dirs],
+                },
+            )
+        )
+    if not payload.prune and stale_spawn_artifacts:
+        warnings.append(
+            DoctorWarning(
+                code="stale_spawn_artifacts",
+                message=(
+                    f"{len(stale_spawn_artifacts)} stale spawn artifact dir(s) would be "
+                    "pruned with --prune."
+                ),
+                payload={
+                    "spawn_ids": [item.spawn_id for item in stale_spawn_artifacts],
+                    "paths": [item.path for item in stale_spawn_artifacts],
+                },
             )
         )
     for finding in surface.workspace_findings:
@@ -172,11 +239,7 @@ def doctor_sync(payload: DoctorInput) -> DoctorOutput:
             )
         )
 
-    running = [
-        row.id
-        for row in spawn_store.list_spawns(resolve_runtime_root(project_root))
-        if is_active_spawn_status(row.status)
-    ]
+    running = [row.id for row in spawns if is_active_spawn_status(row.status)]
     if running:
         warnings.append(
             DoctorWarning(
@@ -189,9 +252,13 @@ def doctor_sync(payload: DoctorInput) -> DoctorOutput:
     return DoctorOutput(
         ok=not warnings,
         project_root=project_root.as_posix(),
-        runs_checked=_count_runs(project_root),
+        runs_checked=len(spawns),
         agents_dir=agents_dir.as_posix(),
         skills_dir=skills_dir.as_posix(),
+        orphan_project_dirs=tuple(orphan_project_dirs),
+        stale_spawn_artifacts=tuple(stale_spawn_artifacts),
+        pruned_orphan_dirs=pruned_orphan_dirs,
+        pruned_spawn_artifacts=pruned_spawn_artifacts,
         warnings=tuple(warnings),
         repaired=tuple(sorted(set(repaired))),
     )

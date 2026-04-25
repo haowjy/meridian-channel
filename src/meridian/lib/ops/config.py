@@ -38,7 +38,14 @@ from meridian.lib.state.paths import (
     resolve_project_runtime_root_for_write,
 )
 
-_SECTION_ORDER: tuple[str, ...] = ("defaults", "timeouts", "harness", "primary", "output")
+_SECTION_ORDER: tuple[str, ...] = (
+    "defaults",
+    "timeouts",
+    "harness",
+    "primary",
+    "output",
+    "state",
+)
 _OUTPUT_VERBOSITY_PRESETS = frozenset({"quiet", "normal", "verbose", "debug"})
 _MISSING_PROJECT_CONFIG_MESSAGE = "no project config; run `meridian config init`"
 _LOCAL_CONFIG_FILENAME = "meridian.local.toml"
@@ -204,6 +211,15 @@ _CONFIG_KEY_SPECS: tuple[_ConfigKeySpec, ...] = (
         field_path=("output", "verbosity"),
         value_kind="verbosity",
         aliases=(),
+    ),
+    _ConfigKeySpec(
+        canonical_key="state.retention_days",
+        section="state",
+        file_key="retention_days",
+        field_path=("state", "retention_days"),
+        value_kind="int",
+        env_var="MERIDIAN_STATE_RETENTION_DAYS",
+        aliases=("retention_days",),
     ),
 )
 
@@ -732,6 +748,11 @@ def _scaffold_template() -> str:
             if isinstance(output_verbosity, str)
             else '# verbosity = "normal"  # example override; default is unset'
         ),
+        "",
+        "# -- State retention -------------------------------------------------------",
+        "[state]",
+        "# How long to keep historical state before doctor may prune it.",
+        "# retention_days = 30  # -1 keeps everything, 0 prunes immediately",
         "",
     ]
     return "\n".join(lines)

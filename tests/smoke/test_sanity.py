@@ -50,8 +50,15 @@ def test_models_list_exits_zero(cli, scratch_dir):
 
 def test_doctor_exits_zero(cli):
     """meridian doctor exits 0."""
-    result = cli("doctor")
+    result = cli("doctor", "--prune")
     result.assert_success()
+
+
+def test_doctor_help_exposes_prune_flag(cli):
+    """meridian doctor --help mentions the prune flag."""
+    result = cli("doctor", "--help")
+    result.assert_success()
+    assert "--prune" in result.stdout
 
 
 def test_spawn_list_exits_zero(cli, scratch_dir):

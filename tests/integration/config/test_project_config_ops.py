@@ -301,3 +301,40 @@ def test_config_show_and_loader_share_local_over_project_precedence(tmp_path: Pa
     assert gotten.value == "opencode"
     assert gotten.source == "file"
     assert load_config(project_root).default_harness == "opencode"
+
+
+def test_config_state_retention_days_round_trip(tmp_path: Path) -> None:
+    project_root = _repo(tmp_path)
+
+    init = config_init_sync(ConfigInitInput(project_root=project_root.as_posix()))
+    project_config = project_root / "meridian.toml"
+    assert init.created is True
+    assert "[state]" in project_config.read_text(encoding="utf-8")
+
+    set_result = config_set_sync(
+        ConfigSetInput(
+            project_root=project_root.as_posix(),
+            key="state.retention_days",
+            value="14",
+        )
+    )
+    shown = config_show_sync(ConfigShowInput(project_root=project_root.as_posix()))
+    gotten = config_get_sync(
+        ConfigGetInput(project_root=project_root.as_posix(), key="state.retention_days")
+    )
+    retention = next(item for item in shown.values if item.key == "state.retention_days")
+
+    assert set_result.key == "state.retention_days"
+    assert set_result.value == 14
+    assert retention.value == 14
+    assert retention.source == "file"
+    assert gotten.value == 14
+    assert gotten.source == "file"
+    assert load_config(project_root).state.retention_days == 14
+
+    reset_result = config_reset_sync(
+        ConfigResetInput(project_root=project_root.as_posix(), key="state.retention_days")
+    )
+
+    assert reset_result.removed is True
+    assert load_config(project_root).state.retention_days == 30

@@ -1,5 +1,6 @@
 """Doctor warning regressions."""
 
+import os
 from pathlib import Path
 
 import pytest
@@ -40,6 +41,20 @@ def _create_agent_skill_dirs(
         (project_root / ".agents" / "agents").mkdir(parents=True, exist_ok=True)
     if create_skills_dir:
         (project_root / ".agents" / "skills").mkdir(parents=True, exist_ok=True)
+
+
+def _set_tree_mtime(path: Path, mtime: float) -> None:
+    for current in (path, *path.rglob("*")):
+        os.utime(current, (mtime, mtime), follow_symlinks=False)
+
+
+def _set_path_mtime(path: Path, mtime: float) -> None:
+    os.utime(path, (mtime, mtime), follow_symlinks=False)
+
+
+def _write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
 def _seed_active_spawn(project_root: Path, *, started_at: str | None = None) -> str:
@@ -317,3 +332,49 @@ def test_doctor_skips_model_resolution_for_config_surface(
     result = doctor_sync(DoctorInput(project_root=project_root.as_posix()))
 
     assert result.project_root == project_root.as_posix()
+
+
+def test_doctor_prunes_current_project_artifacts_and_global_orphans_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = _create_project_root(tmp_path)
+    _create_agent_skill_dirs(project_root)
+    user_home = tmp_path / "user-home"
+    monkeypatch.setenv("MERIDIAN_HOME", user_home.as_posix())
+    monkeypatch.setattr(
+        diag,
+        "check_upgrade_availability",
+        lambda *_args, **_kwargs: mars_ops.UpgradeAvailability(),
+    )
+
+    current_uuid = "current-project-uuid"
+    (project_root / ".meridian").mkdir(parents=True, exist_ok=True)
+    (project_root / ".meridian" / "id").write_text(current_uuid, encoding="utf-8")
+
+    current_root = user_home / "projects" / current_uuid
+    current_spawn = current_root / "spawns" / "p1"
+    _write_text(current_spawn / "history.jsonl", '{"event":"start"}\n')
+    _set_tree_mtime(current_spawn, 1_600_000_000.0)
+    _set_path_mtime(current_root, 1_900_000_000.0)
+
+    orphan_root = user_home / "projects" / "orphan-uuid"
+    _write_text(orphan_root / "state.txt", "orphan")
+    _set_tree_mtime(orphan_root, 1_600_000_000.0)
+
+    other_root = user_home / "projects" / "other-uuid"
+    other_spawn = other_root / "spawns" / "p9"
+    _write_text(other_spawn / "history.jsonl", '{"event":"start"}\n')
+    _set_tree_mtime(other_spawn, 1_600_000_000.0)
+    _set_path_mtime(other_root, 1_900_000_000.0)
+
+    result = doctor_sync(DoctorInput(project_root=project_root.as_posix(), prune=True))
+
+    assert result.pruned_orphan_dirs == 1
+    assert result.pruned_spawn_artifacts == 1
+    assert result.orphan_project_dirs and result.orphan_project_dirs[0].uuid == "orphan-uuid"
+    assert result.stale_spawn_artifacts and result.stale_spawn_artifacts[0].spawn_id == "p1"
+    assert not orphan_root.exists()
+    assert not current_spawn.exists()
+    assert other_spawn.exists()
+    assert result.ok is True
