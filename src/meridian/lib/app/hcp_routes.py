@@ -8,7 +8,13 @@ from typing import Any, NoReturn, Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from meridian.lib.app.agui_replay import replay_events_to_agui
+from meridian.lib.app.agui_replay import (
+    PaginationCursor,
+    decode_pagination_cursor,
+    encode_pagination_cursor,
+    replay_events_paginated,
+    replay_events_to_agui,
+)
 from meridian.lib.app.http_types import HTTPExceptionCallable
 from meridian.lib.config.project_paths import ProjectConfigPaths
 from meridian.lib.core.types import HarnessId, SpawnId
@@ -21,6 +27,8 @@ from meridian.lib.launch.request import LaunchArgvIntent, LaunchRuntime, SpawnRe
 from meridian.lib.state import session_store, spawn_store
 from meridian.lib.state.history import read_history_range
 from meridian.lib.state.paths import RuntimePaths
+
+DEFAULT_HISTORY_PAGE_LIMIT = 100
 
 
 class _FastAPIApp(Protocol):
@@ -162,18 +170,38 @@ def _chat_history_response(
     bounded_limit = max(limit, 0) if limit is not None else None
     end = None if bounded_limit is None else bounded_start + bounded_limit
     page = agui_events[bounded_start:end]
-    events = [
+    return {
+        "events": _history_event_response(page, start_seq=bounded_start),
+        "has_more": end is not None and end < len(agui_events),
+    }
+
+
+def _history_event_response(
+    agui_events: list[dict[str, Any]],
+    *,
+    start_seq: int = 0,
+) -> list[dict[str, Any]]:
+    return [
         {
-            "seq": bounded_start + offset,
+            "seq": start_seq + offset,
             "type": str(event.get("type", "")),
             "data": event,
             "timestamp": str(event.get("timestamp", "")),
         }
-        for offset, event in enumerate(page)
+        for offset, event in enumerate(agui_events)
     ]
+
+
+def _paginated_history_response(
+    *,
+    agui_events: list[dict[str, Any]],
+    next_cursor: str | None,
+    has_more: bool,
+) -> dict[str, object]:
     return {
-        "events": events,
-        "has_more": end is not None and end < len(agui_events),
+        "events": _history_event_response(agui_events),
+        "next_cursor": next_cursor,
+        "has_more": has_more,
     }
 
 
@@ -332,12 +360,111 @@ def register_hcp_routes(
             _handle_hcp_error(exc)
         return {"ok": True}
 
+    def _chat_history_paginated_response(
+        *,
+        spawns: list[spawn_store.SpawnRecord],
+        page_cursor: PaginationCursor,
+        cursor: str | None,
+        limit: int,
+        http_exception: HTTPExceptionCallable,
+    ) -> dict[str, object]:
+        if limit <= 0:
+            raise http_exception(status_code=400, detail="limit must be positive")
+        if page_cursor.spawn_idx > len(spawns):
+            raise http_exception(status_code=400, detail="invalid cursor")
+
+        remaining = limit
+        collected: list[dict[str, Any]] = []
+        spawn_idx = page_cursor.spawn_idx
+        inner_cursor = cursor
+
+        while spawn_idx < len(spawns) and remaining > 0:
+            spawn = spawns[spawn_idx]
+            if not spawn.harness:
+                spawn_idx += 1
+                inner_cursor = None
+                continue
+
+            page = replay_events_paginated(
+                paths.spawn_history_path(spawn.id),
+                HarnessId(spawn.harness),
+                spawn.id,
+                limit=remaining,
+                cursor=inner_cursor,
+            )
+            collected.extend(_agui_event_to_json(event) for event in page.events)
+            remaining = limit - len(collected)
+
+            if page.has_more:
+                if page.next_cursor is None:
+                    raise http_exception(status_code=500, detail="missing pagination cursor")
+                next_inner = decode_pagination_cursor(page.next_cursor)
+                next_cursor = encode_pagination_cursor(
+                    PaginationCursor(
+                        raw_seq=next_inner.raw_seq,
+                        agui_skip=next_inner.agui_skip,
+                        checkpoint=next_inner.checkpoint,
+                        spawn_idx=spawn_idx,
+                    )
+                )
+                return _paginated_history_response(
+                    agui_events=collected,
+                    next_cursor=next_cursor,
+                    has_more=True,
+                )
+
+            spawn_idx += 1
+            inner_cursor = None
+            if remaining == 0 and spawn_idx < len(spawns):
+                next_cursor = encode_pagination_cursor(
+                    PaginationCursor(
+                        raw_seq=0,
+                        agui_skip=0,
+                        checkpoint=0,
+                        spawn_idx=spawn_idx,
+                    )
+                )
+                return _paginated_history_response(
+                    agui_events=collected,
+                    next_cursor=next_cursor,
+                    has_more=True,
+                )
+
+        return _paginated_history_response(
+            agui_events=collected,
+            next_cursor=None,
+            has_more=False,
+        )
+
     async def get_chat_history(
         c_id: str,
-        start_seq: int = 0,
+        start_seq: int | None = None,
         limit: int | None = None,
+        cursor: str | None = None,
     ) -> dict[str, object]:
         _require_chat(c_id)
+        if cursor is not None:
+            try:
+                page_cursor = decode_pagination_cursor(cursor)
+            except ValueError as exc:
+                raise http_exception(status_code=400, detail="invalid cursor") from exc
+            return _chat_history_paginated_response(
+                spawns=_chat_spawns(runtime_root, c_id),
+                page_cursor=page_cursor,
+                cursor=cursor,
+                limit=limit if limit is not None else DEFAULT_HISTORY_PAGE_LIMIT,
+                http_exception=http_exception,
+            )
+
+        if start_seq is None and limit is None:
+            return _chat_history_paginated_response(
+                spawns=_chat_spawns(runtime_root, c_id),
+                page_cursor=PaginationCursor(raw_seq=0, agui_skip=0, checkpoint=0),
+                cursor=None,
+                limit=DEFAULT_HISTORY_PAGE_LIMIT,
+                http_exception=http_exception,
+            )
+
         raw_events_by_spawn = [
             (
                 spawn,
@@ -347,7 +474,7 @@ def register_hcp_routes(
         ]
         return _chat_history_response(
             agui_events=_replay_spawns_to_agui(raw_events_by_spawn),
-            start_seq=start_seq,
+            start_seq=start_seq or 0,
             limit=limit,
         )
 
@@ -357,18 +484,42 @@ def register_hcp_routes(
 
     async def get_spawn_history(
         p_id: str,
-        start_seq: int = 0,
+        start_seq: int | None = None,
         limit: int | None = None,
-    ) -> list[dict[str, Any]]:
+        cursor: str | None = None,
+    ) -> list[dict[str, Any]] | dict[str, object]:
         record = spawn_store.get_spawn(runtime_root, SpawnId(p_id))
         if record is None:
             raise http_exception(status_code=404, detail="spawn not found")
+
+        if cursor is not None or (start_seq is None and limit is None):
+            if cursor is not None:
+                try:
+                    decode_pagination_cursor(cursor)
+                except ValueError as exc:
+                    raise http_exception(status_code=400, detail="invalid cursor") from exc
+            page_limit = limit if limit is not None else DEFAULT_HISTORY_PAGE_LIMIT
+            if page_limit <= 0:
+                raise http_exception(status_code=400, detail="limit must be positive")
+            page = replay_events_paginated(
+                paths.spawn_history_path(p_id),
+                HarnessId(record.harness or ""),
+                p_id,
+                limit=page_limit,
+                cursor=cursor,
+            )
+            return _paginated_history_response(
+                agui_events=[_agui_event_to_json(event) for event in page.events],
+                next_cursor=page.next_cursor,
+                has_more=page.has_more,
+            )
+
         raw_events = read_history_range(paths.spawn_history_path(p_id))
         agui_events = [
             _agui_event_to_json(event)
             for event in replay_events_to_agui(raw_events, HarnessId(record.harness or ""), p_id)
         ]
-        bounded_start = max(start_seq, 0)
+        bounded_start = max(start_seq or 0, 0)
         bounded_limit = max(limit, 0) if limit is not None else None
         end = None if bounded_limit is None else bounded_start + bounded_limit
         return agui_events[bounded_start:end]

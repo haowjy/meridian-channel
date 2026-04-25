@@ -228,7 +228,10 @@ def test_chat_spawns_and_spawn_history(tmp_path: Path) -> None:
     assert spawns_response.status_code == 200
     assert spawns_response.json()[0]["spawn_id"] == "p1"
     assert history_response.status_code == 200
-    assert next(event["type"] for event in history_response.json()) == "RUN_STARTED"
+    history_body = history_response.json()
+    assert next(event["type"] for event in history_body["events"]) == "RUN_STARTED"
+    assert history_body["next_cursor"] is None
+    assert history_body["has_more"] is False
 
 
 def test_spawn_history_paginates_in_agui_event_space(tmp_path: Path) -> None:
@@ -258,3 +261,108 @@ def test_spawn_history_paginates_in_agui_event_space(tmp_path: Path) -> None:
         "TEXT_MESSAGE_START",
         "TEXT_MESSAGE_CONTENT",
     ]
+
+
+def test_spawn_history_uses_cursor_pagination_by_default(tmp_path: Path) -> None:
+    client, _manager, runtime_root = _make_client(tmp_path)
+    _create_chat(client)
+    history_path = RuntimePaths.from_root_dir(runtime_root).spawn_history_path("p1")
+    writer = HarnessHistoryWriter(history_path)
+    for index in range(120):
+        writer.write(
+            HarnessEvent(
+                event_type="item/agentMessage",
+                harness_id="codex",
+                payload={"text": f"message {index}"},
+            )
+        )
+
+    first = client.get("/api/spawns/p1/history")
+
+    assert first.status_code == 200
+    first_body = first.json()
+    assert first_body["events"][0]["type"] == "RUN_STARTED"
+    assert len(first_body["events"]) == 100
+    assert first_body["has_more"] is True
+    assert first_body["next_cursor"] is not None
+
+    second = client.get(
+        "/api/spawns/p1/history",
+        params={"cursor": first_body["next_cursor"], "limit": 10},
+    )
+
+    assert second.status_code == 200
+    second_body = second.json()
+    assert second_body["events"]
+    assert second_body["events"][0]["seq"] == 0
+
+
+def test_chat_history_cursor_paginates_across_spawns(tmp_path: Path) -> None:
+    client, _manager, runtime_root = _make_client(tmp_path)
+    _create_chat(client)
+    runtime_paths = RuntimePaths.from_root_dir(runtime_root)
+    writer_1 = HarnessHistoryWriter(runtime_paths.spawn_history_path("p1"))
+    writer_1.write(
+        HarnessEvent(
+            event_type="item/agentMessage",
+            harness_id="codex",
+            payload={"text": "one"},
+        )
+    )
+    spawn_store.start_spawn(
+        runtime_root,
+        chat_id="c1",
+        model="gpt-5.4",
+        agent="coder",
+        skills=(),
+        harness="codex",
+        kind="hcp",
+        prompt="second",
+        spawn_id=SpawnId("p2"),
+        execution_cwd=str(tmp_path),
+        launch_mode="app",
+    )
+    writer_2 = HarnessHistoryWriter(runtime_paths.spawn_history_path("p2"))
+    writer_2.write(
+        HarnessEvent(
+            event_type="item/agentMessage",
+            harness_id="codex",
+            payload={"text": "two"},
+        )
+    )
+
+    seen_types: list[str] = []
+    cursor: str | None = None
+    while True:
+        params = {} if cursor is None else {"limit": "3", "cursor": cursor}
+        response = client.get("/api/chats/c1/history", params=params)
+        assert response.status_code == 200
+        body = response.json()
+        seen_types.extend(event["type"] for event in body["events"])
+        if not body["has_more"]:
+            assert body["next_cursor"] is None
+            break
+        assert body["next_cursor"] is not None
+        cursor = body["next_cursor"]
+
+    assert seen_types == [
+        "RUN_STARTED",
+        "TEXT_MESSAGE_START",
+        "TEXT_MESSAGE_CONTENT",
+        "RUN_FINISHED",
+        "RUN_STARTED",
+        "TEXT_MESSAGE_START",
+        "TEXT_MESSAGE_CONTENT",
+        "RUN_FINISHED",
+    ]
+
+
+def test_history_routes_reject_invalid_cursor(tmp_path: Path) -> None:
+    client, _manager, _runtime_root = _make_client(tmp_path)
+    _create_chat(client)
+
+    chat_response = client.get("/api/chats/c1/history", params={"cursor": "not-json"})
+    spawn_response = client.get("/api/spawns/p1/history", params={"cursor": "not-json"})
+
+    assert chat_response.status_code == 400
+    assert spawn_response.status_code == 400
