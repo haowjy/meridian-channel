@@ -191,7 +191,7 @@ class OpenCodeConnection(HarnessConnection[OpenCodeLaunchSpec]):
                 timeout_seconds=startup_timeout,
             )
             if not self._primary_observer_mode:
-                await self._post_session_message(config.prompt)
+                await self._post_session_message(config.prompt, system=config.system)
         except Exception:
             self._set_failed()
             await self._cleanup_runtime()
@@ -426,10 +426,12 @@ class OpenCodeConnection(HarnessConnection[OpenCodeLaunchSpec]):
 
         raise RuntimeError(last_error or "OpenCode session creation failed")
 
-    async def _post_session_message(self, text: str) -> None:
+    async def _post_session_message(self, text: str, *, system: str | None = None) -> None:
         part_payload: dict[str, object] = {
             "parts": [{"type": "text", "text": text}],
         }
+        if system and system.strip():
+            part_payload["system"] = system
         await self._post_session_action(
             path_templates=self._MESSAGE_PATH_TEMPLATES,
             payload_variants=(

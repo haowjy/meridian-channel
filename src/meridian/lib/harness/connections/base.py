@@ -82,6 +82,7 @@ class ConnectionConfig:
     prompt: str
     project_root: Path
     env_overrides: dict[str, str]
+    system: str | None = None
     timeout_seconds: float | None = None
     ws_bind_host: str = "127.0.0.1"
     ws_port: int = 0

@@ -34,10 +34,11 @@ _SESSION_PAYLOAD_FIELDS: frozenset[str] = frozenset(
     }
 )
 
+_MESSAGE_FIELDS: frozenset[str] = frozenset({"appended_system_prompt"})
 _REFERENCE_FIELDS: frozenset[str] = frozenset({"reference_items"})
 
 _ACCOUNTED_FIELDS: frozenset[str] = (
-    _SERVE_COMMAND_FIELDS | _SESSION_PAYLOAD_FIELDS | _REFERENCE_FIELDS
+    _SERVE_COMMAND_FIELDS | _SESSION_PAYLOAD_FIELDS | _MESSAGE_FIELDS | _REFERENCE_FIELDS
 )
 _PROJECTED_FIELDS: frozenset[str] = _ACCOUNTED_FIELDS
 _DELEGATED_FIELDS: frozenset[str] = frozenset()
@@ -45,6 +46,7 @@ _DELEGATED_FIELDS: frozenset[str] = frozenset()
 
 def _consume_streaming_lifecycle_fields(spec: OpenCodeLaunchSpec) -> None:
     _ = spec.prompt
+    _ = spec.appended_system_prompt
     if spec.reference_items:
         logger.debug(
             "OpenCode streaming ignores native reference_items; "
@@ -142,6 +144,7 @@ _check_projection_drift(
 __all__ = [
     "_ACCOUNTED_FIELDS",
     "_DELEGATED_FIELDS",
+    "_MESSAGE_FIELDS",
     "_PROJECTED_FIELDS",
     "_REFERENCE_FIELDS",
     "_SERVE_COMMAND_FIELDS",

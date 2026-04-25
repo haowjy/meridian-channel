@@ -76,7 +76,7 @@ class _FakeProcess:
 class _StartProbeOpenCodeConnection(OpenCodeConnection):
     def __init__(self) -> None:
         super().__init__()
-        self.initial_messages: list[str] = []
+        self.initial_messages: list[tuple[str, str | None]] = []
         self.launch_calls = 0
         self.create_session_calls = 0
 
@@ -95,8 +95,8 @@ class _StartProbeOpenCodeConnection(OpenCodeConnection):
         self.create_session_calls += 1
         return "sess-primary-observer"
 
-    async def _post_session_message(self, text: str) -> None:
-        self.initial_messages.append(text)
+    async def _post_session_message(self, text: str, *, system: str | None = None) -> None:
+        self.initial_messages.append((text, system))
 
 
 def _build_connection_config(tmp_path: Path) -> ConnectionConfig:
@@ -106,6 +106,7 @@ def _build_connection_config(tmp_path: Path) -> ConnectionConfig:
         prompt="hello from test",
         project_root=tmp_path,
         env_overrides={"MERIDIAN_TEST_ENV": "1"},
+        system="system from test",
     )
 
 
@@ -136,12 +137,12 @@ def test_opencode_event_from_json_line_pins_activity_transition_events(event_typ
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("use_start_observer", "expected_initial_messages"),
-    ((False, ["hello from test"]), (True, [])),
+    ((False, [("hello from test", "system from test")]), (True, [])),
 )
 async def test_opencode_start_primary_observer_mode_controls_initial_prompt_post(
     tmp_path: Path,
     use_start_observer: bool,
-    expected_initial_messages: list[str],
+    expected_initial_messages: list[tuple[str, str | None]],
 ) -> None:
     connection = _StartProbeOpenCodeConnection()
     config = _build_connection_config(tmp_path)
@@ -161,6 +162,24 @@ async def test_opencode_start_primary_observer_mode_controls_initial_prompt_post
     assert connection.initial_messages == expected_initial_messages
 
     await connection.stop()
+
+
+@pytest.mark.asyncio
+async def test_post_session_message_includes_system_field_when_present() -> None:
+    connection = _TestableOpenCodeConnection(responses=[(204, None, "")])
+    connection._session_id = "sess-system"
+
+    await connection._post_session_message("user turn", system="system prompt")
+
+    assert connection.requests == [
+        (
+            "/session/sess-system/message",
+            {
+                "parts": [{"type": "text", "text": "user turn"}],
+                "system": "system prompt",
+            },
+        )
+    ]
 
 
 @pytest.mark.asyncio

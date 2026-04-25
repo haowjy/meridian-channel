@@ -308,7 +308,7 @@ def test_run_harness_process_writes_prompt_file_before_primary_launch(
     assert outcome.exit_code == 0
 
 
-def test_run_harness_process_writes_inline_primary_projection_manifest(
+def test_run_harness_process_writes_codex_inline_primary_projection_manifest(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -322,77 +322,156 @@ def test_run_harness_process_writes_inline_primary_projection_manifest(
 
         return fake_run_primary_attach
 
-    cases = (
-        (HarnessId.CODEX, "gpt-5.4"),
-        (HarnessId.OPENCODE, "gemini-2.5-pro"),
+    harness_id = HarnessId.CODEX
+    project_root = tmp_path / harness_id.value
+    project_root.mkdir()
+    _write_minimal_mars_config(project_root)
+    harness_registry = get_default_harness_registry()
+    config = load_config(project_root)
+    launch_context = build_launch_context(
+        spawn_id=f"dry-run-primary-{harness_id.value}",
+        request=SpawnRequest(
+            prompt=f"{harness_id.value} primary prompt",
+            prompt_is_composed=False,
+            model="gpt-5.4",
+            harness=harness_id.value,
+            extra_args=(
+                f"--append-system-prompt={harness_id.value} passthrough system prompt",
+            ),
+        ),
+        runtime=LaunchRuntime(
+            argv_intent=LaunchArgvIntent.REQUIRED,
+            composition_surface=LaunchCompositionSurface.PRIMARY,
+            config_snapshot=config.model_dump(mode="json", exclude_none=True),
+            runtime_root=(project_root / ".meridian").as_posix(),
+            project_paths_project_root=project_root.as_posix(),
+            project_paths_execution_cwd=project_root.as_posix(),
+        ),
+        harness_registry=harness_registry,
+        dry_run=True,
     )
+    adapter = harness_registry.get_subprocess_harness(harness_id)
+    monkeypatch.setattr(adapter, "observe_session_id", lambda **kwargs: None)
 
-    for harness_id, model in cases:
-        project_root = tmp_path / harness_id.value
-        project_root.mkdir()
-        _write_minimal_mars_config(project_root)
-        harness_registry = get_default_harness_registry()
-        config = load_config(project_root)
-        launch_context = build_launch_context(
-            spawn_id=f"dry-run-primary-{harness_id.value}",
-            request=SpawnRequest(
-                prompt=f"{harness_id.value} primary prompt",
-                prompt_is_composed=False,
-                model=model,
-                harness=harness_id.value,
-                extra_args=(
-                    f"--append-system-prompt={harness_id.value} passthrough system prompt",
-                ),
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        process,
+        "_run_primary_attach",
+        fake_launcher_for(captured),
+    )
+    monkeypatch.setattr(
+        process,
+        "_run_primary_process_with_capture",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("managed primary path should avoid black-box launcher")
+        ),
+    )
+    monkeypatch.setattr(process, "stop_session", lambda *args, **kwargs: None)
+    monkeypatch.setattr(process, "update_session_harness_id", lambda *args, **kwargs: None)
+
+    outcome = process.run_harness_process(launch_context, harness_registry)
+
+    log_dir = captured["log_dir"]
+    assert isinstance(log_dir, Path)
+    assert not (log_dir / "system-prompt.md").exists()
+    assert not (log_dir / "prompt.md").exists()
+    starting_prompt = (log_dir / "starting-prompt.md").read_text(encoding="utf-8")
+    assert f"{harness_id.value} passthrough system prompt" in starting_prompt
+    assert f"{harness_id.value} primary prompt" in starting_prompt
+    assert json.loads((log_dir / "projection-manifest.json").read_text(encoding="utf-8")) == {
+        "harness": harness_id.value,
+        "surface": "primary",
+        "channels": {
+            "system_instruction": "inline",
+            "user_task_prompt": "inline",
+            "task_context": "inline",
+        },
+    }
+    assert outcome.exit_code == 0
+
+
+def test_run_harness_process_writes_opencode_system_field_primary_projection_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("MERIDIAN_CHAT_ID", raising=False)
+
+    def fake_launcher_for(captured: dict[str, object]):
+        def fake_run_primary_attach(**kwargs: object) -> process.PrimaryAttachOutcome:
+            spawn_dir = (
+                kwargs.get("spawn_dir")
+                or kwargs.get("spawn_log_dir")
+                or kwargs.get("log_dir")
+            )
+            assert isinstance(spawn_dir, Path)
+            captured["log_dir"] = spawn_dir
+            return process.PrimaryAttachOutcome(exit_code=0, session_id=None, tui_pid=333)
+
+        return fake_run_primary_attach
+
+    harness_id = HarnessId.OPENCODE
+    project_root = tmp_path / harness_id.value
+    project_root.mkdir()
+    _write_minimal_mars_config(project_root)
+    harness_registry = get_default_harness_registry()
+    config = load_config(project_root)
+    launch_context = build_launch_context(
+        spawn_id=f"dry-run-primary-{harness_id.value}",
+        request=SpawnRequest(
+            prompt=f"{harness_id.value} primary prompt",
+            prompt_is_composed=False,
+            model="gemini-2.5-pro",
+            harness=harness_id.value,
+            extra_args=(
+                f"--append-system-prompt={harness_id.value} passthrough system prompt",
             ),
-            runtime=LaunchRuntime(
-                argv_intent=LaunchArgvIntent.REQUIRED,
-                composition_surface=LaunchCompositionSurface.PRIMARY,
-                config_snapshot=config.model_dump(mode="json", exclude_none=True),
-                runtime_root=(project_root / ".meridian").as_posix(),
-                project_paths_project_root=project_root.as_posix(),
-                project_paths_execution_cwd=project_root.as_posix(),
-            ),
-            harness_registry=harness_registry,
-            dry_run=True,
-        )
-        adapter = harness_registry.get_subprocess_harness(harness_id)
-        monkeypatch.setattr(adapter, "observe_session_id", lambda **kwargs: None)
+        ),
+        runtime=LaunchRuntime(
+            argv_intent=LaunchArgvIntent.REQUIRED,
+            composition_surface=LaunchCompositionSurface.PRIMARY,
+            config_snapshot=config.model_dump(mode="json", exclude_none=True),
+            runtime_root=(project_root / ".meridian").as_posix(),
+            project_paths_project_root=project_root.as_posix(),
+            project_paths_execution_cwd=project_root.as_posix(),
+        ),
+        harness_registry=harness_registry,
+        dry_run=True,
+    )
+    adapter = harness_registry.get_subprocess_harness(harness_id)
+    monkeypatch.setattr(adapter, "observe_session_id", lambda **kwargs: None)
 
-        captured: dict[str, object] = {}
-        monkeypatch.setattr(
-            process,
-            "_run_primary_attach",
-            fake_launcher_for(captured),
-        )
-        monkeypatch.setattr(
-            process,
-            "_run_primary_process_with_capture",
-            lambda **kwargs: (_ for _ in ()).throw(
-                AssertionError("managed primary path should avoid black-box launcher")
-            ),
-        )
-        monkeypatch.setattr(process, "stop_session", lambda *args, **kwargs: None)
-        monkeypatch.setattr(process, "update_session_harness_id", lambda *args, **kwargs: None)
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(process, "_run_primary_attach", fake_launcher_for(captured))
+    monkeypatch.setattr(
+        process,
+        "_run_primary_process_with_capture",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("managed primary path should avoid black-box launcher")
+        ),
+    )
+    monkeypatch.setattr(process, "stop_session", lambda *args, **kwargs: None)
+    monkeypatch.setattr(process, "update_session_harness_id", lambda *args, **kwargs: None)
 
-        outcome = process.run_harness_process(launch_context, harness_registry)
+    outcome = process.run_harness_process(launch_context, harness_registry)
 
-        log_dir = captured["log_dir"]
-        assert isinstance(log_dir, Path)
-        assert not (log_dir / "system-prompt.md").exists()
-        assert not (log_dir / "prompt.md").exists()
-        starting_prompt = (log_dir / "starting-prompt.md").read_text(encoding="utf-8")
-        assert f"{harness_id.value} passthrough system prompt" in starting_prompt
-        assert f"{harness_id.value} primary prompt" in starting_prompt
-        assert json.loads((log_dir / "projection-manifest.json").read_text(encoding="utf-8")) == {
-            "harness": harness_id.value,
-            "surface": "primary",
-            "channels": {
-                "system_instruction": "inline",
-                "user_task_prompt": "inline",
-                "task_context": "inline",
-            },
-        }
-        assert outcome.exit_code == 0
+    log_dir = captured["log_dir"]
+    assert isinstance(log_dir, Path)
+    system_prompt = (log_dir / "system-prompt.md").read_text(encoding="utf-8")
+    assert f"{harness_id.value} passthrough system prompt" in system_prompt
+    assert f"{harness_id.value} primary prompt" not in system_prompt
+    starting_prompt = (log_dir / "starting-prompt.md").read_text(encoding="utf-8")
+    assert f"{harness_id.value} passthrough system prompt" not in starting_prompt
+    assert f"{harness_id.value} primary prompt" in starting_prompt
+    assert json.loads((log_dir / "projection-manifest.json").read_text(encoding="utf-8")) == {
+        "harness": harness_id.value,
+        "surface": "primary",
+        "channels": {
+            "system_instruction": "system-field",
+            "user_task_prompt": "user-turn",
+            "task_context": "user-turn",
+        },
+    }
+    assert outcome.exit_code == 0
 
 
 def test_run_harness_process_black_box_primary_uses_no_tui_log_artifact(

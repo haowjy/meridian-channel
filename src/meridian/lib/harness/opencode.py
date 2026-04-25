@@ -33,6 +33,15 @@ from meridian.lib.harness.opencode_storage import resolve_opencode_session_file
 from meridian.lib.harness.projections.project_opencode_subprocess import (
     project_opencode_spec_to_cli_args,
 )
+from meridian.lib.launch.composition import (
+    ComposedLaunchContent,
+    ProjectedContent,
+    ProjectionChannels,
+    build_reference_routing,
+    join_content_blocks,
+    render_system_instruction_blocks,
+    render_task_context,
+)
 from meridian.lib.launch.constants import (
     BASE_COMMAND_OPENCODE_SUBPROCESS,
     PRIMARY_BASE_COMMAND_OPENCODE,
@@ -180,11 +189,11 @@ class OpenCodeAdapter(BaseHarnessAdapter[OpenCodeLaunchSpec]):
             "continue_harness_session_id",
             "continue_fork",
             "mcp_tools",
+            "appended_system_prompt",
+            "user_turn_content",
         }
     )
-    _EXPLICITLY_IGNORED_FIELDS: ClassVar[frozenset[str]] = frozenset(
-        {"appended_system_prompt", "report_output_path", "user_turn_content"}
-    )
+    _EXPLICITLY_IGNORED_FIELDS: ClassVar[frozenset[str]] = frozenset({"report_output_path"})
 
     @property
     def id(self) -> HarnessId:
@@ -225,13 +234,14 @@ class OpenCodeAdapter(BaseHarnessAdapter[OpenCodeLaunchSpec]):
         return OpenCodeLaunchSpec(
             model=normalized_model,
             effort=run.effort,
-            prompt=run.prompt,
+            prompt=run.user_turn_content or run.prompt,
             continue_session_id=continue_session_id,
             continue_fork=run.continue_fork and continue_session_id is not None,
             permission_resolver=perms,
             extra_args=run.extra_args,
             interactive=run.interactive,
             mcp_tools=run.mcp_tools,
+            appended_system_prompt=run.appended_system_prompt,
             agent_name=run.agent,
             skills=(),
         )
@@ -245,6 +255,27 @@ class OpenCodeAdapter(BaseHarnessAdapter[OpenCodeLaunchSpec]):
         # MCP injection is off by default — agents use the CLI instead.
         # Users who want always-on MCP can configure it in their harness settings.
         return None
+
+    def project_content(self, content: ComposedLaunchContent) -> ProjectedContent:
+        system_prompt = render_system_instruction_blocks(content)
+        reference_routing = build_reference_routing(content.reference_items)
+        task_context = render_task_context(
+            content.reference_items,
+            reference_routing,
+            content.prior_output,
+        )
+        user_turn = join_content_blocks(task_context, content.user_task_prompt)
+
+        return ProjectedContent(
+            system_prompt=system_prompt,
+            user_turn_content=user_turn,
+            reference_routing=reference_routing,
+            channels=ProjectionChannels(
+                system_instruction="system-field" if system_prompt.strip() else "none",
+                user_task_prompt="user-turn",
+                task_context="user-turn",
+            ),
+        )
 
     def env_overrides(self, config: PermissionConfig) -> dict[str, str]:
         if config.opencode_permission_override:

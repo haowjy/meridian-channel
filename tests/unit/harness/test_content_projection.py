@@ -105,10 +105,23 @@ def test_codex_project_content_keeps_required_inline_ordering() -> None:
     )
 
 
-def test_opencode_project_content_includes_profile_body_as_system_instruction() -> None:
+def test_opencode_project_content_routes_system_via_message_system_field() -> None:
     projected = OpenCodeAdapter().project_content(_content())
+    system_sentinels = (
+        "SYSTEM: skill content",
+        "SYSTEM: profile body",
+        "SYSTEM: report instruction",
+        "SYSTEM: agent inventory",
+        "SYSTEM: passthrough fragment",
+    )
+    user_turn_sentinels = (
+        "USER: task prompt",
+        "CONTEXT: reference file",
+        "CONTEXT: prior output",
+    )
 
-    assert projected.system_prompt == ""
+    assert projected.system_prompt
+    assert projected.user_turn_content
     assert [route.to_dict() for route in projected.reference_routing] == [
         {
             "path": "/repo/ref.txt",
@@ -118,23 +131,19 @@ def test_opencode_project_content_includes_profile_body_as_system_instruction() 
         }
     ]
     assert projected.channel_manifest() == {
-        "system_instruction": "inline",
-        "user_task_prompt": "inline",
-        "task_context": "inline",
+        "system_instruction": "system-field",
+        "user_task_prompt": "user-turn",
+        "task_context": "user-turn",
     }
-    _assert_ordered(
-        projected.user_turn_content,
-        (
-            "SYSTEM: skill content",
-            "SYSTEM: profile body",
-            "SYSTEM: report instruction",
-            "SYSTEM: agent inventory",
-            "SYSTEM: passthrough fragment",
-            "CONTEXT: reference file",
-            "CONTEXT: prior output",
-            "USER: task prompt",
-        ),
-    )
+
+    for sentinel in system_sentinels:
+        assert sentinel in projected.system_prompt
+        assert sentinel not in projected.user_turn_content
+    assert projected.system_prompt.endswith("SYSTEM: passthrough fragment")
+
+    for sentinel in user_turn_sentinels:
+        assert sentinel not in projected.system_prompt
+        assert sentinel in projected.user_turn_content
 
 
 def test_claude_cli_projection_uses_system_prompt_file_and_positional_user_turn(

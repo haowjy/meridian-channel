@@ -317,13 +317,14 @@ def test_spawn_prepare_opencode_keeps_all_references_inline(
         },
     ]
     assert preview.projected_content.channel_manifest() == {
-        "system_instruction": "inline",
-        "user_task_prompt": "inline",
-        "task_context": "inline",
+        "system_instruction": "system-field",
+        "user_task_prompt": "user-turn",
+        "task_context": "user-turn",
     }
     assert f"# Reference: {file_ref.as_posix()}" in preview.resolved_request.prompt
     assert f"# Reference: {dir_ref.as_posix()}/" in preview.resolved_request.prompt
-    assert "# Meridian Agents" in preview.resolved_request.prompt
+    assert "# Meridian Agents" not in preview.resolved_request.prompt
+    assert "# Meridian Agents" in preview.projected_content.system_prompt
 
 
 @pytest.mark.parametrize(
@@ -362,11 +363,19 @@ def test_spawn_prepare_non_claude_includes_agent_inventory_inline(
     )
 
     assert preview.projected_content is not None
-    assert "# Meridian Agents" in preview.projected_content.user_turn_content
-    assert "AGENTS" in preview.projected_content.user_turn_content
-    assert "- dev-orchestrator" in preview.projected_content.user_turn_content
-    assert "- reviewer" in preview.projected_content.user_turn_content
-    assert "# Meridian Agents" in preview.resolved_request.prompt
+    inventory_channel = (
+        preview.projected_content.system_prompt
+        if harness == "opencode"
+        else preview.projected_content.user_turn_content
+    )
+    assert "# Meridian Agents" in inventory_channel
+    assert "AGENTS" in inventory_channel
+    assert "- dev-orchestrator" in inventory_channel
+    assert "- reviewer" in inventory_channel
+    if harness == "opencode":
+        assert "# Meridian Agents" not in preview.resolved_request.prompt
+    else:
+        assert "# Meridian Agents" in preview.resolved_request.prompt
 
 
 def test_spawn_prepare_claude_projects_skills_inventory_and_report_to_system_prompt(

@@ -781,9 +781,10 @@ async def execute_with_streaming(
     config = ConnectionConfig(
         spawn_id=run.spawn_id,
         harness_id=resolved_harness_id,
-        prompt=run.prompt,
+        prompt=spec.prompt,
         project_root=child_cwd,
         env_overrides=child_env,
+        system=getattr(spec, "appended_system_prompt", None),
         timeout_seconds=timeout_seconds,
         debug_tracer=tracer,
     )

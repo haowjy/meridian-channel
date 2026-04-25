@@ -31,6 +31,7 @@ class OpenCodeLaunchSpec(ResolvedLaunchSpec):
     """OpenCode-specific resolved launch spec."""
 
     agent_name: str | None = None
+    appended_system_prompt: str | None = None
     skills: tuple[str, ...] = ()
     # Using Any for reference_items to avoid circular import with ReferenceItem.
     # The actual type is tuple[ReferenceItem, ...] but we use Any at runtime.

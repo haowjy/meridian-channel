@@ -28,6 +28,7 @@ _PROJECTED_FIELDS: frozenset[str] = frozenset(
         "interactive",
         "mcp_tools",
         "agent_name",
+        "appended_system_prompt",
         "skills",
     }
 )
@@ -95,6 +96,11 @@ def project_opencode_spec_to_cli_args(
         logger.debug(
             "OpenCode subprocess received spec.skills but has no native skills flag; "
             "skills must be delivered by prompt injection or streaming payload"
+        )
+    if spec.appended_system_prompt:
+        logger.debug(
+            "OpenCode subprocess cannot project appended_system_prompt separately; "
+            "streaming transport sends it via the message system field"
         )
 
     command: list[str] = list(base_command)
