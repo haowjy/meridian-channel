@@ -70,24 +70,17 @@ class OpenCodeConnection(HarnessConnection[OpenCodeLaunchSpec]):
         "stopped": frozenset(("starting",)),
         "failed": frozenset(("starting", "stopping", "stopped")),
     }
-    _HEALTH_PATHS: ClassVar[tuple[str, ...]] = ("/global/health", "/health", "/api/health")
-    _CREATE_SESSION_PATHS: ClassVar[tuple[str, ...]] = ("/session", "/sessions")
+    _HEALTH_PATHS: ClassVar[tuple[str, ...]] = ("/global/health",)
+    _CREATE_SESSION_PATHS: ClassVar[tuple[str, ...]] = ("/session",)
     _MESSAGE_PATH_TEMPLATES: ClassVar[tuple[str, ...]] = (
         "/session/{session_id}/message",
-        "/sessions/{session_id}/message",
     )
     _EVENT_PATHS: ClassVar[tuple[str, ...]] = (
         "/global/event",
         "/event",
-        "/session/{session_id}/events",
     )
     _CANCEL_PATH_TEMPLATES: ClassVar[tuple[str, ...]] = (
         "/session/{session_id}/abort",
-        "/sessions/{session_id}/abort",
-        "/session/{session_id}/cancel",
-        "/sessions/{session_id}/cancel",
-        "/session/{session_id}/stop",
-        "/sessions/{session_id}/stop",
     )
     _PATH_RETRY_STATUSES: ClassVar[frozenset[int]] = frozenset((404, 405))
     _PAYLOAD_RETRY_STATUSES: ClassVar[frozenset[int]] = frozenset((400, 415, 422))
@@ -391,16 +384,9 @@ class OpenCodeConnection(HarnessConnection[OpenCodeLaunchSpec]):
                 if status in self._SUCCESS_STATUSES:
                     session_id = _extract_session_id(body)
                     if session_id is None:
-                        detail = _summarize_body(body)
-                        if _looks_like_html(detail):
-                            last_error = (
-                                f"OpenCode session endpoint returned HTML on {path}: "
-                                f"status={status}"
-                            )
-                            break
                         raise RuntimeError(
                             f"OpenCode session creation response missing session id on {path}: "
-                            f"{detail}"
+                            f"{_summarize_body(body)}"
                         )
                     return session_id
                 if status in self._PAYLOAD_RETRY_STATUSES:
@@ -427,20 +413,14 @@ class OpenCodeConnection(HarnessConnection[OpenCodeLaunchSpec]):
         raise RuntimeError(last_error or "OpenCode session creation failed")
 
     async def _post_session_message(self, text: str, *, system: str | None = None) -> None:
-        part_payload: dict[str, object] = {
+        payload: dict[str, object] = {
             "parts": [{"type": "text", "text": text}],
         }
         if system and system.strip():
-            part_payload["system"] = system
+            payload["system"] = system
         await self._post_session_action(
             path_templates=self._MESSAGE_PATH_TEMPLATES,
-            payload_variants=(
-                part_payload,
-                {**part_payload, "noReply": False},
-                {"text": text},
-                {"message": text},
-                {"content": text},
-            ),
+            payload_variants=(payload,),
             accepted_statuses=self._SUCCESS_STATUSES,
         )
 
@@ -457,19 +437,13 @@ class OpenCodeConnection(HarnessConnection[OpenCodeLaunchSpec]):
         for template in path_templates:
             path = template.format(session_id=session_id)
             for payload in payload_variants:
-                status, body, content_type = await self._post_json(
+                status, body, _content_type = await self._post_json(
                     path,
                     payload,
                     skip_body_on_statuses=accepted_statuses,
                     tolerate_incomplete_body=True,
                 )
                 if status in accepted_statuses:
-                    if "text/html" in content_type or _looks_like_html(_summarize_body(body)):
-                        last_error = (
-                            f"OpenCode session endpoint returned HTML on {path}: "
-                            f"status={status}"
-                        )
-                        continue
                     return
                 if status in self._PAYLOAD_RETRY_STATUSES:
                     last_error = (
@@ -553,15 +527,6 @@ class OpenCodeConnection(HarnessConnection[OpenCodeLaunchSpec]):
             )
             status = int(response.status)
             if status in self._SUCCESS_STATUSES:
-                content_type = str(response.headers.get("Content-Type", "")).lower()
-                if "text/html" in content_type:
-                    body = await response.text()
-                    response.release()
-                    last_error = (
-                        f"OpenCode event endpoint returned HTML on {path}: "
-                        f"status={status} body={_summarize_body(body)}"
-                    )
-                    continue
                 self._event_path = path
                 trace_wire_recv(
                     self._tracer, "sse_connect", "",
@@ -854,11 +819,6 @@ def _summarize_body(body: object | None) -> str:
     except TypeError:
         return repr(body)[:200]
     return serialized[:200]
-
-
-def _looks_like_html(body_summary: str) -> bool:
-    normalized = body_summary.strip().lower()
-    return normalized.startswith("<!doctype html") or normalized.startswith("<html")
 
 
 def _looks_like_address_in_use(stderr_text: str) -> bool:

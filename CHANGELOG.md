@@ -10,12 +10,14 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - HCP harness adapters for Claude, Codex, OpenCode. HCP chats persist native session IDs from connection or stream events.
 
 ### Fixed
+- OpenCode `serve` now runs in workspace mode (`OPENCODE_WORKSPACE_ID=meridian`), eliminating SPA catch-all that concatenated HTML to API JSON responses.
 - Claude AG-UI assistant snapshots now emit thinking, tool calls, and exact text newlines.
 - AG-UI replay lazy history scan no longer loads full `history.jsonl`.
 - Model alias resolution no longer fails dry-run/policy paths when mars reports the target harness binary is unavailable on the host. Explicit mars harness route still used.
 - HCP chat launch failure now finalizes spawn and stops session. Active HCP chats get heartbeat. Restore skips stopped chats.
 - HCP adapters no longer start harness connections; SpawnManager owns lifecycle.
 - OpenCode streaming now sends system instructions via message `system`, user/context via `parts`.
+- OpenCode HTTP connection: removed dead API path probing (`/sessions`, `/api/health`, cancel/stop variants), HTML workaround code, and speculative payload variants. Paths now match known opencode API surface.
 - Spawn finalization now treats `history.jsonl` as output before legacy `output.jsonl`.
 
 ## [0.0.44] - 2026-04-24

@@ -278,9 +278,13 @@ class OpenCodeAdapter(BaseHarnessAdapter[OpenCodeLaunchSpec]):
         )
 
     def env_overrides(self, config: PermissionConfig) -> dict[str, str]:
+        overrides: dict[str, str] = {}
         if config.opencode_permission_override:
-            return {"OPENCODE_PERMISSION": config.opencode_permission_override}
-        return {}
+            overrides["OPENCODE_PERMISSION"] = config.opencode_permission_override
+        # Run in workspace mode so the server skips the SPA catch-all
+        # (UIRoutes) and serves pure JSON API responses.
+        overrides["OPENCODE_WORKSPACE_ID"] = "meridian"
+        return overrides
 
     def extract_usage(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> TokenUsage:
         return extract_usage_from_artifacts(artifacts, spawn_id)
