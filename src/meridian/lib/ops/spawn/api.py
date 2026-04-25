@@ -25,7 +25,7 @@ from meridian.lib.ops.runtime import (
     runtime_context,
 )
 from meridian.lib.ops.work_attachment import ensure_explicit_work_item
-from meridian.lib.state import spawn_store
+from meridian.lib.state import session_store, spawn_store
 from meridian.lib.state.liveness import is_process_alive
 from meridian.lib.state.managed_primary import terminate_managed_primary_processes
 from meridian.lib.state.paths import resolve_project_paths
@@ -46,6 +46,8 @@ from .execute import (
 from .models import (
     ModelStats,
     SpawnActionOutput,
+    SpawnCancelAllInput,
+    SpawnCancelAllOutput,
     SpawnCancelInput,
     SpawnContinueInput,
     SpawnCreateInput,
@@ -681,6 +683,37 @@ def _spawn_cancel_output_from_outcome(
     )
 
 
+def _normalize_work_filter(work: str | None) -> str | None:
+    normalized = (work or "").strip()
+    return normalized or None
+
+
+def _spawn_matches_work_item(
+    spawn: spawn_store.SpawnRecord,
+    *,
+    runtime_root: Path,
+    work_id: str,
+    active_session_work_ids: dict[str, str] | None = None,
+) -> bool:
+    normalized_work_id = work_id.strip()
+    if not normalized_work_id:
+        return False
+    if spawn.kind == "primary":
+        if active_session_work_ids is None:
+            active_session_work_ids = {
+                record.chat_id: record.active_work_id
+                for record in session_store.list_active_session_records(runtime_root)
+                if record.active_work_id is not None and record.active_work_id.strip()
+            }
+        chat_id = (spawn.chat_id or "").strip()
+        return (
+            bool(chat_id)
+            and is_active_spawn_status(spawn.status)
+            and active_session_work_ids.get(chat_id) == normalized_work_id
+        )
+    return (spawn.work_id or "").strip() == normalized_work_id
+
+
 async def _spawn_cancel_impl(
     payload: SpawnCancelInput,
     *,
@@ -730,6 +763,88 @@ async def _spawn_cancel_impl(
         outcome=outcome,
         row=latest,
     )
+
+
+def spawn_cancel_all_sync(
+    payload: SpawnCancelAllInput,
+    ctx: RuntimeContext | None = None,
+    *,
+    sink: OutputSink | None = None,
+) -> SpawnCancelAllOutput:
+    _ = ctx
+    project_root, _ = resolve_runtime_root_and_config(payload.project_root)
+    runtime_root = resolve_runtime_root(project_root)
+    work_id = _normalize_work_filter(payload.work)
+
+    from meridian.lib.state.reaper import reconcile_spawns
+
+    active_rows = reconcile_spawns(runtime_root, spawn_store.list_spawns(runtime_root))
+    if work_id is not None:
+        active_session_work_ids = {
+            record.chat_id: record.active_work_id
+            for record in session_store.list_active_session_records(runtime_root)
+            if record.active_work_id is not None and record.active_work_id.strip()
+        }
+    else:
+        active_session_work_ids = None
+
+    target_rows = [
+        row
+        for row in active_rows
+        if row.status == "running"
+        and (
+            work_id is None
+            or _spawn_matches_work_item(
+                row,
+                runtime_root=runtime_root,
+                work_id=work_id,
+                active_session_work_ids=active_session_work_ids,
+            )
+        )
+    ]
+
+    results: list[SpawnActionOutput] = []
+    for row in target_rows:
+        try:
+            result = spawn_cancel_sync(
+                SpawnCancelInput(
+                    spawn_id=row.id,
+                    project_root=project_root.as_posix(),
+                ),
+                sink=sink,
+            )
+        except ValueError as exc:
+            result = SpawnActionOutput(
+                command="spawn.cancel",
+                status="failed",
+                spawn_id=row.id,
+                message=f"Cancel failed: {exc}",
+                error=str(exc),
+                model=row.model,
+                harness_id=row.harness,
+                exit_code=1,
+            )
+        results.append(result)
+
+    cancelled_count = sum(1 for result in results if result.status == "cancelled")
+    failed_count = sum(1 for result in results if result.status == "failed")
+    return SpawnCancelAllOutput(
+        work=work_id,
+        total_running=len(target_rows),
+        cancelled_count=cancelled_count,
+        failed_count=failed_count,
+        results=tuple(results),
+    )
+
+
+async def spawn_cancel_all(
+    payload: SpawnCancelAllInput,
+    ctx: RuntimeContext | None = None,
+    *,
+    sink: OutputSink | None = None,
+) -> SpawnCancelAllOutput:
+    _ = ctx
+    return await asyncio.to_thread(spawn_cancel_all_sync, payload, ctx=ctx, sink=sink)
 
 
 def spawn_cancel_sync(

@@ -68,6 +68,7 @@ class BroadcastHub(Generic[_T]):
         self._subscribers: dict[int, asyncio.Queue[_T | None]] = {}
         self._next_id = 0
         self._lock = asyncio.Lock()
+        self._start_seqs: dict[SpawnId, int] = {}
         self._maxsize = maxsize
 
     async def subscribe(self) -> tuple[int, asyncio.Queue[_T | None]]:
@@ -131,11 +132,15 @@ class SpawnMultiSubscriberManager:
         self._broadcasters: dict[SpawnId, BroadcastHub[HarnessEvent]] = {}
         self._pump_tasks: dict[SpawnId, asyncio.Task[None]] = {}
         self._lock = asyncio.Lock()
+        self._start_seqs: dict[SpawnId, int] = {}
 
     async def subscribe(
         self, spawn_id: SpawnId
-    ) -> tuple[int, asyncio.Queue[HarnessEvent | None]] | None:
-        """Subscribe to spawn events. Returns (subscriber_id, queue) or None if spawn not found."""
+    ) -> tuple[int, asyncio.Queue[HarnessEvent | None], int] | None:
+        """Subscribe to spawn events.
+
+        Returns (subscriber_id, queue, sub_start_seq) or None if spawn not found.
+        """
         async with self._lock:
             # Get or create broadcaster for this spawn
             if spawn_id not in self._broadcasters:
@@ -148,18 +153,22 @@ class SpawnMultiSubscriberManager:
                         return None
                     # Already subscribed - need to use our existing broadcaster
                     if spawn_id in self._broadcasters:
-                        return await self._broadcasters[spawn_id].subscribe()
+                        sub_id, queue = await self._broadcasters[spawn_id].subscribe()
+                        return sub_id, queue, self._start_seqs.get(spawn_id, -1)
                     # Can't subscribe - another subscriber has the slot
                     return None
                 
                 # Create broadcaster and start pump task
                 broadcaster: BroadcastHub[HarnessEvent] = BroadcastHub()
+                # Capture history seq at subscription time for replay cursor calculation
+                self._start_seqs[spawn_id] = self._spawn_manager.get_history_seq(spawn_id)
                 self._broadcasters[spawn_id] = broadcaster
                 self._pump_tasks[spawn_id] = asyncio.create_task(
                     self._pump_loop(spawn_id, queue)
                 )
             
-            return await self._broadcasters[spawn_id].subscribe()
+            sub_id, queue = await self._broadcasters[spawn_id].subscribe()
+            return sub_id, queue, self._start_seqs.get(spawn_id, -1)
 
     async def unsubscribe(self, spawn_id: SpawnId, subscriber_id: int) -> None:
         """Unsubscribe from spawn events."""
@@ -173,6 +182,7 @@ class SpawnMultiSubscriberManager:
                 if broadcaster.subscriber_count == 0:
                     self._spawn_manager.unsubscribe(spawn_id)
                     self._broadcasters.pop(spawn_id, None)
+                    self._start_seqs.pop(spawn_id, None)
                     pump_task = self._pump_tasks.pop(spawn_id, None)
                     if pump_task is not None:
                         pump_task.cancel()
@@ -210,6 +220,7 @@ class SpawnMultiSubscriberManager:
                 # broadcaster/task installed by a concurrent re-subscribe.
                 if self._pump_tasks.get(spawn_id) is asyncio.current_task():
                     self._broadcasters.pop(spawn_id, None)
+                    self._start_seqs.pop(spawn_id, None)
                     self._pump_tasks.pop(spawn_id, None)
 
 

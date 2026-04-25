@@ -86,6 +86,8 @@ from meridian.lib.ops.session_search import (
 )
 from meridian.lib.ops.spawn.api import (
     SpawnActionOutput,
+    SpawnCancelAllInput,
+    SpawnCancelAllOutput,
     SpawnCancelInput,
     SpawnContinueInput,
     SpawnCreateInput,
@@ -100,6 +102,8 @@ from meridian.lib.ops.spawn.api import (
     SpawnWrittenFilesInput,
     SpawnWrittenFilesOutput,
     spawn_cancel,
+    spawn_cancel_all,
+    spawn_cancel_all_sync,
     spawn_cancel_sync,
     spawn_continue,
     spawn_continue_sync,
@@ -402,6 +406,19 @@ _OP_SPECS: tuple[ExtensionCommandSpec, ...] = (
         cli_name="cancel",
         agent_default_format="text",
         surfaces=frozenset({ExtensionSurface.CLI, ExtensionSurface.HTTP}),
+    ),
+    ExtensionCommandSpec.from_op(
+        extension_id="meridian.spawn",
+        command_id="cancelAll",
+        summary="Cancel all running spawns, optionally scoped to one work item.",
+        handler=spawn_cancel_all,
+        sync_handler=spawn_cancel_all_sync,
+        input_type=SpawnCancelAllInput,
+        output_type=SpawnCancelAllOutput,
+        cli_group="spawn",
+        cli_name="cancel-all",
+        agent_default_format="text",
+        surfaces=frozenset({ExtensionSurface.CLI}),
     ),
     ExtensionCommandSpec.from_op(
         extension_id="meridian.spawn",

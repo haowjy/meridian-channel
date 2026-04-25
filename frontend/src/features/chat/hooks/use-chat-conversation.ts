@@ -84,6 +84,13 @@ export interface UseChatConversationReturn {
  * We can't execute side effects inside a reducer, so we wrap the
  * machine reducer to stash emitted commands in a mutable ref. The
  * hook reads and flushes this ref after each dispatch via useEffect.
+ *
+ * The reducer also performs a synchronous cache write when it detects
+ * a creating→connecting transition (CREATE_SUCCEEDED / CONTINUE_SUCCEEDED).
+ * This is a pragmatic exception to reducer purity: the mount pool creates
+ * a new ChatThreadView for the real chatId before useEffect-based cache
+ * writes can fire, so the new view would find an empty cache and start
+ * from scratch. The synchronous write ensures the warm-cache path works.
  */
 type CommandSink = { current: ChatCommand[] }
 
@@ -98,7 +105,27 @@ function createWrappedReducer(commandSink: CommandSink) {
     if (result.commands.length > 0) {
       commandSink.current = [...commandSink.current, ...result.commands]
     }
-    return result.context
+
+    // Synchronous cache seed on create transition: when the __new__ shell's
+    // machine acquires a real chatId (creating→connecting), write the new
+    // context to cache immediately so the mount pool's new ChatThreadView
+    // finds a warm snapshot in its first SELECT_CHAT dispatch.
+    const next = result.context
+    if (
+      ctx.phase === "creating" &&
+      next.phase === "connecting" &&
+      next.chatId &&
+      ctx.chatId !== next.chatId
+    ) {
+      chatCacheStore.set(next.chatId, {
+        chatId: next.chatId,
+        machineContext: next,
+        virtualizer: null,
+        updatedAt: Date.now(),
+      })
+    }
+
+    return next
   }
 }
 
@@ -311,10 +338,16 @@ export function useChatConversation({
   const prevCtxRef = useRef<ChatMachineContext | null>(null)
 
   useEffect(() => {
-    // Don't cache the draft slot
-    if (chatId === "__new__") return
     // Don't cache while inactive (frozen context)
     if (!isActive) return
+
+    // Determine the cache key: after CREATE_SUCCEEDED the machine owns a
+    // real chatId even though the prop is still "__new__". Use the machine's
+    // chatId so the new ChatThreadView (mounted by the pool under the real
+    // ID) finds a warm snapshot on its first SELECT_CHAT.
+    const cacheKey = ctx.chatId ?? chatId
+    if (cacheKey === "__new__" || !cacheKey) return
+
     // Only cache once we have real data (past bootstrap)
     if (
       ctx.phase === "zero" ||
@@ -328,9 +361,9 @@ export function useChatConversation({
     prevCtxRef.current = ctx
 
     // Preserve the existing virtualizer state in the cache entry
-    const existing = chatCacheStore.getSnapshot().get(chatId)
-    chatCacheStore.set(chatId, {
-      chatId,
+    const existing = chatCacheStore.getSnapshot().get(cacheKey)
+    chatCacheStore.set(cacheKey, {
+      chatId: cacheKey,
       machineContext: ctx,
       virtualizer: existing?.virtualizer ?? null,
       updatedAt: Date.now(),

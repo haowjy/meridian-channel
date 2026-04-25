@@ -60,10 +60,10 @@ def test_workspace_projection_projects_opencode_external_directories() -> None:
     payload = json.loads(result.env_overrides[OPENCODE_CONFIG_CONTENT_ENV])
     assert payload == {
         "permission": {
-            "external_directory": [
-                "/tmp/workspace/root-a",
-                "/tmp/workspace/root-b",
-            ]
+            "external_directory": {
+                "/tmp/workspace/root-a": "allow",
+                "/tmp/workspace/root-b": "allow",
+            }
         }
     }
 

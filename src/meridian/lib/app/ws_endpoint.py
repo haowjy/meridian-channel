@@ -98,12 +98,28 @@ class _HeartbeatState:
         return (time.monotonic() - self.last_pong) >= _WS_HEARTBEAT_TIMEOUT_SECONDS
 
 
+
+
+_REPLAY_ACK_TIMEOUT_SECONDS = 10.0
+
+
+@dataclass
+class _ReplayState:
+    """Track replay protocol state for Connect-Then-Replay."""
+
+    enabled: bool = False
+    ack_future: asyncio.Future[int] = field(
+        default_factory=lambda: asyncio.get_event_loop().create_future()
+    )
+
+
 async def spawn_websocket(
     websocket: WebSocketClient,
     spawn_id: str,
     manager: SpawnManager,
     multi_sub_manager: SpawnMultiSubscriberManager | None = None,
     on_user_message: Callable[[], None] | None = None,
+    replay: bool = False,
 ) -> None:
     """Bridge one active spawn's fan-out stream to one WebSocket client."""
 
@@ -117,13 +133,15 @@ async def spawn_websocket(
         return
 
     unsubscribe_fn: Callable[[], Awaitable[None]]
+    sub_start_seq: int = -1  # Will be set by multi_sub_manager or computed later
+
     if multi_sub_manager is not None:
         subscription = await multi_sub_manager.subscribe(typed_spawn_id)
         if subscription is None:
             await _send_error(websocket, f"spawn {spawn_id} not found or unavailable")
             await websocket.close()
             return
-        subscriber_id, event_queue = subscription
+        subscriber_id, event_queue, sub_start_seq = subscription
 
         async def _unsubscribe_multi() -> None:
             await multi_sub_manager.unsubscribe(typed_spawn_id, subscriber_id)
@@ -136,6 +154,7 @@ async def spawn_websocket(
             await _send_error(websocket, "another client is already connected")
             await websocket.close()
             return
+        sub_start_seq = manager.get_history_seq(typed_spawn_id)
 
         async def _unsubscribe_single() -> None:
             manager.unsubscribe(typed_spawn_id)
@@ -146,9 +165,15 @@ async def spawn_websocket(
     tracer = manager.get_tracer(typed_spawn_id)
 
     try:
-        await _send_event(websocket, mapper.make_run_started(spawn_id))
+        # Suppress synthetic RUN_STARTED when replay=True (replay snapshot includes it)
+        # Always send capabilities (frontend needs them, not in replay output)
+        if not replay:
+            await _send_event(websocket, mapper.make_run_started(spawn_id))
         await _send_event(websocket, make_capabilities_event(connection.capabilities))
         heartbeat_state = _HeartbeatState()
+
+        # Create replay state if replay mode is requested
+        replay_state = _ReplayState(enabled=replay) if replay else None
 
         outbound_task = asyncio.create_task(
             _outbound_loop(
@@ -158,6 +183,8 @@ async def spawn_websocket(
                 spawn_id,
                 tracer,
                 heartbeat_state=heartbeat_state,
+                replay_state=replay_state,
+                sub_start_seq=sub_start_seq,
             )
         )
         inbound_task = asyncio.create_task(
@@ -168,6 +195,7 @@ async def spawn_websocket(
                 tracer,
                 heartbeat_state=heartbeat_state,
                 on_user_message=on_user_message,
+                replay_state=replay_state,
             )
         )
 
@@ -199,9 +227,31 @@ async def _outbound_loop(
     spawn_id: str,
     tracer: DebugTracer | None = None,
     heartbeat_state: _HeartbeatState | None = None,
+    replay_state: _ReplayState | None = None,
+    sub_start_seq: int = -1,
 ) -> None:
     error_emitted = False
-    turn_active = True  # RunStarted is emitted by spawn_websocket.
+    turn_active = True  # RunStarted is emitted by spawn_websocket (unless replay=True).
+
+    # Handle replay mode: wait for replay_ack, then skip already-delivered events
+    skip_count = 0
+    events_skipped = 0
+    if replay_state is not None and replay_state.enabled:
+        try:
+            cursor = await asyncio.wait_for(
+                asyncio.shield(replay_state.ack_future),
+                timeout=_REPLAY_ACK_TIMEOUT_SECONDS,
+            )
+            # Compute how many queue events overlap with the replay snapshot
+            # skip_count = cursor - (sub_start_seq + 1)
+            # cursor = total history lines at fetch time
+            # sub_start_seq = last history line at subscription time (-1 if none)
+            skip_count = max(0, cursor - (sub_start_seq + 1))
+        except TimeoutError:
+            # No ack received — fall back to sending all events
+            skip_count = 0
+        # In replay mode, the RUN_STARTED was already in the replay snapshot
+        # so we start with turn_active=True but no need to re-emit RUN_STARTED
 
     while True:
         try:
@@ -227,10 +277,22 @@ async def _outbound_loop(
                     await websocket.close()
                 return
             continue
+        # Terminal sentinel always terminates, even during skip phase (EARS-R008a)
         if event is None:
             if turn_active and not error_emitted:
                 await _send_event(websocket, mapper.make_run_finished(spawn_id))
             return
+
+        # Skip events already delivered via replay snapshot (EARS-R007, EARS-R008)
+        if events_skipped < skip_count:
+            events_skipped += 1
+            # Track turn state for skipped events (EARS-R008b)
+            if event.event_type == TURN_BOUNDARY_EVENT_TYPE:
+                turn_active = False
+                error_emitted = False
+            elif not turn_active:
+                turn_active = True  # Would have emitted RUN_STARTED
+            continue
 
         if event.event_type == TURN_BOUNDARY_EVENT_TYPE:
             if turn_active and not error_emitted:
@@ -280,6 +342,7 @@ async def _inbound_loop(
     tracer: DebugTracer | None = None,
     heartbeat_state: _HeartbeatState | None = None,
     on_user_message: Callable[[], None] | None = None,
+    replay_state: _ReplayState | None = None,
 ) -> None:
     while True:
         message = await websocket.receive()
@@ -328,6 +391,16 @@ async def _inbound_loop(
             heartbeat_state.record_pong()
 
         if message_type == "pong":
+            continue
+
+        if message_type == "replay_ack":
+            # Handle replay acknowledgment with cursor position
+            cursor = payload.get("cursor")
+            if not isinstance(cursor, int) or cursor < 0:
+                await _send_error(websocket, "replay_ack requires non-negative integer cursor")
+                continue
+            if replay_state is not None and not replay_state.ack_future.done():
+                replay_state.ack_future.set_result(cursor)
             continue
 
         if message_type == "user_message":
@@ -407,6 +480,10 @@ def register_ws_routes(
             await websocket.close(code=4403)
             return
 
+        # Extract ?replay=1 query parameter (EARS-R006, EARS-R009)
+        replay_param = websocket.query_params.get("replay", "")
+        replay = replay_param == "1" or replay_param.lower() == "true"
+
         typed_websocket = cast("WebSocketClient", websocket)
         try:
             typed_spawn_id = (
@@ -430,6 +507,7 @@ def register_ws_routes(
                 manager,
                 multi_sub_manager=multi_sub_manager,
                 on_user_message=on_user_message,
+                replay=replay,
             )
         except Exception as exc:
             if _is_websocket_disconnect(exc):

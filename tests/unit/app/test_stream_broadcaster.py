@@ -29,6 +29,10 @@ class _FakeManager:
     def get_connection(self, spawn_id: SpawnId) -> object | None:
         return self.connections.get(spawn_id)
 
+    def get_history_seq(self, spawn_id: SpawnId) -> int:
+        _ = spawn_id
+        return -1
+
 
 @pytest.mark.asyncio
 async def test_broadcast_hub_works_with_arbitrary_type() -> None:
@@ -96,8 +100,10 @@ async def test_spawn_multi_subscriber_manager_shares_underlying_subscription() -
     assert second is not None
     assert spawn_manager.subscribe_calls == [spawn_id]
 
-    first_id, first_queue = first
-    second_id, second_queue = second
+    first_id, first_queue, first_start_seq = first
+    second_id, second_queue, second_start_seq = second
+    assert first_start_seq == -1
+    assert second_start_seq == -1
 
     spawn_manager.queues[spawn_id].put_nowait(
         HarnessEvent(
@@ -138,7 +144,8 @@ async def test_spawn_multi_subscriber_manager_cleans_up_after_terminal_event() -
 
     first = await manager.subscribe(spawn_id)
     assert first is not None
-    first_id, first_queue = first
+    first_id, first_queue, first_start_seq = first
+    assert first_start_seq == -1
 
     spawn_manager.queues[spawn_id].put_nowait(None)
 
@@ -147,7 +154,8 @@ async def test_spawn_multi_subscriber_manager_cleans_up_after_terminal_event() -
 
     second = await manager.subscribe(spawn_id)
     assert second is not None
-    second_id, _second_queue = second
+    second_id, _second_queue, second_start_seq = second
+    assert second_start_seq == -1
     assert spawn_manager.subscribe_calls == [spawn_id, spawn_id]
 
     await manager.unsubscribe(spawn_id, first_id)

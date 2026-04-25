@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from collections.abc import Awaitable, Callable
@@ -19,6 +20,7 @@ from meridian.lib.harness.connections.base import HarnessEvent
 from meridian.lib.harness.errors import HarnessBinaryNotFound
 from meridian.lib.launch.launch_types import ResolvedLaunchSpec
 from meridian.lib.state import spawn_store
+from meridian.lib.state.atomic import append_text_line
 from meridian.lib.state.history import HarnessHistoryWriter
 from meridian.lib.streaming.control_socket import ControlSocketServer
 from meridian.lib.streaming.drain_policy import (
@@ -504,6 +506,14 @@ class SpawnManager:
         session = self._sessions.get(spawn_id)
         return session.debug_tracer if session is not None else None
 
+    def get_history_seq(self, spawn_id: SpawnId) -> int:
+        """Return the last-written history seq for one spawn, or -1 if none."""
+
+        writer = self._history_writers.get(spawn_id)
+        if writer is None:
+            return -1
+        return writer.last_seq
+
     async def stop_spawn(
         self,
         spawn_id: SpawnId,
@@ -652,6 +662,12 @@ class SpawnManager:
         """List active spawn IDs."""
 
         return list(self._sessions)
+
+    async def _append_jsonl(self, path: Path, payload: dict[str, Any]) -> None:
+        """Append one JSON line to a JSONL file (used for inbound control log)."""
+
+        line = json.dumps(payload, separators=(",", ":"), sort_keys=True) + "\n"
+        await asyncio.to_thread(append_text_line, path, line)
 
     def _count_jsonl_lines(self, path: Path) -> int:
         if not path.exists():

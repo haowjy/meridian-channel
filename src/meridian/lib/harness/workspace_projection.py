@@ -49,10 +49,15 @@ def _project_claude_workspace_args(roots: tuple[Path, ...]) -> tuple[str, ...]:
 
 
 def _build_opencode_workspace_config(roots: tuple[Path, ...]) -> str:
+    # OpenCode permission schema: each key maps to either an Action string
+    # ("allow"/"ask"/"deny") or a Record<pattern, Action>.  ``external_directory``
+    # takes a per-path object, e.g. ``{"/abs/path": "allow"}``.
     return json.dumps(
         {
             "permission": {
-                "external_directory": [root.as_posix() for root in roots],
+                "external_directory": {
+                    root.as_posix(): "allow" for root in roots
+                },
             }
         },
         separators=(",", ":"),

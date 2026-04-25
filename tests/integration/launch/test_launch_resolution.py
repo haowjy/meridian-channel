@@ -262,7 +262,10 @@ def test_opencode_workspace_projection_handles_parent_env_suppression(
         runtime_root = tmp_path / ".meridian"
         payload = json.loads(preview.env_overrides[OPENCODE_CONFIG_CONTENT_ENV])
         assert payload == {
-            "permission": {"external_directory": [shared_root.as_posix(), runtime_root.as_posix()]},
+            "permission": {"external_directory": {
+                shared_root.as_posix(): "allow",
+                runtime_root.as_posix(): "allow",
+            }},
         }
         assert "workspace_opencode_parent_env_suppressed" not in warning_codes
 
@@ -334,7 +337,7 @@ def test_spawn_prepare_opencode_keeps_all_references_inline(
         ("opencode", "gemini-2.5-pro"),
     ],
 )
-def test_spawn_prepare_non_claude_includes_agent_inventory_inline(
+def test_spawn_prepare_system_field_harnesses_route_agent_inventory_to_system_prompt(
     tmp_path: Path,
     harness: str,
     model: str,
@@ -363,19 +366,13 @@ def test_spawn_prepare_non_claude_includes_agent_inventory_inline(
     )
 
     assert preview.projected_content is not None
-    inventory_channel = (
-        preview.projected_content.system_prompt
-        if harness == "opencode"
-        else preview.projected_content.user_turn_content
-    )
+    inventory_channel = preview.projected_content.system_prompt
     assert "# Meridian Agents" in inventory_channel
     assert "AGENTS" in inventory_channel
     assert "- dev-orchestrator" in inventory_channel
     assert "- reviewer" in inventory_channel
-    if harness == "opencode":
-        assert "# Meridian Agents" not in preview.resolved_request.prompt
-    else:
-        assert "# Meridian Agents" in preview.resolved_request.prompt
+    assert "# Meridian Agents" not in preview.projected_content.user_turn_content
+    assert "# Meridian Agents" not in preview.resolved_request.prompt
 
 
 def test_spawn_prepare_claude_projects_skills_inventory_and_report_to_system_prompt(

@@ -21,6 +21,10 @@ def _truncate_cell(value: str, *, max_chars: int) -> str:
     return f"{compact[: max_chars - 3].rstrip()}..."
 
 
+def _background_wait_note(spawn_id: str) -> str:
+    return f"Backgrounded. Spawn id: {spawn_id}.\nCollect later with `meridian spawn wait`."
+
+
 class SpawnCreateInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -84,13 +88,7 @@ class SpawnActionOutput(BaseModel):
         if self.spawn_id is not None:
             wire["spawn_id"] = self.spawn_id
             if self.background and self.status == "running":
-                note = (
-                    "Backgrounded. You MUST run "
-                    f"`meridian spawn wait {self.spawn_id}` "
-                    "to collect the result. Until wait completes, this spawn is still running "
-                    "and you will not receive its report."
-                )
-                wire["note"] = note
+                wire["note"] = _background_wait_note(self.spawn_id)
                 wire["terminal"] = False
                 wire["wait_required"] = True
                 wire["wait_command"] = f"meridian spawn wait {self.spawn_id}"
@@ -139,12 +137,7 @@ class SpawnActionOutput(BaseModel):
         wire: dict[str, object] = {"status": self.status}
         if self.spawn_id is not None:
             wire["spawn_id"] = self.spawn_id
-            wire["note"] = (
-                "Backgrounded. You MUST run "
-                f"`meridian spawn wait {self.spawn_id}` "
-                "to collect the result. Until wait completes, this spawn is still running "
-                "and you will not receive its report."
-            )
+            wire["note"] = _background_wait_note(self.spawn_id)
             wire["terminal"] = False
             wire["wait_required"] = True
             wire["wait_command"] = f"meridian spawn wait {self.spawn_id}"
@@ -162,12 +155,7 @@ class SpawnActionOutput(BaseModel):
         if self.spawn_id:
             lines.append(f"Spawn id: {self.spawn_id}")
             if self.background and self.status == "running":
-                lines.append(
-                    "You MUST run "
-                    f"`meridian spawn wait {self.spawn_id}` "
-                    "to collect the result. Until wait completes, this spawn is still running "
-                    "and you will not receive its report."
-                )
+                lines.append("Collect later with `meridian spawn wait`.")
         if self.forked_from:
             lines.append(f"Forked from: {self.forked_from}")
         if self.model and self.harness_id:
@@ -417,6 +405,37 @@ class SpawnCancelInput(BaseModel):
 
     spawn_id: str
     project_root: str | None = None
+
+
+class SpawnCancelAllInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    work: str | None = None
+    project_root: str | None = None
+
+
+class SpawnCancelAllOutput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    work: str | None = None
+    total_running: int
+    cancelled_count: int
+    failed_count: int = 0
+    results: tuple["SpawnActionOutput", ...] = ()
+
+    def format_text(self, ctx: object | None = None) -> str:
+        _ = ctx
+        scope = f" for work {self.work}" if self.work else ""
+        if self.total_running == 0:
+            return f"No running spawns to cancel{scope}."
+
+        lines = [f"Cancelled {self.cancelled_count} running spawn(s){scope}."]
+        if self.failed_count:
+            lines.append(f"{self.failed_count} cancellation(s) failed.")
+            for result in self.results:
+                if result.status == "failed":
+                    lines.append(result.format_text())
+        return "\n".join(lines)
 
 
 class SpawnDetailOutput(BaseModel):

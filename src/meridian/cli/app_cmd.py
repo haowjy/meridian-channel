@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import json
 import logging
+import socket
 import subprocess
 from pathlib import Path
 
@@ -105,6 +106,45 @@ def run_app(
             cors_origins=all_origins,
             allow_unsafe_no_permissions=allow_unsafe_no_permissions,
         )
+        # Auto-increment port if the default is already in use (try up to +10).
+        if port is None:
+            for offset in range(11):
+                candidate = resolved_port + offset
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                    try:
+                        probe.bind((host, candidate))
+                    except OSError as exc:
+                        if offset < 10:
+                            continue
+                        raise RuntimeError(
+                            f"Ports {resolved_port}-{candidate} are all in use"
+                        ) from exc
+                # Port is free — update resolved_port and tailscale origins if
+                # the port shifted.
+                if candidate != resolved_port:
+                    logger.info(
+                        "Port %d in use, using %d instead", resolved_port, candidate
+                    )
+                    if tailscale and all_origins:
+                        all_origins = [
+                            o.replace(f":{resolved_port}", f":{candidate}")
+                            for o in all_origins
+                        ]
+                    resolved_port = candidate
+                    # Rebuild the app with the corrected port so the server
+                    # object carries the right value.
+                    app = create_app(
+                        manager,
+                        project_uuid=project_uuid,
+                        runtime_root=runtime_root,
+                        transport="tcp",
+                        host=host,
+                        port=resolved_port,
+                        cors_origins=all_origins,
+                        allow_unsafe_no_permissions=allow_unsafe_no_permissions,
+                    )
+                break
+
         port_file = runtime_root / "app.port"
         port_file.parent.mkdir(parents=True, exist_ok=True)
         port_file.write_text(f"{resolved_port}\n", encoding="utf-8")
