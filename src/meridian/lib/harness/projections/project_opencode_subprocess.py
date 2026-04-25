@@ -110,7 +110,15 @@ def project_opencode_spec_to_cli_args(
 
     normalized_effort = (spec.effort or "").strip()
     if normalized_effort:
-        command.extend(("--variant", normalized_effort))
+        if spec.interactive:
+            # The bare ``opencode`` TUI command does not accept ``--variant``;
+            # only ``opencode run`` does.  Silently drop it for interactive launches.
+            logger.debug(
+                "OpenCode TUI does not support --variant; ignoring effort=%s",
+                normalized_effort,
+            )
+        else:
+            command.extend(("--variant", normalized_effort))
 
     if spec.agent_name:
         command.extend(("--agent", spec.agent_name))
@@ -127,7 +135,7 @@ def project_opencode_spec_to_cli_args(
     )
     _log_collision_if_needed(
         managed_flag="--variant",
-        has_managed_value=bool(normalized_effort),
+        has_managed_value=bool(normalized_effort) and not spec.interactive,
         passthrough_tail=passthrough_tail,
     )
     _log_collision_if_needed(
@@ -151,8 +159,11 @@ def project_opencode_spec_to_cli_args(
     command.extend(passthrough_tail)
 
     if spec.interactive:
-        if spec.prompt:
-            command.extend(("--prompt", spec.prompt))
+        # Interactive TUI launches go through managed attach (opencode serve →
+        # HTTP API → opencode attach).  The system prompt is delivered via the
+        # message system field, and the user types the first message.  Passing
+        # --prompt here would inject boilerplate as a user turn.
+        pass
     else:
         command.append("-")
 

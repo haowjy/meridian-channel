@@ -242,7 +242,9 @@ class OpenCodeAdapter(BaseHarnessAdapter[OpenCodeLaunchSpec]):
             interactive=run.interactive,
             mcp_tools=run.mcp_tools,
             appended_system_prompt=run.appended_system_prompt,
-            agent_name=run.agent,
+            # OpenCode does not support native meridian agents; agent body is
+            # delivered via system prompt composition instead.
+            agent_name=None,
             skills=(),
         )
 
@@ -281,9 +283,6 @@ class OpenCodeAdapter(BaseHarnessAdapter[OpenCodeLaunchSpec]):
         overrides: dict[str, str] = {}
         if config.opencode_permission_override:
             overrides["OPENCODE_PERMISSION"] = config.opencode_permission_override
-        # Run in workspace mode so the server skips the SPA catch-all
-        # (UIRoutes) and serves pure JSON API responses.
-        overrides["OPENCODE_WORKSPACE_ID"] = "meridian"
         return overrides
 
     def extract_usage(self, artifacts: ArtifactStore, spawn_id: SpawnId) -> TokenUsage:

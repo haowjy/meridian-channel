@@ -259,12 +259,7 @@ def _execute_primary_process(
 ) -> tuple[int, bool, str | None]:
     """Run managed attach when eligible, otherwise fall back to black-box launch."""
 
-    # Codex primary ALWAYS uses managed backend (all session modes).
-    # OpenCode primary uses managed backend for RESUME only (original behavior).
-    use_managed_backend = (
-        harness_id == HarnessId.CODEX
-        or (harness_id == HarnessId.OPENCODE and session_mode == SessionMode.RESUME)
-    )
+    use_managed_backend = harness_id in {HarnessId.CODEX, HarnessId.OPENCODE}
     if use_managed_backend:
         try:
             exit_code, managed_session_id = _execute_via_managed_attach(
@@ -463,6 +458,7 @@ async def _run_primary_attach(
                 prompt=spec.prompt,
                 project_root=execution_cwd,
                 env_overrides=dict(env),
+                system=spec.appended_system_prompt or None,
             )
             launcher = PrimaryAttachLauncher(
                 spawn_id=spawn_id,

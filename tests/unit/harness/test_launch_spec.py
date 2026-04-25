@@ -107,7 +107,9 @@ def test_opencode_resolve_launch_spec_strips_prefix_and_maps_fields() -> None:
 
     assert spec.model == "gpt-5.3-codex"
     assert spec.effort == "high"
-    assert spec.agent_name == "worker"
+    # OpenCode does not support native meridian agents; agent body goes via
+    # system prompt composition, so agent_name is always None.
+    assert spec.agent_name is None
     assert spec.skills == ()
     assert spec.permission_resolver.config == resolver.config
 
@@ -201,7 +203,8 @@ def test_opencode_subprocess_projection_logs_model_flag_collision_and_keeps_tail
     assert "extra" in caplog.text.lower()
 
 
-def test_opencode_primary_projection_uses_prompt_flag_instead_of_project_positional() -> None:
+def test_opencode_interactive_projection_omits_prompt_flag() -> None:
+    """Interactive TUI launches go through managed attach; --prompt is not emitted."""
     command = project_opencode_spec_to_cli_args(
         OpenCodeLaunchSpec(
             prompt="prompt text",
@@ -211,7 +214,8 @@ def test_opencode_primary_projection_uses_prompt_flag_instead_of_project_positio
         base_command=("opencode",),
     )
 
-    assert command == ["opencode", "--prompt", "prompt text"]
+    assert command == ["opencode"]
+    assert "--prompt" not in command
 
 
 def test_opencode_subprocess_projection_does_not_emit_file_injection_flags() -> None:

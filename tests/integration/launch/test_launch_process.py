@@ -722,11 +722,11 @@ def test_run_harness_process_claude_primary_stays_on_black_box_path(
     assert outcome.exit_code == 0
 
 
-def test_run_harness_process_opencode_fork_uses_black_box_path(
+def test_run_harness_process_opencode_fork_uses_managed_path(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """OpenCode fork uses black-box subprocess (original behavior)."""
+    """OpenCode fork routes through managed backend (same as all other modes)."""
     monkeypatch.delenv("MERIDIAN_CHAT_ID", raising=False)
     project_root = tmp_path / "opencode-fork"
     project_root.mkdir()
@@ -742,36 +742,24 @@ def test_run_harness_process_opencode_fork_uses_black_box_path(
         ),
     )
     opencode_adapter = harness_registry.get_subprocess_harness(HarnessId.OPENCODE)
-    captured: dict[str, object] = {}
+    managed_calls = 0
 
-    def fail_managed(**kwargs: object) -> process.PrimaryAttachOutcome:
-        _ = kwargs
-        raise AssertionError("fork mode must use black-box launcher path")
+    def fake_run_primary_attach(**kwargs: object) -> process.PrimaryAttachOutcome:
+        nonlocal managed_calls
+        managed_calls += 1
+        on_running = kwargs.get("on_running")
+        if callable(on_running):
+            on_running(8383)
+        return process.PrimaryAttachOutcome(exit_code=0, session_id="oc-session", tui_pid=8383)
 
-    def fake_run_primary_process_with_capture(**kwargs: object) -> tuple[int, int]:
-        command = tuple(kwargs["command"])
-        captured["command"] = command
-        started = kwargs.get("on_child_started")
-        assert callable(started)
-        started(8383)
-        return (0, 8383)
-
-    monkeypatch.setattr(process, "_run_primary_attach", fail_managed)
-    monkeypatch.setattr(
-        process,
-        "_run_primary_process_with_capture",
-        fake_run_primary_process_with_capture,
-    )
+    monkeypatch.setattr(process, "_run_primary_attach", fake_run_primary_attach)
     monkeypatch.setattr(opencode_adapter, "observe_session_id", lambda **kwargs: None)
     monkeypatch.setattr(process, "stop_session", lambda *args, **kwargs: None)
     monkeypatch.setattr(process, "update_session_harness_id", lambda *args, **kwargs: None)
 
     outcome = process.run_harness_process(launch_context, harness_registry)
 
-    command = captured.get("command")
-    assert isinstance(command, tuple)
-    assert "--session" in command
-    assert "--fork" in command
+    assert managed_calls == 1
     assert outcome.exit_code == 0
 
 

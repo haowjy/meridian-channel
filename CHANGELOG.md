@@ -21,7 +21,6 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 - Fresh managed `meridian codex` attach now waits for rollout `session_meta`, not full bootstrap turn completion.
-- OpenCode `serve` now runs in workspace mode (`OPENCODE_WORKSPACE_ID=meridian`), eliminating SPA catch-all that concatenated HTML to API JSON responses.
 - Claude AG-UI assistant snapshots now emit thinking, tool calls, and exact text newlines.
 - AG-UI replay lazy history scan no longer loads full `history.jsonl`.
 - Model alias resolution no longer fails dry-run/policy paths when mars reports the target harness binary is unavailable on the host. Explicit mars harness route still used.
@@ -35,6 +34,10 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - OpenCode workspace projection now emits `external_directory` as `{path: "allow"}` object instead of array. Matches opencode's Effect/Zod permission schema.
 - OpenCode and Codex primary launches always use managed backend (`serve` → HTTP API → `attach`). Previously gated to resume-only, which forced fresh launches through black-box TUI path — losing system prompt delivery and session tracking.
 - OpenCode TUI projection no longer emits `--prompt` for interactive launches. System prompt is delivered via managed backend's message system field; user types the first message.
+- OpenCode system prompt now materialised as temp file in `/tmp` and injected via `OPENCODE_CONFIG_CONTENT` `instructions` config. Path is opaque to the model (OpenCode prefixes instructions with `Instructions from: <path>`). Merges with existing `OPENCODE_CONFIG_CONTENT` entries.
+- OpenCode spawn message delivery now uses `prompt_async` endpoint (fire-and-forget, 204). Old `/message` endpoint streamed the LLM response in the body — early `response.release()` was cancelling prompt execution server-side, so spawns never got assistant responses. Falls back to `/message` for older OpenCode versions.
+- OpenCode adapter no longer sets `agent_name` on launch spec. OpenCode doesn't support native meridian agents; agent body goes via system prompt composition.
+- OpenCode adapter no longer sets `OPENCODE_WORKSPACE_ID=meridian` env override. Was causing "Workspace Unavailable" popup in TUI.
 - Spawn finalization now treats `history.jsonl` as output before legacy `output.jsonl`.
 
 ## [0.0.44] - 2026-04-24

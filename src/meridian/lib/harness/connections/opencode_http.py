@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import socket
+import tempfile
 import time
 from collections.abc import AsyncIterator, Mapping
 from io import BufferedWriter
@@ -37,6 +38,7 @@ from meridian.lib.harness.projections.project_opencode_streaming import (
     project_opencode_spec_to_serve_command,
     project_opencode_spec_to_session_payload,
 )
+from meridian.lib.harness.workspace_projection import OPENCODE_CONFIG_CONTENT_ENV
 from meridian.lib.launch.env import inherit_child_env
 from meridian.lib.observability.trace_helpers import (
     trace_parse_error,
@@ -73,6 +75,7 @@ class OpenCodeConnection(HarnessConnection[OpenCodeLaunchSpec]):
     _HEALTH_PATHS: ClassVar[tuple[str, ...]] = ("/global/health",)
     _CREATE_SESSION_PATHS: ClassVar[tuple[str, ...]] = ("/session",)
     _MESSAGE_PATH_TEMPLATES: ClassVar[tuple[str, ...]] = (
+        "/session/{session_id}/prompt_async",
         "/session/{session_id}/message",
     )
     _EVENT_PATHS: ClassVar[tuple[str, ...]] = (
@@ -331,6 +334,7 @@ class OpenCodeConnection(HarnessConnection[OpenCodeLaunchSpec]):
         env = inherit_child_env(os.environ, config.env_overrides)
         spawn_dir = resolve_spawn_log_dir(config.project_root, config.spawn_id)
         spawn_dir.mkdir(parents=True, exist_ok=True)
+        _materialize_system_prompt(spawn_dir, config.system, env)
         self._stderr_log_path = spawn_dir / "stderr.log"
         self._stderr_handle = self._stderr_log_path.open("ab")
         self._stderr_read_offset = self._stderr_handle.tell()
@@ -819,6 +823,54 @@ def _summarize_body(body: object | None) -> str:
     except TypeError:
         return repr(body)[:200]
     return serialized[:200]
+
+
+def _materialize_system_prompt(
+    spawn_dir: Path,
+    system: str | None,
+    env: dict[str, str],
+) -> None:
+    """Write system prompt to a temp file and inject it as an OpenCode instruction.
+
+    A unique temp file is created under the system temp directory so the path
+    is opaque to the model (OpenCode prefixes each instruction with
+    ``Instructions from: <path>`` which the model can see).  The file only
+    needs to live as long as the ``opencode serve`` process.
+    """
+    _ = spawn_dir  # reserved for future use (cleanup tracking)
+    text = (system or "").strip()
+    if not text:
+        return
+    fd, tmp_path = tempfile.mkstemp(prefix="meridian-sysprompt-", suffix=".md")
+    try:
+        os.write(fd, text.encode("utf-8"))
+    finally:
+        os.close(fd)
+    absolute_path = os.path.abspath(tmp_path)
+
+    existing_raw = env.get(OPENCODE_CONFIG_CONTENT_ENV, "").strip()
+    existing: dict[str, object] = {}
+    if existing_raw:
+        try:
+            parsed = json.loads(existing_raw)
+            if isinstance(parsed, dict):
+                existing = cast("dict[str, object]", parsed)
+        except json.JSONDecodeError:
+            logger.warning(
+                "Failed to parse existing %s; overwriting with instruction config",
+                OPENCODE_CONFIG_CONTENT_ENV,
+            )
+
+    instructions: list[str] = []
+    prev: object = existing.get("instructions")
+    if isinstance(prev, list):
+        for entry in cast("list[object]", prev):
+            if isinstance(entry, str):
+                instructions.append(entry)
+    instructions.append(absolute_path)
+    existing["instructions"] = instructions
+
+    env[OPENCODE_CONFIG_CONTENT_ENV] = json.dumps(existing, separators=(",", ":"))
 
 
 def _looks_like_address_in_use(stderr_text: str) -> bool:
