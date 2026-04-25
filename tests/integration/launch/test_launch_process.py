@@ -151,15 +151,11 @@ def test_run_harness_process_fork_uses_new_chat_and_materialized_session(
         captured["fork_source_session"] = source_session_id
         return "forked-session"
 
-    def fake_run_primary_process_with_capture(**kwargs: object) -> tuple[int, int]:
-        command = tuple(kwargs["command"])
-        assert "resume" in command
-        captured["command_session"] = command[command.index("resume") + 1]
+    def fake_run_primary_attach(**kwargs: object) -> process.PrimaryAttachOutcome:
         captured["env_chat_id"] = dict(kwargs["env"]).get("MERIDIAN_CHAT_ID")
-        started = kwargs.get("on_child_started")
-        assert callable(started)
-        started(111)
-        return (0, 111)
+        return process.PrimaryAttachOutcome(
+            exit_code=0, session_id="forked-session", tui_pid=111,
+        )
 
     def fake_start_session(
         runtime_root: Path,
@@ -184,8 +180,8 @@ def test_run_harness_process_fork_uses_new_chat_and_materialized_session(
     monkeypatch.setattr(codex_adapter, "observe_session_id", lambda **kwargs: "forked-session")
     monkeypatch.setattr(
         process,
-        "_run_primary_process_with_capture",
-        fake_run_primary_process_with_capture,
+        "_run_primary_attach",
+        fake_run_primary_attach,
     )
     monkeypatch.setattr(process, "stop_session", lambda *args, **kwargs: None)
     monkeypatch.setattr(process, "update_session_harness_id", lambda *args, **kwargs: None)
@@ -195,7 +191,6 @@ def test_run_harness_process_fork_uses_new_chat_and_materialized_session(
 
     assert captured["fork_source_session"] == "source-session"
     assert captured["build_continue_session"] == "forked-session"
-    assert captured["command_session"] == "forked-session"
     assert captured["chat_id_arg"] is None
     # I-10: session is created with the SOURCE session ID; fork happens after the row exists.
     assert captured["start_harness_session_id"] == "source-session"
@@ -308,7 +303,7 @@ def test_run_harness_process_writes_prompt_file_before_primary_launch(
     assert outcome.exit_code == 0
 
 
-def test_run_harness_process_writes_codex_inline_primary_projection_manifest(
+def test_run_harness_process_writes_codex_system_field_primary_projection_manifest(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -378,18 +373,19 @@ def test_run_harness_process_writes_codex_inline_primary_projection_manifest(
 
     log_dir = captured["log_dir"]
     assert isinstance(log_dir, Path)
-    assert not (log_dir / "system-prompt.md").exists()
+    system_prompt = (log_dir / "system-prompt.md").read_text(encoding="utf-8")
     assert not (log_dir / "prompt.md").exists()
     starting_prompt = (log_dir / "starting-prompt.md").read_text(encoding="utf-8")
-    assert f"{harness_id.value} passthrough system prompt" in starting_prompt
+    assert f"{harness_id.value} passthrough system prompt" in system_prompt
+    assert f"{harness_id.value} passthrough system prompt" not in starting_prompt
     assert f"{harness_id.value} primary prompt" in starting_prompt
     assert json.loads((log_dir / "projection-manifest.json").read_text(encoding="utf-8")) == {
         "harness": harness_id.value,
         "surface": "primary",
         "channels": {
-            "system_instruction": "inline",
-            "user_task_prompt": "inline",
-            "task_context": "inline",
+            "system_instruction": "system-field",
+            "user_task_prompt": "user-turn",
+            "task_context": "user-turn",
         },
     }
     assert outcome.exit_code == 0
@@ -730,6 +726,7 @@ def test_run_harness_process_opencode_fork_uses_black_box_path(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    """OpenCode fork uses black-box subprocess (original behavior)."""
     monkeypatch.delenv("MERIDIAN_CHAT_ID", raising=False)
     project_root = tmp_path / "opencode-fork"
     project_root.mkdir()
@@ -778,12 +775,14 @@ def test_run_harness_process_opencode_fork_uses_black_box_path(
     assert outcome.exit_code == 0
 
 
-def test_run_harness_process_managed_failure_falls_back_to_black_box(
+def test_run_harness_process_codex_managed_failure_raises_error(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    """Codex primary must use managed backend; failure raises error, no fallback."""
+    import pytest as _pytest
     monkeypatch.delenv("MERIDIAN_CHAT_ID", raising=False)
-    project_root = tmp_path / "codex-fallback"
+    project_root = tmp_path / "codex-no-fallback"
     project_root.mkdir()
     launch_context, harness_registry = _build_primary_launch_context(
         project_root=project_root,
@@ -796,6 +795,47 @@ def test_run_harness_process_managed_failure_falls_back_to_black_box(
         ),
     )
     codex_adapter = harness_registry.get_subprocess_harness(HarnessId.CODEX)
+
+    def failing_managed(**kwargs: object) -> process.PrimaryAttachOutcome:
+        spawn_dir = Path(kwargs["spawn_dir"])
+        spawn_dir.mkdir(parents=True, exist_ok=True)
+        raise process.PrimaryAttachError("managed startup error")
+
+    monkeypatch.setattr(process, "_run_primary_attach", failing_managed)
+    monkeypatch.setattr(
+        process,
+        "_run_primary_process_with_capture",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("codex should not fall back to black-box")
+        ),
+    )
+    monkeypatch.setattr(codex_adapter, "observe_session_id", lambda **kwargs: None)
+    monkeypatch.setattr(process, "stop_session", lambda *args, **kwargs: None)
+    monkeypatch.setattr(process, "update_session_harness_id", lambda *args, **kwargs: None)
+
+    with _pytest.raises(process.PrimaryAttachError, match="managed startup error"):
+        process.run_harness_process(launch_context, harness_registry)
+
+
+def test_run_harness_process_managed_failure_falls_back_to_black_box(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """OpenCode can fall back to black-box when managed backend fails."""
+    monkeypatch.delenv("MERIDIAN_CHAT_ID", raising=False)
+    project_root = tmp_path / "opencode-fallback"
+    project_root.mkdir()
+    launch_context, harness_registry = _build_primary_launch_context(
+        project_root=project_root,
+        harness_id=HarnessId.OPENCODE,
+        model="gemini-2.5-pro",
+        session=SessionRequest(
+            requested_harness_session_id="existing-opencode-session",
+            continue_chat_id="c-opencode",
+            primary_session_mode=SessionMode.RESUME.value,
+        ),
+    )
+    opencode_adapter = harness_registry.get_subprocess_harness(HarnessId.OPENCODE)
     managed_calls = 0
     black_box_calls = 0
     captured_spawn_dir: Path | None = None
@@ -832,7 +872,7 @@ def test_run_harness_process_managed_failure_falls_back_to_black_box(
         "_run_primary_process_with_capture",
         fake_run_primary_process_with_capture,
     )
-    monkeypatch.setattr(codex_adapter, "observe_session_id", lambda **kwargs: None)
+    monkeypatch.setattr(opencode_adapter, "observe_session_id", lambda **kwargs: None)
     monkeypatch.setattr(process, "stop_session", lambda *args, **kwargs: None)
     monkeypatch.setattr(process, "update_session_harness_id", lambda *args, **kwargs: None)
 
@@ -980,3 +1020,53 @@ def test_run_harness_process_resume_does_not_inject_seed_args(
     # Resume path: adapter returns the existing session ID, no session_args injection
     assert launch_context.seed_harness_session_args == ()
     assert launch_context.seed_harness_session_id == "existing-session-id"
+
+
+def test_run_harness_process_fresh_codex_primary_routes_to_managed_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Fresh Codex primary (no session to resume) uses managed attach, not black-box."""
+    monkeypatch.delenv("MERIDIAN_CHAT_ID", raising=False)
+    project_root = tmp_path / "codex-fresh-managed"
+    project_root.mkdir()
+    # No session request - this is a fresh primary
+    launch_context, harness_registry = _build_primary_launch_context(
+        project_root=project_root,
+        harness_id=HarnessId.CODEX,
+        model="gpt-5.4",
+        prompt="fresh codex primary prompt",
+    )
+    codex_adapter = harness_registry.get_subprocess_harness(HarnessId.CODEX)
+    managed_calls = 0
+
+    def fake_run_primary_attach(**kwargs: object) -> process.PrimaryAttachOutcome:
+        nonlocal managed_calls
+        managed_calls += 1
+        # Verify this is for Codex
+        assert kwargs["harness_id"] == HarnessId.CODEX
+        # Call on_running to mark spawn as running
+        on_running = kwargs.get("on_running")
+        if callable(on_running):
+            on_running(12345)
+        return process.PrimaryAttachOutcome(
+            exit_code=0, session_id="fresh-thread-id", tui_pid=12345
+        )
+
+    monkeypatch.setattr(process, "_run_primary_attach", fake_run_primary_attach)
+    monkeypatch.setattr(
+        process,
+        "_run_primary_process_with_capture",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("fresh codex primary should use managed path, not black-box")
+        ),
+    )
+    monkeypatch.setattr(codex_adapter, "observe_session_id", lambda **kwargs: None)
+    monkeypatch.setattr(process, "stop_session", lambda *args, **kwargs: None)
+    monkeypatch.setattr(process, "update_session_harness_id", lambda *args, **kwargs: None)
+
+    outcome = process.run_harness_process(launch_context, harness_registry)
+
+    assert managed_calls == 1
+    assert outcome.exit_code == 0
+    assert outcome.resolved_harness_session_id == "fresh-thread-id"

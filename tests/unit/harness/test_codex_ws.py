@@ -116,13 +116,18 @@ def test_codex_ws_update_turn_state_accepts_thread_activity_aliases(event_type: 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("use_start_observer", "expect_turn_start"),
-    ((False, True), (True, False)),
+    ("use_start_observer", "is_fresh", "expect_turn_start"),
+    (
+        (False, True, True),   # spawn mode + fresh -> sends user prompt turn
+        (True, True, True),    # primary observer + fresh -> sends bootstrap turn
+        (True, False, False),  # primary observer + resume -> no turn (already has rollout)
+    ),
 )
 async def test_codex_ws_start_respects_primary_observer_mode_for_initial_turn(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     use_start_observer: bool,
+    is_fresh: bool,
     expect_turn_start: bool,
 ) -> None:
     connection = codex_ws.CodexConnection()
@@ -153,16 +158,21 @@ async def test_codex_ws_start_respects_primary_observer_mode_for_initial_turn(
     async def _fake_read_messages_loop() -> None:
         return None
 
+    async def _fake_wait_for_turn_completion(timeout_seconds: float = 120.0) -> None:
+        return None
+
     monkeypatch.setattr(codex_ws.asyncio, "create_subprocess_exec", _fake_create_subprocess_exec)
     monkeypatch.setattr(connection, "_connect_with_retry", _fake_connect_with_retry)
     monkeypatch.setattr(connection, "_request", _fake_request)
     monkeypatch.setattr(connection, "_notify", _fake_notify)
     monkeypatch.setattr(connection, "_bootstrap_thread", _fake_bootstrap_thread)
     monkeypatch.setattr(connection, "_read_messages_loop", _fake_read_messages_loop)
+    monkeypatch.setattr(connection, "_wait_for_turn_completion", _fake_wait_for_turn_completion)
 
     config = _build_connection_config(tmp_path)
     spec = CodexLaunchSpec(
         permission_resolver=UnsafeNoOpPermissionResolver(_suppress_warning=True),
+        continue_session_id="existing-thread" if not is_fresh else None,
     )
     if use_start_observer:
         await connection.start_observer(config, spec)

@@ -59,6 +59,9 @@ _ADDRESS_IN_USE_MARKERS: Final[tuple[str, ...]] = (
     "address in use",
     "eaddrinuse",
 )
+_BOOTSTRAP_TURN_PROMPT: Final[str] = (
+    "Meridian bootstrap. Acknowledge readiness only; do not perform a user task."
+)
 
 
 def _load_websockets_module() -> Any | None:
@@ -316,6 +319,11 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
                         "input": _build_text_user_input(config.prompt),
                     },
                 )
+            elif self._is_fresh_session(spec):
+                # Fresh primary sessions need a bootstrap turn to materialize the
+                # Codex rollout before the TUI can attach. Without this, Codex
+                # cannot resume a fresh thread because no rollout file exists.
+                await self._send_bootstrap_turn_and_wait()
 
             self._transition("connected")
         except Exception:
@@ -796,6 +804,47 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
         if timeout_seconds is not None and timeout_seconds > 0:
             return timeout_seconds
         return _DEFAULT_CONNECT_TIMEOUT_SECONDS
+
+    def _is_fresh_session(self, spec: CodexLaunchSpec) -> bool:
+        """Check if this is a fresh session (not resume or fork)."""
+        return not (spec.continue_session_id or "").strip()
+
+    async def _send_bootstrap_turn_and_wait(self) -> None:
+        """Send a minimal bootstrap turn and wait for completion.
+
+        This materializes the Codex rollout file so the TUI can later attach
+        to this thread. The bootstrap prompt is deterministic and minimal.
+        """
+        thread_id = self._require_thread_id("bootstrap_turn")
+        await self._request(
+            "turn/start",
+            {
+                "threadId": thread_id,
+                "input": _build_text_user_input(_BOOTSTRAP_TURN_PROMPT),
+            },
+        )
+        # Wait for the turn to complete so the rollout is persisted
+        await self._wait_for_turn_completion()
+
+    async def _wait_for_turn_completion(self, timeout_seconds: float = 120.0) -> None:
+        """Block until the current turn completes.
+
+        The reader loop (_read_messages_loop) receives turn/completed from the
+        websocket and calls _update_turn_state, which sets _current_turn_id to
+        None. We poll that state until it clears or timeout.
+        """
+        poll_interval = 0.1
+        elapsed = 0.0
+        while self._current_turn_id is not None:
+            if elapsed >= timeout_seconds:
+                raise RuntimeError(
+                    f"Bootstrap turn timed out after {timeout_seconds}s waiting for completion"
+                )
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+            # Check connection health
+            if not self.health():
+                raise RuntimeError("Codex connection lost during bootstrap turn")
 
     async def _bootstrap_thread(self, spec: CodexLaunchSpec) -> dict[str, object]:
         method, payload = self._thread_bootstrap_request(spec)
