@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NoReturn, Protocol, cast
@@ -65,6 +66,9 @@ class ChatDetailResponse(BaseModel):
     created_at: str
     updated_at: str | None = None
     active_p_id: str | None = None
+    launch_mode: str | None = None
+    work_id: str | None = None
+    first_message_snippet: str | None = None
     spawns: list[dict[str, object]] = Field(
         default_factory=lambda: list[dict[str, object]]()
     )
@@ -127,8 +131,39 @@ def _chat_detail(
         created_at=record.started_at,
         updated_at=None,
         active_p_id=str(active_spawn_id) if active_spawn_id is not None else None,
+        launch_mode=_derive_launch_mode(spawns),
+        work_id=_derive_work_id(spawns),
+        first_message_snippet=_derive_first_message(spawns),
         spawns=[_spawn_summary(spawn) for spawn in spawns],
     )
+
+
+def _derive_launch_mode(spawns: list[spawn_store.SpawnRecord]) -> str | None:
+    """Return app launch mode if present, otherwise the first spawn's launch mode."""
+    for spawn in spawns:
+        if spawn.launch_mode == "app":
+            return "app"
+    if spawns:
+        return spawns[0].launch_mode
+    return None
+
+
+def _derive_work_id(spawns: list[spawn_store.SpawnRecord]) -> str | None:
+    """Return work ID from the most recent spawn that has one."""
+    for spawn in reversed(spawns):
+        if spawn.work_id:
+            return spawn.work_id
+    return None
+
+
+def _derive_first_message(spawns: list[spawn_store.SpawnRecord]) -> str | None:
+    """Return the first spawn prompt snippet for sidebar display."""
+    if not spawns:
+        return None
+    prompt = spawns[0].prompt
+    if not prompt:
+        return None
+    return prompt[:120]
 
 
 def _spawn_summary(record: spawn_store.SpawnRecord) -> dict[str, object]:
@@ -528,6 +563,81 @@ def register_hcp_routes(
         end = None if bounded_limit is None else bounded_start + bounded_limit
         return agui_events[bounded_start:end]
 
+
+
+    def _read_inbound_messages(spawn_id: str) -> list[dict[str, object]]:
+        """Read user messages from inbound.jsonl for replay interleaving."""
+        inbound_path = paths.spawn_history_path(spawn_id).parent / "inbound.jsonl"
+        if not inbound_path.exists():
+            return []
+        
+        messages: list[dict[str, object]] = []
+        try:
+            for line in inbound_path.read_text(encoding="utf-8").splitlines():
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    record = json.loads(stripped)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(record, dict):
+                    continue
+                # Only include user_message actions
+                if record.get("action") != "user_message":
+                    continue
+                data = record.get("data", {})
+                text = data.get("text", "") if isinstance(data, dict) else ""
+                ts = record.get("ts", 0)
+                messages.append({
+                    "seq": len(messages),
+                    "text": text,
+                    "ts": ts,
+                })
+        except Exception:
+            pass
+        return messages
+
+    async def get_spawn_replay(p_id: str) -> dict[str, object]:
+        """Return replay snapshot for Connect-Then-Replay protocol."""
+        record = spawn_store.get_spawn(runtime_root, SpawnId(p_id))
+        if record is None:
+            raise http_exception(status_code=404, detail="spawn not found")
+
+        history_path = paths.spawn_history_path(p_id)
+        raw_events = read_history_range(history_path)
+        
+        # Short-circuit for empty history (EARS-R002)
+        if not raw_events:
+            return {"cursor": 0, "events": [], "inbound": []}
+
+        # Use replay_events_to_agui (not paginated) per design
+        agui_events = [
+            _agui_event_to_json(event)
+            for event in replay_events_to_agui(
+                raw_events,
+                HarnessId(record.harness or ""),
+                p_id,
+            )
+        ]
+
+        # Wrap events in the standard envelope
+        wrapped_events = [
+            {
+                "seq": idx,
+                "type": str(event.get("type", "")),
+                "data": event,
+                "timestamp": str(event.get("timestamp", "")),
+            }
+            for idx, event in enumerate(agui_events)
+        ]
+
+        return {
+            "cursor": len(raw_events),
+            "events": wrapped_events,
+            "inbound": _read_inbound_messages(p_id),
+        }
+
     typed_app.post("/api/chats", status_code=201)(create_chat)
     typed_app.get("/api/chats")(list_chats)
     typed_app.get("/api/chats/{c_id}")(get_chat)
@@ -537,6 +647,7 @@ def register_hcp_routes(
     typed_app.get("/api/chats/{c_id}/history")(get_chat_history)
     typed_app.get("/api/chats/{c_id}/spawns")(list_chat_spawns)
     typed_app.get("/api/spawns/{p_id}/history")(get_spawn_history)
+    typed_app.get("/api/spawns/{p_id}/replay")(get_spawn_replay)
 
 
 __all__ = [

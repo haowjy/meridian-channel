@@ -210,6 +210,10 @@ export interface ChatProjection {
   active_p_id: string | null
   created_at: string
   updated_at: string | null
+  harness: string | null
+  launch_mode: string | null
+  work_id: string | null
+  first_message_snippet: string | null
 }
 
 export interface ChatDetailResponse extends ChatProjection {
@@ -228,10 +232,22 @@ export interface ChatHistoryResponse {
   has_more: boolean
 }
 
-export function createChat(prompt: string, model?: string): Promise<ChatDetailResponse> {
+export interface CreateChatOptions {
+  model?: string
+  harness?: string
+}
+
+export function createChat(
+  prompt: string,
+  options?: CreateChatOptions,
+): Promise<ChatDetailResponse> {
   return request<ChatDetailResponse>('/api/chats', {
     method: 'POST',
-    body: JSON.stringify({ prompt, model }),
+    body: JSON.stringify({
+      prompt,
+      model: options?.model,
+      harness: options?.harness,
+    }),
   })
 }
 
@@ -282,6 +298,26 @@ export function getChatHistory(
 export function getChatSpawns(chatId: string): Promise<SpawnProjection[]> {
   return request<SpawnProjection[]>(
     `/api/chats/${encodeURIComponent(chatId)}/spawns`,
+  )
+}
+
+
+
+export interface SpawnInboundMessage {
+  seq: number
+  text: string
+  ts: number
+}
+
+export interface SpawnReplaySnapshot {
+  cursor: number
+  events: ChatHistoryEvent[]
+  inbound: SpawnInboundMessage[]
+}
+
+export function fetchSpawnReplay(spawnId: string): Promise<SpawnReplaySnapshot> {
+  return request<SpawnReplaySnapshot>(
+    `/api/spawns/${encodeURIComponent(spawnId)}/replay`,
   )
 }
 

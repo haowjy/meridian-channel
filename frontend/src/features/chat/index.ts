@@ -2,7 +2,7 @@
 
 export { ChatPage } from "./ChatPage"
 export type { ChatPageProps } from "./ChatPage"
-export type { ChatContextValue, ChatSelection } from "./ChatContext"
+export type { ChatContextValue, ChatSelection, ModelSelection } from "./ChatContext"
 export { ChatContext, ChatProvider, useChat } from "./ChatContext"
 export { chatManifest } from "./manifest"
 export { ChatSidebar } from "./ChatSidebar"
