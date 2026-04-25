@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
+from meridian.lib.app.agui_replay import PaginationCursor, encode_pagination_cursor
 from meridian.lib.app.hcp_routes import register_hcp_routes
 from meridian.lib.config.project_paths import resolve_project_config_paths
 from meridian.lib.core.types import SpawnId
@@ -533,6 +534,23 @@ def test_chat_history_cursor_keeps_turn_boundaries_consistent_across_pages(
     assert pages[1]["events"][0]["type"] == "RUN_STARTED"
     paginated_events = [event for page in pages for event in page["events"]]
     assert _event_types(paginated_events) == _event_types(legacy_response.json()["events"])
+
+
+def test_chat_history_cursor_beyond_spawn_list_returns_empty_page(tmp_path: Path) -> None:
+    client, _manager, _runtime_root = _make_client(tmp_path)
+    _create_chat(client)
+    cursor = encode_pagination_cursor(
+        PaginationCursor(raw_seq=0, agui_skip=0, checkpoint=0, spawn_idx=1)
+    )
+
+    response = client.get("/api/chats/c1/history", params={"cursor": cursor})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "events": [],
+        "next_cursor": None,
+        "has_more": False,
+    }
 
 
 def test_history_routes_reject_invalid_cursor(tmp_path: Path) -> None:

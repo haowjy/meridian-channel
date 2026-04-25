@@ -370,8 +370,12 @@ def register_hcp_routes(
     ) -> dict[str, object]:
         if limit <= 0:
             raise http_exception(status_code=400, detail="limit must be positive")
-        if page_cursor.spawn_idx > len(spawns):
-            raise http_exception(status_code=400, detail="invalid cursor")
+        if page_cursor.spawn_idx >= len(spawns):
+            return _paginated_history_response(
+                agui_events=[],
+                next_cursor=None,
+                has_more=False,
+            )
 
         remaining = limit
         collected: list[dict[str, Any]] = []

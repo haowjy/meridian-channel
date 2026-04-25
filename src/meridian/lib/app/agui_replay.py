@@ -17,6 +17,7 @@ from meridian.lib.state.history import iter_history_from_seq
 from meridian.lib.streaming.drain_policy import TURN_BOUNDARY_EVENT_TYPE
 
 PAGINATION_CURSOR_VERSION = 1
+MAX_PAGINATION_CURSOR_LENGTH = 256
 
 
 @dataclass(frozen=True)
@@ -108,6 +109,9 @@ def encode_pagination_cursor(cursor: PaginationCursor) -> str:
 
 def decode_pagination_cursor(encoded: str) -> PaginationCursor:
     """Decode cursor from an opaque string."""
+
+    if len(encoded) > MAX_PAGINATION_CURSOR_LENGTH:
+        raise ValueError("Invalid pagination cursor")
 
     try:
         padded = encoded + ("=" * (-len(encoded) % 4))
@@ -214,10 +218,12 @@ def replay_events_paginated(
         turn_state.start_replay()
         if page_cursor.checkpoint > 0:
             turn_state.process_turn_boundary()
+        replayed_raw_seq = page_cursor.checkpoint
         for envelope in iter_history_from_seq(history_path, start_seq=page_cursor.checkpoint):
             seq = envelope.get("seq", -1)
             if not isinstance(seq, int) or seq >= page_cursor.raw_seq:
                 break
+            replayed_raw_seq = seq + 1
             event = _raw_to_harness_event(envelope)
             if event is None:
                 continue
@@ -228,6 +234,8 @@ def replay_events_paginated(
                 turn_state,
                 last_turn_boundary_seq,
             )[1]
+        if page_cursor.raw_seq > replayed_raw_seq:
+            return PaginatedReplayResult([], next_cursor=None, has_more=False)
 
     skipped = 0
     for envelope in iter_history_from_seq(history_path, start_seq=page_cursor.raw_seq):
@@ -367,7 +375,7 @@ def _process_replay_event(
 
 def _required_non_negative_int(payload: Mapping[str, object], key: str) -> int:
     value = payload.get(key)
-    if not isinstance(value, int) or value < 0:
+    if type(value) is not int or value < 0:
         raise ValueError("Invalid pagination cursor")
     return value
 
@@ -383,6 +391,7 @@ def _has_more_after_raw(
 
 
 __all__ = [
+    "MAX_PAGINATION_CURSOR_LENGTH",
     "AguiReplayTurnState",
     "PaginatedReplayResult",
     "PaginationCursor",

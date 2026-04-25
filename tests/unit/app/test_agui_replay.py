@@ -8,6 +8,7 @@ from typing import Any, cast
 import pytest
 
 from meridian.lib.app.agui_replay import (
+    MAX_PAGINATION_CURSOR_LENGTH,
     PaginationCursor,
     decode_pagination_cursor,
     encode_pagination_cursor,
@@ -200,6 +201,25 @@ def test_pagination_cursor_rejects_invalid_input() -> None:
         decode_pagination_cursor(invalid)
 
 
+def test_pagination_cursor_rejects_oversized_input() -> None:
+    with pytest.raises(ValueError):
+        decode_pagination_cursor("a" * (MAX_PAGINATION_CURSOR_LENGTH + 1))
+
+
+def test_pagination_cursor_rejects_bool_integer_fields() -> None:
+    encoded = encode_pagination_cursor(PaginationCursor(raw_seq=1, agui_skip=0, checkpoint=0))
+    payload = json.loads(base64.urlsafe_b64decode((encoded + "==").encode("ascii")).decode("utf-8"))
+    payload["raw_seq"] = True
+    invalid = (
+        base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8"))
+        .decode("ascii")
+        .rstrip("=")
+    )
+
+    with pytest.raises(ValueError):
+        decode_pagination_cursor(invalid)
+
+
 def test_paginated_replay_matches_full_replay_without_gaps_or_duplicates(tmp_path: Path) -> None:
     raw_events: list[dict[str, Any]] = [
         {"event_type": "item/agentMessage", "harness_id": "codex", "payload": {"text": "one"}},
@@ -282,6 +302,35 @@ def test_paginated_replay_empty_history_returns_empty_page(tmp_path: Path) -> No
     history_path = tmp_path / "history.jsonl"
 
     page = replay_events_paginated(history_path, HarnessId.CODEX, "p1", limit=10)
+
+    assert page.events == []
+    assert page.next_cursor is None
+    assert not page.has_more
+
+
+def test_paginated_replay_stale_cursor_past_eof_returns_empty_page(tmp_path: Path) -> None:
+    history_path = tmp_path / "history.jsonl"
+    _write_history(
+        history_path,
+        [
+            {
+                "event_type": "item/agentMessage",
+                "harness_id": "codex",
+                "payload": {"text": "one"},
+            },
+        ],
+    )
+    stale_cursor = encode_pagination_cursor(
+        PaginationCursor(raw_seq=99, agui_skip=0, checkpoint=0)
+    )
+
+    page = replay_events_paginated(
+        history_path,
+        HarnessId.CODEX,
+        "p1",
+        limit=10,
+        cursor=stale_cursor,
+    )
 
     assert page.events == []
     assert page.next_cursor is None
