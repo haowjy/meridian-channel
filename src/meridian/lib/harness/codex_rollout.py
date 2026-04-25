@@ -1,0 +1,140 @@
+"""Codex rollout file discovery helpers."""
+
+from __future__ import annotations
+
+import json
+import re
+from collections.abc import Mapping
+from pathlib import Path
+from typing import cast
+
+from meridian.lib.platform import get_home_path
+
+CODEX_ROLLOUT_FILENAME_RE = re.compile(
+    r"^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-(?P<session_id>[0-9a-fA-F-]{36})\.jsonl$"
+)
+
+
+def resolve_codex_home(launch_env: Mapping[str, str]) -> Path:
+    codex_home = launch_env.get("CODEX_HOME", "").strip()
+    if codex_home:
+        return Path(codex_home).expanduser()
+
+    home = launch_env.get("HOME", "").strip()
+    if home:
+        return Path(home).expanduser() / ".codex"
+
+    return get_home_path() / ".codex"
+
+
+def resolve_rollout_session_id(
+    path: Path,
+    project_root: Path,
+    *,
+    allow_bootstrap_only: bool = False,
+) -> str | None:
+    session_id: str | None = None
+    saw_assistant_message = False
+    saw_turn_aborted = False
+    resolved_project_root = project_root.resolve()
+
+    try:
+        with path.open("r", encoding="utf-8", errors="ignore") as handle:
+            for line in handle:
+                try:
+                    payload_obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(payload_obj, dict):
+                    continue
+                payload = cast("dict[str, object]", payload_obj)
+                payload_type = payload.get("type")
+                if not isinstance(payload_type, str):
+                    continue
+
+                if payload_type == "session_meta":
+                    raw_meta = payload.get("payload")
+                    if not isinstance(raw_meta, dict):
+                        continue
+                    meta = cast("dict[str, object]", raw_meta)
+                    candidate_session_id = meta.get("id")
+                    cwd = meta.get("cwd")
+                    if (
+                        not isinstance(candidate_session_id, str)
+                        or not candidate_session_id.strip()
+                    ):
+                        continue
+                    if not isinstance(cwd, str):
+                        continue
+                    try:
+                        if Path(cwd).expanduser().resolve() != resolved_project_root:
+                            return None
+                    except OSError:
+                        continue
+                    session_id = candidate_session_id.strip()
+                    if allow_bootstrap_only:
+                        return session_id
+                    continue
+
+                if payload_type == "response_item":
+                    raw_item = payload.get("payload")
+                    if not isinstance(raw_item, dict):
+                        continue
+                    item = cast("dict[str, object]", raw_item)
+                    if item.get("type") == "message" and item.get("role") == "assistant":
+                        saw_assistant_message = True
+                    continue
+
+                if payload_type == "event_msg":
+                    raw_event = payload.get("payload")
+                    if isinstance(raw_event, dict):
+                        event_payload = cast("dict[str, object]", raw_event)
+                        if event_payload.get("type") == "turn_aborted":
+                            saw_turn_aborted = True
+                    continue
+
+                if payload_type == "turn_aborted":
+                    saw_turn_aborted = True
+    except OSError:
+        return None
+
+    if session_id is None:
+        return None
+    if saw_turn_aborted and not saw_assistant_message:
+        return None
+    return session_id
+
+
+def find_attachable_rollout_session_id(
+    *,
+    codex_home: Path,
+    project_root: Path,
+    session_id: str | None = None,
+) -> str | None:
+    sessions_root = codex_home / "sessions"
+    if not sessions_root.is_dir():
+        return None
+
+    normalized_session_id = session_id.strip() if session_id is not None else ""
+    if normalized_session_id:
+        pattern = f"rollout-*-{normalized_session_id}.jsonl"
+    else:
+        pattern = "rollout-*.jsonl"
+    candidates: list[tuple[float, Path]] = []
+    for candidate in sessions_root.rglob(pattern):
+        if CODEX_ROLLOUT_FILENAME_RE.match(candidate.name) is None:
+            continue
+        try:
+            modified_at = candidate.stat().st_mtime
+        except OSError:
+            continue
+        candidates.append((modified_at, candidate))
+
+    for _, path in sorted(candidates, key=lambda item: item[0], reverse=True):
+        resolved = resolve_rollout_session_id(path, project_root, allow_bootstrap_only=True)
+        if resolved is None:
+            continue
+        if normalized_session_id and resolved != normalized_session_id:
+            continue
+        return resolved
+    return None

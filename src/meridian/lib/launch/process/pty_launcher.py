@@ -6,6 +6,7 @@ import os
 import signal
 import struct
 import sys
+import threading
 from contextlib import ExitStack, suppress
 from pathlib import Path
 from typing import Any, BinaryIO, cast
@@ -56,6 +57,8 @@ def _install_winsize_forwarding(*, source_fd: int, target_fd: int) -> Any:
     """Sync PTY size now and on future terminal resize signals."""
 
     _sync_pty_winsize(source_fd=source_fd, target_fd=target_fd)
+    if threading.current_thread() is not threading.main_thread():
+        return lambda: None
     previous = cast("signal.Handlers", signal.getsignal(signal.SIGWINCH))
 
     def _handle_resize(signum: int, frame: Any) -> None:

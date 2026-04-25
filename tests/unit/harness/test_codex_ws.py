@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 from pathlib import Path
 
@@ -158,7 +160,7 @@ async def test_codex_ws_start_respects_primary_observer_mode_for_initial_turn(
     async def _fake_read_messages_loop() -> None:
         return None
 
-    async def _fake_wait_for_turn_completion(timeout_seconds: float = 120.0) -> None:
+    async def _fake_wait_for_rollout_materialization(timeout_seconds: float = 120.0) -> None:
         return None
 
     monkeypatch.setattr(codex_ws.asyncio, "create_subprocess_exec", _fake_create_subprocess_exec)
@@ -167,7 +169,11 @@ async def test_codex_ws_start_respects_primary_observer_mode_for_initial_turn(
     monkeypatch.setattr(connection, "_notify", _fake_notify)
     monkeypatch.setattr(connection, "_bootstrap_thread", _fake_bootstrap_thread)
     monkeypatch.setattr(connection, "_read_messages_loop", _fake_read_messages_loop)
-    monkeypatch.setattr(connection, "_wait_for_turn_completion", _fake_wait_for_turn_completion)
+    monkeypatch.setattr(
+        connection,
+        "_wait_for_rollout_materialization",
+        _fake_wait_for_rollout_materialization,
+    )
 
     config = _build_connection_config(tmp_path)
     spec = CodexLaunchSpec(
@@ -182,6 +188,82 @@ async def test_codex_ws_start_respects_primary_observer_mode_for_initial_turn(
     assert connection.session_id == "thread-primary-observer"
     assert ("turn/start" in request_methods) is expect_turn_start
     assert request_methods[0] == "initialize"
+
+    await connection._cleanup_resources(mark_stopped=False)
+
+
+@pytest.mark.asyncio
+async def test_codex_ws_primary_observer_emits_startup_phases(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    connection = codex_ws.CodexConnection()
+    fake_process = _FakeProcess()
+    phases: list[str] = []
+
+    async def _fake_create_subprocess_exec(*_args: object, **_kwargs: object) -> _FakeProcess:
+        return fake_process
+
+    async def _fake_connect_with_retry(*_args: object, **_kwargs: object) -> _FakeWebSocket:
+        return _FakeWebSocket()
+
+    async def _fake_request(
+        method: str,
+        _params: dict[str, object],
+        timeout_seconds: float | None = None,
+    ) -> dict[str, object]:
+        _ = timeout_seconds
+        if method == "initialize":
+            return {}
+        if method == "turn/start":
+            return {"turnId": "turn-bootstrap"}
+        return {}
+
+    async def _fake_notify(_method: str) -> None:
+        return None
+
+    async def _fake_bootstrap_thread(_spec: CodexLaunchSpec) -> dict[str, object]:
+        return {"threadId": "thread-primary-observer"}
+
+    async def _fake_read_messages_loop() -> None:
+        return None
+
+    async def _fake_wait_for_rollout_materialization(timeout_seconds: float = 120.0) -> None:
+        _ = timeout_seconds
+        return None
+
+    monkeypatch.setattr(codex_ws.asyncio, "create_subprocess_exec", _fake_create_subprocess_exec)
+    monkeypatch.setattr(connection, "_connect_with_retry", _fake_connect_with_retry)
+    monkeypatch.setattr(connection, "_request", _fake_request)
+    monkeypatch.setattr(connection, "_notify", _fake_notify)
+    monkeypatch.setattr(connection, "_bootstrap_thread", _fake_bootstrap_thread)
+    monkeypatch.setattr(connection, "_read_messages_loop", _fake_read_messages_loop)
+    monkeypatch.setattr(
+        connection,
+        "_wait_for_rollout_materialization",
+        _fake_wait_for_rollout_materialization,
+    )
+
+    config = ConnectionConfig(
+        spawn_id=SpawnId("p123"),
+        harness_id=HarnessId.CODEX,
+        prompt="hello from test",
+        project_root=tmp_path,
+        env_overrides={},
+        startup_telemetry_hook=phases.append,
+    )
+    spec = CodexLaunchSpec(
+        permission_resolver=UnsafeNoOpPermissionResolver(_suppress_warning=True),
+    )
+
+    await connection.start_observer(config, spec)
+
+    assert phases == [
+        "Starting Codex app-server...",
+        "Connecting managed observer...",
+        "Creating fresh Codex thread...",
+        "Materializing rollout...",
+    ]
 
     await connection._cleanup_resources(mark_stopped=False)
 
@@ -220,6 +302,63 @@ async def test_codex_ws_primary_observer_mode_declines_all_server_requests(
         )
     ]
     assert connection._event_queue.empty()
+
+
+@pytest.mark.asyncio
+async def test_codex_ws_wait_for_rollout_materialization_waits_after_thread_start(
+    tmp_path: Path,
+) -> None:
+    connection = codex_ws.CodexConnection()
+    connection._state = "starting"
+    connection._process = _FakeProcess()
+    connection._ws = _FakeWebSocket()
+    connection._thread_id = "11111111-1111-4111-8111-111111111111"
+    connection._config = _build_connection_config(tmp_path)
+    connection._codex_home = tmp_path / "codex-home"
+
+    with pytest.raises(RuntimeError, match="rollout materialization"):
+        await connection._wait_for_rollout_materialization(timeout_seconds=0.01)
+
+
+@pytest.mark.asyncio
+async def test_codex_ws_wait_for_rollout_materialization_proceeds_before_turn_completed(
+    tmp_path: Path,
+) -> None:
+    session_id = "11111111-1111-4111-8111-111111111111"
+    codex_home = tmp_path / "codex-home"
+    sessions_dir = codex_home / "sessions" / "2026" / "04" / "25"
+    sessions_dir.mkdir(parents=True)
+
+    connection = codex_ws.CodexConnection()
+    connection._state = "starting"
+    connection._process = _FakeProcess()
+    connection._ws = _FakeWebSocket()
+    connection._thread_id = session_id
+    connection._current_turn_id = "turn-bootstrap"
+    connection._config = _build_connection_config(tmp_path)
+    connection._codex_home = codex_home
+
+    async def _materialize_rollout() -> None:
+        await asyncio.sleep(0.01)
+        rollout_path = sessions_dir / f"rollout-2026-04-25T12-00-00-{session_id}.jsonl"
+        rollout_path.write_text(
+            json.dumps(
+                {
+                    "type": "session_meta",
+                    "payload": {
+                        "id": session_id,
+                        "cwd": str(tmp_path),
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    task = asyncio.create_task(_materialize_rollout())
+    await connection._wait_for_rollout_materialization(timeout_seconds=0.5)
+    await task
+    assert connection._current_turn_id == "turn-bootstrap"
 
 
 def test_codex_streaming_projection_builds_appserver_command_and_logs_ignored_report_path(

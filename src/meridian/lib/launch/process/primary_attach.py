@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import os
 import socket
+import sys
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
@@ -18,6 +19,7 @@ from typing import Any
 from meridian.lib.core.types import SpawnId
 from meridian.lib.harness.connections.base import ConnectionConfig, HarnessConnection, HarnessEvent
 from meridian.lib.harness.connections.errors import PortBindError
+from meridian.lib.harness.launch_spec import CodexLaunchSpec
 from meridian.lib.launch.launch_types import ResolvedLaunchSpec
 from meridian.lib.state.history import HarnessHistoryWriter
 from meridian.lib.state.primary_meta import ActivityState, PrimaryMetadata, write_primary_metadata
@@ -65,6 +67,43 @@ class PrimaryAttachOutcome:
     tui_pid: int | None
 
 
+class _StartupTelemetry:
+    """Single-line startup progress output for managed primary attach."""
+
+    def __init__(self) -> None:
+        self._enabled = hasattr(sys.stderr, "isatty") and sys.stderr.isatty()
+        self._last_message = ""
+
+    def update(self, message: str) -> None:
+        if not self._enabled:
+            return
+        padding = " " * max(0, len(self._last_message) - len(message))
+        sys.stderr.write(f"\r{message}{padding}")
+        sys.stderr.flush()
+        self._last_message = message
+
+    def clear(self) -> None:
+        if not self._enabled or not self._last_message:
+            return
+        sys.stderr.write(f"\r{' ' * len(self._last_message)}\r")
+        sys.stderr.flush()
+        self._last_message = ""
+
+    def fail(self) -> None:
+        if not self._enabled or not self._last_message:
+            return
+        sys.stderr.write(f"\r{self._last_message} failed\n")
+        sys.stderr.flush()
+        self._last_message = ""
+
+
+def _startup_phase_message(connection: HarnessConnection[Any], spec: ResolvedLaunchSpec) -> str:
+    harness_label = connection.harness_id.value.capitalize()
+    if isinstance(spec, CodexLaunchSpec):
+        return f"Starting {harness_label} app-server..."
+    return f"Starting {harness_label} managed session..."
+
+
 class PrimaryAttachLauncher:
     """Manages lifecycle: connection (owns backend) + TUI process + metadata."""
 
@@ -103,10 +142,19 @@ class PrimaryAttachLauncher:
         self._history_writer = HarnessHistoryWriter(self._spawn_dir / "history.jsonl")
         connection_started = False
         session_id: str | None = None
+        telemetry = _StartupTelemetry()
 
         try:
+            telemetry.update(_startup_phase_message(self._connection, spec))
+
+            def _update_startup_telemetry(message: str) -> None:
+                telemetry.update(message)
+
             config = await self._start_primary_observer_connection_with_retry(
-                config=config,
+                config=replace(
+                    config,
+                    startup_telemetry_hook=_update_startup_telemetry,
+                ),
                 spec=spec,
             )
             connection_started = True
@@ -127,6 +175,7 @@ class PrimaryAttachLauncher:
                     f"(spawn_id={self._spawn_id})"
                 )
 
+            telemetry.update(f"Attaching {self._connection.harness_id.value.capitalize()} TUI...")
             command = tuple(self._tui_command_builder(session_id))
             loop = asyncio.get_running_loop()
             running_callback = on_running if on_running is not None else self._on_running
@@ -147,12 +196,16 @@ class PrimaryAttachLauncher:
                 output_log_path=None,
                 on_child_started=_on_child_started,
             )
+            telemetry.clear()
 
             return PrimaryAttachOutcome(
                 exit_code=launched.exit_code,
                 session_id=session_id,
                 tui_pid=launched.pid,
             )
+        except Exception:
+            telemetry.fail()
+            raise
         finally:
             if connection_started:
                 self._set_activity("finalizing")

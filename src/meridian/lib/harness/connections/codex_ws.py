@@ -23,6 +23,10 @@ if TYPE_CHECKING:
 
 from meridian import __version__
 from meridian.lib.core.types import SpawnId
+from meridian.lib.harness.codex_rollout import (
+    find_attachable_rollout_session_id,
+    resolve_codex_home,
+)
 from meridian.lib.harness.connections.base import (
     MAX_HARNESS_MESSAGE_BYTES,
     ConnectionCapabilities,
@@ -167,6 +171,7 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
         self._stderr_handle: BufferedWriter | None = None
         self._stderr_log_path: Path | None = None
         self._stderr_read_offset = 0
+        self._codex_home: Path | None = None
 
         self._next_request_id = 1
         self._pending_requests: dict[int, asyncio.Future[dict[str, object]]] = {}
@@ -262,6 +267,7 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
         ws_url = f"ws://{host}:{port}"
 
         env = inherit_child_env(os.environ, config.env_overrides)
+        self._codex_home = resolve_codex_home(env)
         spawn_dir = resolve_spawn_log_dir(config.project_root, config.spawn_id)
         spawn_dir.mkdir(parents=True, exist_ok=True)
         self._stderr_log_path = spawn_dir / "stderr.log"
@@ -275,6 +281,7 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
                 port=port,
             )
             try:
+                self._emit_startup_phase("Starting Codex app-server...")
                 self._process = await asyncio.create_subprocess_exec(
                     *appserver_command,
                     cwd=str(config.project_root),
@@ -289,6 +296,7 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
                     binary_name=appserver_command[0],
                 ) from exc
 
+            self._emit_startup_phase("Connecting managed observer...")
             self._ws = await self._connect_with_retry(
                 ws_url,
                 timeout_seconds=self._connect_timeout(),
@@ -308,6 +316,10 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
             )
             await self._notify("initialized")
 
+            if self._is_fresh_session(spec):
+                self._emit_startup_phase("Creating fresh Codex thread...")
+            else:
+                self._emit_startup_phase("Connecting to Codex managed session...")
             thread_result = await self._bootstrap_thread(spec)
             self._thread_id = _extract_thread_id(thread_result)
 
@@ -323,6 +335,13 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
                 # Fresh primary sessions need a bootstrap turn to materialize the
                 # Codex rollout before the TUI can attach. Without this, Codex
                 # cannot resume a fresh thread because no rollout file exists.
+                #
+                # The load-bearing requirement is "thread is attachable", not
+                # "bootstrap response is semantically complete". We gate on
+                # rollout materialization because that is the earliest observed
+                # durable signal that `codex resume --remote` can attach.
+                # Do not optimize this by mutating Codex model/reasoning defaults.
+                self._emit_startup_phase("Materializing rollout...")
                 await self._send_bootstrap_turn_and_wait()
 
             self._transition("connected")
@@ -592,6 +611,7 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
         self._cancel_requested = False
         self._signal_in_flight = False
         self._launch_spec = None
+        self._codex_home = None
         self._close_log_handles()
 
         if mark_stopped:
@@ -805,6 +825,14 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
             return timeout_seconds
         return _DEFAULT_CONNECT_TIMEOUT_SECONDS
 
+    def _emit_startup_phase(self, message: str) -> None:
+        if not self._primary_observer_mode:
+            return
+        config = self._config
+        if config is None or config.startup_telemetry_hook is None:
+            return
+        config.startup_telemetry_hook(message)
+
     def _is_fresh_session(self, spec: CodexLaunchSpec) -> bool:
         """Check if this is a fresh session (not resume or fork)."""
         return not (spec.continue_session_id or "").strip()
@@ -814,6 +842,9 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
 
         This materializes the Codex rollout file so the TUI can later attach
         to this thread. The bootstrap prompt is deterministic and minimal.
+        Meridian intentionally leaves the thread's normal model/effort
+        semantics alone; bootstrap should be made cheaper by improving the
+        attachability gate, not by mutating user-visible Codex defaults.
         """
         thread_id = self._require_thread_id("bootstrap_turn")
         await self._request(
@@ -823,27 +854,46 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
                 "input": _build_text_user_input(_BOOTSTRAP_TURN_PROMPT),
             },
         )
-        # Wait for the turn to complete so the rollout is persisted
-        await self._wait_for_turn_completion()
+        await self._wait_for_rollout_materialization()
 
-    async def _wait_for_turn_completion(self, timeout_seconds: float = 120.0) -> None:
-        """Block until the current turn completes.
+    async def _wait_for_rollout_materialization(self, timeout_seconds: float = 120.0) -> None:
+        """Block until Codex has created an attachable rollout for the thread.
 
-        The reader loop (_read_messages_loop) receives turn/completed from the
-        websocket and calls _update_turn_state, which sets _current_turn_id to
-        None. We poll that state until it clears or timeout.
+        Fresh primary attach only needs the thread to be resumable by the Codex
+        TUI. The attach-safe signal is a rollout file whose session_meta exists
+        and whose cwd matches this project. We intentionally do not wait for
+        turn/completed and do not change model/effort settings to make bootstrap
+        cheaper.
         """
+        config = self._config
+        codex_home = self._codex_home
+        thread_id = self._require_thread_id("rollout_materialization")
+        if config is None or codex_home is None:
+            raise RuntimeError("Codex connection config is unavailable for rollout wait")
+
         poll_interval = 0.1
         elapsed = 0.0
-        while self._current_turn_id is not None:
+        while True:
+            if (
+                find_attachable_rollout_session_id(
+                    codex_home=codex_home,
+                    project_root=config.project_root,
+                    session_id=thread_id,
+                )
+                == thread_id
+            ):
+                return
+
             if elapsed >= timeout_seconds:
                 raise RuntimeError(
-                    f"Bootstrap turn timed out after {timeout_seconds}s waiting for completion"
+                    "Bootstrap turn timed out after "
+                    f"{timeout_seconds}s waiting for Codex rollout materialization"
                 )
             await asyncio.sleep(poll_interval)
             elapsed += poll_interval
-            # Check connection health
-            if not self.health():
+            process_running = self._process is not None and self._process.returncode is None
+            ws_open = self._ws is not None and _ws_is_open(self._ws)
+            if not process_running or not ws_open:
                 raise RuntimeError("Codex connection lost during bootstrap turn")
 
     async def _bootstrap_thread(self, spec: CodexLaunchSpec) -> dict[str, object]:

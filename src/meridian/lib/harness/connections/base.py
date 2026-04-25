@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Generic, Literal
@@ -57,6 +57,7 @@ class ObserverEndpoint:
 
 
 ConnectionState = Literal["created", "starting", "connected", "stopping", "stopped", "failed"]
+StartupTelemetryHook = Callable[[str], None]
 
 
 class ConnectionNotReady(RuntimeError):
@@ -87,6 +88,7 @@ class ConnectionConfig:
     ws_bind_host: str = "127.0.0.1"
     ws_port: int = 0
     debug_tracer: DebugTracer | None = None
+    startup_telemetry_hook: StartupTelemetryHook | None = None
 
 
 def validate_prompt_size(config: ConnectionConfig) -> None:
@@ -176,5 +178,6 @@ __all__ = [
     "HarnessEvent",
     "ObserverEndpoint",
     "PromptTooLargeError",
+    "StartupTelemetryHook",
     "validate_prompt_size",
 ]

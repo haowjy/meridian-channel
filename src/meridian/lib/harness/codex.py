@@ -24,6 +24,10 @@ from meridian.lib.harness.adapter import (
     SpawnParams,
 )
 from meridian.lib.harness.bundle import HarnessBundle, register_harness_bundle
+from meridian.lib.harness.codex_rollout import (
+    CODEX_ROLLOUT_FILENAME_RE,
+    resolve_rollout_session_id,
+)
 from meridian.lib.harness.common import (
     extract_codex_report,
     extract_session_id_from_artifacts_with_patterns,
@@ -53,11 +57,6 @@ from meridian.lib.platform import get_home_path
 from meridian.lib.safety.permissions import PermissionConfig
 
 logger = logging.getLogger(__name__)
-
-CODEX_ROLLOUT_FILENAME_RE = re.compile(
-    r"^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-(?P<session_id>[0-9a-fA-F-]{36})\.jsonl$"
-)
-
 
 def _codex_home() -> Path:
     configured_home = os.environ.get("CODEX_HOME", "").strip()
@@ -130,71 +129,7 @@ def _fork_rollout_path(*, source_path: Path, source_session_id: str, new_session
 
 
 def _resolve_rollout_session_id(path: Path, resolved_repo: Path) -> str | None:
-    session_id: str | None = None
-    saw_assistant_message = False
-    saw_turn_aborted = False
-
-    with path.open("r", encoding="utf-8", errors="ignore") as handle:
-        for line in handle:
-            try:
-                raw_payload_obj = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(raw_payload_obj, dict):
-                continue
-            payload_obj = cast("dict[str, object]", raw_payload_obj)
-            payload_type = payload_obj.get("type")
-            if not isinstance(payload_type, str):
-                continue
-
-            if payload_type == "session_meta":
-                raw_payload = payload_obj.get("payload")
-                if not isinstance(raw_payload, dict):
-                    continue
-                payload = cast("dict[str, object]", raw_payload)
-                candidate_session_id = payload.get("id")
-                cwd = payload.get("cwd")
-                if not isinstance(candidate_session_id, str) or not candidate_session_id.strip():
-                    continue
-                if not isinstance(cwd, str):
-                    continue
-                try:
-                    cwd_matches = Path(cwd).expanduser().resolve() == resolved_repo
-                except OSError:
-                    continue
-                if not cwd_matches:
-                    return None
-                session_id = candidate_session_id.strip()
-                continue
-
-            if payload_type == "response_item":
-                raw_payload = payload_obj.get("payload")
-                if not isinstance(raw_payload, dict):
-                    continue
-                payload = cast("dict[str, object]", raw_payload)
-                if payload.get("type") == "message" and payload.get("role") == "assistant":
-                    saw_assistant_message = True
-                continue
-
-            if payload_type == "event_msg":
-                raw_payload = payload_obj.get("payload")
-                payload = (
-                    cast("dict[str, object] | None", raw_payload)
-                    if isinstance(raw_payload, dict)
-                    else None
-                )
-                if payload is not None and payload.get("type") == "turn_aborted":
-                    saw_turn_aborted = True
-                continue
-
-            if payload_type == "turn_aborted":
-                saw_turn_aborted = True
-
-    if session_id is None:
-        return None
-    if saw_turn_aborted and not saw_assistant_message:
-        return None
-    return session_id
+    return resolve_rollout_session_id(path, resolved_repo)
 
 
 def _detect_primary_session_id(project_root: Path, started_at_epoch: float) -> str | None:
