@@ -14,7 +14,7 @@ import re
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict
 
@@ -81,7 +81,7 @@ def _read_json_object(path: Path) -> dict[str, Any] | None:
         loaded = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    return loaded if isinstance(loaded, dict) else None
+    return cast("dict[str, Any]", loaded) if isinstance(loaded, dict) else None
 
 
 def _read_or_initialize_status(

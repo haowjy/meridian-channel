@@ -6,7 +6,7 @@ import json
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from meridian.lib.harness.connections.base import HarnessEvent
 from meridian.lib.launch.constants import HISTORY_FILENAME, OUTPUT_FILENAME
@@ -87,7 +87,7 @@ def iter_history_events(path: Path) -> Iterator[dict[str, Any]]:
             # Crash-only tolerance for truncated/corrupt trailing lines.
             continue
         if isinstance(payload, dict):
-            yield payload
+            yield cast("dict[str, Any]", payload)
 
 
 def iter_history_from_seq(
@@ -118,6 +118,7 @@ def iter_history_from_seq(
             if not isinstance(envelope, dict):
                 continue
 
+            envelope = cast("dict[str, Any]", envelope)
             seq = envelope.get("seq", -1)
             if not isinstance(seq, int) or seq < start_seq:
                 continue

@@ -33,7 +33,7 @@ def register_misc_commands(
     get_global_options: Callable[[], _GlobalOptionsLike],
 ) -> None:
     @app.command(name="app")
-    def app_command(
+    def app_command(  # pyright: ignore[reportUnusedFunction] - registered via decorator.
         uds: Annotated[
             str | None,
             Parameter(
@@ -121,19 +121,19 @@ def register_misc_commands(
         print(app.generate_completion(shell=normalized))
 
     @completion_app.command(name="bash")
-    def completion_bash() -> None:
+    def completion_bash() -> None:  # pyright: ignore[reportUnusedFunction] - registered via decorator.
         _emit_completion("bash")
 
     @completion_app.command(name="zsh")
-    def completion_zsh() -> None:
+    def completion_zsh() -> None:  # pyright: ignore[reportUnusedFunction] - registered via decorator.
         _emit_completion("zsh")
 
     @completion_app.command(name="fish")
-    def completion_fish() -> None:
+    def completion_fish() -> None:  # pyright: ignore[reportUnusedFunction] - registered via decorator.
         _emit_completion("fish")
 
     @completion_app.command(name="install")
-    def completion_install(
+    def completion_install(  # pyright: ignore[reportUnusedFunction] - registered via decorator.
         shell: Annotated[
             str,
             Parameter(
@@ -165,7 +165,7 @@ def register_misc_commands(
         emit({"shell": normalized_shell, "path": destination.as_posix()})
 
     @streaming_app.command(name="serve")
-    def streaming_serve_cmd(
+    def streaming_serve_cmd(  # pyright: ignore[reportUnusedFunction] - registered via decorator.
         prompt: Annotated[
             str,
             Parameter(name=["--prompt", "-p"], help="Initial prompt for the streaming run."),
@@ -187,7 +187,7 @@ def register_misc_commands(
             Parameter(name="--debug", help="Enable wire-level debug tracing."),
         ] = False,
     ) -> None:
-        options = cast("_GlobalOptionsLike", get_global_options())
+        options = get_global_options()
         resolved_harness = (harness or options.harness or "").strip()
         if not resolved_harness:
             raise ValueError("harness required: pass --harness")
@@ -204,7 +204,7 @@ def register_misc_commands(
         )
 
     @test_app.command(name="chat")
-    def test_chat_cmd(
+    def test_chat_cmd(  # pyright: ignore[reportUnusedFunction] - registered via decorator.
         harness: Annotated[
             str,
             Parameter(help="Harness id: claude, codex, or opencode."),
@@ -282,7 +282,7 @@ def register_misc_commands(
         )
 
     @app.command(name="context")
-    def context_cmd(
+    def context_cmd(  # pyright: ignore[reportUnusedFunction] - registered via decorator.
         name: Annotated[
             str | None,
             Parameter(

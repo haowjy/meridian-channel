@@ -71,11 +71,14 @@ class _ResolvedSessionTarget(BaseModel):
         return self.tracked and self.harness_session_id is None
 
 
+ResolvedSessionTarget = _ResolvedSessionTarget
+
+
 def resolve_session_target(
     *,
     project_root: Path,
     continue_ref: str,
-) -> _ResolvedSessionTarget:
+) -> ResolvedSessionTarget:
     normalized = continue_ref.strip()
     if not normalized:
         raise ValueError("--continue requires a non-empty session reference.")

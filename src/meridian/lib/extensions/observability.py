@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 # Hardcoded blocklist for secret-like keys (case-insensitive).
 SECRET_BLOCKLIST = frozenset(
@@ -47,8 +47,8 @@ class ExtensionInvocationSummary:
     duration_ms: float
     success: bool
     error_code: str | None = None
-    args_redacted: dict[str, Any] = field(default_factory=dict)
-    result_redacted: dict[str, Any] = field(default_factory=dict)
+    args_redacted: dict[str, Any] = field(default_factory=dict[str, Any])
+    result_redacted: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 class RedactionPipeline:
@@ -78,9 +78,9 @@ class RedactionPipeline:
         if isinstance(value, str):
             return cls._truncate_string(value)
         if isinstance(value, dict):
-            return cls._redact_dict(value)
+            return cls._redact_dict(cast("dict[str, Any]", value))
         if isinstance(value, list):
-            return [cls._redact_value(item) for item in value]
+            return [cls._redact_value(item) for item in cast("list[Any]", value)]
         return value
 
     @classmethod

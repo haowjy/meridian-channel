@@ -188,7 +188,8 @@ main() {
   uv run pyright >/dev/null 2>&1 || die "pyright failed — fix type errors first"
   printf 'pass\n'
   printf '  tests... '
-  uv run python -m pytest -x -q >/dev/null 2>&1 || die "tests failed — fix failing tests first"
+  # Keep pytest output visible so the long-running full suite doesn't look hung.
+  uv run python -m pytest -x -q || die "tests failed — fix failing tests first"
   printf 'pass\n'
 
   local current_version

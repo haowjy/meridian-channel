@@ -104,7 +104,7 @@ class GlobalOptions(BaseModel):
 _GLOBAL_OPTIONS: ContextVar[GlobalOptions | None] = ContextVar("_GLOBAL_OPTIONS", default=None)
 
 PrimaryLaunchOutput = primary_launch.PrimaryLaunchOutput
-_ResolvedSessionTarget = primary_launch._ResolvedSessionTarget
+ResolvedSessionTarget = primary_launch.ResolvedSessionTarget
 
 
 def get_global_options() -> GlobalOptions:
@@ -267,7 +267,9 @@ def _resolve_output_format_for_command(
     )
 
 
-def _is_spawn_background_request(argv: Sequence[str]) -> bool:
+def _is_spawn_background_request(  # pyright: ignore[reportUnusedFunction] - compatibility helper.
+    argv: Sequence[str],
+) -> bool:
     """Return True when argv targets spawn create/continue in background mode."""
 
     group, subcommand = _resolve_command_path(argv)
@@ -539,11 +541,11 @@ def _run_primary_launch(
     )
 
 
-def _resolve_session_target(
+def _resolve_session_target(  # pyright: ignore[reportUnusedFunction] - compatibility helper.
     *,
     project_root: Path,
     continue_ref: str,
-) -> _ResolvedSessionTarget:
+) -> ResolvedSessionTarget:
     return primary_launch.resolve_session_target(
         project_root=project_root, continue_ref=continue_ref
     )
@@ -692,7 +694,9 @@ def _is_root_help_request(argv: Sequence[str]) -> bool:
     return _bootstrap_is_root_help_request(argv)
 
 
-def _should_startup_bootstrap(argv: Sequence[str]) -> bool:
+def _should_startup_bootstrap(  # pyright: ignore[reportUnusedFunction] - compatibility helper.
+    argv: Sequence[str],
+) -> bool:
     return _bootstrap_should_startup_bootstrap(argv)
 
 

@@ -6,9 +6,10 @@ import json
 import os
 import shutil
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, cast
+from typing import Any, Literal, cast
 from urllib.parse import unquote
 
 import httpx
@@ -67,16 +68,23 @@ def _pid_alive(pid: int) -> bool:
         PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
         ERROR_ACCESS_DENIED = 5
 
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        open_process = kernel32.OpenProcess
-        close_handle = kernel32.CloseHandle
+        kernel32: Any = ctypes.WinDLL("kernel32", use_last_error=True)  # pyright: ignore[reportAttributeAccessIssue,reportUnknownMemberType,reportUnknownVariableType] - Windows-only ctypes API.
+        open_process = cast(
+            "Callable[[int, bool, int], int]",
+            kernel32.OpenProcess,  # pyright: ignore[reportUnknownMemberType] - Windows-only ctypes API.
+        )
+        close_handle = cast(
+            "Callable[[int], int]",
+            kernel32.CloseHandle,  # pyright: ignore[reportUnknownMemberType] - Windows-only ctypes API.
+        )
 
-        process_handle = open_process(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        process_handle: int = open_process(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
         if process_handle:
             close_handle(process_handle)
             return True
 
-        return ctypes.get_last_error() == ERROR_ACCESS_DENIED
+        get_last_error = cast("Callable[[], int]", ctypes.get_last_error)  # pyright: ignore[reportAttributeAccessIssue,reportUnknownMemberType] - Windows-only ctypes API.
+        return get_last_error() == ERROR_ACCESS_DENIED
 
     try:
         os.kill(pid, 0)

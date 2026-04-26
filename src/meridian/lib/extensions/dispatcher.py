@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import traceback
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pydantic import ValidationError
 
@@ -115,7 +115,7 @@ class ExtensionCommandDispatcher:
             )
 
             if isinstance(handler_result, dict):
-                result = ExtensionJSONResult(payload=handler_result)
+                result = ExtensionJSONResult(payload=cast("dict[str, Any]", handler_result))
             elif isinstance(handler_result, ExtensionJSONResult):
                 result = handler_result
             elif isinstance(handler_result, ExtensionErrorResult):

@@ -41,6 +41,9 @@ def _detect_tailscale_origins(port: int) -> list[str]:
         return []
 
 
+detect_tailscale_origins = _detect_tailscale_origins
+
+
 def run_app(
     uds: str | None = None,
     port: int | None = None,

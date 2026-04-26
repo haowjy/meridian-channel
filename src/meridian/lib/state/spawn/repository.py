@@ -40,7 +40,7 @@ class FileSpawnRepository:
         )
 
     def read_events(self) -> list[SpawnEvent]:
-        return _read_events(self._paths.spawns_jsonl, spawn_store._parse_event)
+        return _read_events(self._paths.spawns_jsonl, spawn_store.parse_event)
 
 
 __all__ = ["FileSpawnRepository", "SpawnRepository"]

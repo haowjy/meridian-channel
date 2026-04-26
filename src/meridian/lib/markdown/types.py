@@ -41,10 +41,10 @@ class ExtractedDocument:
 
     path: Path
     error: str | None  # set if file couldn't be read
-    frontmatter: dict[str, str] = field(default_factory=dict)  # raw key: value pairs
-    headings: list[ExtractedHeading] = field(default_factory=list)
-    fenced_blocks: list[FencedBlock] = field(default_factory=list)
-    references: list[ExtractedLink] = field(default_factory=list)  # all links/images/wikilinks
+    frontmatter: dict[str, str] = field(default_factory=dict[str, str])  # raw key: value pairs
+    headings: list[ExtractedHeading] = field(default_factory=list[ExtractedHeading])
+    fenced_blocks: list[FencedBlock] = field(default_factory=list[FencedBlock])
+    references: list[ExtractedLink] = field(default_factory=list[ExtractedLink])
 
 
 __all__ = [

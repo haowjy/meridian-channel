@@ -127,7 +127,7 @@ def _extract_last_assistant_message(output_lines: str) -> str | None:
             continue
         last_text_line = stripped
         try:
-            payload_obj = json.loads(stripped)
+            payload_obj: object = json.loads(stripped)
         except json.JSONDecodeError:
             continue
         assistants = _assistant_texts(payload_obj)
@@ -145,12 +145,13 @@ def _normalized_history_lines(raw_lines: str) -> str:
         if not stripped:
             continue
         try:
-            payload_obj = json.loads(stripped)
+            payload_obj: object = json.loads(stripped)
         except json.JSONDecodeError:
             normalized.append(stripped)
             continue
         if isinstance(payload_obj, dict) and "seq" in payload_obj and "payload" in payload_obj:
-            payload_obj = payload_obj["payload"]
+            payload = cast("dict[str, object]", payload_obj)
+            payload_obj = payload["payload"]
         normalized.append(json.dumps(payload_obj, separators=(",", ":"), sort_keys=True))
     return "\n".join(normalized)
 

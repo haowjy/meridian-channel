@@ -32,7 +32,7 @@ def load_ignore_patterns(root: Path, filename: str) -> pathspec.PathSpec[Any] | 
         return None
     return cast(
         "pathspec.PathSpec[Any]",
-        pathspec.PathSpec.from_lines("gitwildmatch", patterns),
+        pathspec.PathSpec.from_lines("gitwildmatch", patterns),  # pyright: ignore[reportUnknownMemberType] - third-party overload has incomplete typing.
     )
 
 

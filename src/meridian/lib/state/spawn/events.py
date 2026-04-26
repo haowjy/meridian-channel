@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from meridian.lib.core.spawn_lifecycle import (
     TERMINAL_SPAWN_STATUSES as _TERMINAL_SPAWN_STATUSES,
@@ -172,7 +172,7 @@ def reduce_events(events: list[SpawnEvent]) -> dict[str, SpawnRecord]:
             )
             continue
 
-        finalize_event = cast("spawn_store.SpawnFinalizeEvent", event)
+        finalize_event = event
         incoming_origin = (
             finalize_event.origin if finalize_event.origin is not None else "runner"
         )

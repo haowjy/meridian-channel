@@ -208,10 +208,10 @@ def _build_detached_popen_kwargs() -> dict[str, Any]:
     On Windows, uses creationflags to detach the process.
     """
     if IS_WINDOWS:
+        create_new_process_group = int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+        detached_process = int(getattr(subprocess, "DETACHED_PROCESS", 0))
         return {
-            "creationflags": (
-                subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
-            ),
+            "creationflags": create_new_process_group | detached_process,
         }
     return {
         "start_new_session": True,

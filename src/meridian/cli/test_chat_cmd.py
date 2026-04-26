@@ -88,9 +88,9 @@ def run_test_chat(
     # Resolve CORS origins (tailscale auto-detection + explicit origins).
     all_origins = list(cors_origins or [])
     if tailscale:
-        from meridian.cli.app_cmd import _detect_tailscale_origins
+        from meridian.cli.app_cmd import detect_tailscale_origins
 
-        ts_origins = _detect_tailscale_origins(port)
+        ts_origins = detect_tailscale_origins(port)
         if ts_origins:
             for origin in ts_origins:
                 if origin not in all_origins:

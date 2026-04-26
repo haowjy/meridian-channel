@@ -100,7 +100,7 @@ def read_primary_metadata(runtime_root: Path, spawn_id: str) -> PrimaryMetadata 
     if not isinstance(payload_obj, dict):
         return None
 
-    payload = payload_obj
+    payload = cast("dict[str, object]", payload_obj)
     if payload.get("managed_backend") is not True:
         return None
 

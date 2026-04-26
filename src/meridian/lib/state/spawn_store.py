@@ -244,6 +244,9 @@ def _parse_event(payload: dict[str, Any]) -> SpawnEvent | None:
     return None
 
 
+parse_event = _parse_event
+
+
 def start_spawn(
     runtime_root: Path,
     *,

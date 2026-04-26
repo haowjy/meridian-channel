@@ -583,12 +583,15 @@ def register_hcp_routes(
                     continue
                 if not isinstance(record, dict):
                     continue
+                typed_record = cast("dict[str, object]", record)
                 # Only include user_message actions
-                if record.get("action") != "user_message":
+                if typed_record.get("action") != "user_message":
                     continue
-                data = record.get("data", {})
-                text = data.get("text", "") if isinstance(data, dict) else ""
-                ts = record.get("ts", 0)
+                raw_data = typed_record.get("data", {})
+                data = cast("dict[str, object]", raw_data) if isinstance(raw_data, dict) else {}
+                raw_text = data.get("text", "")
+                text = raw_text if isinstance(raw_text, str) else ""
+                ts = typed_record.get("ts", 0)
                 messages.append({
                     "seq": len(messages),
                     "text": text,
