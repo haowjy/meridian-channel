@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Generic, Literal
 
@@ -20,6 +20,10 @@ MAX_HARNESS_MESSAGE_BYTES: Final[int] = 10 * 1024 * 1024
 
 # Uniform initial-prompt cap across adapters; fail loudly if the prompt is too large.
 MAX_INITIAL_PROMPT_BYTES: Final[int] = 10 * 1024 * 1024
+
+
+def _empty_startup_phases() -> frozenset[str]:
+    return frozenset()
 
 
 class PromptTooLargeError(RuntimeError):
@@ -44,6 +48,10 @@ class ConnectionCapabilities:
     runtime_model_switch: bool
     structured_reasoning: bool
     supports_primary_observer: bool = False
+    supported_startup_phases: frozenset[str] = field(
+        default_factory=_empty_startup_phases
+    )
+    """Startup phases this adapter can observe. Empty = unknown/untyped."""
 
 
 @dataclass(frozen=True)

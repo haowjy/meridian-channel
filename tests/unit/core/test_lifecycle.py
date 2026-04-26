@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 import uuid
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,7 @@ from meridian.lib.core.lifecycle import (
     get_hook_dispatcher,
 )
 from meridian.lib.state import spawn_store
+from meridian.lib.state.paths import RuntimePaths
 from tests.support.fakes import FakeSpawnRepository
 
 
@@ -207,6 +209,58 @@ def test_cancel_finalizes_with_cancelled_status(tmp_path: Path) -> None:
     assert record is not None
     assert record.status == "cancelled"
     assert record.terminal_origin == "cancel"
+
+
+def test_failed_finalize_writes_failure_sentinel(tmp_path: Path) -> None:
+    """Failed terminal transition must write a structured failure sentinel."""
+    repo = FakeSpawnRepository()
+    svc = _make_service(tmp_path, repository=repo)
+    spawn_id = _start_spawn(svc, status="running")
+
+    transitioned = svc.finalize(spawn_id, "failed", 7, origin="launcher", error="boom")
+
+    sentinel_path = RuntimePaths.from_root_dir(tmp_path).spawns_dir / spawn_id / "failure.json"
+    assert transitioned is True
+    data = json.loads(sentinel_path.read_text(encoding="utf-8"))
+    assert data["spawn_id"] == spawn_id
+    assert data["exit_code"] == 7
+    assert data["reason"] == "boom"
+    assert data["metadata"] == {"origin": "launcher"}
+
+
+def test_cancelled_finalize_does_not_write_failure_sentinel(tmp_path: Path) -> None:
+    """Normal cancellation must not create a failure sentinel."""
+    repo = FakeSpawnRepository()
+    svc = _make_service(tmp_path, repository=repo)
+    spawn_id = _start_spawn(svc, status="running")
+
+    transitioned = svc.cancel(spawn_id)
+
+    sentinel_path = RuntimePaths.from_root_dir(tmp_path).spawns_dir / spawn_id / "failure.json"
+    assert transitioned is True
+    assert not sentinel_path.exists()
+
+
+def test_failure_sentinel_write_failure_does_not_block_finalize(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sentinel write errors are best-effort and must not block terminal state."""
+    repo = FakeSpawnRepository()
+    svc = _make_service(tmp_path, repository=repo)
+    spawn_id = _start_spawn(svc, status="running")
+
+    def raise_write_text(*args: object, **kwargs: object) -> int:
+        raise OSError("sentinel blocked")
+
+    monkeypatch.setattr(Path, "write_text", raise_write_text)
+
+    transitioned = svc.finalize(spawn_id, "failed", 1, origin="launcher")
+
+    record = spawn_store.get_spawn(tmp_path, spawn_id, repository=repo)
+    assert transitioned is True
+    assert record is not None
+    assert record.status == "failed"
 
 
 # ---------------------------------------------------------------------------

@@ -8,8 +8,8 @@ import os
 import sys
 import threading
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
-from enum import Enum
+from datetime import UTC, datetime
+from enum import Enum, StrEnum
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
@@ -24,6 +24,19 @@ class LifecycleObserverTier(Enum):
 
     DIAGNOSTIC = "diagnostic"  # best-effort, exceptions logged and swallowed
     POLICY = "policy"  # control path, exceptions propagate
+
+
+class StartupPhase(StrEnum):
+    """Canonical startup phase vocabulary per HCP spec."""
+
+    LAUNCHING_SUBPROCESS = "launching_subprocess"
+    WAITING_FOR_CONNECTION = "waiting_for_connection"
+    INITIALIZING_SESSION = "initializing_session"
+    HARNESS_READY = "harness.ready"
+    SKILLS_LOADING = "skills.loading"
+    SENDING_PROMPT = "sending_prompt"
+    WAITING_FOR_RESPONSE = "waiting_for_response"
+    HARNESS_FAILED = "harness.failed"
 
 
 class LifecycleObserver(Protocol):
@@ -56,6 +69,65 @@ class LifecycleEvent:
     seq: int
     # Event-specific fields
     payload: dict[str, Any] = field(default_factory=dict[str, Any])
+
+
+@dataclass(frozen=True)
+class SpawnFailure:
+    """Structured failure record written alongside terminal failure state."""
+
+    spawn_id: str
+    ts: datetime
+    exit_code: int | None
+    reason: str
+    traceback: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
+
+
+@dataclass(frozen=True)
+class StartupPhaseSignal:
+    """Typed startup phase signal from adapter.
+
+    Emitted during connection setup. Best-effort - adapters may omit
+    phases they cannot observe.
+    """
+
+    phase: StartupPhase
+    spawn_id: str
+    ts: datetime
+    seq: int
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
+
+
+class StartupPhaseEmitter:
+    """Typed emitter for adapter startup telemetry.
+
+    Wraps the global observer notify path and uses the shared
+    per-spawn sequence counter.
+    """
+
+    def __init__(self, spawn_id: str) -> None:
+        self._spawn_id = spawn_id
+
+    def emit(self, phase: StartupPhase, metadata: dict[str, Any] | None = None) -> None:
+        """Emit a startup phase signal."""
+        signal = StartupPhaseSignal(
+            phase=phase,
+            spawn_id=self._spawn_id,
+            ts=datetime.now(UTC),
+            seq=next_spawn_sequence(self._spawn_id),
+            metadata=metadata or {},
+        )
+        event = LifecycleEvent(
+            event=phase.value,
+            spawn_id=self._spawn_id,
+            harness_id="",
+            model="",
+            agent=None,
+            ts=signal.ts,
+            seq=signal.seq,
+            payload=signal.metadata,
+        )
+        notify_observers(event)
 
 
 class SpawnEventCounter:

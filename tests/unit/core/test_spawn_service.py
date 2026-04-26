@@ -68,6 +68,21 @@ async def test_complete_spawn_returns_true_for_first_terminal_transition(
 
 
 @pytest.mark.asyncio
+async def test_get_spawn_failure_returns_failure_sentinel(tmp_path: Path) -> None:
+    lifecycle = SpawnLifecycleService(tmp_path)
+    service = SpawnApplicationService(tmp_path, lifecycle)
+    spawn_id = _start_running_spawn(lifecycle)
+
+    await service.complete_spawn(spawn_id, "failed", 2, origin="runner")
+
+    failure = service.get_spawn_failure(spawn_id)
+    assert failure is not None
+    assert failure.spawn_id == str(spawn_id)
+    assert failure.exit_code == 2
+    assert failure.reason == "runner"
+
+
+@pytest.mark.asyncio
 async def test_complete_spawn_returns_false_after_terminal_transition(
     tmp_path: Path,
 ) -> None:

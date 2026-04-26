@@ -4,6 +4,7 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 ### Added
+- Failed spawn sentinel. Terminal `failed` transition writes `failure.json`; app service can read it back.
 - Lifecycle telemetry event model, observer protocol, event names, and per-spawn sequence counter skeleton for future spawn observer hooks.
 - `scripts/quality-issues.sh` helper. Lists open quality/immediate GitHub issues, skips `future`, groups by priority: high, medium, low, unprioritized.
 - Arbitrary named contexts. Define `[context.<name>]` in `meridian.toml` for custom context roots. `meridian context <name>` resolves and displays. `ContextEntryOutput` model exposes source, path, resolved fields.

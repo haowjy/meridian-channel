@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -14,11 +15,13 @@ from meridian.lib.core.lifecycle import SpawnLifecycleService
 from meridian.lib.core.telemetry import (
     LifecycleObserver,
     LifecycleObserverTier,
+    SpawnFailure,
     register_observer,
 )
 from meridian.lib.core.types import SpawnId
 from meridian.lib.state import spawn_store
 from meridian.lib.state.liveness import is_process_alive
+from meridian.lib.state.paths import RuntimePaths
 from meridian.lib.state.spawn_store import SpawnOrigin
 from meridian.lib.streaming.signal_canceller import CancelOutcome as SignalCancelOutcome
 
@@ -140,6 +143,22 @@ class SpawnApplicationService:
         """Raise if spawn is currently finalizing."""
         if record.status == "finalizing":
             raise ValueError("Spawn is finalizing")
+
+    def get_spawn_failure(self, spawn_id: SpawnId) -> SpawnFailure | None:
+        """Read the failure sentinel for a spawn, if it exists."""
+        sentinel_path = (
+            RuntimePaths.from_root_dir(self._runtime_root).spawns_dir
+            / str(spawn_id)
+            / "failure.json"
+        )
+        if not sentinel_path.exists():
+            return None
+        try:
+            data = json.loads(sentinel_path.read_text(encoding="utf-8"))
+            data["ts"] = datetime.fromisoformat(data["ts"])
+            return SpawnFailure(**data)
+        except Exception:
+            return None
 
     # ---- Spawn Operations (stubs for 0B.2 and 0B.3) ----
 

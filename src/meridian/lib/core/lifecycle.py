@@ -28,9 +28,10 @@ definition time, so the delayed import is transparent to callers.
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 from uuid import UUID
@@ -39,6 +40,7 @@ import structlog
 
 from meridian.lib.core.telemetry import (
     CORE_EVENTS,
+    SpawnFailure,
     allocate_spawn_sequence,
     next_spawn_sequence,
     notify_observers,
@@ -309,6 +311,23 @@ class SpawnLifecycleService:
         clock: Clock | None = None,
     ) -> bool:
         """Finalize a spawn and dispatch spawn.finalized for persisted terminal writes."""
+        existing = spawn_store.get_spawn(
+            self._runtime_root, spawn_id, repository=self._repository
+        )
+        if status == "failed" and (
+            existing is None or existing.status not in _TERMINAL_STATUS_VALUES
+        ):
+            _write_failure_sentinel(
+                self._runtime_root,
+                spawn_id,
+                SpawnFailure(
+                    spawn_id=spawn_id,
+                    ts=datetime.now(tz=UTC),
+                    exit_code=exit_code,
+                    reason=error or origin,
+                    metadata={"origin": origin},
+                ),
+            )
         # Authoritative transition write still happens in spawn_store.
         outcome = spawn_store.finalize_spawn(
             self._runtime_root,
@@ -519,6 +538,31 @@ def _emit_lifecycle_event(
         payload=payload or {},
     )
     notify_observers(event)
+
+
+def _write_failure_sentinel(
+    runtime_root: Path,
+    spawn_id: str,
+    failure: SpawnFailure,
+) -> None:
+    """Best-effort write of failure sentinel.
+
+    Does not propagate exceptions; terminal state writes take priority.
+    """
+    try:
+        from meridian.lib.state.paths import RuntimePaths
+
+        sentinel_path = (
+            RuntimePaths.from_root_dir(runtime_root).spawns_dir
+            / spawn_id
+            / "failure.json"
+        )
+        sentinel_path.parent.mkdir(parents=True, exist_ok=True)
+        data = asdict(failure)
+        data["ts"] = failure.ts.isoformat()
+        sentinel_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except Exception:
+        logger.exception("Failed to write failure sentinel for %s", spawn_id)
 
 
 # ---------------------------------------------------------------------------
