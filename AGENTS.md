@@ -162,6 +162,16 @@ Commit after each step that passes tests. Don't accumulate changes across multip
 2. If you must proceed, `git stash --include-untracked` first
 3. When reverting agent changes, distinguish agent-created files from pre-existing untracked files
 
+### Quality Issue Triage
+
+To see current quality/immediate burn-down work on GitHub, use:
+
+```bash
+scripts/quality-issues.sh
+```
+
+Lists open issues on `meridian-flow/meridian-cli`, excludes issues labelled `future`, and groups by `quality:high`, `quality:medium`, `quality:low`, then unprioritized. Mars capability packaging issues appear here by default — they are not future work unless explicitly labelled `future`.
+
 ## Related Repos
 
 - **mars-agents** (`../mars-agents/`): Standalone agent package manager for `.agents/`. Rust CLI, binary name `mars`. Meridian invokes it via `meridian mars ...` for project package setup and sync. Repo: `meridian-flow/mars-agents`.
