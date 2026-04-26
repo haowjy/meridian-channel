@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from meridian.lib.observability.debug_tracer import DebugTracer
 
 from meridian import __version__
+from meridian.lib.core.telemetry import StartupPhase, StartupPhaseEmitter
 from meridian.lib.core.types import SpawnId
 from meridian.lib.harness.codex_rollout import (
     find_attachable_rollout_session_id,
@@ -183,6 +184,7 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
         self._cancel_requested = False
         self._signal_in_flight = False
         self._primary_observer_mode = False
+        self._startup_emitter: StartupPhaseEmitter | None = None
 
     @property
     def state(self) -> ConnectionState:
@@ -205,6 +207,16 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
             runtime_model_switch=False,
             structured_reasoning=True,
             supports_primary_observer=True,
+            supported_startup_phases=frozenset(
+                phase.value
+                for phase in (
+                    StartupPhase.LAUNCHING_SUBPROCESS,
+                    StartupPhase.WAITING_FOR_CONNECTION,
+                    StartupPhase.INITIALIZING_SESSION,
+                    StartupPhase.HARNESS_READY,
+                    StartupPhase.HARNESS_FAILED,
+                )
+            ),
         )
 
     @property
@@ -251,6 +263,7 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
 
         self._transition("starting")
         self._spawn_id = config.spawn_id
+        self._startup_emitter = StartupPhaseEmitter(str(config.spawn_id))
         self._tracer = config.debug_tracer
         self._config = config
         self._launch_spec = spec
@@ -281,7 +294,7 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
                 port=port,
             )
             try:
-                self._emit_startup_phase("Starting Codex app-server...")
+                self._emit_startup_phase(StartupPhase.LAUNCHING_SUBPROCESS)
                 self._process = await asyncio.create_subprocess_exec(
                     *appserver_command,
                     cwd=str(config.project_root),
@@ -296,7 +309,7 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
                     binary_name=appserver_command[0],
                 ) from exc
 
-            self._emit_startup_phase("Connecting managed observer...")
+            self._emit_startup_phase(StartupPhase.WAITING_FOR_CONNECTION)
             self._ws = await self._connect_with_retry(
                 ws_url,
                 timeout_seconds=self._connect_timeout(),
@@ -317,9 +330,9 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
             await self._notify("initialized")
 
             if self._is_fresh_session(spec):
-                self._emit_startup_phase("Creating fresh Codex thread...")
+                self._emit_startup_phase(StartupPhase.INITIALIZING_SESSION)
             else:
-                self._emit_startup_phase("Connecting to Codex managed session...")
+                self._emit_startup_phase(StartupPhase.INITIALIZING_SESSION)
             thread_result = await self._bootstrap_thread(spec)
             self._thread_id = _extract_thread_id(thread_result)
 
@@ -341,11 +354,13 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
                 # rollout materialization because that is the earliest observed
                 # durable signal that `codex resume --remote` can attach.
                 # Do not optimize this by mutating Codex model/reasoning defaults.
-                self._emit_startup_phase("Materializing rollout...")
+                self._emit_startup_phase(StartupPhase.INITIALIZING_SESSION)
                 await self._send_bootstrap_turn_and_wait()
 
             self._transition("connected")
+            self._emit_startup_phase(StartupPhase.HARNESS_READY)
         except Exception:
+            self._emit_startup_phase(StartupPhase.HARNESS_FAILED)
             self._transition("failed")
             await self._cleanup_resources(mark_stopped=False)
             raise
@@ -572,6 +587,7 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
                 )
         except Exception as exc:
             if self._state in {"starting", "connected"}:
+                self._emit_startup_phase(StartupPhase.HARNESS_FAILED)
                 self._transition("failed")
                 await self._event_queue.put(
                     HarnessEvent(
@@ -612,6 +628,7 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
         self._signal_in_flight = False
         self._launch_spec = None
         self._codex_home = None
+        self._startup_emitter = None
         self._close_log_handles()
 
         if mark_stopped:
@@ -825,13 +842,13 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
             return timeout_seconds
         return _DEFAULT_CONNECT_TIMEOUT_SECONDS
 
-    def _emit_startup_phase(self, message: str) -> None:
+    def _emit_startup_phase(self, phase: StartupPhase) -> None:
         if not self._primary_observer_mode:
             return
-        config = self._config
-        if config is None or config.startup_telemetry_hook is None:
+        emitter = self._startup_emitter
+        if emitter is None:
             return
-        config.startup_telemetry_hook(message)
+        emitter.emit(phase)
 
     def _is_fresh_session(self, spec: CodexLaunchSpec) -> bool:
         """Check if this is a fresh session (not resume or fork)."""

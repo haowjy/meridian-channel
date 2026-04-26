@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from meridian.lib.core.telemetry import StartupPhase
 from meridian.lib.core.types import HarnessId, SpawnId
 from meridian.lib.harness.connections import codex_ws
 from meridian.lib.harness.connections.base import ConnectionConfig
@@ -199,7 +200,24 @@ async def test_codex_ws_primary_observer_emits_startup_phases(
 ) -> None:
     connection = codex_ws.CodexConnection()
     fake_process = _FakeProcess()
-    phases: list[str] = []
+    phases: list[StartupPhase] = []
+    assert connection.capabilities.supported_startup_phases == frozenset(
+        phase.value
+        for phase in (
+            StartupPhase.LAUNCHING_SUBPROCESS,
+            StartupPhase.WAITING_FOR_CONNECTION,
+            StartupPhase.INITIALIZING_SESSION,
+            StartupPhase.HARNESS_READY,
+            StartupPhase.HARNESS_FAILED,
+        )
+    )
+
+    class _RecordingStartupPhaseEmitter:
+        def __init__(self, spawn_id: str) -> None:
+            assert spawn_id == "p123"
+
+        def emit(self, phase: StartupPhase) -> None:
+            phases.append(phase)
 
     async def _fake_create_subprocess_exec(*_args: object, **_kwargs: object) -> _FakeProcess:
         return fake_process
@@ -233,6 +251,7 @@ async def test_codex_ws_primary_observer_emits_startup_phases(
         return None
 
     monkeypatch.setattr(codex_ws.asyncio, "create_subprocess_exec", _fake_create_subprocess_exec)
+    monkeypatch.setattr(codex_ws, "StartupPhaseEmitter", _RecordingStartupPhaseEmitter)
     monkeypatch.setattr(connection, "_connect_with_retry", _fake_connect_with_retry)
     monkeypatch.setattr(connection, "_request", _fake_request)
     monkeypatch.setattr(connection, "_notify", _fake_notify)
@@ -250,7 +269,9 @@ async def test_codex_ws_primary_observer_emits_startup_phases(
         prompt="hello from test",
         project_root=tmp_path,
         env_overrides={},
-        startup_telemetry_hook=phases.append,
+        startup_telemetry_hook=lambda _message: pytest.fail(
+            "Codex adapter should use typed StartupPhaseEmitter, not string hook"
+        ),
     )
     spec = CodexLaunchSpec(
         permission_resolver=UnsafeNoOpPermissionResolver(_suppress_warning=True),
@@ -259,10 +280,11 @@ async def test_codex_ws_primary_observer_emits_startup_phases(
     await connection.start_observer(config, spec)
 
     assert phases == [
-        "Starting Codex app-server...",
-        "Connecting managed observer...",
-        "Creating fresh Codex thread...",
-        "Materializing rollout...",
+        StartupPhase.LAUNCHING_SUBPROCESS,
+        StartupPhase.WAITING_FOR_CONNECTION,
+        StartupPhase.INITIALIZING_SESSION,
+        StartupPhase.INITIALIZING_SESSION,
+        StartupPhase.HARNESS_READY,
     ]
 
     await connection._cleanup_resources(mark_stopped=False)

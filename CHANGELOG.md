@@ -12,6 +12,7 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 - Spawn cancel now uses one application service for CLI and HTTP; managed primary cancel behavior shared across both surfaces.
+- Codex startup telemetry now emits canonical typed phases via lifecycle observers, not string callback messages.
 - `scripts/release.sh` now keeps pytest output visible during pre-release checks, so long full-suite runs no longer look hung.
 - Pyright warning cleanup across CLI, state, app, and launch code. Type-check baseline now clean: `0 errors, 0 warnings`.
 
