@@ -10,6 +10,7 @@ from uuid import UUID
 
 import pytest
 
+import meridian.lib.core.telemetry as telemetry
 from meridian.lib.core.lifecycle import (
     LifecycleEvent,
     SpawnLifecycleService,
@@ -20,6 +21,13 @@ from meridian.lib.core.lifecycle import (
 )
 from meridian.lib.state import spawn_store
 from tests.support.fakes import FakeSpawnRepository
+
+
+@pytest.fixture(autouse=True)
+def _reset_telemetry_globals(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(telemetry, "_GLOBAL_OBSERVERS", [])
+    monkeypatch.setattr(telemetry, "_GLOBAL_EVENT_COUNTER", telemetry.SpawnEventCounter())
+    monkeypatch.setattr(telemetry, "_debug_trace_registered", False)
 
 # ---------------------------------------------------------------------------
 # Test doubles
@@ -63,6 +71,24 @@ class StoreSnapshotHook:
                 record.status if record is not None else None,
                 record.terminal_origin if record is not None else None,
             )
+        )
+
+
+class UpdatingCreatedHook:
+    """Updates spawn metadata from inside spawn.created hook."""
+
+    def __init__(self, runtime_root: Path, repository: FakeSpawnRepository) -> None:
+        self._runtime_root = runtime_root
+        self._repository = repository
+
+    def on_event(self, event: LifecycleEvent) -> None:
+        if event.event_type != "spawn.created":
+            return
+        spawn_store.update_spawn(
+            self._runtime_root,
+            event.spawn_id,
+            desc="updated from hook",
+            repository=self._repository,
         )
 
 
@@ -215,6 +241,32 @@ def test_spawn_created_event_carries_context_fields(tmp_path: Path) -> None:
     assert event.chat_id == "chat-42"
     assert event.work_id == "W1"
     assert event.model == "claude-opus-4-5"
+
+
+def test_start_allocates_sequence_before_hook_triggered_update(tmp_path: Path) -> None:
+    """Hook-triggered update_spawn events must not duplicate later start telemetry seqs."""
+    repo = FakeSpawnRepository()
+    telemetry_events: list[telemetry.LifecycleEvent] = []
+
+    class RecordingTelemetryObserver:
+        def on_event(self, event: telemetry.LifecycleEvent) -> None:
+            telemetry_events.append(event)
+
+    telemetry.register_observer(RecordingTelemetryObserver())
+    svc = _make_service(
+        tmp_path,
+        hooks=[UpdatingCreatedHook(tmp_path, repo)],
+        repository=repo,
+    )
+
+    spawn_id = _start_spawn(svc, status="running")
+
+    spawn_events = [event for event in telemetry_events if event.spawn_id == spawn_id]
+    assert [(event.event, event.seq) for event in spawn_events] == [
+        ("spawn.updated", 1),
+        ("spawn.queued", 2),
+        ("spawn.running", 3),
+    ]
 
 
 # ---------------------------------------------------------------------------

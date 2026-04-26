@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import os
+import sys
 import threading
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     from meridian.lib.core.types import SpawnId
+
+
+logger = logging.getLogger(__name__)
 
 
 class LifecycleObserverTier(Enum):
@@ -63,11 +70,12 @@ class SpawnEventCounter:
         self._lock = threading.Lock()
 
     def allocate(self, spawn_id: SpawnId | str) -> int:
-        """Allocate initial sequence number for a new spawn."""
+        """Allocate initial sequence number for a new spawn (idempotent)."""
         with self._lock:
             spawn_key = str(spawn_id)
-            self._counters[spawn_key] = 0
-            return 0
+            if spawn_key not in self._counters:
+                self._counters[spawn_key] = 0
+            return self._counters[spawn_key]
 
     def next(self, spawn_id: SpawnId | str) -> int:
         """Get next sequence number for an existing spawn."""
@@ -82,6 +90,76 @@ class SpawnEventCounter:
         """Clean up counter for a terminated spawn (optional)."""
         with self._lock:
             self._counters.pop(str(spawn_id), None)
+
+
+class DebugTraceObserver:
+    """Print lifecycle events as JSON to stderr when MERIDIAN_DEBUG=1."""
+
+    def on_event(self, event: LifecycleEvent) -> None:
+        """Emit a JSON line for debug tracing when enabled."""
+        if os.environ.get("MERIDIAN_DEBUG") != "1":
+            return
+        data = asdict(event)
+        data["ts"] = event.ts.isoformat()
+        print(json.dumps(data), file=sys.stderr)
+
+
+_GLOBAL_EVENT_COUNTER = SpawnEventCounter()
+_GLOBAL_OBSERVERS: list[tuple[LifecycleObserver, LifecycleObserverTier]] = []
+_debug_trace_registered = False
+
+
+def register_observer(
+    observer: LifecycleObserver,
+    tier: LifecycleObserverTier = LifecycleObserverTier.DIAGNOSTIC,
+) -> None:
+    """Register a process-wide lifecycle observer."""
+    _GLOBAL_OBSERVERS.append((observer, tier))
+
+
+def register_debug_trace_observer() -> None:
+    """Register the process-wide debug trace observer once."""
+    global _debug_trace_registered
+    if _debug_trace_registered:
+        return
+    register_observer(DebugTraceObserver())
+    _debug_trace_registered = True
+
+
+def notify_observers(event: LifecycleEvent) -> None:
+    """Dispatch a lifecycle event to process-wide observers by tier."""
+    policy_observers = [
+        observer for observer, tier in _GLOBAL_OBSERVERS if tier == LifecycleObserverTier.POLICY
+    ]
+    diagnostic_observers = [
+        observer
+        for observer, tier in _GLOBAL_OBSERVERS
+        if tier == LifecycleObserverTier.DIAGNOSTIC
+    ]
+
+    for observer in policy_observers:
+        observer.on_event(event)
+
+    for observer in diagnostic_observers:
+        try:
+            observer.on_event(event)
+        except Exception:
+            logger.exception("Diagnostic observer failed for event %s", event.event)
+
+
+def allocate_spawn_sequence(spawn_id: SpawnId | str) -> int:
+    """Allocate the shared per-spawn sequence counter."""
+    return _GLOBAL_EVENT_COUNTER.allocate(spawn_id)
+
+
+def next_spawn_sequence(spawn_id: SpawnId | str) -> int:
+    """Return the next shared per-spawn sequence number."""
+    return _GLOBAL_EVENT_COUNTER.next(spawn_id)
+
+
+def release_spawn_sequence(spawn_id: SpawnId | str) -> None:
+    """Release the shared per-spawn sequence counter."""
+    _GLOBAL_EVENT_COUNTER.release(spawn_id)
 
 
 # Event names for core state transitions

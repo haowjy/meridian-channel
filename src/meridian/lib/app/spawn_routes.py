@@ -11,6 +11,7 @@ import re
 import time
 from collections.abc import Callable
 from dataclasses import asdict
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
 from uuid import uuid4
@@ -23,6 +24,12 @@ from meridian.lib.config.project_paths import ProjectConfigPaths
 from meridian.lib.core.lifecycle import SpawnLifecycleService
 from meridian.lib.core.spawn_lifecycle import TERMINAL_SPAWN_STATUSES
 from meridian.lib.core.spawn_service import SpawnApplicationService
+from meridian.lib.core.telemetry import (
+    LifecycleEvent,
+    next_spawn_sequence,
+    notify_observers,
+    register_debug_trace_observer,
+)
 from meridian.lib.core.types import HarnessId, SpawnId
 from meridian.lib.harness.connections.base import ConnectionConfig
 from meridian.lib.harness.registry import get_default_harness_registry
@@ -167,8 +174,7 @@ def register_spawn_routes(
         lifecycle_service,
         spawn_manager=spawn_manager,
     )
-    # Phase 0C.2 registration seam: register debug/stream observers here when
-    # MERIDIAN_DEBUG support lands in 0C.3. No observers are emitted yet.
+    register_debug_trace_observer()
     typed_app = cast("_FastAPIApp", app)
 
     async def reserve_spawn_id(
@@ -447,6 +453,18 @@ def register_spawn_routes(
             }
         
         archive_spawn(runtime_root, str(typed_spawn_id))
+        notify_observers(
+            LifecycleEvent(
+                event="spawn.archived",
+                spawn_id=str(typed_spawn_id),
+                harness_id=record.harness or "",
+                model=record.model or "",
+                agent=record.agent,
+                ts=datetime.now(tz=UTC),
+                seq=next_spawn_sequence(str(typed_spawn_id)),
+                payload={"archived": True},
+            )
+        )
         _broadcast(
             "spawn.archived",
             {

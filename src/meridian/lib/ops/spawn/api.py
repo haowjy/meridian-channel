@@ -11,6 +11,7 @@ from meridian.lib.core.lifecycle import create_lifecycle_service
 from meridian.lib.core.sink import NullSink, OutputSink
 from meridian.lib.core.spawn_lifecycle import ACTIVE_SPAWN_STATUSES, is_active_spawn_status
 from meridian.lib.core.spawn_service import CancelOutcome, SpawnApplicationService
+from meridian.lib.core.telemetry import register_debug_trace_observer
 from meridian.lib.core.types import SpawnId
 from meridian.lib.launch.request import SessionRequest
 from meridian.lib.ops.reference import ResolvedSessionReference, resolve_session_reference
@@ -129,6 +130,7 @@ def spawn_create_sync(
     *,
     sink: OutputSink | None = None,
 ) -> SpawnActionOutput:
+    register_debug_trace_observer()
     resolved_context = runtime_context(ctx)
     if payload.dry_run:
         resolved_root = _resolve_project_root_input(payload.project_root)
@@ -590,8 +592,7 @@ async def _spawn_cancel_impl(
     runtime_root = resolve_runtime_root(project_root)
     lifecycle_service = create_lifecycle_service(project_root, runtime_root)
     spawn_service = SpawnApplicationService(runtime_root, lifecycle_service)
-    # Phase 0C.2 registration seam: register debug observers here when
-    # MERIDIAN_DEBUG support lands in 0C.3. No observers are emitted yet.
+    register_debug_trace_observer()
     try:
         outcome = await spawn_service.cancel(SpawnId(spawn_id))
     except RuntimeError as exc:

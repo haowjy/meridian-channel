@@ -31,10 +31,20 @@ import os
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 from uuid import UUID
 
 import structlog
+
+from meridian.lib.core.telemetry import (
+    CORE_EVENTS,
+    allocate_spawn_sequence,
+    next_spawn_sequence,
+    notify_observers,
+)
+from meridian.lib.core.telemetry import (
+    LifecycleEvent as TelemetryLifecycleEvent,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -44,7 +54,7 @@ if TYPE_CHECKING:
     from meridian.lib.core.domain import SpawnStatus
     from meridian.lib.hooks.dispatch import HookDispatcher
     from meridian.lib.state.spawn.repository import SpawnRepository
-    from meridian.lib.state.spawn_store import LaunchMode, SpawnOrigin
+    from meridian.lib.state.spawn_store import LaunchMode, SpawnOrigin, SpawnRecord
 
 logger = structlog.get_logger(__name__)
 
@@ -228,8 +238,12 @@ class SpawnLifecycleService:
             clock=clock,
             repository=self._repository,
         )
+        allocate_spawn_sequence(str(result_id))
         event = self._build_event("spawn.created", str(result_id))
         self._dispatch(event)
+        self._emit_telemetry_event("spawn.queued", str(result_id))
+        if status == "running":
+            self._emit_telemetry_event("spawn.running", str(result_id))
         return str(result_id)
 
     def mark_running(
@@ -241,6 +255,9 @@ class SpawnLifecycleService:
         runner_pid: int | None = None,
     ) -> None:
         """Mark a spawn as running and dispatch spawn.running."""
+        previous = spawn_store.get_spawn(
+            self._runtime_root, spawn_id, repository=self._repository
+        )
         # Authoritative transition write still happens in spawn_store.
         spawn_store.mark_spawn_running(
             self._runtime_root,
@@ -252,6 +269,8 @@ class SpawnLifecycleService:
         )
         event = self._build_event("spawn.running", spawn_id)
         self._dispatch(event)
+        if previous is None or previous.status != "running":
+            self._emit_telemetry_event("spawn.running", spawn_id)
 
     def record_exited(
         self,
@@ -307,16 +326,20 @@ class SpawnLifecycleService:
         if transitioned:
             event = self._build_event("spawn.finalized", spawn_id)
             self._dispatch(event)
+            self._emit_telemetry_event(f"spawn.{status}", spawn_id)
         return transitioned
 
     def mark_finalizing(self, spawn_id: str) -> bool:
         """CAS transition running -> finalizing.  No lifecycle event dispatched."""
         # Authoritative transition write still happens in spawn_store.
-        return spawn_store.mark_finalizing(
+        transitioned = spawn_store.mark_finalizing(
             self._runtime_root,
             spawn_id,
             repository=self._repository,
         )
+        if transitioned:
+            self._emit_telemetry_event("spawn.finalizing", spawn_id)
+        return transitioned
 
     def cancel(
         self,
@@ -362,6 +385,22 @@ class SpawnLifecycleService:
                     spawn_id=event.spawn_id,
                 )
 
+    def _emit_telemetry_event(
+        self,
+        event_name: str,
+        spawn_id: str,
+        *,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        if event_name not in CORE_EVENTS and event_name != "spawn.updated":
+            return
+        record = spawn_store.get_spawn(
+            self._runtime_root, spawn_id, repository=self._repository
+        )
+        if record is None:
+            return
+        _emit_lifecycle_event(event_name, record, payload=payload)
+
     def _build_event(self, event_type: EventType, spawn_id: str) -> LifecycleEvent:
         # Read event payload through the same authoritative store boundary.
         record = spawn_store.get_spawn(
@@ -404,6 +443,26 @@ class SpawnLifecycleService:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
         )
+
+
+def _emit_lifecycle_event(
+    event_name: str,
+    spawn: SpawnRecord,
+    *,
+    payload: dict[str, Any] | None = None,
+) -> None:
+    """Emit a telemetry lifecycle event through the observer registry."""
+    event = TelemetryLifecycleEvent(
+        event=event_name,
+        spawn_id=str(spawn.id),
+        harness_id=spawn.harness or "",
+        model=spawn.model or "",
+        agent=spawn.agent,
+        ts=datetime.now(tz=UTC),
+        seq=next_spawn_sequence(spawn.id),
+        payload=payload or {},
+    )
+    notify_observers(event)
 
 
 # ---------------------------------------------------------------------------

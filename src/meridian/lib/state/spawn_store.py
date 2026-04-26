@@ -6,6 +6,7 @@ Also includes file-backed ID generation for spawns and sessions.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -345,6 +346,35 @@ def update_spawn(
         work_id=work_id,
     )
     resolved_repository.append_event(event)
+    record = get_spawn(runtime_root, spawn_id, repository=resolved_repository)
+    if record is not None:
+        from meridian.lib.core.telemetry import (
+            LifecycleEvent,
+            next_spawn_sequence,
+            notify_observers,
+        )
+
+        notify_observers(
+            LifecycleEvent(
+                event="spawn.updated",
+                spawn_id=str(record.id),
+                harness_id=record.harness or "",
+                model=record.model or "",
+                agent=record.agent,
+                ts=datetime.now(tz=UTC),
+                seq=next_spawn_sequence(record.id),
+                payload={
+                    "launch_mode": launch_mode,
+                    "worker_pid": worker_pid,
+                    "runner_pid": runner_pid,
+                    "harness_session_id": harness_session_id,
+                    "execution_cwd": execution_cwd,
+                    "error": error,
+                    "desc": desc,
+                    "work_id": work_id,
+                },
+            )
+        )
 
 
 def record_spawn_exited(
