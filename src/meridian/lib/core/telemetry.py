@@ -106,6 +106,7 @@ class DebugTraceObserver:
 
 _GLOBAL_EVENT_COUNTER = SpawnEventCounter()
 _GLOBAL_OBSERVERS: list[tuple[LifecycleObserver, LifecycleObserverTier]] = []
+_GLOBAL_OBSERVERS_LOCK = threading.Lock()
 _debug_trace_registered = False
 
 
@@ -114,26 +115,30 @@ def register_observer(
     tier: LifecycleObserverTier = LifecycleObserverTier.DIAGNOSTIC,
 ) -> None:
     """Register a process-wide lifecycle observer."""
-    _GLOBAL_OBSERVERS.append((observer, tier))
+    with _GLOBAL_OBSERVERS_LOCK:
+        _GLOBAL_OBSERVERS.append((observer, tier))
 
 
 def register_debug_trace_observer() -> None:
     """Register the process-wide debug trace observer once."""
     global _debug_trace_registered
-    if _debug_trace_registered:
-        return
-    register_observer(DebugTraceObserver())
-    _debug_trace_registered = True
+    with _GLOBAL_OBSERVERS_LOCK:
+        if _debug_trace_registered:
+            return
+        _GLOBAL_OBSERVERS.append((DebugTraceObserver(), LifecycleObserverTier.DIAGNOSTIC))
+        _debug_trace_registered = True
 
 
 def notify_observers(event: LifecycleEvent) -> None:
     """Dispatch a lifecycle event to process-wide observers by tier."""
+    with _GLOBAL_OBSERVERS_LOCK:
+        observers = tuple(_GLOBAL_OBSERVERS)
     policy_observers = [
-        observer for observer, tier in _GLOBAL_OBSERVERS if tier == LifecycleObserverTier.POLICY
+        observer for observer, tier in observers if tier == LifecycleObserverTier.POLICY
     ]
     diagnostic_observers = [
         observer
-        for observer, tier in _GLOBAL_OBSERVERS
+        for observer, tier in observers
         if tier == LifecycleObserverTier.DIAGNOSTIC
     ]
 

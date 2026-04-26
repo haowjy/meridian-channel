@@ -231,28 +231,27 @@ def test_projection_authority_reconciler_then_runner_replaces_terminal_tuple(
     runtime_root = _state_root(tmp_path)
     spawn_id = _start_test_spawn(runtime_root)
 
-    assert (
-        finalize_spawn(
-            runtime_root,
-            spawn_id,
-            status="failed",
-            exit_code=1,
-            origin="reconciler",
-            error="orphan_run",
-        )
-        is True
+    reconciler_outcome = finalize_spawn(
+        runtime_root,
+        spawn_id,
+        status="failed",
+        exit_code=1,
+        origin="reconciler",
+        error="orphan_run",
     )
-    assert (
-        finalize_spawn(
-            runtime_root,
-            spawn_id,
-            status="succeeded",
-            exit_code=0,
-            origin="runner",
-            duration_secs=12.5,
-        )
-        is False
+    runner_outcome = finalize_spawn(
+        runtime_root,
+        spawn_id,
+        status="succeeded",
+        exit_code=0,
+        origin="runner",
+        duration_secs=12.5,
     )
+    assert reconciler_outcome.transitioned is True
+    assert runner_outcome.transitioned is False
+    assert runner_outcome.wrote is True
+    assert runner_outcome.snapshot is not None
+    assert runner_outcome.snapshot.status == "succeeded"
 
     row = get_spawn(runtime_root, spawn_id)
     assert row is not None
@@ -268,7 +267,7 @@ def test_finalize_spawn_reconciler_writes_through_finalizing_row(tmp_path: Path)
     spawn_id = _start_test_spawn(runtime_root)
     assert mark_finalizing(runtime_root, spawn_id) is True
 
-    wrote = finalize_spawn(
+    outcome = finalize_spawn(
         runtime_root,
         spawn_id,
         status="failed",
@@ -277,7 +276,8 @@ def test_finalize_spawn_reconciler_writes_through_finalizing_row(tmp_path: Path)
         error="orphan_finalization",
     )
 
-    assert wrote is True
+    assert outcome.transitioned is True
+    assert outcome.wrote is True
     row = get_spawn(runtime_root, spawn_id)
     assert row is not None
     assert row.status == "failed"
@@ -296,7 +296,7 @@ def test_finalize_spawn_reconciler_drops_when_row_already_terminal(tmp_path: Pat
         origin="runner",
         error="timeout",
     )
-    wrote = finalize_spawn(
+    outcome = finalize_spawn(
         runtime_root,
         spawn_id,
         status="succeeded",
@@ -305,7 +305,8 @@ def test_finalize_spawn_reconciler_drops_when_row_already_terminal(tmp_path: Pat
         duration_secs=999.0,
     )
 
-    assert wrote is False
+    assert outcome.transitioned is False
+    assert outcome.wrote is False
     row = get_spawn(runtime_root, spawn_id)
     assert row is not None
     assert row.status == "failed"

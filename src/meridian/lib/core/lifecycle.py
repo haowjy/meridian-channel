@@ -11,7 +11,8 @@ Design decisions in effect:
 - D5: keep update_spawn public — metadata only, no transition
 - D9: No async — synchronous methods matching spawn_store
 - D12: First-class LifecycleEvent over ad hoc callbacks
-- D13: Metrics may be None on spawn.finalized — fire once on first terminal transition
+- D13: Metrics may be None on spawn.finalized — fire for persisted terminal writes,
+  including authoritative replacement of reconciler terminal state
 
 Import note
 -----------
@@ -259,7 +260,7 @@ class SpawnLifecycleService:
             self._runtime_root, spawn_id, repository=self._repository
         )
         # Authoritative transition write still happens in spawn_store.
-        spawn_store.mark_spawn_running(
+        changed = spawn_store.mark_spawn_running(
             self._runtime_root,
             spawn_id,
             launch_mode=launch_mode,
@@ -267,9 +268,10 @@ class SpawnLifecycleService:
             runner_pid=runner_pid,
             repository=self._repository,
         )
-        event = self._build_event("spawn.running", spawn_id)
-        self._dispatch(event)
-        if previous is None or previous.status != "running":
+        if changed:
+            event = self._build_event("spawn.running", spawn_id)
+            self._dispatch(event)
+        if changed and (previous is None or previous.status != "running"):
             self._emit_telemetry_event("spawn.running", spawn_id)
 
     def record_exited(
@@ -306,9 +308,9 @@ class SpawnLifecycleService:
         error: str | None = None,
         clock: Clock | None = None,
     ) -> bool:
-        """Finalize a spawn.  Dispatches spawn.finalized only on first terminal transition."""
+        """Finalize a spawn and dispatch spawn.finalized for persisted terminal writes."""
         # Authoritative transition write still happens in spawn_store.
-        transitioned = spawn_store.finalize_spawn(
+        outcome = spawn_store.finalize_spawn(
             self._runtime_root,
             spawn_id,
             status,
@@ -323,11 +325,13 @@ class SpawnLifecycleService:
             clock=clock,
             repository=self._repository,
         )
-        if transitioned:
-            event = self._build_event("spawn.finalized", spawn_id)
+        if outcome.wrote and outcome.snapshot is not None:
+            event = self._build_event_from_record("spawn.finalized", outcome.snapshot)
             self._dispatch(event)
-            self._emit_telemetry_event(f"spawn.{status}", spawn_id)
-        return transitioned
+            self._emit_telemetry_event_for_record(
+                f"spawn.{outcome.snapshot.status}", outcome.snapshot
+            )
+        return outcome.transitioned
 
     def mark_finalizing(self, spawn_id: str) -> bool:
         """CAS transition running -> finalizing.  No lifecycle event dispatched."""
@@ -399,6 +403,17 @@ class SpawnLifecycleService:
         )
         if record is None:
             return
+        self._emit_telemetry_event_for_record(event_name, record, payload=payload)
+
+    def _emit_telemetry_event_for_record(
+        self,
+        event_name: str,
+        record: SpawnRecord,
+        *,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        if event_name not in CORE_EVENTS and event_name != "spawn.updated":
+            return
         _emit_lifecycle_event(event_name, record, payload=payload)
 
     def _build_event(self, event_type: EventType, spawn_id: str) -> LifecycleEvent:
@@ -436,6 +451,47 @@ class SpawnLifecycleService:
             agent=record.agent if record is not None else None,
             model=record.model if record is not None else None,
             harness=record.harness if record is not None else None,
+            status=status,
+            origin=origin,
+            duration_secs=duration_secs,
+            total_cost_usd=total_cost_usd,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+
+    def _build_event_from_record(
+        self,
+        event_type: EventType,
+        record: SpawnRecord,
+    ) -> LifecycleEvent:
+        status: TerminalStatus | None = None
+        origin: TerminalOrigin | None = None
+        duration_secs: float | None = None
+        total_cost_usd: float | None = None
+        input_tokens: int | None = None
+        output_tokens: int | None = None
+
+        if event_type == "spawn.finalized":
+            rec_status = record.status
+            if rec_status in _TERMINAL_STATUS_VALUES:
+                status = rec_status  # type: ignore[assignment]
+            origin = record.terminal_origin  # type: ignore[assignment]
+            duration_secs = record.duration_secs
+            total_cost_usd = record.total_cost_usd
+            input_tokens = record.input_tokens
+            output_tokens = record.output_tokens
+
+        return LifecycleEvent(
+            event_id=generate_event_id(record.id, event_type, 0),
+            event_type=event_type,
+            timestamp=datetime.now(tz=UTC),
+            spawn_id=record.id,
+            parent_id=record.parent_id,
+            chat_id=record.chat_id,
+            work_id=record.work_id,
+            agent=record.agent,
+            model=record.model,
+            harness=record.harness,
             status=status,
             origin=origin,
             duration_secs=duration_secs,

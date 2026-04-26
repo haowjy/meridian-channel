@@ -136,6 +136,24 @@ class SpawnRecord(BaseModel):
     terminal_origin: SpawnOrigin | None
 
 
+class FinalizeOutcome(BaseModel):
+    """Result of a finalize write with the exact post-write projection.
+
+    ``transitioned`` preserves the legacy "this writer moved an active row to a
+    terminal state" signal.  ``wrote`` distinguishes rejected reconciler attempts
+    from finalize events that were appended for authoritative metadata/override.
+    ``snapshot`` is the store projection immediately after the append, computed
+    under the same lock, so callers can emit events without a post-write reread
+    race.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    transitioned: bool
+    wrote: bool
+    snapshot: SpawnRecord | None
+
+
 class SpawnStartEvent(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -417,15 +435,17 @@ def finalize_spawn(
     error: str | None = None,
     clock: Clock | None = None,
     repository: SpawnRepository | None = None,
-) -> bool:
-    """Append a finalize event and return whether this writer set the terminal status.
+) -> FinalizeOutcome:
+    """Append a finalize event and return write/transition details.
 
     Always writes the event so metadata is never lost -- the projection
     merges duration, cost, and token counts from every finalize event.
-    Returns True when the spawn was active (queued or running) before
-    this call, meaning this writer is the one that moved it to a
-    terminal state. Returns False when the spawn was already terminal
-    or does not exist.
+    ``outcome.transitioned`` is True when the spawn was active (queued,
+    running, or finalizing) before this call, meaning this writer is the one
+    that moved it to a terminal state. It is False when the spawn was already
+    terminal or does not exist. Authoritative finalize events may still write
+    and replace a reconciler terminal tuple; callers should use
+    ``outcome.wrote`` and ``outcome.snapshot`` for post-write event emission.
     """
     resolved_clock = clock or RealClock()
     paths = RuntimePaths.from_root_dir(runtime_root)
@@ -446,7 +466,7 @@ def finalize_spawn(
                 attempted_status=status,
                 attempted_error=error,
             )
-            return False
+            return FinalizeOutcome(transitioned=False, wrote=False, snapshot=record)
         if (
             record is not None
             and record.status != "unknown"
@@ -467,7 +487,12 @@ def finalize_spawn(
             origin=origin,
         )
         resolved_repository.append_event(event)
-        return was_active
+        snapshot = reduce_events(resolved_repository.read_events()).get(str(spawn_id))
+        return FinalizeOutcome(
+            transitioned=was_active,
+            wrote=True,
+            snapshot=snapshot,
+        )
 
 
 def mark_finalizing(
@@ -499,12 +524,13 @@ def mark_spawn_running(
     worker_pid: int | None = None,
     runner_pid: int | None = None,
     repository: SpawnRepository | None = None,
-) -> None:
+) -> bool:
     paths = RuntimePaths.from_root_dir(runtime_root)
     resolved_repository = _resolve_repository(paths, repository=repository)
     with lock_file(paths.spawns_flock):
         records = reduce_events(resolved_repository.read_events())
         record = records.get(str(spawn_id))
+        changed = record is None or record.status != "running"
         if record is not None and record.status not in {"unknown", "running"}:
             _validate_transition(cast("SpawnStatus", record.status), "running")
         event = SpawnUpdateEvent(
@@ -515,6 +541,7 @@ def mark_spawn_running(
             runner_pid=runner_pid,
         )
         resolved_repository.append_event(event)
+        return changed
 
 
 def _spawn_sort_key(spawn: SpawnRecord) -> tuple[int, str]:

@@ -26,6 +26,7 @@ from meridian.lib.state.paths import (
     spawn_log_subpath,
 )
 from meridian.lib.state.spawn_store import (
+    FinalizeOutcome,
     SpawnRecord,
     finalize_spawn,
     get_spawn,
@@ -40,6 +41,7 @@ from meridian.lib.state.spawn_store import (
 # SpawnLifecycleService as the authoritative lifecycle seam.
 __all__ = [
     "ArtifactStore",
+    "FinalizeOutcome",
     "InMemoryStore",
     "LifecycleEvent",
     "LifecycleHook",

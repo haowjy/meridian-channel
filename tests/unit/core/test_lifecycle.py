@@ -290,8 +290,20 @@ def test_spawn_running_event_dispatched_after_mark_running(tmp_path: Path) -> No
     assert event.origin is None
 
 
+def test_mark_running_suppresses_duplicate_running_event(tmp_path: Path) -> None:
+    """mark_running() must not re-emit spawn.running when row is already running."""
+    hook = RecordingHook()
+    svc = _make_service(tmp_path, hooks=[hook])
+    spawn_id = _start_spawn(svc, status="running")
+    hook.events.clear()
+
+    svc.mark_running(spawn_id)
+
+    assert [e.event_type for e in hook.events] == []
+
+
 # ---------------------------------------------------------------------------
-# 4. spawn.finalized dispatched only when finalize returns True
+# 4. spawn.finalized dispatched after terminal writes
 # ---------------------------------------------------------------------------
 
 
@@ -330,21 +342,24 @@ def test_spawn_finalized_event_has_status_and_origin(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_spawn_finalized_not_dispatched_when_already_terminal(tmp_path: Path) -> None:
-    """No spawn.finalized event should be dispatched after terminal idempotent finalize."""
+def test_spawn_finalized_dispatched_when_authoritative_overrides_reconciler(
+    tmp_path: Path,
+) -> None:
+    """Authoritative finalize after reconciler terminal must emit replaced snapshot."""
     hook = RecordingHook()
     svc = _make_service(tmp_path, hooks=[hook])
     spawn_id = _start_spawn(svc, status="running")
 
-    # First finalize — active → terminal; returns True
-    svc.finalize(spawn_id, "succeeded", 0, origin="runner")
+    svc.finalize(spawn_id, "failed", 1, origin="reconciler", error="orphan")
     hook.events.clear()
 
-    # Second finalize — already terminal; returns False
-    transitioned = svc.finalize(spawn_id, "failed", 1, origin="launcher")
+    transitioned = svc.finalize(spawn_id, "succeeded", 0, origin="runner")
 
     assert transitioned is False
-    assert hook.events == []
+    finalized = [e for e in hook.events if e.event_type == "spawn.finalized"]
+    assert len(finalized) == 1
+    assert finalized[0].status == "succeeded"
+    assert finalized[0].origin == "runner"
 
 
 # ---------------------------------------------------------------------------
