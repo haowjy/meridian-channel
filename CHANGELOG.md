@@ -10,6 +10,9 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Arbitrary named contexts. Define `[context.<name>]` in `meridian.toml` for custom context roots. `meridian context <name>` resolves and displays. `ContextEntryOutput` model exposes source, path, resolved fields.
 - Frontend chat: multi-column spawn view, chat composer with submit/clear, thread activity tracking, session list sidebar, spawn header with streaming controls, ChatContext LRU eviction, conversation effects refactor.
 
+### Removed
+- Windows CI matrix. Ubuntu-only until Windows support is re-validated.
+
 ### Changed
 - Spawn cancel now uses one application service for CLI and HTTP; managed primary cancel behavior shared across both surfaces.
 - Codex startup telemetry now emits canonical typed phases via lifecycle observers, not string callback messages.
