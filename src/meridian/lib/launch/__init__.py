@@ -14,13 +14,12 @@ if TYPE_CHECKING:
         normalize_system_prompt_passthrough_args,
     )
     from meridian.lib.launch.context import build_launch_context
-    from meridian.lib.launch.policies import ResolvedPolicies
+    from meridian.lib.launch.policies import ResolvedPolicies, resolve_policies
     from meridian.lib.launch.process import ProcessOutcome, run_harness_process
     from meridian.lib.launch.resolve import (
         ResolvedSkills,
         load_agent_profile_with_fallback,
         resolve_harness,
-        resolve_policies,
         resolve_skills_from_profile,
     )
     from meridian.lib.launch.types import (
@@ -112,7 +111,7 @@ def __getattr__(name: str) -> Any:
             "normalize_system_prompt_passthrough_args",
         ),
         "resolve_harness": (".resolve", "resolve_harness"),
-        "resolve_policies": (".resolve", "resolve_policies"),
+        "resolve_policies": (".policies", "resolve_policies"),
         "resolve_skills_from_profile": (".resolve", "resolve_skills_from_profile"),
         "run_harness_process": (".process", "run_harness_process"),
     }

@@ -3,22 +3,16 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.catalog.agent import AgentProfile, load_agent_profile
 from meridian.lib.catalog.skill import SkillRegistry
-from meridian.lib.config.settings import MeridianConfig
 from meridian.lib.core.domain import SkillContent
-from meridian.lib.core.overrides import RuntimeOverrides
 from meridian.lib.core.types import HarnessId, ModelId
 from meridian.lib.harness.registry import HarnessRegistry
 
 from .prompt import load_skill_contents
-
-if TYPE_CHECKING:
-    from .policies import ResolvedPolicies
 
 
 def load_agent_profile_with_fallback(
@@ -171,38 +165,11 @@ def resolve_harness(
         raise ValueError(message)
     return override_harness
 
-
-def resolve_policies(
-    *,
-    project_root: Path,
-    layers: tuple[RuntimeOverrides, ...],
-    config_overrides: RuntimeOverrides,
-    config: MeridianConfig,
-    harness_registry: HarnessRegistry,
-    configured_default_harness: str = "claude",
-    skills_readonly: bool = True,
-) -> ResolvedPolicies:
-    """Compatibility shim forwarding to stage-owned policy resolver."""
-
-    from .policies import resolve_policies as _resolve_policies
-
-    return _resolve_policies(
-        project_root=project_root,
-        layers=layers,
-        config_overrides=config_overrides,
-        config=config,
-        harness_registry=harness_registry,
-        configured_default_harness=configured_default_harness,
-        skills_readonly=skills_readonly,
-    )
-
-
 __all__ = [
     "ResolvedSkills",
     "format_missing_skills_warning",
     "load_agent_profile_with_fallback",
     "resolve_harness",
-    "resolve_policies",
     "resolve_profile_path",
     "resolve_skill_paths",
     "resolve_skills_from_profile",

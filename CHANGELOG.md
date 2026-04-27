@@ -16,6 +16,7 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `scripts/release.sh` now keeps pytest output visible during pre-release checks, so long full-suite runs no longer look hung.
 - Pyright warning cleanup across CLI, state, app, and launch code. Type-check baseline now clean: `0 errors, 0 warnings`.
 - Launch policy model resolve now one-pass carry-through. Reuse one resolved alias entry for harness pick, final model, same-layer compatibility check, and model defaults.
+- Launch effort/autocompact precedence now one named ladder helper: explicit user -> profile `models:` -> profile defaults -> alias defaults -> none. `launch.resolve` compatibility shim for `resolve_policies` removed; unmatched profile `models:` fallback now debug-only log.
 
 ### Fixed
 - Failure sentinels now write after terminal state persists. Stale `failure.json` ignored unless spawn still `failed`.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,6 +22,8 @@ from .resolve import (
     load_agent_profile_with_fallback,
     resolve_skills_from_profile,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -93,22 +96,22 @@ def _entry_to_overrides(entry: AgentModelEntry) -> RuntimeOverrides:
     )
 
 
-def _resolve_model_overrides(
+def _resolve_profile_model_overrides(
     *,
     profile: AgentProfile | None,
     selected_entry: AliasEntry | None,
     alias_catalog: dict[str, AliasEntry],
-) -> tuple[RuntimeOverrides, str | None]:
+) -> tuple[RuntimeOverrides, str | None, bool]:
     if profile is None or not profile.models or selected_entry is None:
-        return RuntimeOverrides(), None
+        return RuntimeOverrides(), None, False
 
     selected_alias = selected_entry.alias.strip()
     if selected_alias and selected_alias in profile.models:
-        return _entry_to_overrides(profile.models[selected_alias]), None
+        return _entry_to_overrides(profile.models[selected_alias]), None, True
 
     selected_model_id = str(selected_entry.model_id)
     if selected_model_id in profile.models:
-        return _entry_to_overrides(profile.models[selected_model_id]), None
+        return _entry_to_overrides(profile.models[selected_model_id]), None, True
 
     matched_keys: list[str] = []
     for key in profile.models:
@@ -119,7 +122,7 @@ def _resolve_model_overrides(
             matched_keys.append(key)
 
     if not matched_keys:
-        return RuntimeOverrides(), None
+        return RuntimeOverrides(), None, False
 
     winner = matched_keys[0]
     warning: str | None = None
@@ -129,7 +132,60 @@ def _resolve_model_overrides(
             f"'{selected_entry.model_id}'. Using '{winner}' and ignoring: "
             f"{', '.join(matched_keys[1:])}."
         )
-    return _entry_to_overrides(profile.models[winner]), warning
+    return _entry_to_overrides(profile.models[winner]), warning, True
+
+
+def _resolve_effort_autocompact_overrides(
+    *,
+    explicit_user_overrides: RuntimeOverrides,
+    profile_model_overrides: RuntimeOverrides,
+    profile_defaults: RuntimeOverrides,
+    config_overrides: RuntimeOverrides,
+    alias_defaults: RuntimeOverrides,
+) -> RuntimeOverrides:
+    """Resolve effort/autocompact precedence for launch policies.
+
+    Precedence ladder:
+    1) explicit user (CLI/ENV layers)
+    2) profile `models:` entry
+    3) profile generic defaults
+    4) config
+    5) alias defaults
+    6) unset (`None`)
+    """
+
+    return resolve(
+        RuntimeOverrides(
+            effort=explicit_user_overrides.effort,
+            autocompact=explicit_user_overrides.autocompact,
+        ),
+        profile_model_overrides,
+        profile_defaults,
+        RuntimeOverrides(
+            effort=config_overrides.effort,
+            autocompact=config_overrides.autocompact,
+        ),
+        alias_defaults,
+    )
+
+
+def _log_unmatched_profile_model_defaults(
+    *,
+    profile: AgentProfile | None,
+    selected_entry: AliasEntry | None,
+    model_entry_matched: bool,
+    profile_defaults: RuntimeOverrides,
+) -> None:
+    if profile is None or not profile.models or selected_entry is None or model_entry_matched:
+        return
+    if profile_defaults.effort is None and profile_defaults.autocompact is None:
+        return
+    _LOGGER.debug(
+        "Agent profile '%s' has generic effort/autocompact defaults but no matching "
+        "models entry for '%s'; using generic profile defaults.",
+        profile.name,
+        selected_entry.model_id,
+    )
 
 
 def _validate_same_layer_harness_override(
@@ -254,7 +310,7 @@ def resolve_policies(
     selected_entry: AliasEntry | None = resolved_model_entry
 
     alias_catalog = _to_alias_map(load_merged_aliases(project_root))
-    model_overrides, model_warning = _resolve_model_overrides(
+    profile_model_overrides, model_warning, model_entry_matched = _resolve_profile_model_overrides(
         profile=profile,
         selected_entry=selected_entry,
         alias_catalog=alias_catalog,
@@ -264,15 +320,19 @@ def resolve_policies(
         effort=profile_overrides.effort,
         autocompact=profile_overrides.autocompact,
     )
-    user_effort_overrides = resolve(*layers, config_overrides)
-    effort_resolved = resolve(
-        RuntimeOverrides(
-            effort=user_effort_overrides.effort,
-            autocompact=user_effort_overrides.autocompact,
-        ),
-        model_overrides,
-        profile_effort_overrides,
-        alias_defaults,
+    explicit_user_overrides = resolve(*layers)
+    effort_resolved = _resolve_effort_autocompact_overrides(
+        explicit_user_overrides=explicit_user_overrides,
+        profile_model_overrides=profile_model_overrides,
+        profile_defaults=profile_effort_overrides,
+        config_overrides=config_overrides,
+        alias_defaults=alias_defaults,
+    )
+    _log_unmatched_profile_model_defaults(
+        profile=profile,
+        selected_entry=selected_entry,
+        model_entry_matched=model_entry_matched,
+        profile_defaults=profile_effort_overrides,
     )
     resolved = resolved.model_copy(
         update={
