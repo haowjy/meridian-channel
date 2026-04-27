@@ -14,11 +14,16 @@ from meridian.lib.launch.plan import (
     build_primary_spawn_request,
 )
 from meridian.lib.launch.policies import resolve_policies
-from meridian.lib.launch.request import LaunchArgvIntent, LaunchRuntime, SpawnRequest
+from meridian.lib.launch.request import (
+    LaunchArgvIntent,
+    LaunchCompositionSurface,
+    LaunchRuntime,
+    SpawnRequest,
+)
 from meridian.lib.launch.types import LaunchRequest
 from meridian.lib.ops.runtime import build_runtime_from_root_and_config
 from meridian.lib.ops.spawn.models import SpawnCreateInput
-from meridian.lib.ops.spawn.prepare import build_create_payload
+from meridian.lib.ops.spawn.prepare import build_create_payload, validate_create_input
 from tests.support.fixtures import write_agent
 
 
@@ -160,6 +165,102 @@ def test_spawn_prepare_derives_harness_from_model_before_default_harness(tmp_pat
 
     assert prepared.model.startswith("claude-sonnet-4")
     assert prepared.harness == "claude"
+
+
+def test_spawn_validation_preserves_alias_token_for_policy_defaults(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_minimal_mars_config(tmp_path)
+    alias = _mock_alias(
+        alias="gpt55",
+        model_id="gpt-5.5",
+        default_effort="low",
+    )
+    canonical = _mock_alias(
+        alias="gpt-5.5",
+        model_id="gpt-5.5",
+        default_effort="high",
+    )
+
+    monkeypatch.setattr(
+        "meridian.lib.ops.spawn.prepare.resolve_model",
+        lambda name, project_root=None: {"gpt55": alias, "gpt-5.5": canonical}[name],
+    )
+    _patch_alias_resolution(
+        monkeypatch,
+        resolved_entries={"gpt55": alias, "gpt-5.5": canonical},
+        catalog_entries=[alias, canonical],
+    )
+
+    payload, warning = validate_create_input(
+        SpawnCreateInput(
+            prompt="test",
+            model="gpt55",
+            project_root=tmp_path.as_posix(),
+            dry_run=True,
+        )
+    )
+
+    assert warning is None
+    assert payload.model == "gpt55"
+
+    prepared = build_create_payload(payload, runtime=build_runtime_from_root_and_config(
+        tmp_path, MeridianConfig()
+    ))
+
+    assert prepared.model == "gpt-5.5"
+    assert prepared.effort == "low"
+    assert 'model_reasoning_effort="low"' in prepared.cli_command
+
+
+def test_primary_and_spawn_alias_effort_defaults_match(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_minimal_mars_config(tmp_path)
+    alias = _mock_alias(
+        alias="gpt55",
+        model_id="gpt-5.5",
+        default_effort="low",
+    )
+    canonical = _mock_alias(
+        alias="gpt-5.5",
+        model_id="gpt-5.5",
+        default_effort="high",
+    )
+    _patch_alias_resolution(
+        monkeypatch,
+        resolved_entries={"gpt55": alias, "gpt-5.5": canonical},
+        catalog_entries=[alias, canonical],
+    )
+    registry = get_default_harness_registry()
+
+    primary = build_launch_context(
+        spawn_id="dry-run-primary",
+        request=build_primary_spawn_request(request=LaunchRequest(model="gpt55")),
+        runtime=build_primary_launch_runtime(project_root=tmp_path),
+        harness_registry=registry,
+        dry_run=True,
+    )
+    spawn = build_launch_context(
+        spawn_id="dry-run-spawn",
+        request=SpawnRequest(prompt="test", model="gpt55"),
+        runtime=LaunchRuntime(
+            argv_intent=LaunchArgvIntent.REQUIRED,
+            composition_surface=LaunchCompositionSurface.SPAWN_PREPARE,
+            runtime_root=(tmp_path / ".meridian").as_posix(),
+            project_paths_project_root=tmp_path.as_posix(),
+            project_paths_execution_cwd=tmp_path.as_posix(),
+        ),
+        harness_registry=registry,
+        dry_run=True,
+    )
+
+    assert primary.resolved_request.model == "gpt-5.5"
+    assert spawn.resolved_request.model == "gpt-5.5"
+    assert primary.resolved_request.effort == "low"
+    assert spawn.resolved_request.effort == "low"
 
 
 def test_resolve_policies_cli_model_override_can_replace_profile_harness(tmp_path: Path) -> None:

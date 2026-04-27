@@ -102,14 +102,14 @@ def _validate_requested_model(
     requested_model: str,
     *,
     project_root: str | None,
-) -> tuple[str, str | None]:
+) -> str | None:
     normalized = requested_model.strip()
     if not normalized:
-        return "", None
+        return None
 
     explicit_root = Path(project_root).expanduser().resolve() if project_root else None
     try:
-        resolved = resolve_model(normalized, project_root=explicit_root)
+        resolve_model(normalized, project_root=explicit_root)
     except ValueError:
         validation_context = _model_validation_context(normalized, project_root=explicit_root)
         message = (
@@ -120,22 +120,17 @@ def _validate_requested_model(
             message = f"{message}\n{validation_context}"
         raise ValueError(message) from None
 
-    resolved_id = str(resolved.model_id)
-    if resolved_id and resolved_id != normalized:
-        return resolved_id, None
-    return normalized, None
+    return None
 
 
 def validate_create_input(payload: SpawnCreateInput) -> tuple[SpawnCreateInput, str | None]:
     if not payload.prompt.strip() and not payload.files:
         raise ValueError("prompt required: use --prompt/-p or attach at least one --file/-f.")
 
-    resolved_model, model_warning = _validate_requested_model(
+    model_warning = _validate_requested_model(
         payload.model,
         project_root=payload.project_root,
     )
-    if resolved_model and resolved_model != payload.model:
-        return payload.model_copy(update={"model": resolved_model}), model_warning
     return payload, model_warning
 
 
