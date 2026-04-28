@@ -296,7 +296,7 @@ def register_hcp_routes(
         model = body.model.strip() if body.model and body.model.strip() else None
         agent = body.agent.strip()
         skills = tuple(skill.strip() for skill in body.skills if skill.strip())
-        spawn_id = spawn_store.next_spawn_id(runtime_root)
+        spawn_id = spawn_store.reserve_spawn_id(runtime_root)
 
         # Build launch context FIRST to get resolved metadata and env_overrides
         spawn_req = SpawnRequest(
@@ -313,12 +313,15 @@ def register_hcp_routes(
             project_paths_project_root=resolved_project_paths.project_root.as_posix(),
             project_paths_execution_cwd=resolved_project_paths.execution_cwd.as_posix(),
         )
-        launch_ctx = build_launch_context(
-            spawn_id=str(spawn_id),
-            request=spawn_req,
-            runtime=launch_runtime,
-            harness_registry=get_default_harness_registry(),
-        )
+        try:
+            launch_ctx = build_launch_context(
+                spawn_id=str(spawn_id),
+                request=spawn_req,
+                runtime=launch_runtime,
+                harness_registry=get_default_harness_registry(),
+            )
+        except ValueError as exc:
+            raise http_exception(status_code=400, detail=str(exc)) from exc
 
         # DS-002: Project ConnectionConfig from LaunchContext (not empty env_overrides)
         config = ConnectionConfig(
@@ -336,14 +339,14 @@ def register_hcp_routes(
 
         try:
             c_id, _p_id = await _manager().create_chat(
-                prompt,
+                launch_ctx.resolved_request.prompt,
                 model=resolved_model,
                 harness=harness_id.value,
                 config=config,
                 spec=launch_ctx.spec,
                 agent=resolved_agent,
                 skills=skills,
-                execution_cwd=resolved_project_paths.execution_cwd.as_posix(),
+                execution_cwd=launch_ctx.child_cwd.as_posix(),
             )
         except HcpError as exc:
             _handle_hcp_error(exc)

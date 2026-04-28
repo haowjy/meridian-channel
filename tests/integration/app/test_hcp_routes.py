@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -11,8 +14,11 @@ from meridian.lib.app.hcp_routes import register_hcp_routes
 from meridian.lib.config.project_paths import resolve_project_config_paths
 from meridian.lib.core.types import SpawnId
 from meridian.lib.harness.connections.base import HarnessEvent
+from meridian.lib.harness.registry import get_default_harness_registry
 from meridian.lib.hcp.errors import HcpError, HcpErrorCategory
 from meridian.lib.hcp.types import ChatState
+from meridian.lib.launch.context import build_launch_context
+from meridian.lib.launch.request import LaunchArgvIntent, LaunchRuntime, SpawnRequest
 from meridian.lib.state import session_store, spawn_store
 from meridian.lib.state.history import HarnessHistoryWriter
 from meridian.lib.state.paths import RuntimePaths, resolve_runtime_paths
@@ -26,6 +32,7 @@ class FakeHcpSessionManager:
         self.active_spawns: dict[str, SpawnId] = {}
         self.prompts: list[tuple[str, str]] = []
         self.concurrent_prompt = False
+        self.create_calls: list[dict[str, Any]] = []
 
     async def create_chat(
         self,
@@ -44,7 +51,23 @@ class FakeHcpSessionManager:
         execution_cwd: str | None = None,
         metadata: Any = None,
     ) -> tuple[str, SpawnId]:
-        _ = (spec, agent_path, skill_paths, params, metadata)
+        self.create_calls.append(
+            {
+                "prompt": prompt,
+                "model": model,
+                "harness": harness,
+                "config": config,
+                "spec": spec,
+                "agent": agent,
+                "agent_path": agent_path,
+                "skills": skills,
+                "skill_paths": skill_paths,
+                "params": params,
+                "harness_session_id": harness_session_id,
+                "execution_cwd": execution_cwd,
+                "metadata": metadata,
+            }
+        )
         c_id = session_store.start_session(
             self.runtime_root,
             harness=harness,
@@ -92,7 +115,11 @@ class FakeHcpSessionManager:
         session_store.stop_session(self.runtime_root, c_id)
 
 
-def _make_client(tmp_path: Path) -> tuple[TestClient, FakeHcpSessionManager, Path]:
+def _make_client(
+    tmp_path: Path,
+    *,
+    raise_server_exceptions: bool = True,
+) -> tuple[TestClient, FakeHcpSessionManager, Path]:
     runtime_root = resolve_runtime_paths(tmp_path).root_dir
     manager = FakeHcpSessionManager(runtime_root)
     app = FastAPI()
@@ -104,7 +131,7 @@ def _make_client(tmp_path: Path) -> tuple[TestClient, FakeHcpSessionManager, Pat
         HTTPException,
         project_paths=resolve_project_config_paths(project_root=tmp_path),
     )
-    return TestClient(app), manager, runtime_root
+    return TestClient(app, raise_server_exceptions=raise_server_exceptions), manager, runtime_root
 
 
 def _create_chat(client: TestClient) -> dict[str, Any]:
@@ -152,6 +179,222 @@ def _paginate_cursor_history(
         cursor = body["next_cursor"]
 
     return pages
+
+
+def _expected_launch_context(
+    tmp_path: Path,
+    *,
+    spawn_id: str,
+    prompt: str,
+    model: str,
+    harness: str,
+    agent: str,
+    skills: tuple[str, ...],
+):
+    project_paths = resolve_project_config_paths(project_root=tmp_path)
+    return build_launch_context(
+        spawn_id=spawn_id,
+        request=SpawnRequest(
+            prompt=prompt,
+            model=model,
+            harness=harness,
+            agent=agent,
+            skills=skills,
+        ),
+        runtime=LaunchRuntime(
+            argv_intent=LaunchArgvIntent.SPEC_ONLY,
+            unsafe_no_permissions=False,
+            runtime_root=resolve_runtime_paths(tmp_path).root_dir.as_posix(),
+            project_paths_project_root=project_paths.project_root.as_posix(),
+            project_paths_execution_cwd=project_paths.execution_cwd.as_posix(),
+        ),
+        harness_registry=get_default_harness_registry(),
+    )
+
+
+def test_create_chat_projects_launch_context_into_manager_and_persisted_rows(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    client, manager, runtime_root = _make_client(tmp_path)
+    real_build_launch_context = build_launch_context
+    projected_prompt = "projected prompt from launch context"
+    projected_cwd = tmp_path / "projected-child-cwd"
+
+    def fake_build_launch_context(**kwargs: Any):
+        context = real_build_launch_context(**kwargs)
+        return replace(
+            context,
+            child_cwd=projected_cwd,
+            resolved_request=context.resolved_request.model_copy(
+                update={"prompt": projected_prompt}
+            ),
+        )
+
+    monkeypatch.setattr(
+        "meridian.lib.app.hcp_routes.build_launch_context",
+        fake_build_launch_context,
+    )
+
+    created = _create_chat(client)
+    raw_expected_ctx = _expected_launch_context(
+        tmp_path,
+        spawn_id="p1",
+        prompt="start a chat",
+        model="gpt-5.4",
+        harness="codex",
+        agent="coder",
+        skills=("dev-principles",),
+    )
+    expected_ctx = replace(
+        raw_expected_ctx,
+        child_cwd=projected_cwd,
+        resolved_request=raw_expected_ctx.resolved_request.model_copy(
+            update={"prompt": projected_prompt}
+        ),
+    )
+
+    assert len(manager.create_calls) == 1
+    create_call = manager.create_calls[0]
+    config = create_call["config"]
+
+    assert create_call["spec"] == expected_ctx.spec
+    assert create_call["prompt"] == expected_ctx.resolved_request.prompt
+    assert create_call["model"] == expected_ctx.resolved_request.model
+    assert create_call["agent"] == expected_ctx.resolved_request.agent
+    assert create_call["execution_cwd"] == expected_ctx.child_cwd.as_posix()
+    assert config.spawn_id == SpawnId("p1")
+    assert config.harness_id == "codex"
+    assert config.prompt == expected_ctx.resolved_request.prompt
+    assert config.project_root == expected_ctx.child_cwd
+    assert config.env_overrides == dict(expected_ctx.env_overrides)
+    assert config.system == expected_ctx.resolved_request.agent_metadata.get(
+        "appended_system_prompt"
+    )
+    assert config.env_overrides["MERIDIAN_SPAWN_ID"] == created["active_p_id"]
+
+    session_record = session_store.get_session_record(runtime_root, "c1")
+    spawn_record = spawn_store.get_spawn(runtime_root, SpawnId("p1"))
+
+    assert session_record is not None
+    assert spawn_record is not None
+    assert session_record.kind == "primary"
+    assert session_record.model == expected_ctx.resolved_request.model
+    assert session_record.agent == expected_ctx.resolved_request.agent
+    assert session_record.execution_cwd == expected_ctx.child_cwd.as_posix()
+    assert session_record.stopped_at is None
+    assert spawn_record.chat_id == "c1"
+    assert spawn_record.id == "p1"
+    assert spawn_record.harness == "codex"
+    assert spawn_record.model == expected_ctx.resolved_request.model
+    assert spawn_record.agent == expected_ctx.resolved_request.agent
+    assert spawn_record.prompt == expected_ctx.resolved_request.prompt
+    assert spawn_record.execution_cwd == expected_ctx.child_cwd.as_posix()
+    assert spawn_record.launch_mode == "app"
+
+
+def test_create_chat_passes_projected_system_prompt_to_manager(tmp_path: Path, monkeypatch) -> None:
+    client, manager, _runtime_root = _make_client(tmp_path)
+    real_build_launch_context = build_launch_context
+
+    def fake_build_launch_context(**kwargs: Any):
+        context = real_build_launch_context(**kwargs)
+        context.resolved_request.agent_metadata["appended_system_prompt"] = (
+            "system from launch context"
+        )
+        return context
+
+    monkeypatch.setattr(
+        "meridian.lib.app.hcp_routes.build_launch_context",
+        fake_build_launch_context,
+    )
+
+    response = client.post(
+        "/api/chats",
+        json={
+            "prompt": "start a chat",
+            "model": "gpt-5.4",
+            "harness": "codex",
+            "agent": "coder",
+        },
+    )
+
+    assert response.status_code == 201
+    assert manager.create_calls[0]["config"].system == "system from launch context"
+
+
+def test_create_chat_failure_from_launch_context_leaves_no_hcp_rows(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    client, manager, runtime_root = _make_client(tmp_path, raise_server_exceptions=False)
+
+    def failing_build_launch_context(**_: Any):
+        raise ValueError("bad model alias")
+
+    monkeypatch.setattr(
+        "meridian.lib.app.hcp_routes.build_launch_context",
+        failing_build_launch_context,
+    )
+
+    response = client.post(
+        "/api/chats",
+        json={
+            "prompt": "start a chat",
+            "model": "bad-model",
+            "harness": "codex",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "bad model alias"
+    assert manager.create_calls == []
+    assert spawn_store.list_spawns(runtime_root) == []
+    assert session_store.list_active_session_records(runtime_root) == []
+
+
+def test_concurrent_create_chat_requests_allocate_distinct_chat_and_spawn_ids(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    client, _manager, runtime_root = _make_client(tmp_path)
+    real_build_launch_context = build_launch_context
+    barrier = threading.Barrier(2)
+
+    def blocked_build_launch_context(**kwargs: Any):
+        barrier.wait(timeout=5)
+        return real_build_launch_context(**kwargs)
+
+    monkeypatch.setattr(
+        "meridian.lib.app.hcp_routes.build_launch_context",
+        blocked_build_launch_context,
+    )
+
+    def create(index: int):
+        response = client.post(
+            "/api/chats",
+            json={
+                "prompt": f"start a chat {index}",
+                "model": "gpt-5.4",
+                "harness": "codex",
+                "agent": "coder",
+            },
+        )
+        return response.status_code, response.json()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(create, (1, 2)))
+
+    assert [status for status, _body in results] == [201, 201]
+    chat_ids = {body["chat_id"] for _status, body in results}
+    spawn_ids = {body["active_p_id"] for _status, body in results}
+
+    assert len(chat_ids) == 2
+    assert len(spawn_ids) == 2
+    assert {
+        record.chat_id for record in session_store.list_active_session_records(runtime_root)
+    } == chat_ids
+    assert {record.id for record in spawn_store.list_spawns(runtime_root)} == spawn_ids
 
 
 def test_create_list_get_prompt_cancel_and_close_chat(tmp_path: Path) -> None:

@@ -106,6 +106,10 @@ async def streaming_serve(
             prompt=connection_config.prompt,
             project_root=connection_config.project_root,
             env_overrides=connection_config.env_overrides,
+            system=connection_config.system,
+            timeout_seconds=connection_config.timeout_seconds,
+            ws_bind_host=connection_config.ws_bind_host,
+            ws_port=connection_config.ws_port,
             debug_tracer=tracer,
         )
 

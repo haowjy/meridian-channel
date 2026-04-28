@@ -14,6 +14,8 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Windows CI matrix. Ubuntu-only until Windows support is re-validated.
 
 ### Changed
+- `POST /api/spawns` resolve-before-persist. No spawn row created on composition failure. Row metadata (model, agent, harness) reflects resolved values — no "unknown" placeholders.
+- `POST /api/spawns/{id}/archive` routed through `SpawnApplicationService`. Terminal-only gate: 409 if spawn not yet terminal. Idempotent: returns `{noop: true}` if already archived.
 - Spawn cancel now uses one application service for CLI and HTTP; managed primary cancel behavior shared across both surfaces.
 - Codex startup telemetry now emits canonical typed phases via lifecycle observers, not string callback messages.
 - `scripts/release.sh` now keeps pytest output visible during pre-release checks, so long full-suite runs no longer look hung.

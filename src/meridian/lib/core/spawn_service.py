@@ -226,9 +226,8 @@ class SpawnApplicationService:
         Raises on resolution failure. No spawn row exists on failure.
         On success, row exists with resolved metadata.
         """
-        # Generate a placeholder spawn_id for launch context building.
-        # The real ID will be allocated atomically when we persist.
-        # We use a temporary ID format that will be replaced.
+        # Generate a placeholder spawn_id for the first launch-context build.
+        # Resolution can fail here; no spawn row or lifecycle event is emitted.
         temp_spawn_id = f"pending-{id(request)}"
 
         # SEAM-1: Build launch context FIRST. This can fail.
@@ -254,9 +253,32 @@ class SpawnApplicationService:
         # Resolve work_id
         effective_work_id = (work_id or launch_ctx.work_id or "").strip() or None
 
-        # SEAM-ID.1: Allocate ID and persist row atomically via lifecycle service.
-        # start_spawn() reads next ID and appends under the same flock.
-        final_spawn_id = SpawnId(
+        # Reserve the final ID and rebuild launch context before lifecycle.start
+        # so MERIDIAN_SPAWN_ID and related env_overrides are final, while a
+        # second-build failure still leaves no row and emits no ghost events.
+        final_spawn_id = await asyncio.to_thread(
+            spawn_store.reserve_spawn_id,
+            self._runtime_root,
+        )
+        launch_ctx = await asyncio.to_thread(
+            build_launch_context,
+            spawn_id=str(final_spawn_id),
+            request=request,
+            runtime=runtime,
+            harness_registry=harness_registry,
+        )
+        resolved_request = launch_ctx.resolved_request
+        resolved_model = (resolved_request.model or "").strip() or "unknown"
+        resolved_harness = (resolved_request.harness or "").strip()
+        resolved_agent = (resolved_request.agent or "").strip() or None
+        if not resolved_harness:
+            raise ValueError("Harness resolution failed - harness is required")
+        effective_work_id = (work_id or launch_ctx.work_id or "").strip() or None
+
+        # SEAM-ID.1: Persist the already-reserved ID via lifecycle service only
+        # after launch context composition succeeds. Failed composition leaves no
+        # spawn row and emits no spawn.created hook/telemetry.
+        persisted_spawn_id = SpawnId(
             await asyncio.to_thread(
                 self._lifecycle.start,
                 chat_id=chat_id or "",
@@ -271,6 +293,7 @@ class SpawnApplicationService:
                 prompt=resolved_request.prompt,
                 desc=desc,
                 work_id=effective_work_id,
+                spawn_id=str(final_spawn_id),
                 harness_session_id=resolved_request.session.requested_harness_session_id,
                 execution_cwd=str(launch_ctx.child_cwd),
                 launch_mode=launch_mode,
@@ -278,16 +301,10 @@ class SpawnApplicationService:
                 status=initial_status,
             )
         )
-
-        # Re-build launch context with the actual spawn_id.
-        # This is necessary because env_overrides include MERIDIAN_SPAWN_ID.
-        launch_ctx = await asyncio.to_thread(
-            build_launch_context,
-            spawn_id=str(final_spawn_id),
-            request=request,
-            runtime=runtime,
-            harness_registry=harness_registry,
-        )
+        if persisted_spawn_id != final_spawn_id:
+            raise RuntimeError(
+                f"Reserved spawn ID {final_spawn_id} but persisted {persisted_spawn_id}"
+            )
 
         # SEAM-3: Project ConnectionConfig from LaunchContext
         harness_id = HarnessId(resolved_harness)
@@ -516,39 +533,39 @@ class SpawnApplicationService:
         """
         from meridian.lib.spawn.archive import archive_spawn, is_spawn_archived
 
-        record = self.require_spawn(spawn_id)
-
-        # SEAM-5.1: Validate terminal state
-        if not self.is_terminal(record.status):
-            raise ValueError(
-                f"Cannot archive non-terminal spawn (status: {record.status}). "
-                "Wait for spawn to complete or cancel it first."
-            )
-
         spawn_id_str = str(spawn_id)
+        lock = await self._locks.acquire(spawn_id_str)
+        async with lock:
+            record = self.require_spawn(spawn_id)
 
-        # SEAM-5.2: Check if already archived (idempotent)
-        if is_spawn_archived(self._runtime_root, spawn_id_str):
-            return False
+            # SEAM-5.1: Validate terminal state
+            if not self.is_terminal(record.status):
+                raise ValueError(
+                    f"Cannot archive non-terminal spawn (status: {record.status}). "
+                    "Wait for spawn to complete or cancel it first."
+                )
 
-        # Perform archive
-        archive_spawn(self._runtime_root, spawn_id_str)
+            # SEAM-5.2/5.3: serialize check + write + event so exactly one
+            # in-process caller observes not-yet-archived and emits.
+            if is_spawn_archived(self._runtime_root, spawn_id_str):
+                return False
 
-        # SEAM-5.3: Emit spawn.archived exactly once
-        notify_observers(
-            LifecycleEvent(
-                event="spawn.archived",
-                spawn_id=spawn_id_str,
-                harness_id=record.harness or "",
-                model=record.model or "",
-                agent=record.agent,
-                ts=datetime.now(tz=UTC),
-                seq=next_spawn_sequence(spawn_id_str),
-                payload={"archived": True},
+            archive_spawn(self._runtime_root, spawn_id_str)
+
+            notify_observers(
+                LifecycleEvent(
+                    event="spawn.archived",
+                    spawn_id=spawn_id_str,
+                    harness_id=record.harness or "",
+                    model=record.model or "",
+                    agent=record.agent,
+                    ts=datetime.now(tz=UTC),
+                    seq=next_spawn_sequence(spawn_id_str),
+                    payload={"archived": True},
+                )
             )
-        )
 
-        return True
+            return True
 
     # ---- Metadata Updates (SEAM-6) ----
 

@@ -28,6 +28,7 @@ from meridian.lib.core.spawn_lifecycle import (
     validate_transition as _validate_transition,
 )
 from meridian.lib.core.types import SpawnId
+from meridian.lib.state.atomic import atomic_write_text
 from meridian.lib.state.event_store import lock_file
 from meridian.lib.state.paths import RuntimePaths
 from meridian.lib.state.spawn.events import reduce_events
@@ -60,6 +61,53 @@ def _next_spawn_id_from_events(events: list[SpawnEvent]) -> SpawnId:
     return SpawnId(f"p{starts + 1}")
 
 
+def _spawn_id_index(spawn_id: SpawnId | str) -> int:
+    value = str(spawn_id)
+    if len(value) > 1 and value[0] == "p" and value[1:].isdigit():
+        return int(value[1:])
+    return 0
+
+
+def _spawn_counter_path(paths: RuntimePaths) -> Path:
+    return paths.root_dir / "spawn-id-counter"
+
+
+def _read_spawn_counter(paths: RuntimePaths) -> int:
+    counter_path = _spawn_counter_path(paths)
+    if not counter_path.is_file():
+        return 0
+    try:
+        return int(counter_path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return 0
+
+
+def _seed_spawn_counter_from_events(events: list[SpawnEvent]) -> int:
+    return max((_spawn_id_index(getattr(event, "id", "")) for event in events), default=0)
+
+
+def reserve_spawn_id(
+    runtime_root: Path,
+    *,
+    repository: SpawnRepository | None = None,
+) -> SpawnId:
+    """Reserve and return the next spawn ID (`p1`, `p2`, ...).
+
+    Reservation is persisted separately from spawn rows so callers can compose
+    launch context with the final ID before writing lifecycle-visible events.
+    """
+
+    paths = RuntimePaths.from_root_dir(runtime_root)
+    resolved_repository = _resolve_repository(paths, repository=repository)
+    with lock_file(paths.spawns_flock):
+        current = _read_spawn_counter(paths)
+        if current == 0 and not _spawn_counter_path(paths).is_file():
+            current = _seed_spawn_counter_from_events(resolved_repository.read_events())
+        next_value = current + 1
+        atomic_write_text(_spawn_counter_path(paths), f"{next_value}\n")
+        return SpawnId(f"p{next_value}")
+
+
 def next_spawn_id(
     runtime_root: Path,
     *,
@@ -70,7 +118,12 @@ def next_spawn_id(
     paths = RuntimePaths.from_root_dir(runtime_root)
     resolved_repository = _resolve_repository(paths, repository=repository)
     with lock_file(paths.spawns_flock):
-        return _next_spawn_id_from_events(resolved_repository.read_events())
+        next_from_events = _next_spawn_id_from_events(resolved_repository.read_events())
+        next_from_counter = SpawnId(f"p{_read_spawn_counter(paths) + 1}")
+        return max(
+            (next_from_events, next_from_counter),
+            key=_spawn_id_index,
+        )
 
 
 LaunchMode = Literal["background", "foreground", "app"]
@@ -303,11 +356,15 @@ def start_spawn(
     started = started_at or resolved_clock.utc_now_iso()
 
     with lock_file(paths.spawns_flock):
-        resolved_spawn_id = (
-            SpawnId(str(spawn_id))
-            if spawn_id is not None
-            else _next_spawn_id_from_events(resolved_repository.read_events())
-        )
+        if spawn_id is not None:
+            resolved_spawn_id = SpawnId(str(spawn_id))
+        else:
+            current = _read_spawn_counter(paths)
+            if current == 0 and not _spawn_counter_path(paths).is_file():
+                current = _seed_spawn_counter_from_events(resolved_repository.read_events())
+            next_value = current + 1
+            atomic_write_text(_spawn_counter_path(paths), f"{next_value}\n")
+            resolved_spawn_id = SpawnId(f"p{next_value}")
         event = SpawnStartEvent(
             id=str(resolved_spawn_id),
             chat_id=chat_id,
@@ -332,6 +389,34 @@ def start_spawn(
         )
         resolved_repository.append_event(event)
         return resolved_spawn_id
+
+
+def remove_spawn_events(
+    runtime_root: Path,
+    spawn_id: SpawnId | str,
+    *,
+    repository: SpawnRepository | None = None,
+) -> None:
+    """Remove all events for one spawn from the JSONL store.
+
+    This narrow rollback seam is for failed spawn preparation before any runner
+    can observe or act on the row. It is not a user-facing delete/archive path.
+    """
+
+    paths = RuntimePaths.from_root_dir(runtime_root)
+    resolved_repository = _resolve_repository(paths, repository=repository)
+    wanted = str(spawn_id)
+    with lock_file(paths.spawns_flock):
+        retained = [
+            event
+            for event in resolved_repository.read_events()
+            if getattr(event, "id", "") != wanted
+        ]
+        lines = [
+            event.model_dump_json(exclude_none=True, by_alias=False) + "\n"
+            for event in retained
+        ]
+        atomic_write_text(paths.spawns_jsonl, "".join(lines))
 
 
 def update_spawn(

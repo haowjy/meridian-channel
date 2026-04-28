@@ -32,6 +32,7 @@ from meridian.lib.state.spawn_store import (
     get_spawn,
     list_spawns,
     next_spawn_id,
+    reserve_spawn_id,
     spawn_stats,
     start_spawn,
 )
@@ -56,6 +57,7 @@ __all__ = [
     "list_spawns",
     "make_artifact_key",
     "next_spawn_id",
+    "reserve_spawn_id",
     "resolve_fs_dir",
     "resolve_kb_dir",
     "resolve_project_paths",
