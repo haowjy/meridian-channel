@@ -39,8 +39,11 @@ async def archive_spawn_handler(
     context: ExtensionInvocationContext,
     services: ExtensionCommandServices,
 ) -> ExtensionResult:
-    """Archive a spawn ID in runtime state."""
+    """Archive a spawn ID in runtime state.
 
+    Routes through SpawnApplicationService.archive() for lifecycle policy
+    coordination (SEAM-5).
+    """
     _ = context
     if services.runtime_root is None:
         return ExtensionErrorResult(
@@ -48,20 +51,30 @@ async def archive_spawn_handler(
             message="runtime_root not available",
         )
 
-    from meridian.lib.spawn.archive import archive_spawn, is_spawn_archived
+    from meridian.lib.core.lifecycle import SpawnLifecycleService
+    from meridian.lib.core.spawn_service import SpawnApplicationService
 
     spawn_id = args["spawn_id"]
-    if is_spawn_archived(services.runtime_root, spawn_id):
+
+    # Create a minimal lifecycle service without hooks - archive doesn't
+    # require project-level hook wiring
+    lifecycle = SpawnLifecycleService(services.runtime_root)
+    spawn_service = SpawnApplicationService(services.runtime_root, lifecycle)
+
+    try:
+        was_new = await spawn_service.archive(spawn_id)
         return ExtensionJSONResult(
             payload={
                 "spawn_id": spawn_id,
                 "archived": True,
-                "was_already_archived": True,
+                "was_already_archived": not was_new,
             }
         )
-
-    archive_spawn(services.runtime_root, spawn_id)
-    return ExtensionJSONResult(payload={"spawn_id": spawn_id, "archived": True})
+    except ValueError as exc:
+        return ExtensionErrorResult(
+            code="invalid_state",
+            message=str(exc),
+        )
 
 
 ARCHIVE_SPAWN_SPEC = ExtensionCommandSpec(

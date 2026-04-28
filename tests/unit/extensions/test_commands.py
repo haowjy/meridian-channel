@@ -60,23 +60,21 @@ async def test_ping_handler_returns_ok_true() -> None:
 
 
 @pytest.mark.asyncio
-async def test_archive_spawn_handler_uses_spawn_archive_helper(
+async def test_archive_spawn_handler_routes_through_service(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    import meridian.lib.spawn.archive as archive_mod
+    """Handler routes archive through SpawnApplicationService.archive (SEAM-5)."""
+    from meridian.lib.core import spawn_service as service_mod
 
-    calls: list[tuple[Path, str]] = []
+    captured: list[str] = []
 
-    def _fake_is_archived(runtime_root: Path, spawn_id: str) -> bool:
-        _ = (runtime_root, spawn_id)
-        return False
+    async def _fake_archive(self: object, spawn_id: str) -> bool:
+        _ = self
+        captured.append(spawn_id)
+        return True  # was_new=True
 
-    def _fake_archive(runtime_root: Path, spawn_id: str) -> None:
-        calls.append((runtime_root, spawn_id))
-
-    monkeypatch.setattr(archive_mod, "is_spawn_archived", _fake_is_archived)
-    monkeypatch.setattr(archive_mod, "archive_spawn", _fake_archive)
+    monkeypatch.setattr(service_mod.SpawnApplicationService, "archive", _fake_archive)
 
     result = await archive_spawn_handler(
         {"spawn_id": "p123"},
@@ -85,8 +83,65 @@ async def test_archive_spawn_handler_uses_spawn_archive_helper(
     )
 
     assert isinstance(result, ExtensionJSONResult)
-    assert result.payload == {"spawn_id": "p123", "archived": True}
-    assert calls == [(tmp_path, "p123")]
+    assert result.payload == {
+        "spawn_id": "p123",
+        "archived": True,
+        "was_already_archived": False,
+    }
+    assert captured == ["p123"]
+
+
+@pytest.mark.asyncio
+async def test_archive_spawn_handler_reports_already_archived(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Handler correctly reports when spawn was already archived."""
+    from meridian.lib.core import spawn_service as service_mod
+
+    async def _fake_archive(self: object, spawn_id: str) -> bool:
+        _ = (self, spawn_id)
+        return False  # was_new=False (already archived)
+
+    monkeypatch.setattr(service_mod.SpawnApplicationService, "archive", _fake_archive)
+
+    result = await archive_spawn_handler(
+        {"spawn_id": "p456"},
+        _build_context(),
+        ExtensionCommandServices(runtime_root=tmp_path),
+    )
+
+    assert isinstance(result, ExtensionJSONResult)
+    assert result.payload == {
+        "spawn_id": "p456",
+        "archived": True,
+        "was_already_archived": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_archive_spawn_handler_returns_error_on_invalid_state(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Handler returns error when archive raises ValueError (non-terminal spawn)."""
+    from meridian.lib.core import spawn_service as service_mod
+
+    async def _fake_archive(self: object, spawn_id: str) -> bool:
+        _ = (self, spawn_id)
+        raise ValueError("Cannot archive non-terminal spawn (status: running)")
+
+    monkeypatch.setattr(service_mod.SpawnApplicationService, "archive", _fake_archive)
+
+    result = await archive_spawn_handler(
+        {"spawn_id": "p789"},
+        _build_context(),
+        ExtensionCommandServices(runtime_root=tmp_path),
+    )
+
+    assert isinstance(result, ExtensionErrorResult)
+    assert result.code == "invalid_state"
+    assert "non-terminal" in result.message
 
 
 @pytest.mark.asyncio
