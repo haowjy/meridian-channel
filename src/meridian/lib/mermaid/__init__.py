@@ -1,5 +1,6 @@
 """Mermaid diagram validation — Python default with optional JS strict mode."""
 
+from meridian.lib.mermaid.style.types import CheckResult, StyleCheckOptions, StyleWarning
 from meridian.lib.mermaid.validator import (
     BlockResult,
     BundleNotFoundError,
@@ -14,9 +15,12 @@ from meridian.lib.mermaid.validator import (
 __all__ = [
     "BlockResult",
     "BundleNotFoundError",
+    "CheckResult",
     "MermaidValidationResult",
     "NodeNotFoundError",
     "ScanOptions",
+    "StyleCheckOptions",
+    "StyleWarning",
     "ValidationTier",
     "detect_tier",
     "validate_path",
