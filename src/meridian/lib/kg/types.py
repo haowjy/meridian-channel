@@ -7,8 +7,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from meridian.lib.markdown.types import ExtractedDocument
+
+FindingSeverity = Literal["error", "warning"]
 
 
 @dataclass
@@ -64,8 +67,52 @@ class AnalysisResult:
     external_count: int = 0
 
 
+@dataclass
+class CheckFinding:
+    """One finding from kg check."""
+
+    category: str  # "broken_link", "flag_block", "conflict_marker"
+    severity: FindingSeverity
+    file: Path
+    line: int
+    message: str
+    detail: str | None = None  # e.g. the link target, the flag text
+
+
+def _empty_findings() -> list[CheckFinding]:
+    return []
+
+
+@dataclass
+class CheckResult:
+    """Complete kg check output."""
+
+    analysis: AnalysisResult
+    findings: list[CheckFinding] = field(default_factory=_empty_findings)
+    strict: bool = False
+
+    @property
+    def has_errors(self) -> bool:
+        return any(f.severity == "error" for f in self.findings)
+
+    @property
+    def has_warnings(self) -> bool:
+        return any(f.severity == "warning" for f in self.findings)
+
+    @property
+    def error_count(self) -> int:
+        return sum(1 for f in self.findings if f.severity == "error")
+
+    @property
+    def warning_count(self) -> int:
+        return sum(1 for f in self.findings if f.severity == "warning")
+
+
 __all__ = [
     "AnalysisResult",
+    "CheckFinding",
+    "CheckResult",
+    "FindingSeverity",
     "GraphEdge",
     "GraphNode",
 ]

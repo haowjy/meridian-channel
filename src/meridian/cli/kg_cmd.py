@@ -117,12 +117,16 @@ def cmd_kg_check(
         str,
         Parameter(name="--format", help="Output format: text (default) or json."),
     ] = "text",
+    strict: Annotated[
+        bool,
+        Parameter(name="--strict", help="Treat warnings as errors."),
+    ] = False,
 ) -> None:
-    """Check for broken links. Exit 0 if clean, exit 1 if broken links found."""
+    """Check for KG findings. Exit 1 if errors found."""
     from meridian.cli.main import get_global_options
-    from meridian.lib.kg.graph import build_analysis
-    from meridian.lib.kg.report import format_check_output
-    from meridian.lib.kg.serializer import serialize_check
+    from meridian.lib.kg.graph import build_check
+    from meridian.lib.kg.report import format_check_findings
+    from meridian.lib.kg.serializer import serialize_check_findings
 
     resolved = path.resolve()
     if not resolved.exists():
@@ -136,12 +140,11 @@ def cmd_kg_check(
         root = resolved.parent
         targeted_path = resolved
 
-    result = build_analysis(
+    result = build_check(
         root=root,
-        include_backlinks=False,
-        include_clusters=False,
         targeted_path=targeted_path,
         exclude=exclude or None,
+        strict=strict,
     )
 
     effective_fmt = "json" if get_global_options().output.format == "json" else fmt
@@ -149,15 +152,15 @@ def cmd_kg_check(
     if effective_fmt == "json":
         import json
 
-        print(json.dumps(serialize_check(result, resolved), indent=2))
+        print(json.dumps(serialize_check_findings(result, resolved), indent=2))
     else:
-        stdout, stderr = format_check_output(result, root)
+        stdout, stderr = format_check_findings(result, root)
         if stdout:
             print(stdout)
         if stderr:
             print(stderr, file=sys.stderr)
 
-    raise SystemExit(1 if result.broken_links else 0)
+    raise SystemExit(1 if result.has_errors else 0)
 
 
 def _require_dir(path: Path) -> Path:

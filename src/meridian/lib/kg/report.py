@@ -6,7 +6,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-from meridian.lib.kg.types import AnalysisResult
+from meridian.lib.kg.types import AnalysisResult, CheckFinding, CheckResult
 
 _EXTERNAL_PREFIXES = ("http://", "https://", "mailto:", "#")
 
@@ -200,7 +200,38 @@ def format_check_output(result: AnalysisResult, root: Path) -> tuple[str, str]:
     return stdout, stderr
 
 
+def format_check_findings(result: CheckResult, root: Path) -> tuple[str, str]:
+    """Format check findings for text output. Returns (stdout, stderr)."""
+    total_files = len(result.analysis.nodes)
+    total_links = len(result.analysis.edges)
+
+    if not result.findings:
+        return f"No issues found ({total_files} files, {total_links} links)", ""
+
+    findings_by_file: dict[Path, list[CheckFinding]] = defaultdict(list)
+    for finding in result.findings:
+        findings_by_file[finding.file].append(finding)
+
+    stdout_lines: list[str] = []
+    for file in sorted(findings_by_file):
+        for finding in sorted(
+            findings_by_file[file],
+            key=lambda item: (item.line, item.category),
+        ):
+            rel_path = _rel(finding.file, root)
+            stdout_lines.append(
+                f"  {finding.severity}: {rel_path}:{finding.line} {finding.message}"
+            )
+
+    stderr = (
+        f"{result.error_count} errors, {result.warning_count} warnings "
+        f"({total_files} files scanned)"
+    )
+    return "\n".join(stdout_lines), stderr
+
+
 __all__ = [
+    "format_check_findings",
     "format_check_output",
     "format_root_summary",
     "format_summary",

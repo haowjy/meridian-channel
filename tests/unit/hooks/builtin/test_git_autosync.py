@@ -19,6 +19,7 @@ def _hook(
     *,
     remote: str | None = "https://example.com/acme/project.git",
     exclude: tuple[str, ...] = (),
+    options: dict[str, object] | None = None,
 ) -> Hook:
     return Hook(
         name="git-autosync",
@@ -27,6 +28,7 @@ def _hook(
         builtin="git-autosync",
         remote=remote,
         exclude=exclude,
+        options=options or {},
     )
 
 
@@ -251,6 +253,7 @@ def test_sync_runs_commit_first_then_pull_and_push(
         return next(responses)
 
     monkeypatch.setattr(GIT_AUTOSYNC, "_run_git", fake_run_git)
+    monkeypatch.setattr(GIT_AUTOSYNC, "_is_rebase_in_progress", lambda _clone: False)
 
     outcome = GIT_AUTOSYNC._sync("/tmp/clone", ())
 
@@ -269,7 +272,64 @@ def test_sync_runs_commit_first_then_pull_and_push(
     ]
 
 
-def test_sync_aborts_rebase_and_skips_on_conflict(
+def test_sync_leaves_rebase_conflict_for_review_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+    responses = iter(
+        [
+            _cp(args=["git", "add", "-A"]),
+            _cp(args=["git", "diff", "--cached", "--quiet"], returncode=1),
+            _cp(args=["git", "commit", "-m", "autosync: now"]),
+            _cp(args=["git", "fetch", "origin"]),
+            _cp(
+                args=["git", "rev-list", "--left-right", "--count", "HEAD...@{upstream}"],
+                stdout="1 1\n",
+            ),
+            _cp(
+                args=["git", "pull", "--rebase"],
+                returncode=1,
+                stderr="pull failed",
+            ),
+        ]
+    )
+
+    def fake_run_git(
+        work_dir: str,
+        args: list[str],
+        timeout: int,
+    ) -> subprocess.CompletedProcess[str]:
+        _ = work_dir, timeout
+        calls.append(args)
+        return next(responses)
+
+    monkeypatch.setattr(GIT_AUTOSYNC, "_run_git", fake_run_git)
+    rebase_checks = iter([False, True])
+
+    def _is_rebase_in_progress(_clone: str) -> bool:
+        return next(rebase_checks)
+
+    monkeypatch.setattr(GIT_AUTOSYNC, "_is_rebase_in_progress", _is_rebase_in_progress)
+
+    outcome = GIT_AUTOSYNC._sync("/tmp/clone", ())
+
+    assert outcome.outcome == "skipped"
+    assert outcome.success is True
+    assert outcome.skip_reason == "rebase_conflict"
+    assert outcome.error is not None
+    assert "Rebase conflict at /tmp/clone" in outcome.error
+    assert "Conflicts left for review" in outcome.error
+    assert calls == [
+        ["add", "-A"],
+        ["diff", "--cached", "--quiet"],
+        ["commit", "-m", ANY],
+        ["fetch", "origin"],
+        ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"],
+        ["pull", "--rebase"],
+    ]
+
+
+def test_sync_aborts_rebase_conflict_when_policy_requests_abort(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[list[str]] = []
@@ -302,25 +362,46 @@ def test_sync_aborts_rebase_and_skips_on_conflict(
         return next(responses)
 
     monkeypatch.setattr(GIT_AUTOSYNC, "_run_git", fake_run_git)
-    def _is_rebase_in_progress(_clone: str) -> bool:
-        return True
+    rebase_checks = iter([False, True])
+    monkeypatch.setattr(
+        GIT_AUTOSYNC,
+        "_is_rebase_in_progress",
+        lambda _clone: next(rebase_checks),
+    )
 
-    monkeypatch.setattr(GIT_AUTOSYNC, "_is_rebase_in_progress", _is_rebase_in_progress)
+    outcome = GIT_AUTOSYNC._sync("/tmp/clone", (), "abort")
+
+    assert outcome.outcome == "skipped"
+    assert outcome.success is True
+    assert outcome.skip_reason == "rebase_conflict"
+    assert calls[-1] == ["rebase", "--abort"]
+
+
+def test_sync_skips_all_git_operations_when_rebase_already_in_progress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run_git(
+        work_dir: str,
+        args: list[str],
+        timeout: int,
+    ) -> subprocess.CompletedProcess[str]:
+        _ = work_dir, timeout
+        calls.append(args)
+        return _cp(args=["git", *args])
+
+    monkeypatch.setattr(GIT_AUTOSYNC, "_run_git", fake_run_git)
+    monkeypatch.setattr(GIT_AUTOSYNC, "_is_rebase_in_progress", lambda _clone: True)
 
     outcome = GIT_AUTOSYNC._sync("/tmp/clone", ())
 
     assert outcome.outcome == "skipped"
     assert outcome.success is True
-    assert outcome.skip_reason == "rebase_conflict"
-    assert calls == [
-        ["add", "-A"],
-        ["diff", "--cached", "--quiet"],
-        ["commit", "-m", ANY],
-        ["fetch", "origin"],
-        ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"],
-        ["pull", "--rebase"],
-        ["rebase", "--abort"],
-    ]
+    assert outcome.skip_reason == "existing_rebase_conflict"
+    assert outcome.error is not None
+    assert "Rebase already in progress at /tmp/clone" in outcome.error
+    assert calls == []
 
 
 def test_sync_skips_push_when_nothing_to_commit(
@@ -349,6 +430,7 @@ def test_sync_skips_push_when_nothing_to_commit(
         return next(responses)
 
     monkeypatch.setattr(GIT_AUTOSYNC, "_run_git", fake_run_git)
+    monkeypatch.setattr(GIT_AUTOSYNC, "_is_rebase_in_progress", lambda _clone: False)
 
     outcome = GIT_AUTOSYNC._sync("/tmp/clone", ())
 
@@ -396,6 +478,7 @@ def test_sync_applies_exclude_patterns_before_commit(
         return next(responses)
 
     monkeypatch.setattr(GIT_AUTOSYNC, "_run_git", fake_run_git)
+    monkeypatch.setattr(GIT_AUTOSYNC, "_is_rebase_in_progress", lambda _clone: False)
 
     outcome = GIT_AUTOSYNC._sync("/tmp/clone", ("*.log", "tmp/"))
 
@@ -430,6 +513,7 @@ def test_sync_treats_push_failure_as_fail_open_skip(
         return next(responses)
 
     monkeypatch.setattr(GIT_AUTOSYNC, "_run_git", _run_git)
+    monkeypatch.setattr(GIT_AUTOSYNC, "_is_rebase_in_progress", lambda _clone: False)
 
     outcome = GIT_AUTOSYNC._sync("/tmp/clone", ())
 

@@ -195,7 +195,8 @@ class GitAutosync:
             )
 
         try:
-            outcome = self._sync(str(clone_path), config.exclude)
+            conflict_policy = config.options.get("conflict_policy", "leave")
+            outcome = self._sync(str(clone_path), config.exclude, conflict_policy)
         except (OSError, subprocess.SubprocessError) as exc:
             logger.warning(
                 "git_autosync_runtime_error",
@@ -296,12 +297,29 @@ class GitAutosync:
 
         return False
 
-    def _sync(self, clone_path: str, excludes: tuple[str, ...]) -> _SyncOutcome:
+    def _sync(
+        self,
+        clone_path: str,
+        excludes: tuple[str, ...],
+        conflict_policy: object = "leave",
+    ) -> _SyncOutcome:
         """Execute commit-first sync workflow.
 
         Order: add -A -> commit (if needed) -> fetch -> pull --rebase (if behind) -> push
         Committing first ensures local changes are safe before rebasing.
         """
+
+        if self._is_rebase_in_progress(clone_path):
+            return _SyncOutcome(
+                outcome="skipped",
+                success=True,
+                skipped=True,
+                skip_reason="existing_rebase_conflict",
+                error=(
+                    f"Rebase already in progress at {clone_path}. "
+                    "Resolve conflicts before next sync."
+                ),
+            )
 
         # 1. Stage everything
         add = self._run_git(clone_path, ["add", "-A"], timeout=_ADD_TIMEOUT_SECS)
@@ -439,43 +457,56 @@ class GitAutosync:
                 # Detect rebase conflict via repo state (locale-independent)
                 rebase_detected = self._is_rebase_in_progress(clone_path)
 
-                # Always attempt abort - safe no-op if no rebase in progress
-                abort = self._run_git(
-                    clone_path,
-                    ["rebase", "--abort"],
-                    timeout=_REBASE_ABORT_TIMEOUT_SECS,
-                )
-
                 if rebase_detected:
-                    if abort.returncode != 0:
-                        abort_error = (abort.stderr or "")[:500]
-                        logger.error(
-                            "git_autosync_rebase_abort_failed",
+                    if conflict_policy == "abort":
+                        abort = self._run_git(
+                            clone_path,
+                            ["rebase", "--abort"],
+                            timeout=_REBASE_ABORT_TIMEOUT_SECS,
+                        )
+                        if abort.returncode != 0:
+                            abort_error = (abort.stderr or "")[:500]
+                            logger.error(
+                                "git_autosync_rebase_abort_failed",
+                                clone_path=clone_path,
+                                pull_error=message,
+                                abort_error=abort_error,
+                            )
+                            return _SyncOutcome(
+                                outcome="skipped",
+                                success=True,
+                                skipped=True,
+                                skip_reason="rebase_abort_failed",
+                                error=f"{message}; abort failed: {(abort.stderr or '')[:200]}",
+                            )
+
+                        logger.warning(
+                            "git_autosync_rebase_conflict_aborted",
                             clone_path=clone_path,
                             pull_error=message,
-                            abort_error=abort_error,
                         )
                         return _SyncOutcome(
                             outcome="skipped",
                             success=True,
                             skipped=True,
-                            skip_reason="rebase_abort_failed",
-                            error=f"{message}; abort failed: {(abort.stderr or '')[:200]}",
+                            skip_reason="rebase_conflict",
+                            error=message,
                         )
 
                     logger.warning(
-                        "git_autosync_rebase_conflict",
+                        "git_autosync_rebase_conflict_left",
                         clone_path=clone_path,
                         pull_error=message,
-                        abort_return_code=abort.returncode,
                     )
-                    # Local commit is preserved - safe
                     return _SyncOutcome(
                         outcome="skipped",
                         success=True,
                         skipped=True,
                         skip_reason="rebase_conflict",
-                        error=message,
+                        error=(
+                            f"Rebase conflict at {clone_path}. "
+                            f"Conflicts left for review. {message}"
+                        ),
                     )
 
                 logger.warning("git_autosync_pull_failed", clone_path=clone_path, error=message)

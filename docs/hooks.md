@@ -78,6 +78,7 @@ event   = "spawn.finalized"
 | `when.status` | array[str] | no | — | Only fire when spawn exits with one of these statuses |
 | `when.agent` | str | no | — | Only fire for this agent profile |
 | `exclude` | array[str] | no | — | Skip for these agent profiles |
+| `options.conflict_policy` | str | no | `"leave"` | `git-autosync` only: `"leave"` keeps rebase conflicts for review; `"abort"` restores old abort behavior |
 
 `command` and `builtin` are mutually exclusive.
 
@@ -105,6 +106,22 @@ remote = "git@github.com:team/docs.git"
 2. Fetches upstream
 3. Rebases when behind remote
 4. Pushes when ahead or after a local commit
+
+By default, if `git pull --rebase` encounters a conflict, the rebase is left in place
+so agents or humans can inspect and resolve the conflict markers. Future autosync runs
+detect the existing rebase state and skip all git operations until the conflict is resolved.
+
+Set `conflict_policy = "abort"` in options to restore the previous behavior of aborting
+
+```toml
+# Restore old abort-on-conflict behavior
+[[hooks]]
+builtin = "git-autosync"
+remote  = "git@github.com:team/docs.git"
+[hooks.options]
+conflict_policy = "abort"
+```
+the rebase on conflict.
 
 **Required:** `remote` — the Git remote URL of the repo to sync.
 

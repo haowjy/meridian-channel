@@ -10,7 +10,14 @@ from typing import Any, cast
 import pathspec
 
 from meridian.lib.ignores import load_ignore_patterns
-from meridian.lib.kg.types import AnalysisResult, GraphEdge, GraphNode
+from meridian.lib.kg.types import (
+    AnalysisResult,
+    CheckFinding,
+    CheckResult,
+    FindingSeverity,
+    GraphEdge,
+    GraphNode,
+)
 from meridian.lib.markdown.extract import extract_file
 from meridian.lib.markdown.types import ExtractedLink
 
@@ -30,6 +37,9 @@ _SKIP_DIRS = {
 
 # External URL prefixes — not checked for broken links
 _EXTERNAL_PREFIXES = ("http://", "https://", "mailto:", "#")
+_CONFLICT_START = "<<<<<<<"
+_CONFLICT_SEPARATOR = "======="
+_CONFLICT_END = ">>>>>>>"
 
 
 def build_analysis(
@@ -127,6 +137,98 @@ def build_analysis(
         missing_backlinks=missing_backlinks,
         clusters=clusters,
         external_count=external_count,
+    )
+
+
+def build_check(
+    root: Path,
+    *,
+    targeted_path: Path | None = None,
+    exclude: list[str] | None = None,
+    strict: bool = False,
+) -> CheckResult:
+    """Build kg check result with broken links and content findings."""
+    analysis = build_analysis(
+        root=root,
+        include_backlinks=False,
+        include_clusters=False,
+        targeted_path=targeted_path,
+        exclude=exclude,
+    )
+
+    warning_severity: FindingSeverity = "error" if strict else "warning"
+    findings: list[CheckFinding] = []
+
+    for edge in analysis.broken_links:
+        target = str(edge.dst)
+        findings.append(
+            CheckFinding(
+                category="broken_link",
+                severity=warning_severity,
+                file=edge.src,
+                line=edge.line,
+                message=f"Broken link: {target}",
+                detail=target,
+            )
+        )
+
+    for path in sorted(analysis.nodes):
+        findings.extend(_scan_file_findings(path, warning_severity))
+
+    return CheckResult(analysis=analysis, findings=findings, strict=strict)
+
+
+def _scan_file_findings(path: Path, warning_severity: FindingSeverity) -> list[CheckFinding]:
+    findings: list[CheckFinding] = []
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as exc:
+        findings.append(
+            CheckFinding(
+                category="read_error",
+                severity="error",
+                file=path,
+                line=0,
+                message=f"Could not read file: {exc}",
+                detail=str(exc),
+            )
+        )
+        return findings
+
+    in_conflict = False
+    for line_number, line in enumerate(lines, start=1):
+        if "[!FLAG]" in line:
+            findings.append(
+                CheckFinding(
+                    category="flag_block",
+                    severity=warning_severity,
+                    file=path,
+                    line=line_number,
+                    message="Flag block found",
+                    detail=line.strip(),
+                )
+            )
+
+        if line.startswith(_CONFLICT_START):
+            in_conflict = True
+            findings.append(_conflict_marker_finding(path, line_number, line))
+        elif in_conflict and line.startswith(_CONFLICT_SEPARATOR):
+            findings.append(_conflict_marker_finding(path, line_number, line))
+        elif line.startswith(_CONFLICT_END):
+            findings.append(_conflict_marker_finding(path, line_number, line))
+            in_conflict = False
+
+    return findings
+
+
+def _conflict_marker_finding(path: Path, line_number: int, line: str) -> CheckFinding:
+    return CheckFinding(
+        category="conflict_marker",
+        severity="error",
+        file=path,
+        line=line_number,
+        message="Git conflict marker found",
+        detail=line.strip(),
     )
 
 
@@ -245,4 +347,4 @@ def _rel_posix(path: Path, root: Path) -> str:
         return path.as_posix()
 
 
-__all__ = ["build_analysis"]
+__all__ = ["build_analysis", "build_check"]

@@ -133,7 +133,7 @@ grep -q '^keep.txt$' /tmp/meridian-autosync-last-files.txt && \
 echo "PASS: exclude patterns respected" || echo "FAIL: excluded paths were committed"
 ```
 
-### AUTOSYNC-4. Conflict path aborts rebase and skips sync [IMPORTANT]
+### AUTOSYNC-4. Conflict path leaves rebase for review and skips sync [IMPORTANT]
 
 ```bash
 export E2E_OTHER="$E2E_REPO/other"
@@ -182,8 +182,11 @@ assert result.skip_reason == "rebase_conflict"
 print("PASS: conflict path skipped with rebase_conflict")
 PY
 
-test ! -d "$E2E_WORK/.git/rebase-merge" && test ! -d "$E2E_WORK/.git/rebase-apply" && \
-echo "PASS: rebase state aborted and cleaned" || echo "FAIL: rebase state still present"
+test -d "$E2E_WORK/.git/rebase-merge" && \
+grep -q '^<<<<<<< HEAD$' "$E2E_WORK/keep.txt" && \
+grep -q '^=======$' "$E2E_WORK/keep.txt" && \
+grep -q '^>>>>>>> ' "$E2E_WORK/keep.txt" && \
+echo "PASS: rebase conflict left for review" || echo "FAIL: rebase conflict not left for review"
 ```
 
 ### AUTOSYNC-5. No-op run skips with `nothing_to_sync` [IMPORTANT]

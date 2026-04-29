@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from meridian.lib.kg.types import AnalysisResult
+from meridian.lib.kg.types import AnalysisResult, CheckResult
 
 
 def serialize_analysis(result: AnalysisResult, root: Path) -> dict[str, Any]:
@@ -75,6 +75,41 @@ def serialize_check(result: AnalysisResult, path: Path) -> dict[str, Any]:
     }
 
 
+def serialize_check_findings(result: CheckResult, path: Path) -> dict[str, Any]:
+    """Serialize a multi-category kg check result."""
+    root = path if path.is_dir() else path.parent
+    category_counts = {
+        "broken_links": sum(1 for f in result.findings if f.category == "broken_link"),
+        "flag_blocks": sum(1 for f in result.findings if f.category == "flag_block"),
+        "conflict_markers": sum(
+            1 for f in result.findings if f.category == "conflict_marker"
+        ),
+    }
+
+    return {
+        "path": path.as_posix(),
+        "total_files": len(result.analysis.nodes),
+        "findings": [
+            {
+                "category": finding.category,
+                "severity": finding.severity,
+                "file": _rel(finding.file, root),
+                "line": finding.line,
+                "message": finding.message,
+                "detail": finding.detail,
+            }
+            for finding in result.findings
+        ],
+        "counts": {
+            "errors": result.error_count,
+            "warnings": result.warning_count,
+            **category_counts,
+        },
+        "strict": result.strict,
+        "has_errors": result.has_errors,
+    }
+
+
 def _rel(path: Path, root: Path) -> str:
     """Get path relative to root as forward-slash string."""
     try:
@@ -86,4 +121,5 @@ def _rel(path: Path, root: Path) -> str:
 __all__ = [
     "serialize_analysis",
     "serialize_check",
+    "serialize_check_findings",
 ]

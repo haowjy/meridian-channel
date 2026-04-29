@@ -45,7 +45,12 @@ def _context(work_dir: Path) -> HookContext:
     )
 
 
-def _hook(*, remote: str, exclude: tuple[str, ...] = ()) -> Hook:
+def _hook(
+    *,
+    remote: str,
+    exclude: tuple[str, ...] = (),
+    options: dict[str, object] | None = None,
+) -> Hook:
     return Hook(
         name="git-autosync",
         event="work.done",
@@ -53,6 +58,7 @@ def _hook(*, remote: str, exclude: tuple[str, ...] = ()) -> Hook:
         builtin="git-autosync",
         remote=remote,
         exclude=exclude,
+        options=options or {},
     )
 
 
@@ -201,7 +207,7 @@ def test_git_autosync_excludes_configured_paths(
     assert any("tmp/" in line or "tmp/cache.txt" in line for line in status_lines)
 
 
-def test_git_autosync_aborts_rebase_conflict_and_skips(
+def test_git_autosync_leaves_rebase_conflict_for_review(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -229,14 +235,22 @@ def test_git_autosync_aborts_rebase_conflict_and_skips(
     assert result.success is True
     assert result.skipped is True
     assert result.skip_reason == "rebase_conflict"
+    assert result.error is not None
+    assert f"Rebase conflict at {work}" in result.error
+    assert "Conflicts left for review" in result.error
 
-    assert not (work / ".git" / "rebase-merge").exists()
+    assert (work / ".git" / "rebase-merge").exists()
     assert not (work / ".git" / "rebase-apply").exists()
-
-    top_subject = _git("log", "-1", "--pretty=%s", cwd=work).stdout.strip()
-    assert top_subject.startswith("autosync: ")
+    conflicted_file = (work / "shared.txt").read_text(encoding="utf-8")
+    assert "<<<<<<< HEAD" in conflicted_file
+    assert "=======" in conflicted_file
+    assert ">>>>>>> " in conflicted_file
 
     remote_head_after_hook = _remote_head(remote, branch)
     assert remote_head_after_hook == remote_head_after_other
-    local_head = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
-    assert remote_head_after_hook != local_head
+
+    second_result = hook.execute(_context(work), _hook(remote=str(remote)))
+    assert second_result.outcome == "skipped"
+    assert second_result.success is True
+    assert second_result.skipped is True
+    assert second_result.skip_reason == "existing_rebase_conflict"

@@ -45,14 +45,56 @@ def test_kg_check_on_valid_links(cli, scratch_dir):
 
 
 def test_kg_check_on_broken_links(cli, scratch_dir):
-    """kg check exits 1 when broken links found."""
+    """kg check reports broken links as warnings."""
     docs = scratch_dir / "docs"
     docs.mkdir()
     orphan_content = "# Orphan\n\nLink to [missing](does-not-exist.md)\n"
     (docs / "orphan.md").write_text(orphan_content, encoding="utf-8")
 
     result = cli("kg", "check", str(docs))
+    result.assert_success()
+    assert "warning: orphan.md:3 Broken link:" in result.stdout
+    assert "0 errors, 1 warnings" in result.stderr
+
+
+def test_kg_check_strict_fails_on_warnings(cli, scratch_dir):
+    """kg check --strict exits 1 when warning findings exist."""
+    docs = scratch_dir / "docs"
+    docs.mkdir()
+    orphan_content = "# Orphan\n\nLink to [missing](does-not-exist.md)\n"
+    (docs / "orphan.md").write_text(orphan_content, encoding="utf-8")
+
+    result = cli("kg", "check", str(docs), "--strict")
     result.assert_failure(1)
+    assert "error: orphan.md:3 Broken link:" in result.stdout
+    assert "1 errors, 0 warnings" in result.stderr
+
+
+def test_kg_check_reports_flag_blocks_and_conflict_markers(cli, scratch_dir):
+    """kg check reports flags as warnings and conflict markers as errors."""
+    docs = scratch_dir / "docs"
+    docs.mkdir()
+    content = "\n".join(
+        [
+            "# Notes",
+            "> [!FLAG]",
+            "<<<<<<< HEAD",
+            "left",
+            "=======",
+            "right",
+            ">>>>>>> branch",
+            "",
+        ]
+    )
+    (docs / "notes.md").write_text(content, encoding="utf-8")
+
+    result = cli("kg", "check", str(docs))
+    result.assert_failure(1)
+    assert "warning: notes.md:2 Flag block found" in result.stdout
+    assert "error: notes.md:3 Git conflict marker found" in result.stdout
+    assert "error: notes.md:5 Git conflict marker found" in result.stdout
+    assert "error: notes.md:7 Git conflict marker found" in result.stdout
+    assert "3 errors, 1 warnings" in result.stderr
 
 
 def test_kg_graph_cwd_default(cli, scratch_dir):
