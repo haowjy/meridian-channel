@@ -12,8 +12,10 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Removed
 - Windows CI matrix. Ubuntu-only until Windows support is re-validated.
+- Archived old frontend, FastAPI app server, HCP chat stack, `meridian app` command, app-backed tests, and built UI artifacts. Active codebase clear for fresh `meridian chat` / `meridian app` rebuild.
 
 ### Changed
+- App-server-backed extension invocation now reports no app server while local extension discovery/dispatch stays active.
 - `POST /api/spawns` resolve-before-persist. No spawn row created on composition failure. Row metadata (model, agent, harness) reflects resolved values — no "unknown" placeholders.
 - `POST /api/spawns/{id}/archive` routed through `SpawnApplicationService`. Terminal-only gate: 409 if spawn not yet terminal. Idempotent: returns `{noop: true}` if already archived.
 - Spawn cancel now uses one application service for CLI and HTTP; managed primary cancel behavior shared across both surfaces.

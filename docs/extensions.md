@@ -4,7 +4,7 @@ Extensions expose Meridian operations across three surfaces — CLI, HTTP, and M
 
 ## meridian ext CLI
 
-Discovery works with no app server running. Invocation (`ext run`) runs in-process for commands with `requires_app_server: false`. For commands with `requires_app_server: true`, a running app server is required — start one with `meridian app` in a separate terminal.
+Discovery works with no app server running. Invocation (`ext run`) runs in-process for commands with `requires_app_server: false`. Commands with `requires_app_server: true` currently return `No app server running` while the old app server is archived for rebuild.
 
 ### List extensions
 
@@ -71,13 +71,10 @@ Output is the command's JSON payload by default. Pass `--json` or `--format json
 | ---- | ------- |
 | 0 | Success |
 | 1 | Command not found or command returned error |
-| 2 | No app server running |
-| 3 | App server endpoint is stale |
-| 4 | App server is for a different project |
-| 5 | App server is unreachable |
+| 2 | App server unavailable |
 | 7 | Invalid JSON `--args` (not valid JSON or not a JSON object) |
 
-Codes 2–5 are server-state problems; code 7 is a caller error. Check exit codes in scripts to distinguish these cases.
+Code 2 is an app-server availability problem; code 7 is a caller error. Check exit codes in scripts to distinguish these cases.
 
 ---
 

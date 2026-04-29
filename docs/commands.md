@@ -120,11 +120,11 @@ See [configuration.md](configuration.md#context) for the full schema.
 | `meridian ext list` | List registered extensions grouped by namespace |
 | `meridian ext show EXT_ID` | Show commands in one extension |
 | `meridian ext commands` | List all extension commands; `--json` for stable agent output |
-| `meridian ext run FQID` | Invoke an extension command via app server |
+| `meridian ext run FQID` | Invoke an extension command; app-server-backed commands currently report no server |
 
 `FQID` is `extension_id.command_id`, e.g. `meridian.sessions.getSpawnStats`.
 
-`ext list`, `ext show`, and `ext commands` work with no app server running. `ext run` runs in-process for commands with `requires_app_server: false`; commands with `requires_app_server: true` need a running app server (`meridian app`).
+`ext list`, `ext show`, and `ext commands` work with no app server running. `ext run` runs in-process for commands with `requires_app_server: false`; commands with `requires_app_server: true` currently return exit code `2` while the app server is archived for rebuild.
 
 Common `ext run` flags:
 
@@ -136,7 +136,7 @@ Common `ext run` flags:
 | `--request-id ID` | Tracing request ID |
 | `--json` | Output as JSON (alias for `--format json`) |
 
-Exit codes for `ext run`: `2` = no server, `3` = stale endpoint, `4` = wrong project, `5` = unreachable, `7` = invalid `--args`.
+Exit codes for `ext run`: `2` = app server unavailable, `7` = invalid `--args`.
 
 See [extensions.md](extensions.md) for HTTP API and MCP tool details.
 
@@ -154,7 +154,6 @@ See [extensions.md](extensions.md) for HTTP API and MCP tool details.
 | `meridian models refresh` | Force-refresh the models.dev cache |
 | `meridian doctor` | Run diagnostics and reconcile orphan state |
 | `meridian serve` | Start the MCP server |
-| `meridian app` | Start the app web UI server (HTTP extension API endpoint) |
 
 ## Package Management (mars)
 

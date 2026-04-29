@@ -5,13 +5,6 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from meridian.lib.app.locator import (
-    AppServerLocator,
-    AppServerNotRunning,
-    AppServerStaleEndpoint,
-    AppServerUnreachable,
-    AppServerWrongProject,
-)
 from meridian.lib.core.logging import configure_logging
 from meridian.lib.extensions.context import (
     ExtensionCommandServices,
@@ -22,18 +15,9 @@ from meridian.lib.extensions.registry import (
     build_first_party_registry,
     compute_manifest_hash,
 )
-from meridian.lib.extensions.remote_invoker import (
-    RemoteExtensionInvoker,
-    RemoteInvokeRequest,
-)
 from meridian.lib.extensions.types import (
     ExtensionErrorResult,
     ExtensionSurface,
-)
-from meridian.lib.ops.runtime import (
-    get_project_uuid,
-    resolve_runtime_root_and_config_for_read,
-    resolve_runtime_root_for_read,
 )
 
 
@@ -137,57 +121,14 @@ async def extension_invoke(
             }
         return {"status": "ok", "result": result.payload}
 
-    project_root, _ = resolve_runtime_root_and_config_for_read(None)
-    runtime_root = resolve_runtime_root_for_read(project_root)
-    locator = AppServerLocator(runtime_root, get_project_uuid(project_root))
-
-    try:
-        endpoint = locator.locate(verify_reachable=True)
-    except AppServerNotRunning:
-        return {
-            "status": "error",
-            "code": "app_server_required",
-            "message": "No app server running",
-        }
-    except AppServerStaleEndpoint:
-        return {
-            "status": "error",
-            "code": "app_server_stale",
-            "message": "App server endpoint is stale",
-        }
-    except AppServerWrongProject:
-        return {
-            "status": "error",
-            "code": "app_server_wrong_project",
-            "message": "App server is for a different project",
-        }
-    except AppServerUnreachable:
-        return {
-            "status": "error",
-            "code": "app_server_unreachable",
-            "message": "App server is unreachable",
-        }
-
-    invoker = RemoteExtensionInvoker(endpoint)
-    result = await invoker.invoke_async(
-        RemoteInvokeRequest(
-            extension_id=spec.extension_id,
-            command_id=spec.command_id,
-            args=resolved_args,
-            request_id=request_id,
-            work_id=work_id,
-            spawn_id=spawn_id,
-        )
-    )
-
-    if not result.success:
-        return {
-            "status": "error",
-            "code": result.error_code or "invoke_failed",
-            "message": result.error_message or "Invoke failed",
-        }
-
-    return {"status": "ok", "result": result.payload}
+    return {
+        "status": "error",
+        "code": "app_server_archived",
+        "message": (
+            "This extension requires the archived Meridian app server. "
+            "Rebuild `meridian app` before invoking app-server-backed extensions."
+        ),
+    }
 
 def run_server() -> None:
     """Start the FastMCP stdio server."""

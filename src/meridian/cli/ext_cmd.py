@@ -11,29 +11,13 @@ from typing import Annotated, Any, cast
 from cyclopts import App, Parameter
 
 from meridian.cli.output import OutputFormat
-from meridian.lib.app.locator import (
-    AppServerLocator,
-    AppServerNotRunning,
-    AppServerStaleEndpoint,
-    AppServerUnreachable,
-    AppServerWrongProject,
-)
 from meridian.lib.extensions.context import (
     ExtensionCommandServices,
     ExtensionInvocationContextBuilder,
 )
 from meridian.lib.extensions.dispatcher import ExtensionCommandDispatcher
 from meridian.lib.extensions.registry import build_first_party_registry, compute_manifest_hash
-from meridian.lib.extensions.remote_invoker import (
-    RemoteExtensionInvoker,
-    RemoteInvokeRequest,
-)
 from meridian.lib.extensions.types import ExtensionErrorResult, ExtensionSurface
-from meridian.lib.ops.runtime import (
-    get_project_uuid,
-    resolve_runtime_root_and_config_for_read,
-    resolve_runtime_root_for_read,
-)
 
 type Emitter = Callable[[object], None]
 type OutputFormatResolver = Callable[[], OutputFormat]
@@ -349,46 +333,12 @@ def ext_run(
         _print_run_success(format=effective_format, payload=result.payload)
         return
 
-    project_root, _ = resolve_runtime_root_and_config_for_read(None)
-    runtime_root = resolve_runtime_root_for_read(project_root)
-    locator = AppServerLocator(runtime_root, get_project_uuid(project_root))
-
-    try:
-        endpoint = locator.locate(verify_reachable=True)
-    except AppServerNotRunning:
-        print("No app server running", file=sys.stderr)
-        raise SystemExit(EXIT_SERVER_NOT_RUNNING) from None
-    except AppServerStaleEndpoint:
-        print("App server endpoint is stale", file=sys.stderr)
-        raise SystemExit(EXIT_SERVER_STALE) from None
-    except AppServerWrongProject:
-        print("App server is for a different project", file=sys.stderr)
-        raise SystemExit(EXIT_SERVER_WRONG_PROJECT) from None
-    except AppServerUnreachable:
-        print("App server is unreachable", file=sys.stderr)
-        raise SystemExit(EXIT_SERVER_UNREACHABLE) from None
-
-    invoker = RemoteExtensionInvoker(endpoint)
-    result = invoker.invoke_sync(
-        RemoteInvokeRequest(
-            extension_id=spec.extension_id,
-            command_id=spec.command_id,
-            args=parsed_args,
-            request_id=request_id,
-            work_id=work_id,
-            spawn_id=spawn_id,
-        )
+    _print_run_error(
+        format=effective_format,
+        code="app_server_required",
+        message="No app server running",
     )
-
-    if not result.success:
-        _print_run_error(
-            format=effective_format,
-            code=result.error_code,
-            message=result.error_message,
-        )
-        raise SystemExit(EXIT_GENERAL_ERROR)
-
-    _print_run_success(format=effective_format, payload=result.payload)
+    raise SystemExit(EXIT_SERVER_NOT_RUNNING)
 
 
 def register_ext_commands(

@@ -26,35 +26,6 @@ def _run_ext(tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _write_project_uuid(project_root: Path, project_uuid: str) -> None:
-    meridian_dir = project_root / ".meridian"
-    meridian_dir.mkdir(parents=True, exist_ok=True)
-    (meridian_dir / "id").write_text(project_uuid, encoding="utf-8")
-
-
-def _write_stale_endpoint(tmp_path: Path, project_uuid: str) -> None:
-    runtime_root = tmp_path / "meridian-home" / "projects" / project_uuid
-    instance_dir = runtime_root / "app" / "999999999"
-    instance_dir.mkdir(parents=True, exist_ok=True)
-    (instance_dir / "token").write_text("stale-token", encoding="utf-8")
-    (instance_dir / "endpoint.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "instance_id": "stale-instance",
-                "transport": "tcp",
-                "host": "127.0.0.1",
-                "port": 9999,
-                "project_uuid": project_uuid,
-                "repo_root": (tmp_path / "project").as_posix(),
-                "pid": 999999999,
-                "started_at": "2026-04-23T00:00:00+00:00",
-            }
-        ),
-        encoding="utf-8",
-    )
-
-
 class TestExtCliIntegration:
     """Integration tests for ext CLI commands."""
 
@@ -114,19 +85,3 @@ class TestExtCliIntegration:
         )
         assert result.returncode == 2
         assert "No app server running" in result.stderr
-
-    def test_ext_run_stale_endpoint_exits_3(self, tmp_path: Path) -> None:
-        project_uuid = "project-stale-uuid"
-        _write_project_uuid(tmp_path / "project", project_uuid)
-        _write_stale_endpoint(tmp_path, project_uuid)
-
-        result = _run_ext(
-            tmp_path,
-            "run",
-            "meridian.sessions.getSpawnStats",
-            "--args",
-            '{"spawn_id":"p123"}',
-        )
-
-        assert result.returncode == 3
-        assert "App server endpoint is stale" in result.stderr
