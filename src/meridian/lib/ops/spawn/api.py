@@ -892,16 +892,18 @@ def spawn_wait_sync(
     )
     timeout_seconds = minutes_to_seconds(timeout_minutes) or 0.0
     checkpoint_seconds = (
-        payload.timeout_secs
-        if payload.timeout_secs is not None
-        else config.wait_checkpoint_seconds
+        payload.yield_after_secs
+        if payload.yield_after_secs is not None
+        else config.wait_yield_after_seconds
     )
     started = time.monotonic()
-    hard_deadline = started + max(timeout_seconds, 0.0)
     use_checkpoint = not payload.timeout_explicit
-    checkpoint_deadline = (
-        started + max(checkpoint_seconds, 0.0) if use_checkpoint else None
-    )
+    if use_checkpoint:
+        checkpoint_deadline = started + max(checkpoint_seconds, 0.0)
+        hard_deadline = None
+    else:
+        checkpoint_deadline = None
+        hard_deadline = started + max(timeout_seconds, 0.0)
     poll = (
         payload.poll_interval_secs
         if payload.poll_interval_secs is not None
@@ -979,7 +981,7 @@ def spawn_wait_sync(
                 checkpoint_elapsed_secs=now - started,
             )
 
-        if now >= hard_deadline:
+        if hard_deadline is not None and now >= hard_deadline:
             elapsed = now - started
             raise TimeoutError(_build_wait_timeout_message(pending, elapsed))
         if now >= next_progress:

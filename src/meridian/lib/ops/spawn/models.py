@@ -673,7 +673,7 @@ class SpawnWaitInput(BaseModel):
     # Compatibility alias for MCP clients that still send `spawn_id`.
     spawn_id: str | None = None
     timeout: float | None = None
-    timeout_secs: float | None = None
+    yield_after_secs: float | None = None
     timeout_explicit: bool = False
     poll_interval_secs: float | None = None
     verbose: bool = False

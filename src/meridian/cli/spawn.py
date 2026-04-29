@@ -658,10 +658,10 @@ def _spawn_wait(
             help="Hard timeout in minutes. Overrides checkpoint behavior.",
         ),
     ] = None,
-    timeout_secs: Annotated[
+    yield_after_secs: Annotated[
         float | None,
         Parameter(
-            name="--timeout-secs",
+            name="--yield-after-secs",
             help=(
                 "Cache-preserving yield interval in seconds (default: 240). "
                 "Exits cleanly when reached."
@@ -688,7 +688,7 @@ def _spawn_wait(
         SpawnWaitInput(
             spawn_ids=spawn_ids,
             timeout=timeout,
-            timeout_secs=timeout_secs,
+            yield_after_secs=yield_after_secs,
             timeout_explicit=timeout is not None,
             verbose=verbose,
             quiet=quiet,
