@@ -97,6 +97,31 @@ def test_kg_check_reports_flag_blocks_and_conflict_markers(cli, scratch_dir):
     assert "3 errors, 1 warnings" in result.stderr
 
 
+def test_kg_check_ignores_findings_inside_fenced_blocks(cli, scratch_dir):
+    """kg check ignores flags and conflict markers inside fenced code blocks."""
+    docs = scratch_dir / "docs"
+    docs.mkdir()
+    content = "\n".join(
+        [
+            "# Example docs",
+            "Here is a code example:",
+            "````markdown",
+            "> [!FLAG]",
+            "```",
+            "<<<<<<< HEAD",
+            "=======",
+            ">>>>>>> branch",
+            "```",
+            "````",
+            "",
+        ]
+    )
+    (docs / "example.md").write_text(content, encoding="utf-8")
+
+    result = cli("kg", "check", str(docs))
+    result.assert_success()
+
+
 def test_kg_graph_cwd_default(cli, scratch_dir):
     """kg graph uses cwd when no path specified."""
     (scratch_dir / "test.md").write_text("# Test\n", encoding="utf-8")
