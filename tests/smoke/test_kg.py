@@ -122,6 +122,26 @@ def test_kg_check_ignores_findings_inside_fenced_blocks(cli, scratch_dir):
     result.assert_success()
 
 
+def test_kg_check_ignores_inline_code_and_prose_flag_examples(cli, scratch_dir):
+    """kg check ignores documentation examples of flag callout syntax."""
+    docs = scratch_dir / "docs"
+    docs.mkdir()
+    content = "\n".join(
+        [
+            "# Flag examples",
+            "Flags are searchable with `grep -r '\\[!FLAG\\]'`.",
+            "- `> [!FLAG]` markers are review callouts.",
+            "Add a `[!FLAG]` if something needs human review.",
+            "Plain [!FLAG] prose mention is documentation, not a flag.",
+            "",
+        ]
+    )
+    (docs / "examples.md").write_text(content, encoding="utf-8")
+
+    result = cli("kg", "check", str(docs))
+    result.assert_success()
+
+
 def test_kg_graph_cwd_default(cli, scratch_dir):
     """kg graph uses cwd when no path specified."""
     (scratch_dir / "test.md").write_text("# Test\n", encoding="utf-8")

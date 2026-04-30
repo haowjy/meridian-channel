@@ -163,13 +163,13 @@ def test_invalid_backtick_info_string_does_not_suppress(tmp_path):
         [
             "# Notes",
             "``` info`bad",
-            "[!FLAG]",
+            "> [!FLAG]",
             "```",
             "",
         ]
     )
     findings = _findings(tmp_path, content)
-    # The invalid opener is not a fence, so [!FLAG] on line 3 should be detected
+    # The invalid opener is not a fence, so the blockquote flag on line 3 should be detected
     assert ("flag_block", 3) in findings
 
 
@@ -186,3 +186,30 @@ def test_unclosed_fence_suppresses_to_eof(tmp_path):
         ]
     )
     assert _findings(tmp_path, content) == []
+
+
+def test_inline_code_and_prose_flag_mentions_are_not_actionable(tmp_path):
+    content = "\n".join(
+        [
+            "# Notes",
+            "Flags are searchable with `grep -r '\\[!FLAG\\]'`.",
+            "- `> [!FLAG]` markers are review callouts.",
+            "Add a `[!FLAG]` if something needs human review.",
+            "Plain [!FLAG] prose mention is documentation, not a flag.",
+            "",
+        ]
+    )
+
+    assert _findings(tmp_path, content) == []
+
+
+def test_blockquote_flag_with_leading_whitespace_is_actionable(tmp_path):
+    content = "\n".join(
+        [
+            "# Notes",
+            "   >   [!FLAG] needs human review",
+            "",
+        ]
+    )
+
+    assert _findings(tmp_path, content) == [("flag_block", 2)]

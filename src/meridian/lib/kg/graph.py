@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from collections import deque
 from pathlib import Path
 from typing import Any, cast
@@ -41,6 +42,7 @@ _EXTERNAL_PREFIXES = ("http://", "https://", "mailto:", "#")
 _CONFLICT_START = "<<<<<<<"
 _CONFLICT_SEPARATOR = "======="
 _CONFLICT_END = ">>>>>>>"
+_ACTIONABLE_FLAG_RE = re.compile(r"^\s*>\s*\[!FLAG\]")
 _md_parser = MarkdownIt()
 
 
@@ -204,7 +206,7 @@ def _scan_file_findings(path: Path, warning_severity: FindingSeverity) -> list[C
         if line_number in fenced:
             continue
 
-        if "[!FLAG]" in line:
+        if _ACTIONABLE_FLAG_RE.match(line):
             findings.append(
                 CheckFinding(
                     category="flag_block",
