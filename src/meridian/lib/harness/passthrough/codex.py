@@ -1,0 +1,86 @@
+"""Codex TUI passthrough configuration for managed primary sessions."""
+
+from __future__ import annotations
+
+import socket
+from pathlib import Path
+from typing import Any
+
+from meridian.lib.core.types import SpawnId
+from meridian.lib.harness.connections.base import ConnectionConfig, HarnessConnection
+from meridian.lib.harness.ids import HarnessId
+from meridian.lib.harness.launch_spec import CodexLaunchSpec
+from meridian.lib.launch.launch_types import ResolvedLaunchSpec
+from meridian.lib.launch.process.primary_attach import PrimaryAttachError, TuiCommandBuilder
+
+
+def _reserve_local_port(host: str = "127.0.0.1") -> int:
+    """Reserve one ephemeral TCP port and return it."""
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind((host, 0))
+        return int(sock.getsockname()[1])
+
+
+def _require_observer_endpoint_url(
+    connection: HarnessConnection[Any],
+    *,
+    transport: str,
+) -> str:
+    endpoint = connection.observer_endpoint
+    if endpoint is None:
+        raise PrimaryAttachError(
+            f"Managed backend did not expose an observer endpoint for {connection.harness_id.value}"
+        )
+    if endpoint.transport != transport:
+        raise PrimaryAttachError(
+            "Managed backend exposed unexpected observer transport "
+            f"'{endpoint.transport}' (expected '{transport}')"
+        )
+    return endpoint.url
+
+
+def _build_codex_attach_command(
+    session_id: str,
+    ws_url: str,
+) -> tuple[str, ...]:
+    """Build `codex resume {session_id} --remote {ws_url}`."""
+
+    return ("codex", "resume", session_id, "--remote", ws_url)
+
+
+class CodexPassthrough:
+    """Build Codex managed primary TUI passthrough inputs."""
+
+    def build_config(
+        self,
+        *,
+        spawn_id: SpawnId,
+        spec: ResolvedLaunchSpec,
+        execution_cwd: Path,
+        env: dict[str, str],
+    ) -> ConnectionConfig:
+        if not isinstance(spec, CodexLaunchSpec):
+            raise PrimaryAttachError(f"Expected CodexLaunchSpec, got {type(spec).__name__}")
+        ws_bind_host = "127.0.0.1"
+        return ConnectionConfig(
+            spawn_id=spawn_id,
+            harness_id=HarnessId.CODEX,
+            prompt=spec.prompt,
+            project_root=execution_cwd,
+            env_overrides=dict(env),
+            ws_bind_host=ws_bind_host,
+            ws_port=_reserve_local_port(ws_bind_host),
+        )
+
+    def build_tui_command(
+        self,
+        connection: HarnessConnection[Any],
+    ) -> TuiCommandBuilder:
+        return lambda session_id: _build_codex_attach_command(
+            session_id=session_id,
+            ws_url=_require_observer_endpoint_url(connection, transport="ws"),
+        )
+
+
+__all__ = ["CodexPassthrough"]

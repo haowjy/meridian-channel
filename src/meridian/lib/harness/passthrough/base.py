@@ -1,0 +1,33 @@
+"""TuiPassthrough protocol — builds harness-specific attach configuration."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Protocol
+
+from meridian.lib.core.types import SpawnId
+from meridian.lib.harness.connections.base import ConnectionConfig, HarnessConnection
+from meridian.lib.launch.launch_types import ResolvedLaunchSpec
+from meridian.lib.launch.process.primary_attach import TuiCommandBuilder
+
+
+class TuiPassthrough(Protocol):
+    """Build attach configuration for one harness's TUI passthrough."""
+
+    def build_config(
+        self,
+        *,
+        spawn_id: SpawnId,
+        spec: ResolvedLaunchSpec,
+        execution_cwd: Path,
+        env: dict[str, str],
+    ) -> ConnectionConfig:
+        """Build the ConnectionConfig for observer mode."""
+        ...
+
+    def build_tui_command(
+        self,
+        connection: HarnessConnection[Any],
+    ) -> TuiCommandBuilder:
+        """Return a TUI command builder for the given connection."""
+        ...

@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import socket
 import time
 from collections.abc import Callable
 from contextlib import suppress
@@ -24,8 +23,8 @@ from meridian.lib.core.spawn_service import SpawnApplicationService
 from meridian.lib.core.types import HarnessId, SpawnId
 from meridian.lib.harness.claude_preflight import ensure_claude_session_accessible
 from meridian.lib.harness.connections import get_connection_class
-from meridian.lib.harness.connections.base import ConnectionConfig, HarnessConnection
-from meridian.lib.harness.launch_spec import CodexLaunchSpec, OpenCodeLaunchSpec
+from meridian.lib.harness.connections.base import HarnessConnection
+from meridian.lib.harness.passthrough import get_passthrough
 from meridian.lib.harness.registry import HarnessRegistry
 from meridian.lib.launch.artifact_io import write_projection_artifacts
 from meridian.lib.launch.constants import (
@@ -129,50 +128,6 @@ def run_primary_process_with_capture(
         on_child_started=on_child_started,
     )
     return launched.exit_code, launched.pid
-
-
-def _build_codex_attach_command(
-    session_id: str,
-    ws_url: str,
-) -> tuple[str, ...]:
-    """Build `codex resume {session_id} --remote {ws_url}`."""
-
-    return ("codex", "resume", session_id, "--remote", ws_url)
-
-
-def _build_opencode_attach_command(
-    session_id: str,
-    http_url: str,
-) -> tuple[str, ...]:
-    """Build `opencode attach {http_url} --session {session_id}`."""
-
-    return ("opencode", "attach", http_url, "--session", session_id)
-
-
-def _reserve_local_port(host: str = "127.0.0.1") -> int:
-    """Reserve one ephemeral TCP port and return it."""
-
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind((host, 0))
-        return int(sock.getsockname()[1])
-
-
-def _require_observer_endpoint_url(
-    connection: HarnessConnection[Any],
-    *,
-    transport: str,
-) -> str:
-    endpoint = connection.observer_endpoint
-    if endpoint is None:
-        raise PrimaryAttachError(
-            f"Managed backend did not expose an observer endpoint for {connection.harness_id.value}"
-        )
-    if endpoint.transport != transport:
-        raise PrimaryAttachError(
-            "Managed backend exposed unexpected observer transport "
-            f"'{endpoint.transport}' (expected '{transport}')"
-        )
-    return endpoint.url
 
 
 def _cleanup_managed_primary_sidecars(spawn_dir: Path) -> None:
@@ -414,77 +369,32 @@ async def _run_primary_attach(
 
     _ = project_root
     try:
+        passthrough = get_passthrough(harness_id)
         connection_factory = cast(
             "Callable[[], HarnessConnection[Any]]",
             get_connection_class(harness_id),
         )
         connection = connection_factory()
-        if harness_id == HarnessId.CODEX:
-            if not isinstance(spec, CodexLaunchSpec):
-                raise PrimaryAttachError(
-                    f"Expected CodexLaunchSpec, got {type(spec).__name__}"
-                )
-            ws_bind_host = "127.0.0.1"
-            ws_port = _reserve_local_port(ws_bind_host)
-            config = ConnectionConfig(
-                spawn_id=spawn_id,
-                harness_id=harness_id,
-                prompt=spec.prompt,
-                project_root=execution_cwd,
-                env_overrides=dict(env),
-                ws_bind_host=ws_bind_host,
-                ws_port=ws_port,
-            )
-            launcher = PrimaryAttachLauncher(
-                spawn_id=spawn_id,
-                spawn_dir=spawn_dir,
-                connection=connection,
-                tui_command_builder=lambda session_id: _build_codex_attach_command(
-                    session_id=session_id,
-                    ws_url=_require_observer_endpoint_url(connection, transport="ws"),
-                ),
-                process_launcher=process_launcher,
-                on_running=on_running,
-            )
-            return await launcher.run(
-                config=config,
-                spec=spec,
-                cwd=execution_cwd,
-                env=env,
-            )
-
-        if harness_id == HarnessId.OPENCODE:
-            if not isinstance(spec, OpenCodeLaunchSpec):
-                raise PrimaryAttachError(
-                    f"Expected OpenCodeLaunchSpec, got {type(spec).__name__}"
-                )
-            config = ConnectionConfig(
-                spawn_id=spawn_id,
-                harness_id=harness_id,
-                prompt=spec.prompt,
-                project_root=execution_cwd,
-                env_overrides=dict(env),
-                system=spec.appended_system_prompt or None,
-            )
-            launcher = PrimaryAttachLauncher(
-                spawn_id=spawn_id,
-                spawn_dir=spawn_dir,
-                connection=connection,
-                tui_command_builder=lambda session_id: _build_opencode_attach_command(
-                    session_id=session_id,
-                    http_url=_require_observer_endpoint_url(connection, transport="http"),
-                ),
-                process_launcher=process_launcher,
-                on_running=on_running,
-            )
-            return await launcher.run(
-                config=config,
-                spec=spec,
-                cwd=execution_cwd,
-                env=env,
-            )
-
-        raise PrimaryAttachError(f"Managed primary attach is not supported for {harness_id.value}")
+        config = passthrough.build_config(
+            spawn_id=spawn_id,
+            spec=spec,
+            execution_cwd=execution_cwd,
+            env=env,
+        )
+        launcher = PrimaryAttachLauncher(
+            spawn_id=spawn_id,
+            spawn_dir=spawn_dir,
+            connection=connection,
+            tui_command_builder=passthrough.build_tui_command(connection),
+            process_launcher=process_launcher,
+            on_running=on_running,
+        )
+        return await launcher.run(
+            config=config,
+            spec=spec,
+            cwd=execution_cwd,
+            env=env,
+        )
     except PrimaryAttachError:
         raise
     except Exception as exc:
