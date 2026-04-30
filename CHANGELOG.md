@@ -14,6 +14,8 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Chat recovery no longer emits duplicate `runtime.error` on repeated restarts of the same abandoned chat. SQLite index now consistent with JSONL after recovery.
 
 ### Added
+- `meridian chat` management commands: `ls`, `show`, `log`, `close`; server discovery file; REST `GET /chat` and `GET /chat/{id}/events`.
+- `meridian chat --headless/--no-headless`; non-headless says frontend absent, keeps API-only mode.
 - `meridian chat` starts the local headless chat backend with host/port/model/harness options.
 - Codex/OpenCode chat normalizers plus cross-harness parity tests for turn/content/file events.
 - Chat backend SQLite projection, HITL REST responses, and git checkpoint create/revert.

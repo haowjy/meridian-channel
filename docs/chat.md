@@ -14,6 +14,7 @@ meridian chat --harness opencode       # OpenCode
 meridian chat --model gpt-4o           # explicit model
 meridian chat --port 8765              # fixed port
 meridian chat --port 8765 --host 0.0.0.0  # listen on all interfaces
+meridian chat --no-headless              # frontend placeholder; still API-only for now
 ```
 
 On startup, the server prints its base URL and blocks:
@@ -30,8 +31,36 @@ Chat backend: http://127.0.0.1:52341
 | `--model NAME` | harness default | Model id or alias |
 | `--port PORT` | `0` (auto) | Port to bind; `0` picks a free port |
 | `--host HOST` | `127.0.0.1` | Interface to bind |
+| `--headless/--no-headless` | `--headless` | API-only mode. `--no-headless` currently prints a frontend-unavailable notice and continues headless. |
 
 Global `--harness` is read from `meridian config` when `--harness` is omitted.
+
+Startup writes `~/.meridian/chat-server.json` with the current base URL so management
+commands can find the running server. Pass `--url` to any management command to
+override discovery.
+
+---
+
+
+## Management CLI
+
+These commands connect to a running chat server. By default they read the server
+URL from `~/.meridian/chat-server.json`; use `--url http://host:port` to target a
+specific server.
+
+```bash
+meridian chat ls
+meridian chat show c-a1b2c3
+meridian chat log c-a1b2c3 --last 20
+meridian chat log c-a1b2c3 --follow
+meridian chat close c-a1b2c3
+```
+
+- `ls` prints `chat_id | state | created_at`.
+- `show` prints state and the last few events.
+- `log` prints event JSON; `--follow` tails live events over WebSocket after
+  replaying the requested history.
+- `close` posts to `/chat/{chat_id}/close` and confirms accepted closes.
 
 ---
 
@@ -62,6 +91,25 @@ POST /chat/{id}/close   →  end the conversation (agent process exits)
 ## REST API
 
 All endpoints return JSON. Error responses use `{"detail": "<reason>"}`.
+
+### List chats
+
+```
+GET /chat
+```
+
+Response:
+```json
+{
+  "chats": [
+    {
+      "chat_id": "c-a1b2c3...",
+      "state": "idle",
+      "created_at": "2026-04-30T12:00:00Z"
+    }
+  ]
+}
+```
 
 ### Create a chat
 
@@ -153,6 +201,16 @@ POST /chat/{chat_id}/close
 
 No body. Closes the agent process and marks the chat `closed`. Event log
 remains readable for replay.
+
+### List chat events
+
+```
+GET /chat/{chat_id}/events
+GET /chat/{chat_id}/events?last=20
+```
+
+Returns persisted event log entries for replay or inspection. `last=0` returns
+an empty list.
 
 ### Get chat state
 

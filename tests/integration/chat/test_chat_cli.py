@@ -93,6 +93,66 @@ def test_chat_cli_rejects_unknown_harness(monkeypatch, tmp_path) -> None:
         )
 
 
+def test_chat_cli_no_headless_warns_and_writes_server_discovery(monkeypatch, tmp_path) -> None:
+    runtime_root = tmp_path / "runtime"
+    monkeypatch.setattr("meridian.cli.chat_cmd.get_user_home", lambda: runtime_root)
+    monkeypatch.chdir(tmp_path)
+    stdout = StringIO()
+
+    actual_port = run_chat_server(
+        host="0.0.0.0",
+        port=8765,
+        headless=False,
+        uvicorn_run=lambda *_args, **_kwargs: None,
+        stdout=stdout,
+    )
+
+    assert actual_port == 8765
+    assert stdout.getvalue().splitlines() == [
+        "frontend not yet available, running in headless mode",
+        "Chat backend: http://0.0.0.0:8765",
+    ]
+    discovery = runtime_root / "chat-server.json"
+    assert discovery.exists()
+    assert '"url": "http://127.0.0.1:8765"' in discovery.read_text(encoding="utf-8")
+
+
+def test_chat_ls_uses_discovered_server_url(monkeypatch, tmp_path, capsys) -> None:
+    runtime_root = tmp_path / "runtime"
+    runtime_root.mkdir()
+    (runtime_root / "chat-server.json").write_text(
+        '{"url":"http://127.0.0.1:9999"}\n', encoding="utf-8"
+    )
+    monkeypatch.setattr("meridian.cli.chat_cmd.get_user_home", lambda: runtime_root)
+
+    def fake_request(method, path, *, timeout):
+        assert method == "GET"
+        assert path == "http://127.0.0.1:9999/chat"
+        assert timeout == 5.0
+
+        class Response:
+            status_code = 200
+            text = ""
+
+            def json(self):
+                return {
+                    "chats": [
+                        {"chat_id": "c-1", "state": "idle", "created_at": "2026-04-30T00:00:00Z"}
+                    ]
+                }
+
+        return Response()
+
+    monkeypatch.setattr("httpx.request", fake_request)
+
+    chat_cmd._chat_ls()
+
+    output = capsys.readouterr().out
+    assert "chat_id" in output
+    assert "c-1" in output
+    assert "idle" in output
+
+
 def test_chat_command_falls_back_to_globally_parsed_harness(monkeypatch) -> None:
     captured: dict[str, object] = {}
 

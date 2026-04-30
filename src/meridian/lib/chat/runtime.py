@@ -47,6 +47,13 @@ class ChatRuntimeView:
 
 
 @dataclass(frozen=True)
+class ChatListItem:
+    chat_id: str
+    state: str
+    created_at: str | None
+
+
+@dataclass(frozen=True)
 class ChatStreamSource:
     event_log: ChatEventLog
     fanout: WebSocketFanOut | None
@@ -199,6 +206,37 @@ class ChatRuntime(PipelineLookup):
                 entry.fanout = None
         return result
 
+    def list_chats(self) -> list[ChatListItem]:
+        """Return all known chats with current states and creation timestamps."""
+
+        chat_ids = set(self._live) | set(self._persisted_only)
+        if self.paths.chats_dir.exists():
+            chat_ids.update(path.name for path in self.paths.chats_dir.iterdir() if path.is_dir())
+        rows: list[ChatListItem] = []
+        for chat_id in sorted(chat_ids):
+            state = self.get_state(chat_id)
+            if state is None:
+                continue
+            rows.append(
+                ChatListItem(
+                    chat_id=chat_id,
+                    state=state,
+                    created_at=self._created_at(chat_id),
+                )
+            )
+        return rows
+
+    def list_events(self, chat_id: str, *, last: int | None = None) -> list[ChatEvent] | None:
+        """Return persisted events for one chat, optionally limited from the end."""
+
+        stream_source = self.get_stream_source(chat_id)
+        if stream_source is None:
+            return None
+        events = list(stream_source.event_log.read_all())
+        if last is not None:
+            return events[-last:] if last > 0 else []
+        return events
+
     def get_state(self, chat_id: str) -> str | None:
         """Return chat state or None if not found."""
 
@@ -250,6 +288,14 @@ class ChatRuntime(PipelineLookup):
     def persisted_event_index(self, chat_id: str) -> ChatEventIndex | None:
         persisted = self._persisted_only.get(chat_id)
         return persisted.event_index if persisted is not None else None
+
+    def _created_at(self, chat_id: str) -> str | None:
+        stream_source = self.get_stream_source(chat_id)
+        if stream_source is None:
+            return None
+        for event in stream_source.event_log.read_all():
+            return event.timestamp
+        return None
 
     def _load_state_from_disk(self, chat_id: str) -> str | None:
         record = self._load_record_from_disk(chat_id)
@@ -353,6 +399,7 @@ async def _checkpoint_turn(service: CheckpointService, event: ChatEvent) -> None
 
 
 __all__ = [
+    "ChatListItem",
     "ChatRuntime",
     "ChatRuntimeView",
     "ChatStreamSource",

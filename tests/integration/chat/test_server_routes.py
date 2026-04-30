@@ -58,6 +58,35 @@ def test_rest_routes_are_command_wrappers(tmp_path: Path) -> None:
         assert client.get(f"/chat/{chat_id}/state").json()["state"] == "closed"
 
 
+def test_list_chats_and_events_routes_expose_persisted_state(tmp_path: Path) -> None:
+    configure(runtime_root=tmp_path, backend_acquisition=Acquisition())
+    with TestClient(app) as client:
+        chat_id = client.post("/chat", json={}).json()["chat_id"]
+
+        listed = client.get("/chat").json()
+        assert listed["chats"] == [
+            {"chat_id": chat_id, "state": "idle", "created_at": listed["chats"][0]["created_at"]}
+        ]
+        assert listed["chats"][0]["created_at"]
+
+        events = client.get(f"/chat/{chat_id}/events").json()
+        assert events["chat_id"] == chat_id
+        assert [event["type"] for event in events["events"]] == ["chat.started"]
+
+        prompted = client.post(f"/chat/{chat_id}/msg", json={"text": "hi"}).json()
+        assert prompted["status"] == "accepted"
+        limited = client.get(f"/chat/{chat_id}/events?last=1").json()
+        assert len(limited["events"]) == 1
+        assert limited["events"][0]["type"]
+
+
+def test_events_route_rejects_unknown_chat(tmp_path: Path) -> None:
+    configure(runtime_root=tmp_path, backend_acquisition=Acquisition())
+    with TestClient(app) as client:
+        response = client.get("/chat/c-missing/events")
+        assert response.status_code == 404
+
+
 def test_restart_recovery_marks_unclosed_active_chat_idle_with_error(tmp_path: Path) -> None:
     configure(runtime_root=tmp_path, backend_acquisition=Acquisition())
     with TestClient(app) as client:

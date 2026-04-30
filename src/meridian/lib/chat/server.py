@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.chat.commands import ChatCommand, CommandResult
@@ -69,6 +70,21 @@ class StateResponse(BaseModel):
     state: str
 
 
+class ChatListItemResponse(BaseModel):
+    chat_id: str
+    state: str
+    created_at: str | None = None
+
+
+class ChatListResponse(BaseModel):
+    chats: list[ChatListItemResponse]
+
+
+class ChatEventsResponse(BaseModel):
+    chat_id: str
+    events: list[dict[str, object]]
+
+
 class _UnavailableAcquisition:
     async def acquire(
         self,
@@ -105,6 +121,20 @@ def configure(
         runtime_root=runtime_root or get_user_home(),
         project_root=project_root or Path.cwd(),
         backend_acquisition=backend_acquisition or _UnavailableAcquisition(),
+    )
+
+
+@app.get("/chat", response_model=ChatListResponse)
+async def list_chats() -> ChatListResponse:
+    return ChatListResponse(
+        chats=[
+            ChatListItemResponse(
+                chat_id=item.chat_id,
+                state=item.state,
+                created_at=item.created_at,
+            )
+            for item in _runtime.list_chats()
+        ]
     )
 
 
@@ -148,6 +178,17 @@ async def revert_checkpoint(chat_id: str, body: RevertRequest) -> CommandResult:
 @app.post("/chat/{chat_id}/close", response_model=CommandResult)
 async def close_chat(chat_id: str) -> CommandResult:
     return await _dispatch_rest(chat_id, "close", {})
+
+
+@app.get("/chat/{chat_id}/events", response_model=ChatEventsResponse)
+async def get_chat_events(
+    chat_id: str,
+    last: int | None = Query(default=None, ge=0),
+) -> ChatEventsResponse:
+    events = _runtime.list_events(chat_id, last=last)
+    if events is None:
+        raise HTTPException(status_code=404, detail="chat_not_found")
+    return ChatEventsResponse(chat_id=chat_id, events=[asdict(event) for event in events])
 
 
 @app.get("/chat/{chat_id}/state", response_model=StateResponse)
