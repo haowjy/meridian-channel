@@ -4,13 +4,14 @@ import asyncio
 import json
 import logging
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from meridian.lib.core.telemetry import StartupPhase
 from meridian.lib.core.types import HarnessId, SpawnId
 from meridian.lib.harness.connections import codex_ws
-from meridian.lib.harness.connections.base import ConnectionConfig
+from meridian.lib.harness.connections.base import ConnectionConfig, HarnessRequest
 from meridian.lib.harness.launch_spec import CodexLaunchSpec
 from meridian.lib.harness.projections.project_codex_common import (
     HarnessCapabilityMismatch,
@@ -399,6 +400,65 @@ async def test_codex_ws_primary_observer_mode_declines_all_server_requests(
         )
     ]
     assert connection._event_queue.empty()
+
+
+@pytest.mark.asyncio
+async def test_codex_ws_confirm_mode_rejects_approval_before_handler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    handled_requests: list[HarnessRequest] = []
+
+    class RecordingHandler:
+        async def handle_request(
+            self,
+            connection: Any,
+            request: HarnessRequest,
+        ) -> None:
+            _ = connection
+            handled_requests.append(request)
+
+    connection = codex_ws.CodexConnection(request_handler=RecordingHandler())
+    connection._launch_spec = CodexLaunchSpec(
+        permission_resolver=TieredPermissionResolver(
+            config=PermissionConfig(approval="confirm")
+        )
+    )
+    captured_errors: list[tuple[object, int, str]] = []
+
+    async def _fake_send_jsonrpc_error(
+        request_id: object,
+        *,
+        code: int,
+        message: str,
+    ) -> None:
+        captured_errors.append((request_id, code, message))
+
+    monkeypatch.setattr(connection, "_send_jsonrpc_error", _fake_send_jsonrpc_error)
+
+    await connection._handle_server_request(
+        {
+            "id": "approval-req-1",
+            "method": "item/commandExecution/requestApproval",
+            "params": {"threadId": "thread-1"},
+        }
+    )
+
+    warning = await asyncio.wait_for(connection._event_queue.get(), timeout=1.0)
+
+    assert handled_requests == []
+    assert warning is not None
+    assert warning.event_type == "warning/approvalRejected"
+    assert warning.payload == {
+        "reason": "confirm_mode",
+        "method": "item/commandExecution/requestApproval",
+    }
+    assert captured_errors == [
+        (
+            "approval-req-1",
+            -32000,
+            "Codex websocket approval requests are unsupported in confirm mode.",
+        )
+    ]
 
 
 @pytest.mark.asyncio

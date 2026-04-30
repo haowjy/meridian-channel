@@ -16,7 +16,9 @@ from meridian.lib.harness.connections.base import (
 from meridian.lib.harness.launch_spec import CodexLaunchSpec, ResolvedLaunchSpec
 from meridian.lib.safety.permissions import UnsafeNoOpPermissionResolver
 from meridian.lib.state.paths import resolve_runtime_paths
+from meridian.lib.streaming import event_observers
 from meridian.lib.streaming import spawn_manager as spawn_manager_module
+from meridian.lib.streaming.event_observers import EventObserverRegistry
 from meridian.lib.streaming.spawn_manager import SpawnManager
 
 
@@ -274,6 +276,41 @@ async def test_on_event_callback_remains_compatible(
     await manager.stop_spawn(spawn_id)
 
     assert callback_events == ["turn/started", "turn/completed"]
+
+
+@pytest.mark.asyncio
+async def test_observer_shutdown_times_out_and_cancels_hung_observer(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    spawn_id = SpawnId("s-hung-observer")
+    registry = EventObserverRegistry()
+    observer_entered = asyncio.Event()
+    observer_cancelled = asyncio.Event()
+
+    class HungObserver:
+        async def on_event(self, spawn_id: SpawnId, event: HarnessEvent) -> None:
+            _ = spawn_id, event
+            observer_entered.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                observer_cancelled.set()
+                raise
+
+        async def on_complete(self, spawn_id: SpawnId) -> None:
+            _ = spawn_id
+
+    monkeypatch.setattr(event_observers, "_OBSERVER_SHUTDOWN_TIMEOUT_SECONDS", 0.01)
+    registry.register(spawn_id, HungObserver())
+    registry.dispatch(spawn_id, _event("turn/started"))
+    await asyncio.wait_for(observer_entered.wait(), timeout=1.0)
+
+    with caplog.at_level(logging.WARNING):
+        await registry.shutdown(spawn_id)
+
+    await asyncio.wait_for(observer_cancelled.wait(), timeout=1.0)
+    assert "Observer shutdown timed out for spawn s-hung-observer" in caplog.text
 
 
 @pytest.mark.asyncio

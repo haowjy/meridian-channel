@@ -753,6 +753,8 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
             )
 
         if method.endswith("/requestApproval"):
+            if await self._reject_confirm_mode_approval_request(request_id, method):
+                return
             harness_request = HarnessRequest(
                 request_id=str(request_id),
                 request_type="approval",
@@ -787,6 +789,37 @@ class CodexConnection(HarnessConnection[CodexLaunchSpec]):
             code=-32601,
             message=f"Meridian codex_ws adapter does not support server request '{method}'",
         )
+
+    async def _reject_confirm_mode_approval_request(
+        self,
+        request_id: object,
+        method: str,
+    ) -> bool:
+        launch_spec = self._launch_spec
+        if launch_spec is None or launch_spec.permission_resolver.config.approval != "confirm":
+            return False
+
+        logger.warning(
+            "Rejecting Codex server approval request in confirm mode: %s",
+            method,
+        )
+        await self._event_queue.put(
+            HarnessEvent(
+                event_type="warning/approvalRejected",
+                payload={
+                    "reason": "confirm_mode",
+                    "method": method,
+                },
+                harness_id=self.harness_id.value,
+                raw_text=None,
+            )
+        )
+        await self._send_jsonrpc_error(
+            request_id,
+            code=-32000,
+            message="Codex websocket approval requests are unsupported in confirm mode.",
+        )
+        return True
 
     def _fail_pending_requests(self, error: Exception) -> None:
         for request_id in list(self._pending_requests.keys()):

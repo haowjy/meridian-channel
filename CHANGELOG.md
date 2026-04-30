@@ -38,6 +38,7 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - SpawnManager now supports post-persist event observers. Slow/failing observers isolated from drain loop and subscriber fan-out; legacy `on_event` stays as shim.
 
 ### Fixed
+- Codex confirm-mode approval requests rejected again in websocket adapter. Slow observer shutdown now times out, so spawn teardown no hang forever.
 - `kg check` skips `[!FLAG]` blocks and git conflict markers inside fenced code blocks.
 - Mermaid style checks skip YAML frontmatter and directive bodies; `fill-no-color` no longer treats `stroke-color:` as text color.
 - `meridian doctor` active-spawn warning now post-reconcile. Warning only lists genuinely live sessions, not stale rows just repaired. Same-run `--prune` can now clean artifacts that became eligible after reconciliation. Cached summary no longer suggests `--prune --global` when only live sessions remain.

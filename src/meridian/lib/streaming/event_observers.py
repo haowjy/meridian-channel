@@ -12,6 +12,7 @@ from meridian.lib.core.types import SpawnId
 from meridian.lib.harness.connections.base import HarnessEvent
 
 logger = logging.getLogger(__name__)
+_OBSERVER_SHUTDOWN_TIMEOUT_SECONDS = 5.0
 
 HarnessEventCallback = Callable[[HarnessEvent], Awaitable[None] | None]
 
@@ -149,7 +150,20 @@ class EventObserverRegistry:
             queued.complete()
         for queued in queued_observers:
             with suppress(asyncio.CancelledError):
-                await queued.task
+                try:
+                    await asyncio.wait_for(
+                        queued.task,
+                        timeout=_OBSERVER_SHUTDOWN_TIMEOUT_SECONDS,
+                    )
+                except TimeoutError:
+                    logger.warning(
+                        "Observer shutdown timed out for spawn %s after %.1fs; cancelling",
+                        spawn_id,
+                        _OBSERVER_SHUTDOWN_TIMEOUT_SECONDS,
+                    )
+                    queued.task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await queued.task
 
 
 __all__ = [
