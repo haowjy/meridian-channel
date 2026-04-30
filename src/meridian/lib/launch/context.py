@@ -331,6 +331,29 @@ def _collect_git_context_clone_roots(config: ContextConfig | None) -> tuple[Path
     return tuple(roots)
 
 
+def _collect_context_projection_roots(
+    project_root: Path, config: ContextConfig | None
+) -> tuple[Path, ...]:
+    """Return all meridian context paths for workspace projection.
+
+    Includes work_root, work_archive, kb_root, and any extra context dirs.
+    These are the paths that meridian exports as MERIDIAN_CONTEXT_*_DIR env vars.
+    """
+    if config is None:
+        return ()
+
+    resolved = resolve_context_paths(project_root, config)
+    roots: list[Path] = [
+        resolved.work_root,
+        resolved.work_archive,
+        resolved.kb_root,
+    ]
+    for path, _source in resolved.extra.values():
+        roots.append(path)
+
+    return tuple(roots)
+
+
 def _dedupe_roots_in_order(roots: tuple[Path, ...]) -> tuple[Path, ...]:
     """Deduplicate root paths while preserving the first-seen order."""
 
@@ -735,6 +758,9 @@ def build_launch_context(
     workspace_roots = get_projectable_roots(workspace_snapshot)
     context_config = load_context_config(project_paths.project_root)
     git_context_roots = _collect_git_context_clone_roots(context_config)
+    context_projection_roots = _collect_context_projection_roots(
+        project_paths.project_root, context_config
+    )
     runtime_root = Path(runtime.runtime_root).expanduser().resolve()
     resolved_request = request
     composition_warnings: tuple[CompositionWarning, ...] = ()
@@ -801,7 +827,14 @@ def build_launch_context(
 
     workspace_projection = project_workspace_roots(
         harness_id=harness.id,
-        roots=_dedupe_roots_in_order((*workspace_roots, *git_context_roots, runtime_root)),
+        roots=_dedupe_roots_in_order(
+            (
+                *workspace_roots,
+                *git_context_roots,
+                *context_projection_roots,
+                runtime_root,
+            )
+        ),
         parent_opencode_config_content=os.getenv(OPENCODE_CONFIG_CONTENT_ENV),
     )
     projected_extra_args = (
@@ -900,12 +933,14 @@ def build_launch_context(
     )
     effective_work_id = (runtime_work_id or resolved_request.work_id_hint or "").strip() or None
     increment_depth = runtime.composition_surface != LaunchCompositionSurface.PRIMARY
+    runtime_overrides = runtime_ctx.child_context(
+        child_spawn_id=spawn_id,
+        increment_depth=increment_depth,
+    )
+    runtime_overrides["MERIDIAN_HARNESS"] = harness.id.value
     merged_overrides = merge_env_overrides(
         plan_overrides=plan_overrides or {},
-        runtime_overrides=runtime_ctx.child_context(
-            child_spawn_id=spawn_id,
-            increment_depth=increment_depth,
-        ),
+        runtime_overrides=runtime_overrides,
         preflight_overrides=preflight.extra_env,
     )
     merged_overrides.update(workspace_projection.env_overrides)

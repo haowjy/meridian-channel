@@ -198,11 +198,14 @@ def test_build_launch_context_projects_runtime_child_env_paths(
     assert runtime_ctx.env_overrides["MERIDIAN_CONTEXT_WORK_ARCHIVE_DIR"] == (
         tmp_path / ".meridian" / "archive" / "work"
     ).as_posix()
+    assert runtime_ctx.env_overrides["MERIDIAN_HARNESS"] == "codex"
+    assert runtime_ctx.env["MERIDIAN_HARNESS"] == "codex"
     unexpected = {
         key
         for key in runtime_ctx.env_overrides
         if key not in ALLOWED_CHILD_ENV_KEYS
         and not key.startswith("MERIDIAN_CONTEXT_")
+        and key != "MERIDIAN_HARNESS"
     }
     assert unexpected == set()
 
@@ -341,3 +344,140 @@ def test_build_launch_context_emits_child_spawn_id(
 
     assert runtime_ctx.env_overrides["MERIDIAN_SPAWN_ID"] == "p-child"
     assert runtime_ctx.env_overrides["MERIDIAN_PARENT_SPAWN_ID"] == "p-parent"
+
+
+def test_build_launch_context_projects_context_paths_to_workspace_roots(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """CONTEXT-PROJ-1: Context paths are included in workspace projection."""
+    _write_minimal_mars_config(tmp_path)
+    monkeypatch.delenv("MERIDIAN_HARNESS_COMMAND", raising=False)
+    monkeypatch.delenv("MERIDIAN_WORK_ID", raising=False)
+    (tmp_path / "meridian.local.toml").write_text(
+        "\n".join(
+            [
+                "[context.work]",
+                'path = "ctx/work"',
+                'archive = "ctx/archive/work"',
+                "",
+                "[context.kb]",
+                'path = "ctx/kb"',
+                "",
+                "[context.strategy]",
+                'path = "ctx/strategy"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    # Create the directories so they exist for projection
+    (tmp_path / "ctx" / "work").mkdir(parents=True)
+    (tmp_path / "ctx" / "archive" / "work").mkdir(parents=True)
+    (tmp_path / "ctx" / "kb").mkdir(parents=True)
+    (tmp_path / "ctx" / "strategy").mkdir(parents=True)
+
+    request = _build_spawn_request()
+    runtime = _build_launch_runtime(
+        tmp_path=tmp_path,
+        composition_surface=LaunchCompositionSurface.PRIMARY,
+    )
+
+    runtime_ctx = build_launch_context(
+        spawn_id="p-primary-context-proj",
+        request=request,
+        runtime=runtime,
+        harness_registry=get_default_harness_registry(),
+        dry_run=True,
+    )
+
+    # Verify env vars are still exported (existing behavior)
+    assert runtime_ctx.env_overrides["MERIDIAN_CONTEXT_WORK_DIR"] == (
+        tmp_path / "ctx" / "work"
+    ).as_posix()
+    assert runtime_ctx.env_overrides["MERIDIAN_CONTEXT_WORK_ARCHIVE_DIR"] == (
+        tmp_path / "ctx" / "archive" / "work"
+    ).as_posix()
+    assert runtime_ctx.env_overrides["MERIDIAN_CONTEXT_KB_DIR"] == (
+        tmp_path / "ctx" / "kb"
+    ).as_posix()
+    assert runtime_ctx.env_overrides["MERIDIAN_CONTEXT_STRATEGY_DIR"] == (
+        tmp_path / "ctx" / "strategy"
+    ).as_posix()
+
+    # Verify workspace projection includes context paths for all harnesses.
+    # For OpenCode: check OPENCODE_CONFIG_CONTENT env override.
+    if "OPENCODE_CONFIG_CONTENT" in runtime_ctx.env_overrides:
+        import json
+        config = json.loads(runtime_ctx.env_overrides["OPENCODE_CONFIG_CONTENT"])
+        external_dirs = config.get("permission", {}).get("external_directory", {})
+        assert (tmp_path / "ctx" / "work").as_posix() in external_dirs
+        assert (tmp_path / "ctx" / "kb").as_posix() in external_dirs
+        assert (tmp_path / "ctx" / "strategy").as_posix() in external_dirs
+
+
+def test_build_launch_context_opencode_includes_context_paths_in_external_directory(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """CONTEXT-PROJ-2: OpenCode projection includes all context paths."""
+    import json
+
+    _write_minimal_mars_config(tmp_path)
+    monkeypatch.delenv("MERIDIAN_HARNESS_COMMAND", raising=False)
+    monkeypatch.delenv("MERIDIAN_WORK_ID", raising=False)
+    monkeypatch.delenv("OPENCODE_CONFIG_CONTENT", raising=False)
+    (tmp_path / "meridian.local.toml").write_text(
+        "\n".join(
+            [
+                "[context.work]",
+                'path = "ctx/work"',
+                'archive = "ctx/archive/work"',
+                "",
+                "[context.kb]",
+                'path = "ctx/kb"',
+                "",
+                "[context.strategy]",
+                'path = "ctx/strategy"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "ctx" / "work").mkdir(parents=True)
+    (tmp_path / "ctx" / "archive" / "work").mkdir(parents=True)
+    (tmp_path / "ctx" / "kb").mkdir(parents=True)
+    (tmp_path / "ctx" / "strategy").mkdir(parents=True)
+
+    request = _build_spawn_request()
+    request = request.model_copy(update={"harness": HarnessId.OPENCODE.value, "model": ""})
+    runtime = _build_launch_runtime(
+        tmp_path=tmp_path,
+        composition_surface=LaunchCompositionSurface.PRIMARY,
+    )
+
+    runtime_ctx = build_launch_context(
+        spawn_id="p-opencode-context-proj",
+        request=request,
+        runtime=runtime,
+        harness_registry=get_default_harness_registry(),
+        dry_run=True,
+    )
+
+    assert "OPENCODE_CONFIG_CONTENT" in runtime_ctx.env_overrides
+    config = json.loads(runtime_ctx.env_overrides["OPENCODE_CONFIG_CONTENT"])
+    external_dirs = config.get("permission", {}).get("external_directory", {})
+
+    work_path = (tmp_path / "ctx" / "work").as_posix()
+    kb_path = (tmp_path / "ctx" / "kb").as_posix()
+    archive_path = (tmp_path / "ctx" / "archive" / "work").as_posix()
+    strategy_path = (tmp_path / "ctx" / "strategy").as_posix()
+
+    assert work_path in external_dirs
+    assert kb_path in external_dirs
+    assert archive_path in external_dirs
+    assert strategy_path in external_dirs
+    assert external_dirs[work_path] == "allow"
+    assert external_dirs[kb_path] == "allow"
+    assert external_dirs[archive_path] == "allow"
+    assert external_dirs[strategy_path] == "allow"
