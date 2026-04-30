@@ -189,13 +189,22 @@ def test_build_launch_context_projects_runtime_child_env_paths(
     assert runtime_ctx.env_overrides["MERIDIAN_WORK_DIR"] == (
         tmp_path / ".meridian" / "work" / "work-alpha"
     ).as_posix()
-    assert runtime_ctx.env_overrides["MERIDIAN_KB_DIR"] == (
+    assert runtime_ctx.env_overrides["MERIDIAN_CONTEXT_WORK_DIR"] == (
+        tmp_path / ".meridian" / "work"
+    ).as_posix()
+    assert runtime_ctx.env_overrides["MERIDIAN_CONTEXT_KB_DIR"] == (
         tmp_path / ".meridian" / "kb"
     ).as_posix()
-    assert runtime_ctx.env_overrides["MERIDIAN_FS_DIR"] == (
-        tmp_path / ".meridian" / "kb"
+    assert runtime_ctx.env_overrides["MERIDIAN_CONTEXT_WORK_ARCHIVE_DIR"] == (
+        tmp_path / ".meridian" / "archive" / "work"
     ).as_posix()
-    assert set(runtime_ctx.env_overrides) <= ALLOWED_CHILD_ENV_KEYS
+    unexpected = {
+        key
+        for key in runtime_ctx.env_overrides
+        if key not in ALLOWED_CHILD_ENV_KEYS
+        and not key.startswith("MERIDIAN_CONTEXT_")
+    }
+    assert unexpected == set()
 
 
 @pytest.mark.parametrize(
@@ -274,8 +283,13 @@ def test_build_launch_context_primary_exports_configured_context_dirs(
         dry_run=True,
     )
 
-    assert runtime_ctx.env_overrides["MERIDIAN_WORK_DIR"] == (tmp_path / "ctx/work").as_posix()
-    assert runtime_ctx.env_overrides["MERIDIAN_KB_DIR"] == (tmp_path / "ctx/kb").as_posix()
+    assert runtime_ctx.env_overrides["MERIDIAN_CONTEXT_WORK_DIR"] == (
+        tmp_path / "ctx/work"
+    ).as_posix()
+    assert runtime_ctx.env_overrides["MERIDIAN_CONTEXT_WORK_ARCHIVE_DIR"] == (
+        tmp_path / "ctx/archive/work"
+    ).as_posix()
+    assert runtime_ctx.env_overrides["MERIDIAN_CONTEXT_KB_DIR"] == (tmp_path / "ctx/kb").as_posix()
     assert runtime_ctx.env_overrides["MERIDIAN_CONTEXT_STRATEGY_DIR"] == (
         tmp_path / "ctx/strategy"
     ).as_posix()
@@ -302,7 +316,7 @@ def test_build_launch_context_env_keeps_project_root_when_execution_cwd_differs(
 
     assert runtime_ctx.execution_cwd == execution_cwd
     assert runtime_ctx.env_overrides["MERIDIAN_PROJECT_DIR"] == tmp_path.as_posix()
-    assert runtime_ctx.env_overrides["MERIDIAN_KB_DIR"] == (
+    assert runtime_ctx.env_overrides["MERIDIAN_CONTEXT_KB_DIR"] == (
         tmp_path / ".meridian" / "kb"
     ).as_posix()
 

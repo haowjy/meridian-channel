@@ -40,30 +40,24 @@ def _looks_like_secret_env_var(key: str) -> bool:
 
 
 def _normalize_meridian_env(env: dict[str, str]) -> None:
-    """Normalize only already-resolved MERIDIAN path overrides.
+    """Normalize MERIDIAN_CONTEXT_*_DIR path overrides.
 
-    Path derivation now lives in ChildEnvContext/ResolvedContext. This helper
-    only trims explicit values and drops blank placeholders.
+    Trims whitespace and drops blank placeholders.
     """
-    for key in ("MERIDIAN_WORK_DIR",):
-        if key not in env:
+    import re
+
+    context_pattern = re.compile(r"^MERIDIAN_CONTEXT_[A-Z][A-Z0-9_]*_DIR$")
+    to_drop: list[str] = []
+    for key in env:
+        if key != "MERIDIAN_WORK_DIR" and not context_pattern.match(key):
             continue
         normalized = env[key].strip()
         if normalized:
             env[key] = normalized
-            continue
+        else:
+            to_drop.append(key)
+    for key in to_drop:
         env.pop(key, None)
-
-    kb_value = (env.get("MERIDIAN_KB_DIR", "") if "MERIDIAN_KB_DIR" in env else "").strip()
-    fs_value = (env.get("MERIDIAN_FS_DIR", "") if "MERIDIAN_FS_DIR" in env else "").strip()
-    resolved_kb = kb_value or fs_value
-    if resolved_kb:
-        env["MERIDIAN_KB_DIR"] = resolved_kb
-        # Deprecated alias preserved for older harness/agent environments.
-        env["MERIDIAN_FS_DIR"] = resolved_kb
-        return
-    env.pop("MERIDIAN_KB_DIR", None)
-    env.pop("MERIDIAN_FS_DIR", None)
 
 
 def sanitize_child_env(

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from pathlib import Path
 from typing import cast
 
@@ -11,14 +10,15 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from meridian.lib.config.context_config import ArbitraryContextConfig, ContextConfig
 from meridian.lib.config.project_root import resolve_project_root
-from meridian.lib.context.resolver import resolve_context_paths
+from meridian.lib.context.resolver import (
+    ResolvedContextPaths,
+    render_context_lines,
+    resolve_context_paths,
+)
 from meridian.lib.core.resolved_context import ResolvedContext
 from meridian.lib.core.util import FormatContext
 from meridian.lib.ops.runtime import resolve_runtime_root_for_read
 from meridian.lib.state.paths import load_context_config
-
-_EXTRA_CONTEXT_ENV_PREFIX = "MERIDIAN_CONTEXT_"
-_EXTRA_CONTEXT_ENV_SUFFIX = "_DIR"
 
 
 class ContextInput(BaseModel):
@@ -57,13 +57,30 @@ class ContextOutput(BaseModel):
     def _available_names(self) -> tuple[str, ...]:
         return ("work", "kb", "work.archive", *sorted(self.extra_contexts))
 
+    def _to_resolved_paths(self) -> ResolvedContextPaths:
+        """Convert output fields back to ResolvedContextPaths for rendering."""
+
+        from meridian.lib.config.context_config import ContextSourceType
+
+        extra: dict[str, tuple[Path, ContextSourceType]] = {}
+        for name, entry in self.extra_contexts.items():
+            extra[name] = (Path(entry.resolved), ContextSourceType(entry.source))
+        return ResolvedContextPaths(
+            work_root=Path(self.work_resolved),
+            work_archive=Path(self.work_archive_resolved),
+            work_source=ContextSourceType(self.work_source),
+            kb_root=Path(self.kb_resolved),
+            kb_source=ContextSourceType(self.kb_source),
+            extra=extra,
+        )
+
     def format_text(self, ctx: FormatContext | None = None) -> str:
         verbose = self.render_verbose
         if ctx is not None and ctx.verbosity > 0:
             verbose = True
 
-        lines: list[str] = []
         if verbose:
+            lines: list[str] = []
             lines.append("work:")
             lines.append(f"  source: {self.work_source}")
             lines.append(f"  path: {self.work_path}")
@@ -82,13 +99,7 @@ class ContextOutput(BaseModel):
                 lines.append(f"  resolved: {entry.resolved}")
             return "\n".join(lines)
 
-        lines.append(f"work: {self.work_resolved} ({self.work_source})")
-        lines.append(f"  archive: {self.work_archive_resolved}")
-        lines.append(f"kb: {self.kb_resolved} ({self.kb_source})")
-        for name in sorted(self.extra_contexts):
-            entry = self.extra_contexts[name]
-            lines.append(f"{name}: {entry.resolved} ({entry.source})")
-        return "\n".join(lines)
+        return "\n".join(render_context_lines(self._to_resolved_paths(), check_env=True))
 
     def resolve_name(self, name: str) -> str:
         """Resolve one context-name query to its absolute path string."""
@@ -150,57 +161,8 @@ def _extra_context_config(config: ContextConfig) -> dict[str, ArbitraryContextCo
     return parsed
 
 
-def _context_name_from_env_key(key: str) -> str | None:
-    """Return normalized context name for ``MERIDIAN_CONTEXT_*_DIR`` keys."""
-
-    if not key.startswith(_EXTRA_CONTEXT_ENV_PREFIX) or not key.endswith(
-        _EXTRA_CONTEXT_ENV_SUFFIX
-    ):
-        return None
-    raw_name = key[len(_EXTRA_CONTEXT_ENV_PREFIX) : -len(_EXTRA_CONTEXT_ENV_SUFFIX)]
-    normalized = raw_name.strip("_").lower()
-    return normalized or None
-
-
-def _context_output_from_env() -> ContextOutput | None:
-    """Build context output from exported session env vars when available."""
-
-    work_dir = os.getenv("MERIDIAN_WORK_DIR", "").strip()
-    kb_dir = os.getenv("MERIDIAN_KB_DIR", "").strip()
-    if not work_dir or not kb_dir:
-        return None
-
-    extra_contexts: dict[str, ContextEntryOutput] = {}
-    for key, value in os.environ.items():
-        name = _context_name_from_env_key(key)
-        resolved = value.strip()
-        if name is None or not resolved:
-            continue
-        extra_contexts[name] = ContextEntryOutput(
-            source="env",
-            path=resolved,
-            resolved=resolved,
-        )
-
-    return ContextOutput(
-        work_path=work_dir,
-        work_resolved=work_dir,
-        work_source="env",
-        work_archive="",
-        work_archive_resolved="",
-        kb_path=kb_dir,
-        kb_resolved=kb_dir,
-        kb_source="env",
-        extra_contexts=extra_contexts,
-    )
-
-
 def context_sync(input: ContextInput) -> ContextOutput:
     """Synchronous handler for context query."""
-
-    env_output = _context_output_from_env()
-    if env_output is not None:
-        return env_output.model_copy(update={"render_verbose": input.verbose})
 
     project_root = resolve_project_root()
     context_config = load_context_config(project_root) or ContextConfig()

@@ -20,6 +20,7 @@ from meridian.lib.config.context_config import (
 from meridian.lib.config.project_paths import ProjectConfigPaths
 from meridian.lib.config.settings import MeridianConfig, load_config
 from meridian.lib.config.workspace import get_projectable_roots
+from meridian.lib.context.resolver import resolve_context_paths
 from meridian.lib.core.child_env import build_child_env_overrides, validate_child_env_keys
 from meridian.lib.core.overrides import RuntimeOverrides
 from meridian.lib.core.resolved_context import ResolvedContext
@@ -62,6 +63,7 @@ from .permissions import (
 from .policies import resolve_policies
 from .prompt import (
     build_agent_inventory_prompt,
+    build_context_prompt,
     build_report_instruction,
     compose_skill_injections,
     dedupe_skill_names,
@@ -104,7 +106,6 @@ class ChildEnvContext:
     parent_depth: int
     work_id: str | None = None
     work_dir: Path | None = None
-    kb_dir: Path | None = None
     context_dirs: tuple[tuple[str, Path], ...] = ()
 
     @classmethod
@@ -116,7 +117,7 @@ class ChildEnvContext:
     ) -> ChildEnvContext:
         resolved_project_root = project_paths.project_root.resolve()
         resolved_runtime_root = runtime_root.resolve()
-        context_config = load_context_config(resolved_project_root)
+        context_config = load_context_config(resolved_project_root) or ContextConfig()
         parent_ctx = ResolvedContext.from_environment(
             explicit_project_root=resolved_project_root,
             explicit_runtime_root=resolved_runtime_root,
@@ -135,15 +136,29 @@ class ChildEnvContext:
                 work_id = None
 
         repo_paths = resolve_project_paths(resolved_project_root)
-        project_state_dir = repo_paths.root_dir
         work_dir = (
             parent_ctx.work_dir
             if parent_ctx.work_dir is not None and parent_ctx.work_id == work_id
-            else resolve_work_scratch_dir(project_state_dir, work_id)
+            else resolve_work_scratch_dir(repo_paths.root_dir, work_id)
             if work_id is not None
-            else repo_paths.work_dir
+            else None
         )
-        kb_dir = parent_ctx.kb_dir or repo_paths.kb_dir
+
+        resolved_context_paths = resolve_context_paths(
+            resolved_project_root,
+            context_config,
+        )
+        context_dirs = (
+            ("work", resolved_context_paths.work_root),
+            ("work_archive", resolved_context_paths.work_archive),
+            ("kb", resolved_context_paths.kb_root),
+            *tuple(
+                sorted(
+                    (name, path)
+                    for name, (path, _) in resolved_context_paths.extra.items()
+                )
+            ),
+        )
 
         return cls(
             # Keep MERIDIAN_PROJECT_DIR anchored to the project/config root so
@@ -156,8 +171,7 @@ class ChildEnvContext:
             parent_depth=parent_depth,
             work_id=work_id,
             work_dir=work_dir,
-            kb_dir=kb_dir,
-            context_dirs=parent_ctx.context_dirs,
+            context_dirs=context_dirs,
         )
 
     def child_context(
@@ -175,7 +189,6 @@ class ChildEnvContext:
             parent_depth=self.parent_depth,
             work_id=self.work_id,
             work_dir=self.work_dir,
-            kb_dir=self.kb_dir,
             context_dirs=self.context_dirs,
             increment_depth=increment_depth,
         )
@@ -488,12 +501,14 @@ def _resolve_surface_request(
         inventory_prompt = (
             build_agent_inventory_prompt(project_root=project_paths.project_root) or ""
         )
+        context_prompt = build_context_prompt(project_root=project_paths.project_root) or ""
 
         spawn_composed_content = ComposedLaunchContent(
             skill_injection=skill_injection,
             agent_profile_body=agent_profile_body,
             report_instruction=build_report_instruction(),
             inventory_prompt=inventory_prompt,
+            context_prompt=context_prompt,
             passthrough_system_fragments=(),
             user_task_prompt=cleaned_user_prompt,
             reference_items=loaded_references,
@@ -546,8 +561,12 @@ def _resolve_surface_request(
             (request.session.primary_session_mode or "fresh").strip().lower()
         ) or "fresh"
         inventory_prompt: str | None = None
+        context_prompt_primary: str | None = None
         if session_mode != "resume":
             inventory_prompt = build_agent_inventory_prompt(
+                project_root=project_paths.project_root
+            )
+            context_prompt_primary = build_context_prompt(
                 project_root=project_paths.project_root
             )
 
@@ -589,6 +608,7 @@ def _resolve_surface_request(
                 agent_profile_body=agent_profile_body,
                 report_instruction="",
                 inventory_prompt=inventory_prompt or "",
+                context_prompt=context_prompt_primary or "",
                 passthrough_system_fragments=tuple(
                     frag.strip() for frag in passthrough_prompt_fragments if frag.strip()
                 ),

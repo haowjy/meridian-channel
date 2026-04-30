@@ -17,8 +17,6 @@ _MERIDIAN_ENV_KEYS = (
     "MERIDIAN_CHAT_ID",
     "MERIDIAN_WORK_ID",
     "MERIDIAN_WORK_DIR",
-    "MERIDIAN_KB_DIR",
-    "MERIDIAN_FS_DIR",
 )
 
 
@@ -136,6 +134,11 @@ def test_child_env_overrides_output_format() -> None:
         work_id="work-123",
         work_dir=Path("/repo/.meridian/work/work-123"),
         kb_dir=Path("/repo/.meridian/kb"),
+        context_dirs=(
+            ("work", Path("/repo/.meridian/work")),
+            ("work_archive", Path("/repo/.meridian/archive/work")),
+            ("kb", Path("/repo/.meridian/kb")),
+        ),
     )
 
     overrides = resolved.child_env_overrides()
@@ -147,8 +150,9 @@ def test_child_env_overrides_output_format() -> None:
         "MERIDIAN_CHAT_ID": "c9",
         "MERIDIAN_WORK_ID": "work-123",
         "MERIDIAN_WORK_DIR": "/repo/.meridian/work/work-123",
-        "MERIDIAN_KB_DIR": "/repo/.meridian/kb",
-        "MERIDIAN_FS_DIR": "/repo/.meridian/kb",
+        "MERIDIAN_CONTEXT_WORK_DIR": "/repo/.meridian/work",
+        "MERIDIAN_CONTEXT_WORK_ARCHIVE_DIR": "/repo/.meridian/archive/work",
+        "MERIDIAN_CONTEXT_KB_DIR": "/repo/.meridian/kb",
     }
     assert resolved.child_env_overrides(increment_depth=False)["MERIDIAN_DEPTH"] == "2"
 

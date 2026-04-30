@@ -24,6 +24,7 @@ SYSTEM_INSTRUCTION_BLOCK_ORDER: tuple[str, ...] = (
     "agent_profile_body",
     "report_instruction",
     "inventory_prompt",
+    "context_prompt",
     # passthrough_system_fragments appended last
 )
 
@@ -103,6 +104,9 @@ class ComposedLaunchContent:
 
     inventory_prompt: str
     """Agent inventory — SYSTEM_INSTRUCTION, not startup context."""
+
+    context_prompt: str
+    """Resolved context directories with env var names."""
 
     passthrough_system_fragments: tuple[str, ...]
     """Explicit --append-system-prompt passthrough args; appended last."""

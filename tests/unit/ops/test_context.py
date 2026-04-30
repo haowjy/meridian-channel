@@ -26,8 +26,8 @@ if TYPE_CHECKING:
 
 @pytest.fixture(autouse=True)
 def _clear_context_env(monkeypatch: MonkeyPatch) -> None:
-    monkeypatch.delenv("MERIDIAN_WORK_DIR", raising=False)
-    monkeypatch.delenv("MERIDIAN_KB_DIR", raising=False)
+    monkeypatch.delenv("MERIDIAN_CONTEXT_WORK_DIR", raising=False)
+    monkeypatch.delenv("MERIDIAN_CONTEXT_KB_DIR", raising=False)
     for key in tuple(os.environ):
         if key.startswith("MERIDIAN_CONTEXT_") and key.endswith("_DIR"):
             monkeypatch.delenv(key, raising=False)
@@ -216,36 +216,90 @@ def test_context_sync_includes_arbitrary_named_contexts(monkeypatch: MonkeyPatch
     )
 
 
-def test_context_sync_prefers_exported_session_env(monkeypatch: MonkeyPatch) -> None:
-    monkeypatch.setenv("MERIDIAN_WORK_DIR", "/env/work/current")
-    monkeypatch.setenv("MERIDIAN_KB_DIR", "/env/kb")
-    monkeypatch.setenv("MERIDIAN_CONTEXT_STRATEGY_DIR", "/env/strategy")
-    monkeypatch.setenv("MERIDIAN_CONTEXT_TEAM_NOTES_DIR", "/env/team-notes")
-
-    def unexpected_resolve_project_root() -> Path:
-        raise AssertionError("context_sync should not re-resolve config when env is complete")
-
-    monkeypatch.setattr(
-        "meridian.lib.ops.context.resolve_project_root",
-        unexpected_resolve_project_root,
+def test_context_output_shows_env_var_names_when_matching(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("MERIDIAN_CONTEXT_WORK_DIR", "/repo/.meridian/work")
+    monkeypatch.setenv("MERIDIAN_CONTEXT_KB_DIR", "/repo/.meridian/kb")
+    monkeypatch.setenv("MERIDIAN_CONTEXT_STRATEGY_DIR", "/repo/strategy")
+    output = ContextOutput(
+        work_path=".meridian/work",
+        work_resolved="/repo/.meridian/work",
+        work_source="local",
+        work_archive=".meridian/archive/work",
+        work_archive_resolved="/repo/.meridian/archive/work",
+        kb_path=".meridian/kb",
+        kb_resolved="/repo/.meridian/kb",
+        kb_source="local",
+        extra_contexts={
+            "strategy": {
+                "source": "git",
+                "path": "voluma-bio/strategy",
+                "resolved": "/repo/strategy",
+            }
+        },
+    )
+    text = output.format_text()
+    assert text == (
+        "work: $MERIDIAN_CONTEXT_WORK_DIR\n"
+        "  archive: /repo/.meridian/archive/work\n"
+        "kb: $MERIDIAN_CONTEXT_KB_DIR\n"
+        "strategy: $MERIDIAN_CONTEXT_STRATEGY_DIR"
     )
 
-    output = context_sync(ContextInput(verbose=True))
 
-    assert output.work_source == "env"
-    assert output.work_path == "/env/work/current"
-    assert output.work_resolved == "/env/work/current"
-    assert output.kb_source == "env"
-    assert output.kb_path == "/env/kb"
-    assert output.kb_resolved == "/env/kb"
-    assert output.work_archive == ""
-    assert output.work_archive_resolved == ""
-    assert output.extra_contexts["strategy"].resolved == "/env/strategy"
-    assert output.extra_contexts["team_notes"].resolved == "/env/team-notes"
-    assert output.render_verbose is True
+def test_context_output_shows_paths_when_env_mismatches(monkeypatch: MonkeyPatch) -> None:
+    # Env var points to a work item dir, but resolved is the work root — don't alias
+    monkeypatch.setenv("MERIDIAN_CONTEXT_WORK_DIR", "/repo/.meridian/work/some-item")
+    monkeypatch.setenv("MERIDIAN_CONTEXT_KB_DIR", "/repo/.meridian/kb")
+    output = ContextOutput(
+        work_path=".meridian/work",
+        work_resolved="/repo/.meridian/work",
+        work_source="local",
+        work_archive=".meridian/archive/work",
+        work_archive_resolved="/repo/.meridian/archive/work",
+        kb_path=".meridian/kb",
+        kb_resolved="/repo/.meridian/kb",
+        kb_source="local",
+    )
+    text = output.format_text()
+    assert "work: /repo/.meridian/work" in text
+    assert "$MERIDIAN_CONTEXT_WORK_DIR" not in text
+    assert "kb: $MERIDIAN_CONTEXT_KB_DIR" in text
 
 
-def test_context_output_text_formats_default_and_verbose() -> None:
+def test_context_output_shows_paths_when_env_not_set(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.delenv("MERIDIAN_CONTEXT_WORK_DIR", raising=False)
+    monkeypatch.delenv("MERIDIAN_CONTEXT_KB_DIR", raising=False)
+    monkeypatch.delenv("MERIDIAN_CONTEXT_STRATEGY_DIR", raising=False)
+    output = ContextOutput(
+        work_path=".meridian/work",
+        work_resolved="/repo/.meridian/work",
+        work_source="local",
+        work_archive=".meridian/archive/work",
+        work_archive_resolved="/repo/.meridian/archive/work",
+        kb_path=".meridian/kb",
+        kb_resolved="/repo/.meridian/kb",
+        kb_source="local",
+        extra_contexts={
+            "strategy": {
+                "source": "git",
+                "path": "voluma-bio/strategy",
+                "resolved": "/repo/strategy",
+            }
+        },
+    )
+    text = output.format_text()
+    assert text == (
+        "work: /repo/.meridian/work\n"
+        "  archive: /repo/.meridian/archive/work\n"
+        "kb: /repo/.meridian/kb\n"
+        "strategy: /repo/strategy"
+    )
+
+
+def test_context_output_text_formats_default_and_verbose(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.delenv("MERIDIAN_CONTEXT_WORK_DIR", raising=False)
+    monkeypatch.delenv("MERIDIAN_CONTEXT_KB_DIR", raising=False)
+    monkeypatch.delenv("MERIDIAN_CONTEXT_STRATEGY_DIR", raising=False)
     output = ContextOutput(
         work_path=".meridian/work",
         work_resolved="/repo/.meridian/work",
@@ -266,10 +320,10 @@ def test_context_output_text_formats_default_and_verbose() -> None:
 
     assert (
         output.format_text()
-        == "work: /repo/.meridian/work (local)\n"
+        == "work: /repo/.meridian/work\n"
         "  archive: /repo/.meridian/archive/work\n"
-        "kb: /repo/.meridian/kb (local)\n"
-        "strategy: /repo/strategy (git)"
+        "kb: /repo/.meridian/kb\n"
+        "strategy: /repo/strategy"
     )
 
     verbose_output = output.model_copy(update={"render_verbose": True})
@@ -358,7 +412,7 @@ def test_work_current_sync_uses_resolved_context(monkeypatch: MonkeyPatch) -> No
 def test_context_sync_falls_back_to_config_when_session_env_incomplete(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("MERIDIAN_WORK_DIR", "/env/work/current")
+    monkeypatch.setenv("MERIDIAN_CONTEXT_WORK_DIR", "/env/work/current")
     project_root = Path("/repo")
 
     def fake_resolve_project_root() -> Path:

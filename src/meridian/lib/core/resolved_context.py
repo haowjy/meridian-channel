@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Protocol, Self
 
 from meridian.lib.config.context_config import ContextConfig
-from meridian.lib.context.resolver import resolve_context_paths
+from meridian.lib.context.resolver import context_env_key, resolve_context_paths
 from meridian.lib.core.depth import (
     MERIDIAN_DEPTH_ENV,
     child_meridian_depth,
@@ -137,8 +137,16 @@ class ResolvedContext:
         context_dirs: tuple[tuple[str, Path], ...] = ()
         if project_root is not None and resolved_config is not None:
             resolved_context_paths = resolve_context_paths(project_root, resolved_config)
-            context_dirs = tuple(
-                sorted((name, path) for name, (path, _) in resolved_context_paths.extra.items())
+            context_dirs = (
+                ("work", resolved_context_paths.work_root),
+                ("work_archive", resolved_context_paths.work_archive),
+                ("kb", resolved_context_paths.kb_root),
+                *tuple(
+                    sorted(
+                        (name, path)
+                        for name, (path, _) in resolved_context_paths.extra.items()
+                    )
+                ),
             )
 
         return cls(
@@ -177,23 +185,9 @@ class ResolvedContext:
             overrides["MERIDIAN_WORK_ID"] = self.work_id
         if self.work_dir is not None:
             overrides["MERIDIAN_WORK_DIR"] = self.work_dir.as_posix()
-        if self.kb_dir is not None:
-            kb_value = self.kb_dir.as_posix()
-            overrides["MERIDIAN_KB_DIR"] = kb_value
-            # Deprecated alias: keep while callers migrate to MERIDIAN_KB_DIR.
-            overrides["MERIDIAN_FS_DIR"] = kb_value
         for context_name, context_dir in self.context_dirs:
-            env_name = "".join(
-                character if character.isalnum() else "_"
-                for character in context_name.upper()
-            ).strip("_")
-            if not env_name:
+            env_key = context_env_key(context_name)
+            if env_key == "MERIDIAN_CONTEXT__DIR":
                 continue
-            overrides[f"MERIDIAN_CONTEXT_{env_name}_DIR"] = context_dir.as_posix()
+            overrides[env_key] = context_dir.as_posix()
         return overrides
-
-    @property
-    def fs_dir(self) -> Path | None:
-        """Deprecated compatibility alias for ``kb_dir``."""
-
-        return self.kb_dir

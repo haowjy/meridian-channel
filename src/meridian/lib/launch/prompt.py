@@ -180,6 +180,35 @@ def _dedupe_fan_out_aliases(
     return deduped
 
 
+def build_context_prompt(*, project_root: Path) -> str | None:
+    """Render resolved context paths for launch system context.
+
+    Produces a block showing available context directories and their
+    env var names so agents can reference them directly.
+    Returns None when no context is resolvable.
+    """
+
+    from meridian.lib.config.context_config import ContextConfig
+    from meridian.lib.context.resolver import render_context_lines, resolve_context_paths
+    from meridian.lib.state.paths import load_context_config
+
+    context_config = load_context_config(project_root) or ContextConfig()
+    resolved = resolve_context_paths(project_root, context_config)
+
+    header = [
+        "# Meridian Context",
+        "",
+        "Resolved context directories available via environment variables.",
+        "",
+    ]
+    context_lines = render_context_lines(
+        resolved,
+        check_env=False,
+    )
+
+    return "\n".join([*header, *context_lines]).strip()
+
+
 def build_agent_inventory_prompt(*, project_root: Path) -> str | None:
     """Render installed agent inventory for launch system context."""
 
@@ -375,6 +404,7 @@ def render_file_template(
 __all__ = [
     "ReferenceFile",
     "ReferenceItem",
+    "build_context_prompt",
     "build_report_instruction",
     "compose_run_prompt",
     "compose_run_prompt_text",

@@ -21,6 +21,7 @@ def _content() -> ComposedLaunchContent:
         agent_profile_body="SYSTEM: profile body",
         report_instruction="SYSTEM: report instruction",
         inventory_prompt="SYSTEM: agent inventory",
+        context_prompt="",
         passthrough_system_fragments=("SYSTEM: passthrough fragment",),
         user_task_prompt="USER: task prompt",
         reference_items=(
