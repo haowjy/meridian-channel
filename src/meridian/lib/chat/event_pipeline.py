@@ -21,6 +21,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+LIFECYCLE_EVENT_TYPES = {TURN_COMPLETED, CHAT_EXITED}
+
 
 class ChatEventIndex(Protocol):
     def upsert(self, event: ChatEvent) -> None: ...
@@ -72,7 +74,7 @@ class ChatEventPipeline:
             await self._task
 
     async def ingest(self, event: ChatEvent) -> None:
-        """Queue a normalized event; drop and warn when the queue is full."""
+        """Queue a normalized event; apply lifecycle transitions before drops."""
 
         if event.chat_id != self._chat_id:
             logger.warning(
@@ -81,6 +83,9 @@ class ChatEventPipeline:
                 event.chat_id,
             )
             return
+        lifecycle_already_notified = event.type in LIFECYCLE_EVENT_TYPES
+        if lifecycle_already_notified:
+            self._notify_session(event)
         try:
             self._queue.put_nowait(event)
         except asyncio.QueueFull:
@@ -113,7 +118,8 @@ class ChatEventPipeline:
                 except Exception:
                     logger.warning("Chat event index upsert failed", exc_info=True)
             await self._fanout.broadcast(persisted)
-            self._notify_session(persisted)
+            if persisted.type not in LIFECYCLE_EVENT_TYPES:
+                self._notify_session(persisted)
             if persisted.type == CHAT_EXITED:
                 break
 

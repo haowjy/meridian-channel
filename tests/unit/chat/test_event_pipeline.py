@@ -79,6 +79,22 @@ async def test_queue_full_drops_event_and_emits_runtime_warning(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_turn_completed_notifies_session_when_queue_full(tmp_path):
+    session = Session()
+    pipeline = ChatEventPipeline(
+        "c1",
+        ChatEventLog(tmp_path / "events.jsonl"),
+        session,
+        max_queue=1,
+    )
+
+    await pipeline.ingest(event("content.delta"))
+    await pipeline.ingest(event("turn.completed", gen=7))
+
+    assert session.completed == [7]
+
+
+@pytest.mark.asyncio
 async def test_on_execution_complete_notifies_session(tmp_path):
     session = Session()
     pipeline = ChatEventPipeline(
