@@ -22,32 +22,39 @@ class CheckpointService:
         event_pipeline: ChatEventPipeline,
         *,
         chat_registry: Callable[[], int] | None = None,
+        checkpoint_lock: asyncio.Lock | None = None,
     ) -> None:
         self._project_root = project_root
         self._pipeline = event_pipeline
         self._chat_registry = chat_registry
+        self._checkpoint_lock = checkpoint_lock or asyncio.Lock()
 
     async def create_checkpoint(self, turn_id: str) -> str | None:
-        if self._unsafe_multi_chat():
-            logger.warning("Skipping checkpoint create for multi-chat project root")
-            return None
-        if not await _is_git_repo(self._project_root):
-            return None
-        await _git(self._project_root, "add", "-A")
-        diff = await _git(self._project_root, "diff", "--cached", "--quiet", check=False)
-        if diff.returncode == 0:
+        async with self._checkpoint_lock:
+            if self._unsafe_multi_chat():
+                logger.warning("Skipping checkpoint create for multi-chat project root")
+                return None
+            if not await _is_git_repo(self._project_root):
+                return None
+            await _git(self._project_root, "add", "-A")
+            diff = await _git(self._project_root, "diff", "--cached", "--quiet", check=False)
+            if diff.returncode == 0:
+                commit_sha = (await _git_stdout(self._project_root, "rev-parse", "HEAD")).strip()
+                if commit_sha:
+                    await self._emit("checkpoint.created", turn_id, commit_sha, clean=True)
+                    return commit_sha
+                return None
+            message = f"meridian checkpoint {turn_id}"
+            await _git(self._project_root, "commit", "-m", message)
             commit_sha = (await _git_stdout(self._project_root, "rev-parse", "HEAD")).strip()
-            if commit_sha:
-                await self._emit("checkpoint.created", turn_id, commit_sha, clean=True)
-                return commit_sha
-            return None
-        message = f"meridian checkpoint {turn_id}"
-        await _git(self._project_root, "commit", "-m", message)
-        commit_sha = (await _git_stdout(self._project_root, "rev-parse", "HEAD")).strip()
-        await self._emit("checkpoint.created", turn_id, commit_sha, clean=False)
-        return commit_sha
+            await self._emit("checkpoint.created", turn_id, commit_sha, clean=False)
+            return commit_sha
 
     async def revert_to_checkpoint(self, commit_sha: str) -> None:
+        async with self._checkpoint_lock:
+            await self._revert_to_checkpoint(commit_sha)
+
+    async def _revert_to_checkpoint(self, commit_sha: str) -> None:
         if not commit_sha:
             raise ValueError("invalid_command:missing_commit_sha")
         if self._unsafe_multi_chat():

@@ -47,7 +47,10 @@ def _chat(
 ) -> None:
     """Start the local headless chat backend server."""
 
-    run_chat_server(model=model, harness=harness, port=port, host=host)
+    from meridian.cli.main import get_global_options
+
+    effective_harness = harness or get_global_options().harness
+    run_chat_server(model=model, harness=effective_harness, port=port, host=host)
 
 
 def run_chat_server(

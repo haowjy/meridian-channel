@@ -46,6 +46,7 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - SpawnManager now supports post-persist event observers. Slow/failing observers isolated from drain loop and subscriber fan-out; legacy `on_event` stays as shim.
 
 ### Fixed
+- Chat final-gate leaks/races: `meridian chat --harness` now honors global parse, checkpoints serialize git mutations per server, and failed chat heartbeat startup stops spawned backend.
 - Chat backend final-gate blockers: per-turn generation fencing, checkpoint multi-chat guard, failed acquisition observer rollback, and harness selection regression coverage.
 - Codex confirm-mode approval requests rejected again in websocket adapter. Slow observer shutdown now times out, so spawn teardown no hang forever.
 - `kg check` skips `[!FLAG]` blocks and git conflict markers inside fenced code blocks.

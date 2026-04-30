@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import importlib
 from io import StringIO
 
 import pytest
 
 from meridian.cli import chat_cmd
 from meridian.cli.chat_cmd import run_chat_server
+from meridian.cli.output import OutputConfig
 from meridian.lib.harness.ids import HarnessId
+
+cli_main = importlib.import_module("meridian.cli.main")
 
 
 def test_chat_cli_auto_port_prints_local_backend_url(monkeypatch, tmp_path) -> None:
@@ -80,6 +84,25 @@ def test_chat_cli_rejects_unknown_harness(monkeypatch, tmp_path) -> None:
             uvicorn_run=lambda *_args, **_kwargs: None,
             stdout=StringIO(),
         )
+
+
+def test_chat_command_falls_back_to_globally_parsed_harness(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run_chat_server(**kwargs) -> int:
+        captured.update(kwargs)
+        return 8765
+
+    monkeypatch.setattr(chat_cmd, "run_chat_server", fake_run_chat_server)
+    token = cli_main._GLOBAL_OPTIONS.set(
+        cli_main.GlobalOptions(output=OutputConfig(format="text"), harness="codex")
+    )
+    try:
+        chat_cmd._chat(port=8765)
+    finally:
+        cli_main._GLOBAL_OPTIONS.reset(token)
+
+    assert captured["harness"] == "codex"
 
 
 @pytest.mark.parametrize("harness", [HarnessId.CLAUDE, HarnessId.CODEX, HarnessId.OPENCODE])

@@ -51,6 +51,8 @@ class _SpawnManagerLike(Protocol):
 
     async def start_heartbeat(self, spawn_id: SpawnId) -> None: ...
 
+    async def stop_spawn(self, spawn_id: SpawnId) -> None: ...
+
 
 NormalizerFactory = Callable[[HarnessId], EventNormalizer] | Callable[[str, str], EventNormalizer]
 PipelineFactory = Callable[[str], ChatEventPipeline] | Callable[[str, str], ChatEventPipeline]
@@ -119,6 +121,8 @@ class ColdSpawnAcquisition:
         except Exception:
             with suppress(Exception):
                 self._spawn_manager.unregister_observer(config.spawn_id, observer)
+            with suppress(Exception):
+                await self._spawn_manager.stop_spawn(config.spawn_id)
             raise
         return BackendHandle(
             spawn_id=config.spawn_id,

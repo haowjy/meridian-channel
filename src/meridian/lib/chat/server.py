@@ -105,6 +105,7 @@ class ChatServerState:
         self.fanouts: dict[str, WebSocketFanOut] = {}
         self.pipelines: dict[str, ChatEventPipeline] = {}
         self.checkpoints: dict[str, CheckpointService] = {}
+        self.checkpoint_lock = asyncio.Lock()
 
     @property
     def handler(self) -> ChatCommandHandler:
@@ -161,6 +162,7 @@ def recover_chats() -> None:
             _state.project_root,
             pipeline,
             chat_registry=_active_chat_count,
+            checkpoint_lock=_state.checkpoint_lock,
         )
         pipeline.set_turn_completed_callback(
             lambda event, service=checkpoint: _checkpoint_turn(service, event)
@@ -207,6 +209,7 @@ async def create_chat(body: CreateChatRequest) -> CreateChatResponse:
         _state.project_root,
         pipeline,
         chat_registry=_active_chat_count,
+        checkpoint_lock=_state.checkpoint_lock,
     )
     pipeline.set_turn_completed_callback(
         lambda event, service=checkpoint: _checkpoint_turn(service, event)

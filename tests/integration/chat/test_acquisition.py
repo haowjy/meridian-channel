@@ -48,6 +48,7 @@ class SpawnManager:
         self.drain_policy = None
         self.started_config = None
         self.fail_start = False
+        self.fail_heartbeat = False
 
     def register_observer(self, spawn_id, observer):
         self.calls.append(("register", spawn_id, observer))
@@ -65,6 +66,11 @@ class SpawnManager:
 
     async def start_heartbeat(self, spawn_id):
         self.calls.append(("heartbeat", spawn_id, None))
+        if self.fail_heartbeat:
+            raise RuntimeError("heartbeat boom")
+
+    async def stop_spawn(self, spawn_id):
+        self.calls.append(("stop", spawn_id, None))
 
 
 class Normalizer:
@@ -142,4 +148,39 @@ async def test_cold_acquisition_unregisters_observer_when_start_fails(tmp_path: 
     with pytest.raises(RuntimeError, match="boom"):
         await acquisition.acquire("c1", "hello")
 
-    assert [call[0] for call in manager.calls] == ["register", "start", "unregister"]
+    assert [call[0] for call in manager.calls] == ["register", "start", "unregister", "stop"]
+
+
+@pytest.mark.asyncio
+async def test_cold_acquisition_stops_spawn_when_heartbeat_fails(tmp_path: Path):
+    manager = SpawnManager()
+    manager.fail_heartbeat = True
+    spawn_id = SpawnId("s-chat")
+
+    acquisition = ColdSpawnAcquisition(
+        spawn_manager=manager,
+        normalizer_factory=lambda harness_id: Normalizer(),
+        pipeline_factory=lambda chat_id: Pipeline(),
+        connection_config_factory=lambda chat_id, prompt: ConnectionConfig(
+            spawn_id=spawn_id,
+            harness_id=HarnessId.CLAUDE,
+            prompt=prompt,
+            project_root=tmp_path,
+            env_overrides={},
+        ),
+        launch_spec_factory=lambda prompt: ClaudeLaunchSpec(
+            prompt=prompt,
+            permission_resolver=UnsafeNoOpPermissionResolver(_suppress_warning=True),
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="heartbeat boom"):
+        await acquisition.acquire("c1", "hello")
+
+    assert [call[0] for call in manager.calls] == [
+        "register",
+        "start",
+        "heartbeat",
+        "unregister",
+        "stop",
+    ]
