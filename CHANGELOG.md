@@ -6,6 +6,7 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 - Chat backend structural refactors: `server.py` now transport-only; `ChatRuntime` owns lifecycle, dispatch, close postwork, and recovery. `BackendAcquisitionFactory` + `PipelineLookup` break bootstrap cycle. Normalizers moved from `harness/normalizers/` to `chat/normalization/` (D8 superseded). TUI passthrough extracted to `harness/passthrough/` with `TuiPassthrough` protocol.
 - Dead code cleanup: removed `cli/format_helpers.py` shim, dead CLI helpers, unused `ReferenceFile` aliases, `load_reference_files()`, speculative `CreateChatRequest` model/harness fields, stale re-exports, unused function params, unreachable recovery logic.
+- Chat backend test suite expanded from 1289 to 1329 tests. New coverage: recovery edge cases (truncated JSONL, corrupt index, idempotency), concurrency races (parallel create, dispatch fencing, close+prompt), WebSocket fanout (reconnection, multi-client, ack framing), HITL flow (approve, answer_input, stale generation), CLI passthrough registry.
 
 ### Fixed
 - `meridian work` / `meridian work list` no longer crash when a work item exists in both active and archive directories. Warns instead of failing, dashboard stays usable.
