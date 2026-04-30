@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 from uuid import uuid4
 
 from meridian.lib.chat.backend_handle import BackendHandle
@@ -20,6 +20,9 @@ from meridian.lib.launch.launch_types import ResolvedLaunchSpec
 from meridian.lib.safety.permissions import UnsafeNoOpPermissionResolver
 from meridian.lib.streaming.drain_policy import PersistentDrainPolicy
 
+if TYPE_CHECKING:
+    from meridian.lib.chat.runtime import PipelineLookup
+
 
 class BackendAcquisition(Protocol):
     """Strategy for acquiring a backing execution on first prompt."""
@@ -33,6 +36,18 @@ class BackendAcquisition(Protocol):
     ) -> BackendHandle:
         """Acquire a backend and send the initial prompt as part of startup."""
         ...
+
+
+class BackendAcquisitionFactory(Protocol):
+    """Build backend acquisition after the runtime pipeline lookup exists."""
+
+    def build(
+        self,
+        *,
+        pipeline_lookup: PipelineLookup,
+        project_root: Path,
+        runtime_root: Path,
+    ) -> BackendAcquisition: ...
 
 
 class _SpawnManagerLike(Protocol):
@@ -54,8 +69,7 @@ class _SpawnManagerLike(Protocol):
     async def stop_spawn(self, spawn_id: SpawnId) -> None: ...
 
 
-NormalizerFactory = Callable[[HarnessId], EventNormalizer] | Callable[[str, str], EventNormalizer]
-PipelineFactory = Callable[[str], ChatEventPipeline] | Callable[[str, str], ChatEventPipeline]
+NormalizerFactory = Callable[[str, str], EventNormalizer]
 ConnectionConfigFactory = Callable[[str, str], ConnectionConfig]
 LaunchSpecFactory = Callable[[str], ResolvedLaunchSpec]
 
@@ -74,7 +88,7 @@ class ColdSpawnAcquisition:
         *,
         spawn_manager: _SpawnManagerLike,
         normalizer_factory: NormalizerFactory,
-        pipeline_factory: PipelineFactory,
+        pipeline_lookup: PipelineLookup,
         connection_config_factory: ConnectionConfigFactory | None = None,
         launch_spec_factory: LaunchSpecFactory | None = None,
         project_root: Path | None = None,
@@ -82,7 +96,7 @@ class ColdSpawnAcquisition:
     ) -> None:
         self._spawn_manager = spawn_manager
         self._normalizer_factory = normalizer_factory
-        self._pipeline_factory = pipeline_factory
+        self._pipeline_lookup = pipeline_lookup
         self._connection_config_factory = connection_config_factory
         self._launch_spec_factory = launch_spec_factory
         self._project_root = project_root if project_root is not None else Path.cwd()
@@ -101,7 +115,7 @@ class ColdSpawnAcquisition:
         spec = self._build_launch_spec(initial_prompt)
         execution_id = str(config.spawn_id)
         normalizer = self._build_normalizer(config.harness_id, chat_id, execution_id)
-        pipeline = self._build_pipeline(chat_id, execution_id)
+        pipeline = self._build_pipeline(chat_id)
         observer = ChatEventObserver(
             normalizer=normalizer,
             pipeline=pipeline,
@@ -161,20 +175,18 @@ class ColdSpawnAcquisition:
         chat_id: str,
         execution_id: str,
     ) -> EventNormalizer:
-        try:
-            return self._normalizer_factory(harness_id)  # type: ignore[misc,call-arg]
-        except TypeError:
-            return self._normalizer_factory(chat_id, execution_id)  # type: ignore[misc,call-arg]
+        _ = harness_id
+        return self._normalizer_factory(chat_id, execution_id)
 
-    def _build_pipeline(self, chat_id: str, execution_id: str) -> ChatEventPipeline:
-        try:
-            return self._pipeline_factory(chat_id)  # type: ignore[misc,call-arg]
-        except TypeError:
-            return self._pipeline_factory(chat_id, execution_id)  # type: ignore[misc,call-arg]
+    def _build_pipeline(self, chat_id: str) -> ChatEventPipeline:
+        pipeline = self._pipeline_lookup.get_pipeline(chat_id)
+        if pipeline is None:
+            raise RuntimeError(f"chat pipeline not configured for {chat_id}")
+        return pipeline
 
 
 def _spawn_id() -> SpawnId:
     return SpawnId(f"chat-{uuid4()}")
 
 
-__all__ = ["BackendAcquisition", "ColdSpawnAcquisition"]
+__all__ = ["BackendAcquisition", "BackendAcquisitionFactory", "ColdSpawnAcquisition"]

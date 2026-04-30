@@ -7,10 +7,10 @@ from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol
 from uuid import uuid4
 
-from meridian.lib.chat.backend_acquisition import BackendAcquisition
+from meridian.lib.chat.backend_acquisition import BackendAcquisition, BackendAcquisitionFactory
 from meridian.lib.chat.checkpoint import CheckpointService
 from meridian.lib.chat.command_handler import ChatCommandHandler
 from meridian.lib.chat.commands import COMMAND_CLOSE, ChatCommand, CommandResult
@@ -52,7 +52,13 @@ class ChatStreamSource:
     fanout: WebSocketFanOut | None
 
 
-class ChatRuntime:
+class PipelineLookup(Protocol):
+    """Lookup seam for acquisition code that needs an existing live pipeline."""
+
+    def get_pipeline(self, chat_id: str) -> ChatEventPipeline | None: ...
+
+
+class ChatRuntime(PipelineLookup):
     """Own recovered chat state and live chat service registries."""
 
     def __init__(
@@ -60,17 +66,27 @@ class ChatRuntime:
         *,
         runtime_root: Path,
         project_root: Path,
-        backend_acquisition: BackendAcquisition,
+        backend_acquisition: BackendAcquisition | None = None,
+        acquisition_factory: BackendAcquisitionFactory | None = None,
     ) -> None:
         self.runtime_root = runtime_root
         self.project_root = project_root
         self.paths = RuntimePaths.from_root_dir(runtime_root)
-        self.backend_acquisition = backend_acquisition
         self.checkpoint_lock = asyncio.Lock()
         self._live: dict[str, LiveChatEntry] = {}
         self._persisted_only: dict[str, PersistedChatRecord] = {}
         self._started = False
         self._stopped = False
+        if acquisition_factory is not None:
+            self.backend_acquisition = acquisition_factory.build(
+                pipeline_lookup=self,
+                project_root=project_root,
+                runtime_root=runtime_root,
+            )
+        elif backend_acquisition is not None:
+            self.backend_acquisition = backend_acquisition
+        else:
+            raise ValueError("backend_acquisition or acquisition_factory is required")
 
     @property
     def live_entries(self) -> dict[str, LiveChatEntry]:
@@ -215,6 +231,12 @@ class ChatRuntime:
             return None
         return ChatStreamSource(record.event_log, None)
 
+    def get_pipeline(self, chat_id: str) -> ChatEventPipeline | None:
+        """Return the live pipeline for a chat, if one is registered."""
+
+        entry = self._live.get(chat_id)
+        return entry.pipeline if entry is not None else None
+
     def active_chat_count(self) -> int:
         return sum(1 for entry in self._live.values() if entry.session.state != "closed")
 
@@ -343,5 +365,6 @@ __all__ = [
     "ChatStreamSource",
     "LiveChatEntry",
     "PersistedChatRecord",
+    "PipelineLookup",
     "build_live_entry",
 ]

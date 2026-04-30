@@ -89,6 +89,7 @@ _runtime = ChatRuntime(
 
 def configure(
     *,
+    runtime: ChatRuntime | None = None,
     runtime_root: Path | None = None,
     backend_acquisition: BackendAcquisition | None = None,
     project_root: Path | None = None,
@@ -96,6 +97,9 @@ def configure(
     """Configure process-local chat server dependencies."""
 
     global _runtime
+    if runtime is not None:
+        _runtime = runtime
+        return
     _runtime = ChatRuntime(
         runtime_root=runtime_root or get_user_home(),
         project_root=project_root or Path.cwd(),

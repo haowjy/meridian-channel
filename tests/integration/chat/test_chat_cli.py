@@ -13,6 +13,12 @@ from meridian.lib.harness.ids import HarnessId
 cli_main = importlib.import_module("meridian.cli.main")
 
 
+class EmptyPipelineLookup:
+    def get_pipeline(self, chat_id: str):
+        _ = chat_id
+        return None
+
+
 def test_chat_cli_auto_port_prints_local_backend_url(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("meridian.cli.chat_cmd.get_user_home", lambda: tmp_path / "runtime")
     monkeypatch.chdir(tmp_path)
@@ -112,6 +118,7 @@ def test_backend_acquisition_preserves_requested_harness(tmp_path, harness: Harn
         project_root=tmp_path,
         harness_id=harness,
         model="model-x",
+        pipeline_lookup=EmptyPipelineLookup(),
     )
 
     config = acquisition._build_connection_config("c1", "hello")

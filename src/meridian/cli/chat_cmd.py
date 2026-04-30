@@ -5,19 +5,21 @@ from __future__ import annotations
 import os
 import socket
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any, cast
 
 from cyclopts import App, Parameter
 
 from meridian.lib.chat.backend_acquisition import ColdSpawnAcquisition
-from meridian.lib.chat.event_pipeline import ChatEventPipeline
+from meridian.lib.chat.runtime import ChatRuntime, PipelineLookup
 from meridian.lib.harness.ids import HarnessId
 from meridian.lib.harness.launch_spec import (
     ClaudeLaunchSpec,
     CodexLaunchSpec,
     OpenCodeLaunchSpec,
 )
+from meridian.lib.harness.normalizers.base import EventNormalizer
 from meridian.lib.harness.normalizers.registry import get_normalizer_factory
 from meridian.lib.launch.launch_types import ResolvedLaunchSpec
 from meridian.lib.safety.permissions import UnsafeNoOpPermissionResolver
@@ -78,17 +80,15 @@ def run_chat_server(
     runtime_root = get_user_home()
     project_root = Path.cwd()
     harness_id = _resolve_harness_id(harness)
-    acquisition = _build_backend_acquisition(
+    runtime = ChatRuntime(
         runtime_root=runtime_root,
         project_root=project_root,
-        harness_id=harness_id,
-        model=(model or "").strip() or None,
+        acquisition_factory=_ChatBackendAcquisitionFactory(
+            harness_id=harness_id,
+            model=(model or "").strip() or None,
+        ),
     )
-    configure(
-        runtime_root=runtime_root,
-        project_root=project_root,
-        backend_acquisition=acquisition,
-    )
+    configure(runtime=runtime)
 
     env_port = int(os.environ.get("PORT", "0") or "0")
     actual_port = port if port != 0 else (env_port or _find_free_port(host))
@@ -114,28 +114,41 @@ def _find_free_port(host: str) -> int:
         return int(sock.getsockname()[1])
 
 
+@dataclass(frozen=True)
+class _ChatBackendAcquisitionFactory:
+    harness_id: HarnessId
+    model: str | None
+
+    def build(
+        self,
+        *,
+        pipeline_lookup: PipelineLookup,
+        project_root: Path,
+        runtime_root: Path,
+    ) -> ColdSpawnAcquisition:
+        return _build_backend_acquisition(
+            runtime_root=runtime_root,
+            project_root=project_root,
+            harness_id=self.harness_id,
+            model=self.model,
+            pipeline_lookup=pipeline_lookup,
+        )
+
+
 def _build_backend_acquisition(
     *,
     runtime_root: Path,
     project_root: Path,
     harness_id: HarnessId,
     model: str | None,
+    pipeline_lookup: PipelineLookup,
 ) -> ColdSpawnAcquisition:
     manager = SpawnManager(runtime_root=runtime_root, project_root=project_root)
 
-    def pipeline_factory(chat_id: str, _execution_id: str) -> ChatEventPipeline:
-        import meridian.lib.chat.server as chat_server
-
-        runtime = vars(chat_server)["_runtime"]
-        entry = runtime.live_entries.get(chat_id)
-        if entry is None:
-            raise RuntimeError(f"chat pipeline not configured for {chat_id}")
-        return entry.pipeline
-
     return ColdSpawnAcquisition(
         spawn_manager=cast("Any", manager),
-        normalizer_factory=get_normalizer_factory(harness_id),
-        pipeline_factory=pipeline_factory,
+        normalizer_factory=_normalizer_factory(harness_id),
+        pipeline_lookup=pipeline_lookup,
         launch_spec_factory=lambda prompt: _launch_spec(
             harness_id=harness_id,
             prompt=prompt,
@@ -144,6 +157,15 @@ def _build_backend_acquisition(
         project_root=project_root,
         harness_id=harness_id,
     )
+
+
+def _normalizer_factory(harness_id: HarnessId) -> Callable[[str, str], EventNormalizer]:
+    factory = get_normalizer_factory(harness_id)
+
+    def wrapper(chat_id: str, execution_id: str) -> EventNormalizer:
+        return factory(chat_id, execution_id)
+
+    return wrapper
 
 
 def _launch_spec(*, harness_id: HarnessId, prompt: str, model: str | None) -> ResolvedLaunchSpec:

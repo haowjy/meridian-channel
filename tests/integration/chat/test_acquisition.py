@@ -89,6 +89,14 @@ class Pipeline:
         pass
 
 
+class PipelineLookup:
+    def __init__(self):
+        self.pipeline = Pipeline()
+
+    def get_pipeline(self, chat_id):
+        return self.pipeline
+
+
 @pytest.mark.asyncio
 async def test_cold_acquisition_registers_observer_before_start_and_uses_persistent_policy(
     tmp_path: Path,
@@ -98,8 +106,8 @@ async def test_cold_acquisition_registers_observer_before_start_and_uses_persist
 
     acquisition = ColdSpawnAcquisition(
         spawn_manager=manager,
-        normalizer_factory=lambda harness_id: Normalizer(),
-        pipeline_factory=lambda chat_id: Pipeline(),
+        normalizer_factory=lambda chat_id, execution_id: Normalizer(),
+        pipeline_lookup=PipelineLookup(),
         connection_config_factory=lambda chat_id, prompt: ConnectionConfig(
             spawn_id=spawn_id,
             harness_id=HarnessId.CLAUDE,
@@ -130,8 +138,8 @@ async def test_cold_acquisition_unregisters_observer_when_start_fails(tmp_path: 
 
     acquisition = ColdSpawnAcquisition(
         spawn_manager=manager,
-        normalizer_factory=lambda harness_id: Normalizer(),
-        pipeline_factory=lambda chat_id: Pipeline(),
+        normalizer_factory=lambda chat_id, execution_id: Normalizer(),
+        pipeline_lookup=PipelineLookup(),
         connection_config_factory=lambda chat_id, prompt: ConnectionConfig(
             spawn_id=spawn_id,
             harness_id=HarnessId.CLAUDE,
@@ -159,8 +167,8 @@ async def test_cold_acquisition_stops_spawn_when_heartbeat_fails(tmp_path: Path)
 
     acquisition = ColdSpawnAcquisition(
         spawn_manager=manager,
-        normalizer_factory=lambda harness_id: Normalizer(),
-        pipeline_factory=lambda chat_id: Pipeline(),
+        normalizer_factory=lambda chat_id, execution_id: Normalizer(),
+        pipeline_lookup=PipelineLookup(),
         connection_config_factory=lambda chat_id, prompt: ConnectionConfig(
             spawn_id=spawn_id,
             harness_id=HarnessId.CLAUDE,
