@@ -35,6 +35,7 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Launch policy model resolve now one-pass carry-through. Reuse one resolved alias entry for harness pick, final model, same-layer compatibility check, and model defaults.
 - Launch effort/autocompact precedence now one named ladder helper: explicit user -> profile `models:` -> profile defaults -> alias defaults -> none. `launch.resolve` compatibility shim for `resolve_policies` removed; unmatched profile `models:` fallback now debug-only log.
 - Prompt package deps unpinned in `mars.toml`; `meridian-dev-workflow` lock now v0.1.8.
+- SpawnManager now supports post-persist event observers. Slow/failing observers isolated from drain loop and subscriber fan-out; legacy `on_event` stays as shim.
 
 ### Fixed
 - `kg check` skips `[!FLAG]` blocks and git conflict markers inside fenced code blocks.
