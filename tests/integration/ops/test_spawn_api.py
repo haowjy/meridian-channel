@@ -212,10 +212,12 @@ def test_spawn_list_and_show_suppress_terminal_primary_activity(
     assert detail.tui_pid == 4343
 
 
-def test_wait_yield_default_uses_shortest_harness_interval(tmp_path: Path) -> None:
+def test_wait_yield_default_uses_parent_harness_interval(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     project_root = tmp_path / "repo"
     project_root.mkdir()
-    runtime_root = _state_root(project_root)
     (project_root / "meridian.toml").write_text(
         "\n".join(
             [
@@ -232,45 +234,35 @@ def test_wait_yield_default_uses_shortest_harness_interval(tmp_path: Path) -> No
         ),
         encoding="utf-8",
     )
-    claude_id = spawn_store.start_spawn(
-        runtime_root,
-        chat_id="c1",
-        model="claude-opus-4-6",
-        agent="coder",
-        harness="claude",
-        prompt="claude",
-    )
-    codex_id = spawn_store.start_spawn(
-        runtime_root,
-        chat_id="c1",
-        model="gpt-5.4",
-        agent="coder",
-        harness="codex",
-        prompt="codex",
-    )
-    unknown_id = spawn_store.start_spawn(
-        runtime_root,
-        chat_id="c1",
-        model="other",
-        agent="coder",
-        harness="",
-        prompt="unknown",
-    )
     config = spawn_api.load_config(project_root)
 
+    monkeypatch.setenv("MERIDIAN_HARNESS", "claude")
     assert (
         spawn_api._resolve_wait_yield_after_seconds(
             payload=SpawnWaitInput(),
-            spawn_ids=(str(claude_id), str(codex_id)),
+            spawn_ids=("p-claude-child", "p-codex-child"),
             project_root=project_root,
             config=config,
         )
         == 270.0
     )
+
+    monkeypatch.setenv("MERIDIAN_HARNESS", "codex")
     assert (
         spawn_api._resolve_wait_yield_after_seconds(
             payload=SpawnWaitInput(),
-            spawn_ids=(str(codex_id), str(unknown_id)),
+            spawn_ids=("p-claude-child", "p-unknown-child"),
+            project_root=project_root,
+            config=config,
+        )
+        == 900.0
+    )
+
+    monkeypatch.delenv("MERIDIAN_HARNESS", raising=False)
+    assert (
+        spawn_api._resolve_wait_yield_after_seconds(
+            payload=SpawnWaitInput(),
+            spawn_ids=("p-codex-child",),
             project_root=project_root,
             config=config,
         )

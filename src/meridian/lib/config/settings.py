@@ -1049,7 +1049,7 @@ class HarnessConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="ignore")
 
     claude: HarnessProfileConfig = Field(
-        default_factory=lambda: HarnessProfileConfig(wait_yield_seconds=270.0)
+        default_factory=lambda: HarnessProfileConfig(wait_yield_seconds=900.0)
     )
     codex: HarnessProfileConfig = Field(
         default_factory=lambda: HarnessProfileConfig(wait_yield_seconds=900.0)

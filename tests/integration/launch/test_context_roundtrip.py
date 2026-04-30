@@ -40,6 +40,9 @@ def test_launch_context_child_env_roundtrips_through_resolved_context(
         dry_run=True,
     )
 
+    assert launch_context.env["MERIDIAN_HARNESS"] == HarnessId.CODEX.value
+    assert launch_context.env_overrides["MERIDIAN_HARNESS"] == HarnessId.CODEX.value
+
     for key, value in launch_context.env_overrides.items():
         monkeypatch.setenv(key, value)
 

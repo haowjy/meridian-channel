@@ -1,6 +1,7 @@
 """Spawn operations used by CLI and MCP surfaces."""
 
 import asyncio
+import os
 import time
 from pathlib import Path
 
@@ -868,14 +869,9 @@ def _resolve_wait_yield_after_seconds(
     if resolver is None:
         return float(getattr(config, "wait_yield_after_seconds", 240.0))
 
-    effective: list[float] = []
-    for spawn_id in spawn_ids:
-        row = read_spawn_row(project_root, spawn_id)
-        harness = row.harness if row is not None else None
-        effective.append(float(resolver(harness)))
-    if not effective:
-        return float(resolver(None))
-    return min(effective)
+    _ = (spawn_ids, project_root)
+    parent_harness = os.getenv("MERIDIAN_HARNESS")
+    return float(resolver(parent_harness))
 
 
 def spawn_wait_sync(
