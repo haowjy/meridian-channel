@@ -13,8 +13,10 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from meridian.lib.chat.backend_acquisition import BackendAcquisition
+from meridian.lib.chat.checkpoint import CheckpointService
 from meridian.lib.chat.command_handler import ChatCommandHandler
 from meridian.lib.chat.commands import ChatCommand, CommandResult
+from meridian.lib.chat.event_index import ChatEventIndex
 from meridian.lib.chat.event_log import ChatEventLog
 from meridian.lib.chat.event_pipeline import ChatEventPipeline
 from meridian.lib.chat.protocol import CHAT_EXITED, CHAT_STARTED, ChatEvent, utc_now_iso
@@ -50,6 +52,21 @@ class PromptRequest(BaseModel):
     text: str
 
 
+class ApprovalRequest(BaseModel):
+    request_id: str
+    decision: str
+    payload: dict[str, object] | None = None
+
+
+class InputRequest(BaseModel):
+    request_id: str
+    answers: dict[str, object]
+
+
+class RevertRequest(BaseModel):
+    commit_sha: str
+
+
 class StateResponse(BaseModel):
     chat_id: str
     state: str
@@ -66,27 +83,36 @@ class _UnavailableAcquisition:
 
 
 class ChatServerState:
-    def __init__(self, runtime_root: Path, backend_acquisition: BackendAcquisition) -> None:
+    def __init__(
+        self,
+        runtime_root: Path,
+        backend_acquisition: BackendAcquisition,
+        project_root: Path,
+    ) -> None:
         self.runtime_root = runtime_root
+        self.project_root = project_root
         self.paths = RuntimePaths.from_root_dir(runtime_root)
         self.backend_acquisition = backend_acquisition
         self.sessions: dict[str, ChatSessionService] = {}
         self.event_logs: dict[str, ChatEventLog] = {}
+        self.event_indexes: dict[str, ChatEventIndex] = {}
         self.fanouts: dict[str, WebSocketFanOut] = {}
         self.pipelines: dict[str, ChatEventPipeline] = {}
+        self.checkpoints: dict[str, CheckpointService] = {}
 
     @property
     def handler(self) -> ChatCommandHandler:
-        return ChatCommandHandler(self.sessions, self.pipelines)
+        return ChatCommandHandler(self.sessions, self.pipelines, self.checkpoints)
 
 
-_state = ChatServerState(get_user_home(), _UnavailableAcquisition())
+_state = ChatServerState(get_user_home(), _UnavailableAcquisition(), Path.cwd())
 
 
 def configure(
     *,
     runtime_root: Path | None = None,
     backend_acquisition: BackendAcquisition | None = None,
+    project_root: Path | None = None,
 ) -> None:
     """Configure process-local chat server dependencies."""
 
@@ -94,6 +120,7 @@ def configure(
     _state = ChatServerState(
         runtime_root or get_user_home(),
         backend_acquisition or _UnavailableAcquisition(),
+        project_root or Path.cwd(),
     )
     recover_chats()
 
@@ -113,15 +140,24 @@ def recover_chats() -> None:
         if not events:
             continue
         _state.event_logs[chat_id] = event_log
+        event_index = _load_event_index(chat_id)
+        event_index.rebuild_from_log(event_log)
         if any(event.type == CHAT_EXITED for event in events):
             continue
         session = ChatSessionService(chat_id, _state.backend_acquisition)
         _state.sessions[chat_id] = session
         fanout = WebSocketFanOut()
         _state.fanouts[chat_id] = fanout
-        pipeline = ChatEventPipeline(chat_id, event_log, session, fanout=fanout)
+        pipeline = ChatEventPipeline(
+            chat_id, event_log, session, event_index=event_index, fanout=fanout
+        )
+        checkpoint = CheckpointService(_state.project_root, pipeline)
+        pipeline.set_turn_completed_callback(
+            lambda event, service=checkpoint: _checkpoint_turn(service, event)
+        )
         _start_pipeline_if_running_loop(pipeline)
         _state.pipelines[chat_id] = pipeline
+        _state.checkpoints[chat_id] = checkpoint
         last_state = _state_from_events(events)
         if last_state in {"active", "draining"}:
             _ = event_log.append(
@@ -141,15 +177,24 @@ async def create_chat(body: CreateChatRequest) -> CreateChatResponse:
     _ = body
     chat_id = f"c-{uuid4().hex}"
     event_log = ChatEventLog(_state.paths.chat_history_path(chat_id))
+    event_index = _load_event_index(chat_id)
     session = ChatSessionService(chat_id, _state.backend_acquisition)
     fanout = WebSocketFanOut()
-    pipeline = ChatEventPipeline(chat_id, event_log, session, fanout=fanout)
+    pipeline = ChatEventPipeline(
+        chat_id, event_log, session, event_index=event_index, fanout=fanout
+    )
+    checkpoint = CheckpointService(_state.project_root, pipeline)
+    pipeline.set_turn_completed_callback(
+        lambda event, service=checkpoint: _checkpoint_turn(service, event)
+    )
     pipeline.start()
 
     _state.event_logs[chat_id] = event_log
+    _state.event_indexes[chat_id] = event_index
     _state.sessions[chat_id] = session
     _state.fanouts[chat_id] = fanout
     _state.pipelines[chat_id] = pipeline
+    _state.checkpoints[chat_id] = checkpoint
 
     await pipeline.ingest(
         ChatEvent(
@@ -172,6 +217,26 @@ async def prompt_chat(chat_id: str, body: PromptRequest) -> CommandResult:
 @app.post("/chat/{chat_id}/cancel", response_model=CommandResult)
 async def cancel_chat(chat_id: str) -> CommandResult:
     return await _dispatch_rest(chat_id, "cancel", {})
+
+
+@app.post("/chat/{chat_id}/approve", response_model=CommandResult)
+async def approve_request(chat_id: str, body: ApprovalRequest) -> CommandResult:
+    payload: dict[str, Any] = {"request_id": body.request_id, "decision": body.decision}
+    if body.payload is not None:
+        payload["payload"] = body.payload
+    return await _dispatch_rest(chat_id, "approve", payload)
+
+
+@app.post("/chat/{chat_id}/input", response_model=CommandResult)
+async def answer_input(chat_id: str, body: InputRequest) -> CommandResult:
+    return await _dispatch_rest(
+        chat_id, "answer_input", {"request_id": body.request_id, "answers": body.answers}
+    )
+
+
+@app.post("/chat/{chat_id}/revert", response_model=CommandResult)
+async def revert_checkpoint(chat_id: str, body: RevertRequest) -> CommandResult:
+    return await _dispatch_rest(chat_id, "revert", {"commit_sha": body.commit_sha})
 
 
 @app.post("/chat/{chat_id}/close", response_model=CommandResult)
@@ -301,6 +366,24 @@ def _load_event_log(chat_id: str) -> ChatEventLog | None:
     event_log = ChatEventLog(path)
     _state.event_logs[chat_id] = event_log
     return event_log
+
+
+def _load_event_index(chat_id: str) -> ChatEventIndex:
+    event_index = _state.event_indexes.get(chat_id)
+    if event_index is not None:
+        return event_index
+    event_index = ChatEventIndex(_state.paths.chats_dir / chat_id / "index.sqlite3")
+    _state.event_indexes[chat_id] = event_index
+    return event_index
+
+
+async def _checkpoint_turn(service: CheckpointService, event: ChatEvent) -> None:
+    turn_id = event.turn_id
+    if turn_id is None:
+        raw_turn_id = event.payload.get("turn_id")
+        turn_id = raw_turn_id if isinstance(raw_turn_id, str) else None
+    if turn_id:
+        await service.create_checkpoint(turn_id)
 
 
 def _parse_last_seq(websocket: WebSocket) -> int | None:

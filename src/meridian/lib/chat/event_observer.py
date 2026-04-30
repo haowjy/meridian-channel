@@ -63,4 +63,5 @@ def _with_generation(event: ChatEvent, generation: int | None) -> ChatEvent:
         harness_id=event.harness_id,
     )
 
+
 __all__ = ["ChatEventObserver", "EventNormalizer"]

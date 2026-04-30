@@ -142,6 +142,7 @@ class ChatSessionService:
         if self._state in ("active", "draining"):
             self._state = "idle"
 
+
 __all__ = [
     "ChatClosedError",
     "ChatSessionError",

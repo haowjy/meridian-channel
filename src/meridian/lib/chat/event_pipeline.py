@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from typing import TYPE_CHECKING, Protocol
 
@@ -48,6 +49,7 @@ class ChatEventPipeline:
         *,
         event_index: ChatEventIndex | None = None,
         fanout: ChatEventFanOut | None = None,
+        turn_completed_callback: Callable[[ChatEvent], Awaitable[None]] | None = None,
         max_queue: int = 10000,
     ) -> None:
         self._chat_id = chat_id
@@ -55,12 +57,23 @@ class ChatEventPipeline:
         self._session = session_service
         self._index = event_index
         self._fanout = fanout if fanout is not None else NoopChatEventFanOut()
+        self._turn_completed_callback = turn_completed_callback
         self._queue: asyncio.Queue[ChatEvent | None] = asyncio.Queue(maxsize=max_queue)
         self._task: asyncio.Task[None] | None = None
 
     @property
     def task(self) -> asyncio.Task[None] | None:
         return self._task
+
+    @property
+    def chat_id(self) -> str:
+        return self._chat_id
+
+    def set_turn_completed_callback(
+        self,
+        callback: Callable[[ChatEvent], Awaitable[None]] | None,
+    ) -> None:
+        self._turn_completed_callback = callback
 
     def start(self) -> None:
         if self._task is None or self._task.done():
@@ -123,6 +136,11 @@ class ChatEventPipeline:
                 except Exception:
                     logger.warning("Chat event index upsert failed", exc_info=True)
             await self._fanout.broadcast(persisted)
+            if persisted.type == TURN_COMPLETED and self._turn_completed_callback is not None:
+                try:
+                    await self._turn_completed_callback(persisted)
+                except Exception:
+                    logger.warning("Chat checkpoint creation failed", exc_info=True)
             if persisted.type not in LIFECYCLE_EVENT_TYPES:
                 self._notify_session(persisted)
             self._queue.task_done()
@@ -143,6 +161,7 @@ def _execution_generation(event: ChatEvent) -> int | None:
     if isinstance(value, int):
         return value
     return None
+
 
 __all__ = [
     "ChatEventFanOut",

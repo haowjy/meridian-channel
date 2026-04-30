@@ -15,6 +15,7 @@ from meridian.lib.chat.session_service import (
 )
 
 if TYPE_CHECKING:
+    from meridian.lib.chat.checkpoint import CheckpointService
     from meridian.lib.chat.event_pipeline import ChatEventPipeline
 
 
@@ -25,9 +26,11 @@ class ChatCommandHandler:
         self,
         sessions: Mapping[str, ChatSessionService],
         pipelines: Mapping[str, ChatEventPipeline] | None = None,
+        checkpoints: Mapping[str, CheckpointService] | None = None,
     ) -> None:
         self._sessions = sessions
         self._pipelines = pipelines or {}
+        self._checkpoints = checkpoints or {}
 
     async def dispatch(self, command: ChatCommand) -> CommandResult:
         session = self._sessions.get(command.chat_id)
@@ -55,10 +58,14 @@ class ChatCommandHandler:
                 case "close":
                     await session.close(self._pipelines.get(command.chat_id))
                 case "revert":
-                    return CommandResult(
-                        status="rejected",
-                        error="not_supported_by_current_harness",
-                    )
+                    checkpoint = self._checkpoints.get(command.chat_id)
+                    if checkpoint is None:
+                        return CommandResult(
+                            status="rejected",
+                            error="checkpoint_not_configured",
+                        )
+                    commit_sha = _required_str(command.payload, "commit_sha")
+                    await checkpoint.revert_to_checkpoint(commit_sha)
                 case "swap_model" | "swap_effort":
                     return CommandResult(
                         status="rejected",
@@ -112,9 +119,7 @@ class ChatCommandHandler:
         if pipeline is None or handle is None:
             return
         event_type = (
-            "request.resolved"
-            if command.type == COMMAND_APPROVE
-            else "user_input.resolved"
+            "request.resolved" if command.type == COMMAND_APPROVE else "user_input.resolved"
         )
         await pipeline.ingest(
             ChatEvent(
@@ -147,5 +152,6 @@ def _required_object_dict(value: object) -> dict[str, object]:
         raise ValueError("invalid_command:expected_object")
     typed_value = cast("dict[object, object]", value)
     return {str(key): item for key, item in typed_value.items()}
+
 
 __all__ = ["ChatCommandHandler"]

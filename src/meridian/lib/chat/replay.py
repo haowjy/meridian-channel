@@ -51,7 +51,6 @@ class ReplayService:
         finally:
             self._fanout.unregister(ws)
 
-
     async def _send_json(self, ws: WebSocket, payload: dict[str, object]) -> None:
         if self._send_lock is None:
             await ws.send_json(payload)

@@ -36,6 +36,7 @@ def require_state(session: ChatSessionService, *allowed: ChatState) -> None:
     if session.state not in allowed:
         raise InvalidStateError(session.chat_id, session.state, allowed)
 
+
 __all__ = [
     "CommandInvariantError",
     "InvalidStateError",

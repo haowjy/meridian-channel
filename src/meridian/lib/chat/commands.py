@@ -27,6 +27,7 @@ SUPPORTED_COMMAND_TYPES: Final = frozenset(
     }
 )
 
+
 @dataclass(frozen=True)
 class ChatCommand:
     """One inbound command from any consumer."""
@@ -37,12 +38,14 @@ class ChatCommand:
     timestamp: str
     payload: dict[str, Any] = field(default_factory=lambda: {})
 
+
 @dataclass(frozen=True)
 class CommandResult:
     """Synchronous acknowledgment for a dispatched command."""
 
     status: Literal["accepted", "rejected"]
     error: str | None = None
+
 
 __all__ = [
     "COMMAND_ANSWER_INPUT",
