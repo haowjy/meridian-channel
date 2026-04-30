@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 from typing import cast
 
@@ -15,6 +16,9 @@ from meridian.lib.core.resolved_context import ResolvedContext
 from meridian.lib.core.util import FormatContext
 from meridian.lib.ops.runtime import resolve_runtime_root_for_read
 from meridian.lib.state.paths import load_context_config
+
+_EXTRA_CONTEXT_ENV_PREFIX = "MERIDIAN_CONTEXT_"
+_EXTRA_CONTEXT_ENV_SUFFIX = "_DIR"
 
 
 class ContextInput(BaseModel):
@@ -146,8 +150,57 @@ def _extra_context_config(config: ContextConfig) -> dict[str, ArbitraryContextCo
     return parsed
 
 
+def _context_name_from_env_key(key: str) -> str | None:
+    """Return normalized context name for ``MERIDIAN_CONTEXT_*_DIR`` keys."""
+
+    if not key.startswith(_EXTRA_CONTEXT_ENV_PREFIX) or not key.endswith(
+        _EXTRA_CONTEXT_ENV_SUFFIX
+    ):
+        return None
+    raw_name = key[len(_EXTRA_CONTEXT_ENV_PREFIX) : -len(_EXTRA_CONTEXT_ENV_SUFFIX)]
+    normalized = raw_name.strip("_").lower()
+    return normalized or None
+
+
+def _context_output_from_env() -> ContextOutput | None:
+    """Build context output from exported session env vars when available."""
+
+    work_dir = os.getenv("MERIDIAN_WORK_DIR", "").strip()
+    kb_dir = os.getenv("MERIDIAN_KB_DIR", "").strip()
+    if not work_dir or not kb_dir:
+        return None
+
+    extra_contexts: dict[str, ContextEntryOutput] = {}
+    for key, value in os.environ.items():
+        name = _context_name_from_env_key(key)
+        resolved = value.strip()
+        if name is None or not resolved:
+            continue
+        extra_contexts[name] = ContextEntryOutput(
+            source="env",
+            path=resolved,
+            resolved=resolved,
+        )
+
+    return ContextOutput(
+        work_path=work_dir,
+        work_resolved=work_dir,
+        work_source="env",
+        work_archive="",
+        work_archive_resolved="",
+        kb_path=kb_dir,
+        kb_resolved=kb_dir,
+        kb_source="env",
+        extra_contexts=extra_contexts,
+    )
+
+
 def context_sync(input: ContextInput) -> ContextOutput:
     """Synchronous handler for context query."""
+
+    env_output = _context_output_from_env()
+    if env_output is not None:
+        return env_output.model_copy(update={"render_verbose": input.verbose})
 
     project_root = resolve_project_root()
     context_config = load_context_config(project_root) or ContextConfig()

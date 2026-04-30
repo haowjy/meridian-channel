@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import os
-import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+import pytest
 
 from meridian.lib.config.context_config import ContextConfig, ContextSourceType
 from meridian.lib.context.resolver import ResolvedContextPaths
@@ -21,6 +22,15 @@ from meridian.lib.ops.context import (
 
 if TYPE_CHECKING:
     from pytest import MonkeyPatch
+
+
+@pytest.fixture(autouse=True)
+def _clear_context_env(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.delenv("MERIDIAN_WORK_DIR", raising=False)
+    monkeypatch.delenv("MERIDIAN_KB_DIR", raising=False)
+    for key in tuple(os.environ):
+        if key.startswith("MERIDIAN_CONTEXT_") and key.endswith("_DIR"):
+            monkeypatch.delenv(key, raising=False)
 
 
 def test_resolve_runtime_context_passes_explicit_roots(
@@ -206,6 +216,35 @@ def test_context_sync_includes_arbitrary_named_contexts(monkeypatch: MonkeyPatch
     )
 
 
+def test_context_sync_prefers_exported_session_env(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("MERIDIAN_WORK_DIR", "/env/work/current")
+    monkeypatch.setenv("MERIDIAN_KB_DIR", "/env/kb")
+    monkeypatch.setenv("MERIDIAN_CONTEXT_STRATEGY_DIR", "/env/strategy")
+    monkeypatch.setenv("MERIDIAN_CONTEXT_TEAM_NOTES_DIR", "/env/team-notes")
+
+    def unexpected_resolve_project_root() -> Path:
+        raise AssertionError("context_sync should not re-resolve config when env is complete")
+
+    monkeypatch.setattr(
+        "meridian.lib.ops.context.resolve_project_root",
+        unexpected_resolve_project_root,
+    )
+
+    output = context_sync(ContextInput(verbose=True))
+
+    assert output.work_source == "env"
+    assert output.work_path == "/env/work/current"
+    assert output.work_resolved == "/env/work/current"
+    assert output.kb_source == "env"
+    assert output.kb_path == "/env/kb"
+    assert output.kb_resolved == "/env/kb"
+    assert output.work_archive == ""
+    assert output.work_archive_resolved == ""
+    assert output.extra_contexts["strategy"].resolved == "/env/strategy"
+    assert output.extra_contexts["team_notes"].resolved == "/env/team-notes"
+    assert output.render_verbose is True
+
+
 def test_context_output_text_formats_default_and_verbose() -> None:
     output = ContextOutput(
         work_path=".meridian/work",
@@ -316,11 +355,39 @@ def test_work_current_sync_uses_resolved_context(monkeypatch: MonkeyPatch) -> No
     assert output.work_dir == "/repo/.meridian/work/current"
 
 
-def test_ops_context_does_not_reference_env_vars_directly() -> None:
-    """ops/context.py must not read or mutate MERIDIAN_* env vars itself."""
+def test_context_sync_falls_back_to_config_when_session_env_incomplete(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MERIDIAN_WORK_DIR", "/env/work/current")
+    project_root = Path("/repo")
 
-    source_path = Path(__file__).resolve().parents[3] / "src/meridian/lib/ops/context.py"
-    source = source_path.read_text(encoding="utf-8")
-    meridian_keys = set(re.findall(r"MERIDIAN_[A-Z_]+", source))
+    def fake_resolve_project_root() -> Path:
+        return project_root
 
-    assert meridian_keys == set()
+    def fake_load_context_config(_repo: Path) -> None:
+        return None
+
+    def fake_resolve_context_paths(
+        _repo: Path,
+        config: ContextConfig,
+    ) -> ResolvedContextPaths:
+        return ResolvedContextPaths(
+            work_root=Path("/fallback/work"),
+            work_archive=Path("/fallback/archive/work"),
+            work_source=config.work.source,
+            kb_root=Path("/fallback/kb"),
+            kb_source=config.kb.source,
+            extra={},
+        )
+
+    monkeypatch.setattr("meridian.lib.ops.context.resolve_project_root", fake_resolve_project_root)
+    monkeypatch.setattr("meridian.lib.ops.context.load_context_config", fake_load_context_config)
+    monkeypatch.setattr(
+        "meridian.lib.ops.context.resolve_context_paths",
+        fake_resolve_context_paths,
+    )
+
+    output = context_sync(ContextInput())
+
+    assert output.work_resolved == "/fallback/work"
+    assert output.kb_resolved == "/fallback/kb"

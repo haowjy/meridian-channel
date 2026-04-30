@@ -114,13 +114,19 @@ class ChildEnvContext:
         project_paths: ProjectConfigPaths,
         runtime_root: Path,
     ) -> ChildEnvContext:
-        parent_ctx = ResolvedContext.from_environment()
+        resolved_project_root = project_paths.project_root.resolve()
+        resolved_runtime_root = runtime_root.resolve()
+        context_config = load_context_config(resolved_project_root)
+        parent_ctx = ResolvedContext.from_environment(
+            explicit_project_root=resolved_project_root,
+            explicit_runtime_root=resolved_runtime_root,
+            context_config=context_config,
+        )
         parent_spawn_id = str(parent_ctx.spawn_id) if parent_ctx.spawn_id else None
         parent_chat_id = parent_ctx.chat_id.strip() or None
         parent_depth = parent_ctx.depth
 
-        work_id = os.getenv("MERIDIAN_WORK_ID", "").strip() or None
-        resolved_runtime_root = runtime_root.resolve()
+        work_id = parent_ctx.work_id or os.getenv("MERIDIAN_WORK_ID", "").strip() or None
         if work_id is None and parent_chat_id:
             # Keep launch semantics: runtime_root decides active work lookup.
             try:
@@ -128,13 +134,16 @@ class ChildEnvContext:
             except Exception:
                 work_id = None
 
-        resolved_project_root = project_paths.project_root.resolve()
         repo_paths = resolve_project_paths(resolved_project_root)
         project_state_dir = repo_paths.root_dir
         work_dir = (
-            resolve_work_scratch_dir(project_state_dir, work_id) if work_id is not None else None
+            parent_ctx.work_dir
+            if parent_ctx.work_dir is not None and parent_ctx.work_id == work_id
+            else resolve_work_scratch_dir(project_state_dir, work_id)
+            if work_id is not None
+            else repo_paths.work_dir
         )
-        kb_dir = repo_paths.kb_dir
+        kb_dir = parent_ctx.kb_dir or repo_paths.kb_dir
 
         return cls(
             # Keep MERIDIAN_PROJECT_DIR anchored to the project/config root so

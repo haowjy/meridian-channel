@@ -28,8 +28,10 @@ def test_child_env_context_from_environment_uses_resolved_context_parent_fields(
     runtime_state_root.mkdir()
     monkeypatch.setenv("MERIDIAN_WORK_ID", "work-explicit")
 
-    def fake_from_environment(cls) -> ResolvedContext:
+    def fake_from_environment(cls, **kwargs: object) -> ResolvedContext:
         _ = cls
+        assert kwargs["explicit_project_root"] == project_paths.project_root.resolve()
+        assert kwargs["explicit_runtime_root"] == runtime_state_root.resolve()
         return ResolvedContext(depth=3, chat_id=" parent-chat ")
 
     monkeypatch.setattr(ResolvedContext, "from_environment", classmethod(fake_from_environment))
@@ -63,8 +65,10 @@ def test_child_env_context_from_environment_falls_back_to_session_lookup(
 
     seen_lookup: list[tuple[Path, str]] = []
 
-    def fake_from_environment(cls) -> ResolvedContext:
+    def fake_from_environment(cls, **kwargs: object) -> ResolvedContext:
         _ = cls
+        assert kwargs["explicit_project_root"] == project_paths.project_root.resolve()
+        assert kwargs["explicit_runtime_root"] == runtime_state_root.resolve()
         return ResolvedContext(depth=1, chat_id="chat-lookup")
 
     def fake_get_session_active_work_id(runtime_root: Path, chat_id: str) -> str | None:
@@ -99,8 +103,10 @@ def test_child_env_context_from_environment_ignores_session_lookup_failures(
     runtime_state_root.mkdir()
     monkeypatch.delenv("MERIDIAN_WORK_ID", raising=False)
 
-    def fake_from_environment(cls) -> ResolvedContext:
+    def fake_from_environment(cls, **kwargs: object) -> ResolvedContext:
         _ = cls
+        assert kwargs["explicit_project_root"] == project_paths.project_root.resolve()
+        assert kwargs["explicit_runtime_root"] == runtime_state_root.resolve()
         return ResolvedContext(depth=2, chat_id="chat-lookup")
 
     def raising_lookup(runtime_root: Path, chat_id: str) -> str | None:
@@ -119,7 +125,7 @@ def test_child_env_context_from_environment_ignores_session_lookup_failures(
     )
 
     assert resolved.work_id is None
-    assert resolved.work_dir is None
+    assert resolved.work_dir == (project_paths.project_root / ".meridian" / "work").resolve()
     assert resolved.kb_dir == (project_paths.project_root / ".meridian" / "kb").resolve()
 
 
@@ -135,8 +141,10 @@ def test_child_env_context_keeps_repo_root_when_execution_cwd_is_spawn_artifact(
     runtime_state_root = tmp_path / "runtime"
     monkeypatch.setenv("MERIDIAN_WORK_ID", "nested-spawn")
 
-    def fake_from_environment(cls) -> ResolvedContext:
+    def fake_from_environment(cls, **kwargs: object) -> ResolvedContext:
         _ = cls
+        assert kwargs["explicit_project_root"] == project_root.resolve()
+        assert kwargs["explicit_runtime_root"] == runtime_state_root.resolve()
         return ResolvedContext(depth=2, chat_id="parent-chat")
 
     monkeypatch.setattr(ResolvedContext, "from_environment", classmethod(fake_from_environment))

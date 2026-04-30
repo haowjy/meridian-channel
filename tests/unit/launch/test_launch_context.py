@@ -236,6 +236,51 @@ def test_build_launch_context_primary_preserves_runtime_depth(
     assert "MERIDIAN_PARENT_SPAWN_ID" not in runtime_ctx.env_overrides
 
 
+def test_build_launch_context_primary_exports_configured_context_dirs(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _write_minimal_mars_config(tmp_path)
+    monkeypatch.delenv("MERIDIAN_HARNESS_COMMAND", raising=False)
+    monkeypatch.delenv("MERIDIAN_WORK_ID", raising=False)
+    (tmp_path / "meridian.local.toml").write_text(
+        "\n".join(
+            [
+                "[context.work]",
+                'path = "ctx/work"',
+                'archive = "ctx/archive/work"',
+                "",
+                "[context.kb]",
+                'path = "ctx/kb"',
+                "",
+                "[context.strategy]",
+                'path = "ctx/strategy"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    request = _build_spawn_request()
+    runtime = _build_launch_runtime(
+        tmp_path=tmp_path,
+        composition_surface=LaunchCompositionSurface.PRIMARY,
+    )
+
+    runtime_ctx = build_launch_context(
+        spawn_id="p-primary-context",
+        request=request,
+        runtime=runtime,
+        harness_registry=get_default_harness_registry(),
+        dry_run=True,
+    )
+
+    assert runtime_ctx.env_overrides["MERIDIAN_WORK_DIR"] == (tmp_path / "ctx/work").as_posix()
+    assert runtime_ctx.env_overrides["MERIDIAN_KB_DIR"] == (tmp_path / "ctx/kb").as_posix()
+    assert runtime_ctx.env_overrides["MERIDIAN_CONTEXT_STRATEGY_DIR"] == (
+        tmp_path / "ctx/strategy"
+    ).as_posix()
+
+
 def test_build_launch_context_env_keeps_project_root_when_execution_cwd_differs(
     monkeypatch: MonkeyPatch,
     tmp_path: Path,
