@@ -1,0 +1,151 @@
+"""Central ChatCommand dispatch."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, cast
+
+from meridian.lib.chat.command_invariants import NoActiveExecutionError, require_active_execution
+from meridian.lib.chat.commands import COMMAND_APPROVE, COMMAND_CLOSE, ChatCommand, CommandResult
+from meridian.lib.chat.protocol import ChatEvent, utc_now_iso
+from meridian.lib.chat.session_service import (
+    ChatClosedError,
+    ChatSessionService,
+    ConcurrentPromptError,
+)
+
+if TYPE_CHECKING:
+    from meridian.lib.chat.event_pipeline import ChatEventPipeline
+
+
+class ChatCommandHandler:
+    """Single dispatch point for all inbound chat commands."""
+
+    def __init__(
+        self,
+        sessions: Mapping[str, ChatSessionService],
+        pipelines: Mapping[str, ChatEventPipeline] | None = None,
+    ) -> None:
+        self._sessions = sessions
+        self._pipelines = pipelines or {}
+
+    async def dispatch(self, command: ChatCommand) -> CommandResult:
+        session = self._sessions.get(command.chat_id)
+        if session is None:
+            return CommandResult(status="rejected", error="chat_not_found")
+        if session.state == "closed" and command.type != COMMAND_CLOSE:
+            return CommandResult(status="rejected", error="chat_closed")
+
+        try:
+            match command.type:
+                case "prompt":
+                    text = command.payload.get("text")
+                    if not isinstance(text, str) or not text:
+                        return CommandResult(
+                            status="rejected",
+                            error="invalid_command:missing_text",
+                        )
+                    await session.prompt(text)
+                case "cancel":
+                    await session.cancel()
+                case "approve":
+                    await self._handle_approve(session, command)
+                case "answer_input":
+                    await self._handle_answer_input(session, command)
+                case "close":
+                    await session.close(self._pipelines.get(command.chat_id))
+                case "revert":
+                    return CommandResult(
+                        status="rejected",
+                        error="not_supported_by_current_harness",
+                    )
+                case "swap_model" | "swap_effort":
+                    return CommandResult(
+                        status="rejected",
+                        error="not_supported_by_current_harness",
+                    )
+                case _:
+                    return CommandResult(
+                        status="rejected",
+                        error=f"unknown_command_type:{command.type}",
+                    )
+        except ConcurrentPromptError:
+            return CommandResult(status="rejected", error="concurrent_prompt")
+        except ChatClosedError:
+            return CommandResult(status="rejected", error="chat_closed")
+        except NoActiveExecutionError:
+            return CommandResult(status="rejected", error="no_active_execution")
+        except Exception as exc:
+            return CommandResult(status="rejected", error=str(exc))
+        return CommandResult(status="accepted")
+
+    async def _handle_approve(self, session: ChatSessionService, command: ChatCommand) -> None:
+        handle = require_active_execution(session)
+        request_id = _required_str(command.payload, "request_id")
+        decision = _required_str(command.payload, "decision")
+        raw_payload = command.payload.get("payload")
+        if raw_payload is not None and not isinstance(raw_payload, dict):
+            raise ValueError("invalid_command:payload_not_object")
+        response_payload = _optional_object_dict(cast("object", raw_payload))
+        await handle.respond_request(request_id, decision, response_payload)
+        await self._emit_resolution_event(session, command, request_id, {"decision": decision})
+
+    async def _handle_answer_input(self, session: ChatSessionService, command: ChatCommand) -> None:
+        handle = require_active_execution(session)
+        request_id = _required_str(command.payload, "request_id")
+        raw_answers = command.payload.get("answers")
+        if not isinstance(raw_answers, dict):
+            raise ValueError("invalid_command:missing_answers")
+        answers = _required_object_dict(cast("object", raw_answers))
+        await handle.respond_user_input(request_id, answers)
+        await self._emit_resolution_event(session, command, request_id, {"answers": answers})
+
+    async def _emit_resolution_event(
+        self,
+        session: ChatSessionService,
+        command: ChatCommand,
+        request_id: str,
+        payload: dict[str, Any],
+    ) -> None:
+        pipeline = self._pipelines.get(command.chat_id)
+        handle = session.current_execution
+        if pipeline is None or handle is None:
+            return
+        event_type = (
+            "request.resolved"
+            if command.type == COMMAND_APPROVE
+            else "user_input.resolved"
+        )
+        await pipeline.ingest(
+            ChatEvent(
+                type=event_type,
+                seq=0,
+                chat_id=command.chat_id,
+                execution_id=str(handle.spawn_id),
+                timestamp=utc_now_iso(),
+                request_id=request_id,
+                payload={"command_id": command.command_id, **payload},
+            )
+        )
+
+
+def _required_str(payload: dict[str, Any], key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"invalid_command:missing_{key}")
+    return value
+
+
+def _optional_object_dict(value: object) -> dict[str, object] | None:
+    if value is None:
+        return None
+    return _required_object_dict(value)
+
+
+def _required_object_dict(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise ValueError("invalid_command:expected_object")
+    typed_value = cast("dict[object, object]", value)
+    return {str(key): item for key, item in typed_value.items()}
+
+__all__ = ["ChatCommandHandler"]

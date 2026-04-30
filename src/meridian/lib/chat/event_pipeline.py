@@ -1,0 +1,140 @@
+"""Persistence-first normalized chat event pipeline."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from contextlib import suppress
+from typing import TYPE_CHECKING, Protocol
+
+from meridian.lib.chat.event_log import ChatEventLog
+from meridian.lib.chat.protocol import (
+    CHAT_EXITED,
+    RUNTIME_WARNING,
+    TURN_COMPLETED,
+    ChatEvent,
+    utc_now_iso,
+)
+
+if TYPE_CHECKING:
+    from meridian.lib.chat.session_service import ChatSessionService
+
+logger = logging.getLogger(__name__)
+
+
+class ChatEventIndex(Protocol):
+    def upsert(self, event: ChatEvent) -> None: ...
+
+
+class ChatEventFanOut(Protocol):
+    async def broadcast(self, event: ChatEvent) -> None: ...
+
+
+class NoopChatEventFanOut:
+    async def broadcast(self, event: ChatEvent) -> None:
+        _ = event
+
+
+class ChatEventPipeline:
+    """Ingest ChatEvents, persist first, then update projections and callbacks."""
+
+    def __init__(
+        self,
+        chat_id: str,
+        event_log: ChatEventLog,
+        session_service: ChatSessionService,
+        *,
+        event_index: ChatEventIndex | None = None,
+        fanout: ChatEventFanOut | None = None,
+        max_queue: int = 10000,
+    ) -> None:
+        self._chat_id = chat_id
+        self._log = event_log
+        self._session = session_service
+        self._index = event_index
+        self._fanout = fanout if fanout is not None else NoopChatEventFanOut()
+        self._queue: asyncio.Queue[ChatEvent | None] = asyncio.Queue(maxsize=max_queue)
+        self._task: asyncio.Task[None] | None = None
+
+    @property
+    def task(self) -> asyncio.Task[None] | None:
+        return self._task
+
+    def start(self) -> None:
+        if self._task is None or self._task.done():
+            self._task = asyncio.create_task(self._run())
+
+    async def stop(self) -> None:
+        if self._task is None:
+            return
+        await self._queue.put(None)
+        with suppress(asyncio.CancelledError):
+            await self._task
+
+    async def ingest(self, event: ChatEvent) -> None:
+        """Queue a normalized event; drop and warn when the queue is full."""
+
+        if event.chat_id != self._chat_id:
+            logger.warning(
+                "Dropping chat event for wrong chat: pipeline=%s event=%s",
+                self._chat_id,
+                event.chat_id,
+            )
+            return
+        try:
+            self._queue.put_nowait(event)
+        except asyncio.QueueFull:
+            logger.warning(
+                "Chat pipeline queue full for %s, dropping %s",
+                self._chat_id,
+                event.type,
+            )
+            warning = ChatEvent(
+                type=RUNTIME_WARNING,
+                seq=0,
+                chat_id=self._chat_id,
+                execution_id=event.execution_id,
+                timestamp=utc_now_iso(),
+                payload={"reason": "pipeline_queue_full", "dropped_type": event.type},
+                harness_id=event.harness_id,
+            )
+            with suppress(asyncio.QueueFull):
+                self._queue.put_nowait(warning)
+
+    async def _run(self) -> None:
+        while True:
+            event = await self._queue.get()
+            if event is None:
+                break
+            persisted = self._log.append(event)
+            if self._index is not None:
+                try:
+                    self._index.upsert(persisted)
+                except Exception:
+                    logger.warning("Chat event index upsert failed", exc_info=True)
+            await self._fanout.broadcast(persisted)
+            self._notify_session(persisted)
+            if persisted.type == CHAT_EXITED:
+                break
+
+    async def on_execution_complete(self, execution_generation: int | None = None) -> None:
+        self._session.on_execution_died(execution_generation)
+
+    def _notify_session(self, event: ChatEvent) -> None:
+        generation = _execution_generation(event)
+        if event.type == TURN_COMPLETED:
+            self._session.on_turn_completed(generation)
+
+
+def _execution_generation(event: ChatEvent) -> int | None:
+    value = event.payload.get("execution_generation")
+    if isinstance(value, int):
+        return value
+    return None
+
+__all__ = [
+    "ChatEventFanOut",
+    "ChatEventIndex",
+    "ChatEventPipeline",
+    "NoopChatEventFanOut",
+]

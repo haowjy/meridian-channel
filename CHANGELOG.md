@@ -4,6 +4,8 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 ### Added
+- Chat substrate: normalized ChatEvent, shared ChatCommand dispatch, JSONL event log, lifecycle service, backend handle, observer bridge, and persistence-first pipeline.
+
 - Harness connection runtime HITL seam. Codex server requests now pass through typed handler policy before JSON-RPC responses; default auto-accept keeps existing spawn behavior.
 - `meridian mermaid check` style warnings: ox-edge, bare-end, fill-no-color
 - `--strict` flag: treat warnings as errors
