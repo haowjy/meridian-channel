@@ -172,6 +172,12 @@ def recover_chats() -> None:
             )
 
 
+def get_chat_pipeline(chat_id: str) -> ChatEventPipeline | None:
+    """Return the live pipeline for a configured chat, when present."""
+
+    return _state.pipelines.get(chat_id)
+
+
 @app.post("/chat", response_model=CreateChatResponse)
 async def create_chat(body: CreateChatRequest) -> CreateChatResponse:
     _ = body
@@ -415,7 +421,7 @@ def _last_execution_id(events: list[ChatEvent]) -> str:
     return ""
 
 
-__all__ = ["app", "configure", "recover_chats"]
+__all__ = ["app", "configure", "get_chat_pipeline", "recover_chats"]
 
 
 def _start_pipeline_if_running_loop(pipeline: ChatEventPipeline) -> None:

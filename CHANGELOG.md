@@ -4,6 +4,7 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 ### Added
+- `meridian chat` starts the local headless chat backend with host/port/model/harness options.
 - Codex/OpenCode chat normalizers plus cross-harness parity tests for turn/content/file events.
 - Chat backend SQLite projection, HITL REST responses, and git checkpoint create/revert.
 - Chat backend FastAPI transport: REST command wrappers, bidirectional WebSocket command acks, fan-out, replay, close replay, and restart lost-backend recovery.
