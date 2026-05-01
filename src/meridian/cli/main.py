@@ -92,6 +92,7 @@ class GlobalOptions(BaseModel):
     # Future cleanup: `output_explicit` may be removable now that
     # `explicit_format` carries the resolved explicit output selection.
     output_explicit: bool = False
+    force_agent: bool = False
     force_human: bool = False
     passthrough_args: tuple[str, ...] = ()
     sink: OutputSink | None = None
@@ -165,6 +166,7 @@ def _extract_global_options(argv: Sequence[str]) -> tuple[list[str], GlobalOptio
         yes=parsed.yes,
         no_input=parsed.no_input,
         output_explicit=parsed.output_explicit,
+        force_agent=parsed.force_agent,
         force_human=parsed.force_human,
         explicit_format=explicit_format,
     )
@@ -300,6 +302,10 @@ def root(
             show=False,
         ),
     ] = False,
+    force_agent: Annotated[
+        bool,
+        Parameter(name="--agent", help="Force agent mode for this invocation.", show=False),
+    ] = False,
     continue_ref: Annotated[
         str | None,
         Parameter(
@@ -391,6 +397,7 @@ def root(
                 harness=harness,
                 yes=yes,
                 no_input=no_input,
+                force_agent=force_agent,
             )
         )
 
@@ -696,9 +703,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     if not (cleaned_args and cleaned_args[0] == "mars"):
         cleaned_args, passthrough_args = _split_passthrough_args(cleaned_args)
         options = options.model_copy(update={"passthrough_args": passthrough_args})
-    effective_agent_mode = (
-        agent_mode_enabled() and not options.force_human and not _interactive_terminal_attached()
-    )
+    if options.force_agent:
+        effective_agent_mode = True
+    elif options.force_human:
+        effective_agent_mode = False
+    else:
+        effective_agent_mode = agent_mode_enabled() and not _interactive_terminal_attached()
 
     # Resolve output format based on command and agent mode
     resolved_format = _resolve_output_format_for_command(
@@ -734,6 +744,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     options = options.model_copy(update={"sink": active_sink})
     token = _GLOBAL_OPTIONS.set(options)
     try:
+        if effective_agent_mode:
+            from meridian.cli.agent_help import apply_agent_help_supplements
+
+            apply_agent_help_supplements()
         with temporary_config_env(options.config_file):
             if (
                 options.output.format == "text"
@@ -755,6 +769,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     finally:
         flush_sink(active_sink)
         _GLOBAL_OPTIONS.reset(token)
+        if effective_agent_mode:
+            from meridian.cli.agent_help import restore_help_supplements
+
+            restore_help_supplements()
 
 
 _register_group_commands()

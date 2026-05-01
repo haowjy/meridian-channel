@@ -19,7 +19,6 @@ _TOP_LEVEL_VALUE_FLAGS = frozenset(
         "--model",
         "-m",
         "--harness",
-        "--agent",
         "-a",
         "--work",
         "--autocompact",
@@ -42,6 +41,7 @@ _TOP_LEVEL_BOOL_FLAGS = frozenset(
         "--no-yes",
         "--no-input",
         "--no-no-input",
+        "--agent",
         "--human",
         "--yolo",
         "--no-yolo",
@@ -60,6 +60,7 @@ class ParsedGlobalOptions:
     yes: bool
     no_input: bool
     output_explicit: bool
+    force_agent: bool
     force_human: bool
 
 
@@ -138,6 +139,7 @@ def extract_global_options(
     yes = False
     no_input = False
     output_explicit = False
+    force_agent = False
     force_human = False
     cleaned: list[str] = []
 
@@ -223,6 +225,18 @@ def extract_global_options(
         if arg == "--no-no-input":
             index += 1
             continue
+        if arg == "--agent":
+            if _first_positional_token(cleaned) is not None:
+                if index + 1 < len(argv) and not argv[index + 1].startswith("-"):
+                    cleaned.extend(("-a", argv[index + 1]))
+                    index += 2
+                else:
+                    cleaned.append("-a")
+                    index += 1
+                continue
+            force_agent = True
+            index += 1
+            continue
         if arg == "--human":
             force_human = True
             index += 1
@@ -246,6 +260,9 @@ def extract_global_options(
             harness = shortcut_value
             del cleaned[shortcut_index]
 
+    if force_agent and force_human:
+        raise SystemExit("Cannot combine --agent with --human.")
+
     return cleaned, ParsedGlobalOptions(
         output_format=normalize_output_format(output_format, json_mode),
         config_file=config_file,
@@ -253,6 +270,7 @@ def extract_global_options(
         yes=yes,
         no_input=no_input,
         output_explicit=output_explicit,
+        force_agent=force_agent,
         force_human=force_human,
     )
 

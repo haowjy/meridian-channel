@@ -32,6 +32,24 @@ def test_human_flag_restores_full_help(cli):
         assert visible in text
 
 
+def test_agent_flag_forces_restricted_help(cli):
+    """--agent flag forces agent-mode help without nested-process detection."""
+    result = cli("--agent", "--help", env_override={"MERIDIAN_DEPTH": ""})
+    result.assert_success()
+
+    text = result.stdout
+    for visible in ("spawn", "work", "models"):
+        assert visible in text, f"agent help should show {visible}"
+    assert "init" not in text
+
+
+def test_agent_and_human_flags_are_mutually_exclusive(cli):
+    """--agent and --human cannot both set effective mode."""
+    result = cli("--agent", "--human", "--help", env_override={"MERIDIAN_DEPTH": "1"})
+    result.assert_failure(1)
+    assert "Cannot combine --agent with --human" in result.stderr
+
+
 def test_agent_mode_models_list_redirects_to_mars(cli):
     """Agent mode gets the same compatibility redirect for models list."""
     result = cli("models", "list", env_override={"MERIDIAN_DEPTH": "1"})

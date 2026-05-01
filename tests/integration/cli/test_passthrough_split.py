@@ -43,6 +43,27 @@ def test_split_passthrough_without_separator() -> None:
     assert passthrough == ()
 
 
+def test_global_agent_flag_forces_agent_mode_without_profile_disambiguation() -> None:
+    cleaned, options = cli_main._extract_global_options(["--agent", "coder", "--dry-run"])
+
+    assert cleaned == ["coder", "--dry-run"]
+    assert options.force_agent is True
+
+
+def test_agent_flag_before_command_forces_agent_mode() -> None:
+    cleaned, options = cli_main._extract_global_options(["--agent", "spawn", "list"])
+
+    assert cleaned == ["spawn", "list"]
+    assert options.force_agent is True
+
+
+def test_post_command_agent_flag_is_preserved_as_spawn_profile_selection() -> None:
+    cleaned, options = cli_main._extract_global_options(["spawn", "--agent", "coder"])
+
+    assert cleaned == ["spawn", "-a", "coder"]
+    assert options.force_agent is False
+
+
 def test_split_passthrough_with_empty_tail() -> None:
     cleaned, passthrough = _split_spawn_args(["spawn", "-p", "hello", "--"])
 
