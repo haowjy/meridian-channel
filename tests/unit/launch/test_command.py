@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from meridian.lib.core.types import ModelId
 from meridian.lib.harness.claude import ClaudeAdapter
 from meridian.lib.harness.launch_spec import ClaudeLaunchSpec, OpenCodeLaunchSpec
@@ -69,3 +71,30 @@ def test_build_launch_argv_projects_claude_prompt_file_path_from_resolved_spec()
     flag_index = argv.index("--append-system-prompt-file")
     assert argv[flag_index + 1] == prompt_file_path
     assert "--append-system-prompt" not in argv
+
+
+def test_build_launch_argv_ignores_removed_meridian_harness_command_env_var(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "MERIDIAN_HARNESS_COMMAND",
+        "definitely-not-a-real-harness-binary",
+    )
+    adapter = ClaudeAdapter()
+    run_inputs = ResolvedRunInputs(prompt="do thing")
+    perms = _resolver()
+    projected_spec = resolve_launch_spec_stage(
+        adapter=adapter,
+        run_inputs=run_inputs,
+        perms=perms,
+    )
+
+    argv = build_launch_argv(
+        adapter=adapter,
+        run_inputs=run_inputs,
+        perms=perms,
+        projected_spec=projected_spec,
+    )
+
+    assert argv[: len(adapter.BASE_COMMAND)] == adapter.BASE_COMMAND
+
