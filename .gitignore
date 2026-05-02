@@ -16,7 +16,7 @@ tmp/
 
 .orchestrate/
 .scratch/
-.codex/config.toml
+.codex/
 
 err
 out
@@ -28,3 +28,7 @@ out
 .agents/
 .claude/agents/
 .claude/skills/
+
+# Pre-built frontend assets (copied during release, not tracked)
+src/meridian/web_dist/*
+!src/meridian/web_dist/__init__.py
