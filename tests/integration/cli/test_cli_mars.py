@@ -1,4 +1,5 @@
 import importlib
+import subprocess
 from io import StringIO
 
 import pytest
@@ -64,6 +65,52 @@ def test_run_mars_passthrough_sync_calls_augment_result() -> None:
     assert exc_info.value.code == 1
     assert len(observed) == 1
     assert observed[0].request.is_sync is True
+
+
+def test_execute_mars_passthrough_marks_sync_as_meridian_managed() -> None:
+    request = mars_passthrough.MarsPassthroughRequest(
+        command=("/usr/bin/mars", "sync"),
+        mars_args=("sync",),
+        is_sync=True,
+        wants_json=False,
+        root_override=None,
+    )
+    observed: dict[str, object] = {}
+
+    def _fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        observed["cmd"] = cmd
+        observed["env"] = kwargs.get("env")
+        return subprocess.CompletedProcess(args=cmd, returncode=0)
+
+    result = mars_passthrough.execute_mars_passthrough(request, run=_fake_run)
+
+    assert result.returncode == 0
+    assert observed["cmd"] == ["/usr/bin/mars", "sync"]
+    env = observed["env"]
+    assert isinstance(env, dict)
+    assert env["MERIDIAN_MANAGED"] == "1"
+
+
+def test_execute_mars_passthrough_does_not_mark_non_sync() -> None:
+    request = mars_passthrough.MarsPassthroughRequest(
+        command=("/usr/bin/mars", "models", "list"),
+        mars_args=("models", "list"),
+        is_sync=False,
+        wants_json=False,
+        root_override=None,
+    )
+    observed: dict[str, object] = {}
+
+    def _fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        observed["cmd"] = cmd
+        observed["env"] = kwargs.get("env")
+        return subprocess.CompletedProcess(args=cmd, returncode=0)
+
+    result = mars_passthrough.execute_mars_passthrough(request, run=_fake_run)
+
+    assert result.returncode == 0
+    assert observed["cmd"] == ["/usr/bin/mars", "models", "list"]
+    assert observed["env"] is None
 
 
 def test_main_mars_defaults_to_text_in_agent_mode(monkeypatch: pytest.MonkeyPatch) -> None:

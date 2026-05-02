@@ -153,6 +153,9 @@ def execute_mars_passthrough(
     """Execute a prepared Mars passthrough request."""
 
     stderr_stream = sys.stderr if stderr is None else stderr
+    run_kwargs: dict[str, object] = {}
+    if request.is_sync:
+        run_kwargs["env"] = {**os.environ, "MERIDIAN_MANAGED": "1"}
     try:
         if request.wants_json:
             result = run(
@@ -160,6 +163,7 @@ def execute_mars_passthrough(
                 check=False,
                 capture_output=True,
                 text=True,
+                **run_kwargs,
             )
             return MarsPassthroughResult(
                 request=request,
@@ -168,7 +172,7 @@ def execute_mars_passthrough(
                 stderr_text=result.stderr or "",
             )
 
-        result = run(list(request.command), check=False)
+        result = run(list(request.command), check=False, **run_kwargs)
         return MarsPassthroughResult(request=request, returncode=result.returncode)
     except FileNotFoundError:
         print(
