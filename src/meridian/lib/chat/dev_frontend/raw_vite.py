@@ -62,6 +62,12 @@ class RawViteSession:
 
         return self._url
 
+    @property
+    def extra_urls(self) -> dict[str, str]:
+        """No extra URLs for raw Vite."""
+
+        return {}
+
     async def wait_until_ready(self, timeout: float) -> None:
         """Wait until Vite serves requests or fails startup."""
 

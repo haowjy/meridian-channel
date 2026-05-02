@@ -17,6 +17,7 @@ from meridian.lib.chat.dev_frontend.launcher import (
     FrontendSession,
     PortlessRouteOccupiedError,
 )
+from meridian.lib.chat.dev_frontend.discovery import detect_tailscale_dns_name
 from meridian.lib.chat.dev_frontend.policy import PortlessExposure, PortlessRetryPolicy
 
 
@@ -63,7 +64,8 @@ class PortlessLauncher:
             url = _get_portless_url(self._exposure.service_name) or (
                 f"https://{self._exposure.service_name}.localhost"
             )
-            return PortlessSession(process=process, url=url)
+            extra = self._detect_extra_urls()
+            return PortlessSession(process=process, url=url, extra_urls=extra)
 
         if exit_code != 0:
             if self._exposure.share_mode == "local" and not self._retry_policy.force_takeover:
@@ -96,21 +98,48 @@ class PortlessLauncher:
         url = _get_portless_url(self._exposure.service_name) or (
             f"https://{self._exposure.service_name}.localhost"
         )
-        return PortlessSession(process=process, url=url)
+        extra = self._detect_extra_urls()
+        return PortlessSession(process=process, url=url, extra_urls=extra)
+
+    def _detect_extra_urls(self) -> dict[str, str]:
+        """Build extra URL dict for tailscale/funnel modes."""
+
+        if self._exposure.share_mode not in ("tailscale", "funnel"):
+            return {}
+        dns_name = detect_tailscale_dns_name()
+        if not dns_name:
+            return {}
+        # Portless uses port 8443 for tailscale HTTPS
+        tailscale_url = f"https://{dns_name}:8443"
+        label = "Funnel (public)" if self._exposure.share_mode == "funnel" else "Tailscale"
+        return {label: tailscale_url}
 
 
 class PortlessSession:
     """Running portless process managed by the dev supervisor."""
 
-    def __init__(self, *, process: subprocess.Popen[bytes], url: str) -> None:
+    def __init__(
+        self,
+        *,
+        process: subprocess.Popen[bytes],
+        url: str,
+        extra_urls: dict[str, str] | None = None,
+    ) -> None:
         self._process = process
         self._url = url
+        self._extra_urls = extra_urls or {}
 
     @property
     def url(self) -> str:
         """Browser-facing URL for the dev frontend."""
 
         return self._url
+
+    @property
+    def extra_urls(self) -> dict[str, str]:
+        """Additional URLs (e.g. tailscale, funnel)."""
+
+        return self._extra_urls
 
     async def wait_until_ready(self, timeout: float) -> None:
         """Wait until the portless-managed dev server responds or fails startup."""

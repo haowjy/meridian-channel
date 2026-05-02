@@ -34,6 +34,11 @@ class FrontendSession(Protocol):
         """Browser-facing URL for the dev frontend."""
         ...
 
+    @property
+    def extra_urls(self) -> dict[str, str]:
+        """Additional URLs to display (e.g. tailscale, funnel). Label → URL."""
+        ...
+
     async def wait_until_ready(self, timeout: float) -> None:
         """Wait until the frontend can serve requests or startup fails."""
         ...

@@ -69,6 +69,8 @@ class DevSupervisor:
             url = self._frontend_session.url
 
             print(f"Chat UI (dev): {url}", flush=True)
+            for label, extra_url in self._frontend_session.extra_urls.items():
+                print(f"  {label}: {extra_url}", flush=True)
             if self.open_browser:
                 webbrowser.open(url)
 
