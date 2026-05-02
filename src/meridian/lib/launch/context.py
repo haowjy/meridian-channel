@@ -471,6 +471,17 @@ def _resolve_surface_request(
             profile_skills=merged_skill_names,
             project_root=project_paths.project_root,
             readonly=dry_run,
+            harness_id=str(policies.harness),
+            selected_model_token=(
+                model_selection.selected_model_token
+                if model_selection is not None
+                else policies.model
+            ),
+            canonical_model_id=(
+                model_selection.canonical_model_id
+                if model_selection is not None
+                else policies.model
+            ),
         )
 
     route_warning = None

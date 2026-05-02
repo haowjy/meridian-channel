@@ -599,10 +599,19 @@ def resolve_policies(
     profile_skills: tuple[str, ...] = ()
     if profile is not None:
         profile_skills = dedupe_skill_names(profile.skills)
+    skill_selected_model_token = (
+        model_selection.selected_model_token if model_selection is not None else final_model
+    )
+    skill_canonical_model_id = (
+        model_selection.canonical_model_id if model_selection is not None else final_model
+    )
     resolved_skills = resolve_skills_from_profile(
         profile_skills=profile_skills,
         project_root=project_root,
         readonly=skills_readonly,
+        harness_id=str(harness_id),
+        selected_model_token=skill_selected_model_token,
+        canonical_model_id=skill_canonical_model_id,
     )
 
     return ResolvedPolicies(

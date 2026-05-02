@@ -73,6 +73,9 @@ def resolve_skills_from_profile(
     profile_skills: tuple[str, ...],
     project_root: Path,
     readonly: bool = False,
+    harness_id: str | None = None,
+    selected_model_token: str | None = None,
+    canonical_model_id: str | None = None,
 ) -> ResolvedSkills:
     """Load and resolve skills declared in an agent profile."""
 
@@ -92,7 +95,13 @@ def resolve_skills_from_profile(
     resolved_skill_names = tuple(
         skill_name for skill_name in profile_skills if skill_name in available_skill_names
     )
-    loaded_skills = load_skill_contents(registry, resolved_skill_names)
+    loaded_skills = load_skill_contents(
+        registry,
+        resolved_skill_names,
+        harness_id=harness_id,
+        selected_model_token=selected_model_token,
+        canonical_model_id=canonical_model_id,
+    )
     return ResolvedSkills(
         skill_names=tuple(skill.name for skill in loaded_skills),
         loaded_skills=loaded_skills,

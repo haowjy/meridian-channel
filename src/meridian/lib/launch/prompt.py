@@ -91,13 +91,22 @@ def dedupe_skill_contents(skills: Sequence[SkillContent]) -> tuple[SkillContent,
 def load_skill_contents(
     registry: SkillRegistry,
     names: Sequence[str],
+    *,
+    harness_id: str | None = None,
+    selected_model_token: str | None = None,
+    canonical_model_id: str | None = None,
 ) -> tuple[SkillContent, ...]:
     """Load skill contents in deterministic deduplicated order."""
 
     deduped_names = dedupe_skill_names(names)
     if not deduped_names:
         return ()
-    loaded = registry.load(list(deduped_names))
+    loaded = registry.load(
+        list(deduped_names),
+        harness_id=harness_id,
+        selected_model_token=selected_model_token,
+        canonical_model_id=canonical_model_id,
+    )
     return dedupe_skill_contents(loaded)
 
 
