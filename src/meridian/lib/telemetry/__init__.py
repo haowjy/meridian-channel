@@ -1,5 +1,15 @@
-"""Telemetry observer registry public API."""
+"""Telemetry public API."""
 
+from __future__ import annotations
+
+from pathlib import Path
+
+from meridian.lib.telemetry.events import (
+    EVENT_REGISTRY,
+    TelemetryEnvelope,
+    concerns_for_event,
+    make_error_data,
+)
 from meridian.lib.telemetry.observers import (
     DebugTraceObserver,
     LifecycleObserver,
@@ -8,11 +18,35 @@ from meridian.lib.telemetry.observers import (
     register_debug_trace_observer,
     register_observer,
 )
+from meridian.lib.telemetry.router import TelemetryRouter, emit_telemetry, set_global_router
+from meridian.lib.telemetry.sinks import NoopSink, StderrSink, TelemetrySink
+
+
+def init_telemetry(*, sink: TelemetrySink | None = None, runtime_root: Path | None = None) -> None:
+    """Initialize the process-wide telemetry router."""
+    if sink is None:
+        # LocalJSONLSink arrives in Phase 2.2. Until then runtime-root processes
+        # intentionally route to NoopSink while rootless callers use setup_telemetry
+        # to select StderrSink explicitly.
+        _ = runtime_root
+        sink = NoopSink()
+    set_global_router(TelemetryRouter(sink))
+
 
 __all__ = [
+    "EVENT_REGISTRY",
     "DebugTraceObserver",
     "LifecycleObserver",
     "LifecycleObserverTier",
+    "NoopSink",
+    "StderrSink",
+    "TelemetryEnvelope",
+    "TelemetryRouter",
+    "TelemetrySink",
+    "concerns_for_event",
+    "emit_telemetry",
+    "init_telemetry",
+    "make_error_data",
     "notify_observers",
     "register_debug_trace_observer",
     "register_observer",

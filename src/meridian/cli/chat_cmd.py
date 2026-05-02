@@ -32,6 +32,7 @@ from meridian.lib.launch.launch_types import ResolvedLaunchSpec
 from meridian.lib.safety.permissions import UnsafeNoOpPermissionResolver
 from meridian.lib.state.user_paths import get_user_home
 from meridian.lib.streaming.spawn_manager import SpawnManager
+from meridian.lib.telemetry.init import setup_telemetry
 
 CHAT_SERVER_FILE = "chat-server.json"
 
@@ -217,6 +218,7 @@ def run_chat_server(
         raise ValueError("port must be between 0 and 65535")
 
     runtime_root = get_user_home()
+    setup_telemetry(runtime_root=runtime_root)
     project_root = resolve_project_root()
     harness_id = _resolve_harness_id(harness)
     runtime = ChatRuntime(

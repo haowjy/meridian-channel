@@ -30,6 +30,7 @@ from meridian.lib.state.paths import resolve_project_paths
 from meridian.lib.state.primary_meta import (
     read_primary_surface_metadata,
 )
+from meridian.lib.telemetry.init import setup_telemetry
 from meridian.lib.utils.time import minutes_to_seconds
 
 from .execute import (
@@ -136,8 +137,10 @@ def spawn_create_sync(
     if payload.dry_run:
         resolved_root = _resolve_project_root_input(payload.project_root)
         config = load_config(resolved_root)
+        setup_telemetry(runtime_root=None)
     else:
         resolved_root, config = resolve_runtime_root_and_config(payload.project_root)
+        setup_telemetry(runtime_root=resolve_runtime_root(resolved_root))
     payload = payload.model_copy(update={"project_root": resolved_root.as_posix()})
     payload, preflight_warning = validate_create_input(payload)
     if payload.dry_run and payload.work.strip():
@@ -597,6 +600,7 @@ async def _spawn_cancel_impl(
     lifecycle_service = create_lifecycle_service(project_root, runtime_root)
     spawn_service = SpawnApplicationService(runtime_root, lifecycle_service)
     register_debug_trace_observer()
+    setup_telemetry(runtime_root=runtime_root)
     try:
         outcome = await spawn_service.cancel(SpawnId(spawn_id))
     except RuntimeError as exc:
