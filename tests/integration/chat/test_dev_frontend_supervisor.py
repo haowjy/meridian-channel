@@ -15,10 +15,12 @@ class FakeServer:
     def __init__(self, config) -> None:
         self.config = config
         self.should_exit = False
+        self.started = False
         self.serve_started = asyncio.Event()
         self.serve_stopped = asyncio.Event()
 
     async def serve(self) -> None:
+        self.started = True
         self.serve_started.set()
         while not self.should_exit:
             await asyncio.sleep(0.01)
@@ -96,6 +98,25 @@ class FakeLauncher:
         return LaunchResult(session=self.session)
 
 
+class FakeHttpResponse:
+    def raise_for_status(self) -> None:
+        pass
+
+    def json(self) -> dict[str, str]:
+        return {"chat_id": "test-chat-id"}
+
+
+class FakeHttpClient:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, _exc_type, _exc, _tb) -> None:
+        pass
+
+    async def post(self, _url: str, *, json, timeout: float) -> FakeHttpResponse:
+        return FakeHttpResponse()
+
+
 def _patch_uvicorn(monkeypatch):
     holder: dict[str, FakeServer] = {}
 
@@ -108,6 +129,7 @@ def _patch_uvicorn(monkeypatch):
 
     monkeypatch.setattr(supervisor_module.uvicorn, "Config", fake_config)
     monkeypatch.setattr(supervisor_module.uvicorn, "Server", fake_server_factory)
+    monkeypatch.setattr(supervisor_module.httpx, "AsyncClient", FakeHttpClient)
     return holder
 
 
@@ -162,7 +184,8 @@ def test_dev_supervisor_opens_browser_after_readiness_and_uses_local_client_endp
     captured = capsys.readouterr()
 
     assert exit_code == 0
-    assert "Chat UI (dev): https://dev.example" in captured.out
+    assert "Chat UI (dev): https://dev.example?chat_id=test-chat-id" in captured.out
+    assert "Chat ID: test-chat-id" in captured.err
     assert holder["server"].config["host"] == "0.0.0.0"
     assert holder["server"].config["port"] == 4173
     assert launch_calls[0][0] == Path("/tmp/meridian-web")
@@ -172,7 +195,7 @@ def test_dev_supervisor_opens_browser_after_readiness_and_uses_local_client_endp
     assert backend.http_origin == "http://127.0.0.1:4173"
     assert backend.ws_origin == "ws://127.0.0.1:4173"
     assert session.wait_timeouts == [30.0]
-    assert events == ["ready", "open:https://dev.example"]
+    assert events == ["ready", "open:https://dev.example?chat_id=test-chat-id"]
     assert session.terminate_calls == [5.0]
     assert holder["server"].should_exit is True
     assert holder["server"].serve_stopped.is_set()
@@ -231,7 +254,8 @@ def test_dev_supervisor_reports_unexpected_frontend_exit_and_cleans_up(
     captured = capsys.readouterr()
 
     assert exit_code == 1
-    assert "Chat UI (dev): https://app.meridian.localhost" in captured.out
+    assert "Chat UI (dev): https://app.meridian.localhost?chat_id=test-chat-id" in captured.out
+    assert "Chat ID: test-chat-id" in captured.err
     assert "Vite dev server exited unexpectedly with code 23" in captured.err
     assert session.terminate_calls == [5.0]
     assert holder["server"].should_exit is True

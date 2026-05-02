@@ -59,12 +59,32 @@ class FakeLauncher:
         return LaunchResult(session=self.session)
 
 
+class FakeHttpResponse:
+    def raise_for_status(self) -> None:
+        pass
+
+    def json(self) -> dict[str, str]:
+        return {"chat_id": "test-chat-123"}
+
+
+class FakeHttpClient:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, _exc_type, _exc, _tb) -> None:
+        pass
+
+    async def post(self, _url: str, *, json, timeout: float) -> FakeHttpResponse:
+        return FakeHttpResponse()
+
+
 class FakeServer:
     behavior = "wait"
     error = RuntimeError("backend boom")
 
     def __init__(self, _config):
         self.should_exit = False
+        self.started = self.behavior != "raise"
 
     async def serve(self) -> None:
         if self.behavior == "raise":
@@ -84,6 +104,13 @@ def _patch_uvicorn(monkeypatch, behavior: str) -> None:
         lambda app, host, port: SimpleNamespace(app=app, host=host, port=port),
     )
     monkeypatch.setattr("meridian.lib.chat.dev_frontend.supervisor.uvicorn.Server", FakeServer)
+
+
+def _patch_httpx(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "meridian.lib.chat.dev_frontend.supervisor.httpx.AsyncClient",
+        FakeHttpClient,
+    )
 
 
 def _make_supervisor(*, launcher: FakeLauncher, tmp_path: Path, open_browser: bool = False) -> DevSupervisor:
@@ -115,6 +142,7 @@ async def test_run_propagates_backend_failure_before_frontend_launch(monkeypatch
 @pytest.mark.asyncio
 async def test_run_wraps_frontend_readiness_timeout_and_cleans_up(monkeypatch, tmp_path: Path):
     _patch_uvicorn(monkeypatch, "wait")
+    _patch_httpx(monkeypatch)
     monkeypatch.setattr("meridian.lib.chat.dev_frontend.supervisor.asyncio.sleep", _yield_once)
     session = FakeSession(ready_exc=TimeoutError("frontend timed out"))
     launcher = FakeLauncher(session=session)
@@ -130,6 +158,7 @@ async def test_run_wraps_frontend_readiness_timeout_and_cleans_up(monkeypatch, t
 @pytest.mark.asyncio
 async def test_run_propagates_frontend_launch_failure_and_cleans_up(monkeypatch, tmp_path: Path):
     _patch_uvicorn(monkeypatch, "wait")
+    _patch_httpx(monkeypatch)
     monkeypatch.setattr("meridian.lib.chat.dev_frontend.supervisor.asyncio.sleep", _yield_once)
     launcher = FakeLauncher(launch_exc=FrontendLaunchError("launch failed"))
     supervisor = _make_supervisor(launcher=launcher, tmp_path=tmp_path)
