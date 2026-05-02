@@ -1,5 +1,6 @@
 """FastMCP server entry point and operation registration."""
 
+import time
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -19,6 +20,7 @@ from meridian.lib.extensions.types import (
     ExtensionErrorResult,
     ExtensionSurface,
 )
+from meridian.lib.telemetry import emit_telemetry
 from meridian.lib.telemetry.init import setup_telemetry
 
 
@@ -79,17 +81,46 @@ async def extension_invoke(
     EB3.11: Returns structured error payload on failures.
     """
 
+    start = time.monotonic()
     resolved_args = args or {}
+
+    def emit_invoked(status: str, *, code: str | None = None) -> None:
+        ids = {
+            key: value
+            for key, value in {
+                "request_id": request_id,
+                "work_id": work_id,
+                "spawn_id": spawn_id,
+            }.items()
+            if value is not None
+        }
+        data: dict[str, Any] = {
+            "fqid": fqid,
+            "status": status,
+            "latency_ms": round((time.monotonic() - start) * 1000, 1),
+        }
+        if code is not None:
+            data["code"] = code
+        emit_telemetry(
+            "server",
+            "mcp.command.invoked",
+            scope="mcp.server",
+            ids=ids or None,
+            data=data,
+            severity="error" if status == "error" else "info",
+        )
 
     registry = build_first_party_registry()
     spec = registry.get(fqid)
     if spec is None:
+        emit_invoked("error", code="not_found")
         return {
             "status": "error",
             "code": "not_found",
             "message": f"Command not found: {fqid}",
         }
     if ExtensionSurface.MCP not in spec.surfaces:
+        emit_invoked("error", code="surface_not_allowed")
         return {
             "status": "error",
             "code": "surface_not_allowed",
@@ -97,10 +128,8 @@ async def extension_invoke(
         }
 
     if not spec.requires_app_server:
-        # In-process dispatch for local-only commands — skip observability logging.
-        # These commands don't go through the app server, and the MCP server doesn't
-        # have a stable runtime root for writing logs. HTTP-routed commands will be
-        # logged by the app server's dispatcher.
+        # In-process dispatch for local-only commands. Rootless observability
+        # stays process-scoped via stderr telemetry rather than segment storage.
         dispatcher = ExtensionCommandDispatcher(registry)
         context_builder = ExtensionInvocationContextBuilder(ExtensionSurface.MCP)
         if request_id is not None:
@@ -116,13 +145,16 @@ async def extension_invoke(
             services=ExtensionCommandServices(),
         )
         if isinstance(result, ExtensionErrorResult):
+            emit_invoked("error", code=result.code)
             return {
                 "status": "error",
                 "code": result.code,
                 "message": result.message,
             }
+        emit_invoked("ok")
         return {"status": "ok", "result": result.payload}
 
+    emit_invoked("error", code="app_server_archived")
     return {
         "status": "error",
         "code": "app_server_archived",
