@@ -32,8 +32,20 @@ class ConfigSurfaceWorkspaceRoots(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     count: int
-    enabled: int
-    missing: int
+    projected: int
+    skipped: int
+
+
+class ConfigSurfaceWorkspaceRootDetail(BaseModel):
+    """Per-root workspace detail surfaced by verbose text/JSON inspection."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    source: str
+    declared_path: str
+    resolved_path: str
+    status: str
 
 
 class ConfigSurfaceWorkspace(BaseModel):
@@ -42,20 +54,21 @@ class ConfigSurfaceWorkspace(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     status: WorkspaceStatus
-    path: str | None = None
+    sources: tuple[str, ...] = ()
     roots: ConfigSurfaceWorkspaceRoots
     applicability: dict[str, WorkspaceApplicability]
+    roots_detail: tuple[ConfigSurfaceWorkspaceRootDetail, ...] = ()
 
     @classmethod
     def from_snapshot(cls, snapshot: WorkspaceSnapshot) -> ConfigSurfaceWorkspace:
         projectable_roots = get_projectable_roots(snapshot)
         return cls(
             status=snapshot.status,
-            path=snapshot.path.as_posix() if snapshot.path is not None else None,
+            sources=tuple(path.as_posix() for path in snapshot.source_paths),
             roots=ConfigSurfaceWorkspaceRoots(
                 count=snapshot.roots_count,
-                enabled=snapshot.enabled_roots_count,
-                missing=snapshot.missing_roots_count,
+                projected=len(projectable_roots),
+                skipped=snapshot.roots_count - len(projectable_roots),
             ),
             applicability={
                 HarnessId.CLAUDE.value: project_workspace_roots(
@@ -71,6 +84,16 @@ class ConfigSurfaceWorkspace(BaseModel):
                     roots=projectable_roots,
                 ).applicability,
             },
+            roots_detail=tuple(
+                ConfigSurfaceWorkspaceRootDetail(
+                    name=root.name,
+                    source=root.source,
+                    declared_path=root.declared_path,
+                    resolved_path=root.resolved_path.as_posix(),
+                    status="projected" if root.enabled and root.exists else "skipped",
+                )
+                for root in snapshot.roots
+            ),
         )
 
 

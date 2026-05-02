@@ -170,8 +170,12 @@ from meridian.lib.ops.work_lifecycle import (
 from meridian.lib.ops.workspace import (
     WorkspaceInitInput,
     WorkspaceInitOutput,
+    WorkspaceMigrateInput,
+    WorkspaceMigrateOutput,
     workspace_init,
     workspace_init_sync,
+    workspace_migrate,
+    workspace_migrate_sync,
 )
 
 _OP_SPECS: tuple[ExtensionCommandSpec, ...] = (
@@ -243,13 +247,26 @@ _OP_SPECS: tuple[ExtensionCommandSpec, ...] = (
     ExtensionCommandSpec.from_op(
         extension_id="meridian.workspace",
         command_id="init",
-        summary="Create local workspace.local.toml with commented examples.",
+        summary="Create local meridian.local.toml workspace scaffold.",
         handler=workspace_init,
         sync_handler=workspace_init_sync,
         input_type=WorkspaceInitInput,
         output_type=WorkspaceInitOutput,
         cli_group="workspace",
         cli_name="init",
+        agent_default_format="text",
+        surfaces=frozenset({ExtensionSurface.CLI, ExtensionSurface.HTTP}),
+    ),
+    ExtensionCommandSpec.from_op(
+        extension_id="meridian.workspace",
+        command_id="migrate",
+        summary="Migrate legacy workspace.local.toml roots into meridian.local.toml.",
+        handler=workspace_migrate,
+        sync_handler=workspace_migrate_sync,
+        input_type=WorkspaceMigrateInput,
+        output_type=WorkspaceMigrateOutput,
+        cli_group="workspace",
+        cli_name="migrate",
         agent_default_format="text",
         surfaces=frozenset({ExtensionSurface.CLI, ExtensionSurface.HTTP}),
     ),

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Literal, cast
 
 import structlog
-from pydantic import BaseModel, ConfigDict, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, field_serializer
 
 from meridian.lib.config.context_config import ContextSourceType
 from meridian.lib.config.project_config_state import (
@@ -272,27 +272,36 @@ class ConfigShowOutput(BaseModel):
     path: str
     workspace: ConfigSurfaceWorkspace
     values: tuple[ConfigResolvedValue, ...]
-    workspace_findings: tuple[WorkspaceFinding, ...] = Field(default=(), exclude=True)
+    workspace_findings: tuple[WorkspaceFinding, ...] = ()
     warning: str | None = None
 
     @field_serializer("workspace")
     def _serialize_workspace(self, value: ConfigSurfaceWorkspace) -> dict[str, object]:
-        return value.model_dump(exclude_none=True)
+        return value.model_dump(exclude={"roots_detail"} if not value.roots_detail else None)
 
     def format_text(self, ctx: FormatContext | None = None) -> str:
-        _ = ctx
+        verbosity = 0 if ctx is None else ctx.verbosity
         lines = [f"path: {self.path}"]
         lines.append(f"workspace.status = {self.workspace.status}")
-        if self.workspace.path is not None:
-            lines.append(f"workspace.path = {self.workspace.path}")
+        lines.append(
+            "workspace.sources = "
+            + json.dumps(list(self.workspace.sources), sort_keys=True)
+        )
         lines.append(f"workspace.roots.count = {self.workspace.roots.count}")
-        lines.append(f"workspace.roots.enabled = {self.workspace.roots.enabled}")
-        lines.append(f"workspace.roots.missing = {self.workspace.roots.missing}")
+        lines.append(f"workspace.roots.projected = {self.workspace.roots.projected}")
+        lines.append(f"workspace.roots.skipped = {self.workspace.roots.skipped}")
         for harness in ("claude", "codex", "opencode"):
             applicability = self.workspace.applicability.get(harness)
             if applicability is None:
                 continue
             lines.append(f"workspace.applicability.{harness} = {applicability}")
+        if verbosity > 0:
+            for index, root in enumerate(self.workspace.roots_detail):
+                lines.append(f"workspace.roots[{index}].name = {root.name}")
+                lines.append(f"workspace.roots[{index}].source = {root.source}")
+                lines.append(f"workspace.roots[{index}].declared_path = {root.declared_path}")
+                lines.append(f"workspace.roots[{index}].resolved_path = {root.resolved_path}")
+                lines.append(f"workspace.roots[{index}].status = {root.status}")
         if self.warning is not None:
             lines.append(f"warning: {self.warning}")
         for finding in self.workspace_findings:

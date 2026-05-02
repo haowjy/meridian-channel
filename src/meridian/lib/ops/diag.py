@@ -10,7 +10,6 @@ from meridian.lib.config.project_root import resolve_project_root
 from meridian.lib.core.depth import is_root_side_effect_process
 from meridian.lib.core.spawn_lifecycle import is_active_spawn_status
 from meridian.lib.core.util import FormatContext
-from meridian.lib.harness.ids import HarnessId
 from meridian.lib.ops.config import ensure_runtime_state_bootstrap_sync
 from meridian.lib.ops.config_surface import build_config_surface
 from meridian.lib.ops.mars import check_upgrade_availability, format_upgrade_availability
@@ -192,21 +191,6 @@ def doctor_sync(payload: DoctorInput) -> DoctorOutput:
                 code=finding.code,
                 message=finding.message,
                 payload=finding.payload,
-            )
-        )
-    codex_workspace_applicability = surface.workspace.applicability.get(HarnessId.CODEX.value)
-    if codex_workspace_applicability == "unsupported:requires_config_generation":
-        warnings.append(
-            DoctorWarning(
-                code="workspace_unsupported_harness",
-                message=(
-                    "Workspace roots cannot be projected to codex yet; "
-                    "this harness requires config generation."
-                ),
-                payload={
-                    "harness": HarnessId.CODEX.value,
-                    "applicability": codex_workspace_applicability,
-                },
             )
         )
     if not skills_dirs:

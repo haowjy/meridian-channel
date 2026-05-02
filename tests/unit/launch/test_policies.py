@@ -262,8 +262,25 @@ def test_build_launch_context_surfaces_warning_channel_without_agent_metadata_si
     assert "warning" not in preview.resolved_request.agent_metadata
 
 
-def test_spawn_prepare_derives_harness_from_model_before_default_harness(tmp_path: Path) -> None:
+def test_spawn_prepare_derives_harness_from_model_before_default_harness(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _write_minimal_mars_config(tmp_path)
+    alias = _mock_alias(
+        alias="claude-sonnet-4",
+        model_id="claude-sonnet-4",
+        harness=HarnessId.CLAUDE,
+    )
+    monkeypatch.setattr(
+        "meridian.lib.ops.spawn.prepare.resolve_model",
+        lambda name, project_root=None: alias,
+    )
+    _patch_alias_resolution(
+        monkeypatch,
+        resolved_entries={"claude-sonnet-4": alias},
+        catalog_entries=[alias],
+    )
     config = MeridianConfig(default_model="claude-sonnet-4", default_harness="codex")
     runtime = build_runtime_from_root_and_config(tmp_path, config)
 
@@ -438,9 +455,22 @@ def test_primary_and_spawn_alias_effort_defaults_match(
     assert spawn.model_selection.canonical_model_id == "gpt-5.5"
 
 
-def test_resolve_policies_cli_model_override_can_replace_profile_harness(tmp_path: Path) -> None:
+def test_resolve_policies_cli_model_override_can_replace_profile_harness(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _write_minimal_mars_config(tmp_path)
     write_agent(tmp_path, name="explorer", model="gpt-5.4", harness="codex")
+    _patch_alias_resolution(
+        monkeypatch,
+        resolved_entries={
+            "claude-haiku-4-5": _mock_alias(
+                alias="claude-haiku-4-5",
+                model_id="claude-haiku-4-5",
+                harness=HarnessId.CLAUDE,
+            )
+        },
+    )
 
     policies = resolve_policies(
         project_root=tmp_path,
@@ -457,8 +487,21 @@ def test_resolve_policies_cli_model_override_can_replace_profile_harness(tmp_pat
     assert str(policies.harness) == "claude"
 
 
-def test_resolve_policies_errors_on_same_layer_user_harness_model_conflict(tmp_path: Path) -> None:
+def test_resolve_policies_errors_on_same_layer_user_harness_model_conflict(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _write_minimal_mars_config(tmp_path)
+    _patch_alias_resolution(
+        monkeypatch,
+        resolved_entries={
+            "claude-haiku-4-5": _mock_alias(
+                alias="claude-haiku-4-5",
+                model_id="claude-haiku-4-5",
+                harness=HarnessId.CLAUDE,
+            )
+        },
+    )
     with pytest.raises(ValueError, match="incompatible with model"):
         resolve_policies(
             project_root=tmp_path,
@@ -759,6 +802,7 @@ def test_resolve_policies_falls_back_to_first_available_fanout_before_model_poli
     assert policies.model_selection is not None
     assert policies.model_selection.requested_token == "claude-choice"
     assert policies.model_selection.selected_model_token == "codex-fanout"
+    assert policies.model_selection.canonical_model_id == "gpt-5.5"
     assert policies.model_selection.harness_provenance == "availability-fallback"
 
 
@@ -811,6 +855,116 @@ def test_resolve_policies_fanout_skips_raw_model_with_unresolvable_harness(
     assert policies.model_selection.requested_token == "claude-choice"
     assert policies.model_selection.selected_model_token == "codex-fanout"
     assert policies.model_selection.harness_provenance == "availability-fallback"
+
+
+def test_resolve_policies_fallback_scans_fanout_then_exact_policies_and_skips_globs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_minimal_mars_config(tmp_path)
+    _write_agent_profile(
+        tmp_path,
+        name="reviewer",
+        frontmatter=(
+            "name: reviewer\n"
+            "model: claude-choice\n"
+            "fanout:\n"
+            "  - alias: unavailable-too\n"
+            "model-policies:\n"
+            "  - match: {model-glob: 'gpt-*'}\n"
+            "    override: {effort: low}\n"
+            "  - match: {alias: unavailable-policy}\n"
+            "    override: {autocompact: 44}\n"
+            "  - match: {model: gpt-5.4}\n"
+            "    override: {effort: high}\n"
+        ),
+    )
+    aliases = {
+        "claude-choice": _mock_alias(
+            alias="claude-choice", model_id="claude-haiku-4-5", harness=HarnessId.CLAUDE
+        ),
+        "unavailable-too": _mock_alias(
+            alias="unavailable-too", model_id="opencode-model", harness=HarnessId.OPENCODE
+        ),
+        "unavailable-policy": _mock_alias(
+            alias="unavailable-policy", model_id="opencode-policy", harness=HarnessId.OPENCODE
+        ),
+        "gpt-5.4": _mock_alias(alias="", model_id="gpt-5.4", harness=HarnessId.CODEX),
+    }
+    _patch_alias_resolution(monkeypatch, resolved_entries=aliases)
+    registry = HarnessRegistry()
+    registry.register(CodexAdapter())
+
+    policies = resolve_policies(
+        project_root=tmp_path,
+        layers=(RuntimeOverrides(agent="reviewer"), RuntimeOverrides()),
+        config_overrides=RuntimeOverrides(),
+        config=MeridianConfig(),
+        harness_registry=registry,
+        configured_default_harness="claude",
+    )
+
+    assert policies.model == "gpt-5.4"
+    assert policies.harness == HarnessId.CODEX
+    assert policies.resolved_overrides.effort == "high"
+    assert policies.resolved_overrides.autocompact is None
+    assert policies.model_selection is not None
+    assert policies.model_selection.requested_token == "claude-choice"
+    assert policies.model_selection.selected_model_token == "gpt-5.4"
+    assert policies.model_selection.canonical_model_id == "gpt-5.4"
+    assert policies.model_selection.harness_provenance == "availability-fallback"
+
+
+def test_resolve_policies_raises_when_fallback_candidates_are_exhausted_and_glob_is_skipped(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_minimal_mars_config(tmp_path)
+    _write_agent_profile(
+        tmp_path,
+        name="reviewer",
+        frontmatter=(
+            "name: reviewer\n"
+            "model: claude-choice\n"
+            "fanout:\n"
+            "  - alias: unavailable-fanout\n"
+            "model-policies:\n"
+            "  - match: {alias: unavailable-alias}\n"
+            "    override: {effort: low}\n"
+            "  - match: {model: unavailable-model}\n"
+            "    override: {autocompact: 44}\n"
+            "  - match: {model-glob: 'gpt-*'}\n"
+            "    override: {harness: codex, effort: high}\n"
+        ),
+    )
+
+    aliases = {
+        "claude-choice": _mock_alias(
+            alias="claude-choice", model_id="claude-haiku-4-5", harness=HarnessId.CLAUDE
+        ),
+        "unavailable-fanout": _mock_alias(
+            alias="unavailable-fanout", model_id="opencode-fanout", harness=HarnessId.OPENCODE
+        ),
+        "unavailable-alias": _mock_alias(
+            alias="unavailable-alias", model_id="opencode-alias", harness=HarnessId.OPENCODE
+        ),
+        "unavailable-model": _mock_alias(
+            alias="", model_id="unavailable-model", harness=HarnessId.OPENCODE
+        ),
+    }
+    _patch_alias_resolution(monkeypatch, resolved_entries=aliases)
+    registry = HarnessRegistry()
+    registry.register(CodexAdapter())
+
+    with pytest.raises(ValueError, match="Unknown or unsupported harness 'claude'"):
+        resolve_policies(
+            project_root=tmp_path,
+            layers=(RuntimeOverrides(agent="reviewer"), RuntimeOverrides()),
+            config_overrides=RuntimeOverrides(),
+            config=MeridianConfig(),
+            harness_registry=registry,
+            configured_default_harness="claude",
+        )
 
 
 def test_resolve_policies_explicit_model_skips_harness_availability_fallback(
@@ -1500,18 +1654,19 @@ def test_resolve_policies_no_overrides_at_any_layer_yields_none(
     assert policies.resolved_overrides.autocompact is None
 
 
-def test_resolve_policies_temporary_gate_resolves_layer_model_at_most_once(
+def test_resolve_policies_fallback_winner_is_not_re_resolved_after_selection(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # TEMPORARY GATE TEST: remove after Phase 1 ships.
     _write_minimal_mars_config(tmp_path)
     _write_agent_profile(
         tmp_path,
         name="architect",
         frontmatter=(
             "name: architect\n"
-            "model: gpt-5.4\n"
+            "model: claude-choice\n"
+            "fanout:\n"
+            "  - alias: codex-fanout\n"
         ),
     )
 
@@ -1520,31 +1675,43 @@ def test_resolve_policies_temporary_gate_resolves_layer_model_at_most_once(
     def resolve_once(name: str, project_root: Path | None = None) -> AliasEntry:
         _ = project_root
         calls.append(name)
-        if name == "gpt":
-            return _mock_alias(alias="gpt", model_id="gpt-5.4")
+        if name == "claude-choice":
+            return _mock_alias(
+                alias="claude-choice",
+                model_id="claude-haiku-4-5",
+                harness=HarnessId.CLAUDE,
+            )
+        if name == "codex-fanout":
+            return _mock_alias(
+                alias="codex-fanout",
+                model_id="gpt-5.5",
+                harness=HarnessId.CODEX,
+            )
         return _mock_alias(alias="", model_id=name)
 
     monkeypatch.setattr("meridian.lib.launch.policies.resolve_model_entry", resolve_once)
-    def list_gpt_alias(project_root: Path | None = None) -> list[AliasEntry]:
-        _ = project_root
-        return [_mock_alias(alias="gpt", model_id="gpt-5.4")]
-
     monkeypatch.setattr(
         "meridian.lib.launch.policies.load_merged_aliases",
-        list_gpt_alias,
+        lambda project_root=None: [
+            _mock_alias(alias="codex-fanout", model_id="gpt-5.5", harness=HarnessId.CODEX)
+        ],
     )
+    registry = HarnessRegistry()
+    registry.register(CodexAdapter())
 
     policies = resolve_policies(
         project_root=tmp_path,
-        layers=(RuntimeOverrides(agent="architect", model="gpt"), RuntimeOverrides()),
+        layers=(RuntimeOverrides(agent="architect"), RuntimeOverrides()),
         config_overrides=RuntimeOverrides(),
         config=MeridianConfig(),
-        harness_registry=get_default_harness_registry(),
-        configured_default_harness="codex",
+        harness_registry=registry,
+        configured_default_harness="claude",
     )
 
-    assert policies.model == "gpt-5.4"
-    assert calls.count("gpt") <= 1
+    assert policies.model == "gpt-5.5"
+    assert calls.count("claude-choice") == 1
+    assert calls.count("codex-fanout") == 1
+    assert "gpt-5.5" not in calls
 
 
 def test_resolve_policies_model_selection_preserves_requested_alias_token(

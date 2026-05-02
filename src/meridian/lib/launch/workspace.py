@@ -5,6 +5,18 @@ from pathlib import Path
 from meridian.lib.config.workspace import WorkspaceSnapshot, resolve_workspace_snapshot
 
 
+def _format_workspace_source_path(*, project_root: Path, source_paths: tuple[Path, ...]) -> str:
+    if not source_paths:
+        return "workspace.local.toml"
+    labels: list[str] = []
+    for path in source_paths:
+        try:
+            labels.append(path.relative_to(project_root).as_posix())
+        except ValueError:
+            labels.append(path.as_posix())
+    return ", ".join(labels)
+
+
 def resolve_workspace_snapshot_for_launch(project_root: Path) -> WorkspaceSnapshot:
     """Resolve launch workspace snapshot and raise on invalid topology."""
 
@@ -14,9 +26,12 @@ def resolve_workspace_snapshot_for_launch(project_root: Path) -> WorkspaceSnapsh
     details = "; ".join(finding.message for finding in snapshot.findings if finding.message.strip())
     if not details:
         details = "Workspace file is invalid."
-    path = snapshot.path.as_posix() if snapshot.path is not None else "workspace.local.toml"
+    path = _format_workspace_source_path(
+        project_root=project_root.resolve(),
+        source_paths=snapshot.source_paths,
+    )
     raise ValueError(
-        f"Invalid workspace file '{path}'. {details} "
+        f"Invalid workspace config in {path}. {details} "
         "Run `meridian config show` or `meridian doctor` for details."
     )
 

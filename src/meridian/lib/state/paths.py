@@ -210,6 +210,18 @@ def _context_config_paths(
     )
 
 
+def _workspace_config_paths(
+    project_root: Path,
+    *,
+    project_config: Path | None = None,
+    local_config: Path | None = None,
+) -> tuple[Path, Path]:
+    return (
+        project_config or (project_root / "meridian.toml"),
+        local_config or (project_root / "meridian.local.toml"),
+    )
+
+
 def _load_context_table(path: Path) -> dict[str, object] | None:
     if not path.is_file():
         return None
@@ -227,6 +239,25 @@ def _load_context_table(path: Path) -> dict[str, object] | None:
             f"Invalid value for 'context' in '{path.as_posix()}': expected table."
         )
     return cast("dict[str, object]", context)
+
+
+def _load_workspace_table(path: Path) -> dict[str, object] | None:
+    if not path.is_file():
+        return None
+    try:
+        payload_obj = tomllib.loads(path.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as exc:
+        raise ValueError(f"Invalid TOML in Meridian config '{path.as_posix()}': {exc}") from exc
+
+    payload = cast("dict[str, object]", payload_obj)
+    workspace = payload.get("workspace")
+    if workspace is None:
+        return None
+    if not isinstance(workspace, dict):
+        raise ValueError(
+            f"Invalid value for 'workspace' in '{path.as_posix()}': expected table."
+        )
+    return cast("dict[str, object]", workspace)
 
 
 def _merge_nested_dicts(base: dict[str, object], overrides: dict[str, object]) -> dict[str, object]:
@@ -306,6 +337,47 @@ def load_context_config(
     return _try_load_context_config(
         project_root,
         user_config=user_config,
+        project_config=project_config,
+        local_config=local_config,
+    )
+
+
+def _try_load_workspace_config(
+    project_root: Path,
+    *,
+    project_config: Path | None = None,
+    local_config: Path | None = None,
+) -> dict[str, object] | None:
+    """Try loading merged workspace config from project/local Meridian config files."""
+
+    merged_workspace: dict[str, object] = {}
+    found_workspace = False
+    for config_path in _workspace_config_paths(
+        project_root,
+        project_config=project_config,
+        local_config=local_config,
+    ):
+        workspace_table = _load_workspace_table(config_path)
+        if workspace_table is None:
+            continue
+        found_workspace = True
+        merged_workspace = _merge_nested_dicts(merged_workspace, workspace_table)
+
+    if not found_workspace:
+        return None
+    return merged_workspace
+
+
+def load_workspace_config(
+    project_root: Path,
+    *,
+    project_config: Path | None = None,
+    local_config: Path | None = None,
+) -> dict[str, object] | None:
+    """Load merged workspace config for one repo, or ``None`` when no [workspace] exists."""
+
+    return _try_load_workspace_config(
+        project_root,
         project_config=project_config,
         local_config=local_config,
     )

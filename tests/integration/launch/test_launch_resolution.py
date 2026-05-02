@@ -139,6 +139,62 @@ def test_workspace_roots_append_after_claude_preflight_projection(
     )
 
 
+def test_named_workspace_roots_project_through_codex_launch_context(tmp_path: Path) -> None:
+    _write_minimal_mars_config(tmp_path)
+    committed_root = tmp_path / "committed-root"
+    local_override_root = tmp_path / "local-override-root"
+    local_only_root = tmp_path / "local-only-root"
+    legacy_root = tmp_path / "legacy-root"
+    for path in (committed_root, local_override_root, local_only_root, legacy_root):
+        path.mkdir()
+    (tmp_path / "meridian.toml").write_text(
+        "[workspace.shared]\n"
+        'path = "./committed-root"\n'
+        "\n"
+        "[workspace.local_only]\n"
+        'path = "./local-only-root"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "meridian.local.toml").write_text(
+        "[workspace.shared]\n"
+        'path = "./local-override-root"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "workspace.local.toml").write_text(
+        "[[context-roots]]\n"
+        'path = "./legacy-root"\n',
+        encoding="utf-8",
+    )
+
+    preview = build_launch_context(
+        spawn_id="dry-run-codex-named-workspace",
+        request=SpawnRequest(
+            prompt="workspace projection",
+            model="gpt-5.4",
+            harness="codex",
+        ),
+        runtime=LaunchRuntime(
+            argv_intent=LaunchArgvIntent.REQUIRED,
+            runtime_root=(tmp_path / ".meridian").as_posix(),
+            project_paths_project_root=tmp_path.as_posix(),
+            project_paths_execution_cwd=tmp_path.as_posix(),
+        ),
+        harness_registry=get_default_harness_registry(),
+        dry_run=True,
+    )
+
+    runtime_root = tmp_path / ".meridian"
+    assert preview.run_params.extra_args == (
+        "--add-dir",
+        local_override_root.as_posix(),
+        "--add-dir",
+        local_only_root.as_posix(),
+        "--add-dir",
+        runtime_root.as_posix(),
+    )
+    assert legacy_root.as_posix() not in preview.run_params.extra_args
+
+
 def test_git_backed_context_remote_projects_clone_root_once(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -180,11 +236,16 @@ def test_git_backed_context_remote_projects_clone_root_once(
 
     clone_root = resolve_clone_path(remote)
     runtime_root = tmp_path / ".meridian"
-    assert preview.run_params.extra_args == (
-        "--add-dir",
-        clone_root.as_posix(),
-        "--add-dir",
-        runtime_root.as_posix(),
+    codex_clone_root_pairs = sum(
+        1
+        for index, token in enumerate(preview.run_params.extra_args[:-1])
+        if token == "--add-dir"
+        and preview.run_params.extra_args[index + 1] == clone_root.as_posix()
+    )
+    assert codex_clone_root_pairs == 1
+    assert any(
+        token == "--add-dir" and preview.run_params.extra_args[index + 1] == runtime_root.as_posix()
+        for index, token in enumerate(preview.run_params.extra_args[:-1])
     )
 
     monkeypatch.setenv("CLAUDECODE", "1")
@@ -210,6 +271,52 @@ def test_git_backed_context_remote_projects_clone_root_once(
         if token == "--add-dir" and claude_preview.argv[index + 1] == clone_root.as_posix()
     )
     assert claude_clone_root_pairs == 1
+
+
+def test_named_workspace_roots_project_through_opencode_launch_context(
+    tmp_path: Path,
+) -> None:
+    _write_minimal_mars_config(tmp_path)
+    docs_root = tmp_path / "docs-root"
+    docs_root.mkdir()
+    (tmp_path / "meridian.toml").write_text(
+        "[workspace.docs]\n"
+        'path = "./docs-root"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "workspace.local.toml").write_text(
+        "[[context-roots]]\n"
+        'path = "./ignored-legacy"\n',
+        encoding="utf-8",
+    )
+
+    preview = build_launch_context(
+        spawn_id="dry-run-opencode-named-workspace",
+        request=SpawnRequest(
+            prompt="workspace projection",
+            model="gemini-2.5-pro",
+            harness="opencode",
+        ),
+        runtime=LaunchRuntime(
+            argv_intent=LaunchArgvIntent.REQUIRED,
+            runtime_root=(tmp_path / ".meridian").as_posix(),
+            project_paths_project_root=tmp_path.as_posix(),
+            project_paths_execution_cwd=tmp_path.as_posix(),
+        ),
+        harness_registry=get_default_harness_registry(),
+        dry_run=True,
+    )
+
+    runtime_root = tmp_path / ".meridian"
+    payload = json.loads(preview.env_overrides[OPENCODE_CONFIG_CONTENT_ENV])
+    assert payload == {
+        "permission": {
+            "external_directory": {
+                docs_root.as_posix(): "allow",
+                runtime_root.as_posix(): "allow",
+            }
+        }
+    }
 
 
 @pytest.mark.parametrize(
