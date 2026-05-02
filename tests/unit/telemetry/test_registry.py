@@ -115,7 +115,7 @@ def test_usage_model_family_normalization_omits_raw_model_ids() -> None:
     assert normalize_usage_model_family("claude-sonnet-4-6") == "claude-sonnet"
     assert normalize_usage_model_family("claude-opus-4-6") == "claude-opus"
     assert normalize_usage_model_family("claude-haiku-4-6") == "claude-haiku"
-    assert normalize_usage_model_family("gpt-5.3-codex") == "codex"
+    assert normalize_usage_model_family("vendor-codex-model") == "codex"
     assert normalize_usage_model_family("codex-latest") == "codex"
     assert normalize_usage_model_family("o4-mini") == "openai-o"
     assert normalize_usage_model_family("o3-2026-01-01") == "openai-o"
