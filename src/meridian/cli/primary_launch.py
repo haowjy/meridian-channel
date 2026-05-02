@@ -11,6 +11,7 @@ from meridian.cli.utils import missing_fork_session_error
 from meridian.lib.core.util import FormatContext
 from meridian.lib.harness.registry import get_default_harness_registry
 from meridian.lib.launch import LaunchRequest, SessionMode, launch_primary
+from meridian.lib.launch.composition import PromptDocument
 from meridian.lib.launch.request import SessionRequest
 from meridian.lib.ops.reference import resolve_session_reference
 
@@ -113,6 +114,8 @@ def run_primary_launch(
     timeout: float | None,
     dry_run: bool,
     passthrough: tuple[str, ...],
+    supplemental_prompt_documents: tuple[PromptDocument, ...] = (),
+    prompt: str | None = None,
 ) -> PrimaryLaunchOutput:
     def _merge_warnings(*warnings: str | None) -> str | None:
         parts = [item.strip() for item in warnings if item and item.strip()]
@@ -234,6 +237,7 @@ def run_primary_launch(
             passthrough_args=passthrough,
             session_mode=session_mode,
             pinned_context="",
+            supplemental_prompt_documents=supplemental_prompt_documents,
             dry_run=dry_run,
             approval=resolved_approval,
             effort=effort,

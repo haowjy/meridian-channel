@@ -4,6 +4,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from meridian.lib.launch.composition import PromptDocument
+
 
 def _empty_template_vars() -> dict[str, str]:
     return {}
@@ -63,6 +65,7 @@ class SpawnRequest(BaseModel):
     harness: str | None = None
     agent: str | None = None
     skills: tuple[str, ...] = ()
+    supplemental_prompt_documents: tuple[PromptDocument, ...] = ()
 
     # Harness shape
     extra_args: tuple[str, ...] = ()

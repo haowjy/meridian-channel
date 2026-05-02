@@ -53,6 +53,7 @@ def build_primary_spawn_request(
         harness=(request.harness or "").strip() or None,
         agent=(request.agent or "").strip() or None,
         extra_args=request.passthrough_args,
+        supplemental_prompt_documents=request.supplemental_prompt_documents,
         sandbox=request.sandbox,
         approval=request.approval,
         autocompact=request.autocompact,

@@ -11,6 +11,7 @@ from meridian.lib.catalog.model_aliases import AliasEntry
 from meridian.lib.catalog.models import load_merged_aliases
 from meridian.lib.catalog.skill import SkillRegistry
 from meridian.lib.core.domain import SkillContent
+from meridian.lib.launch.composition import PromptDocument
 from meridian.lib.launch.reference import (
     ReferenceItem,
     render_reference_blocks,
@@ -143,6 +144,26 @@ def _render_templated_section(
 ) -> str:
     return substitute_template_variables(section_text, variables)
 
+
+
+def compose_skill_prompt_documents(skills: Sequence[SkillContent]) -> tuple[PromptDocument, ...]:
+    """Format loaded skills as typed supplemental prompt documents."""
+
+    documents: list[PromptDocument] = []
+    for skill in skills:
+        content = skill.content.strip()
+        if not content:
+            continue
+        path = Path(skill.path).as_posix()
+        documents.append(
+            PromptDocument(
+                kind="skill",
+                logical_name=skill.name,
+                path=path,
+                content=f"# Skill: {path}\n\n{content}",
+            )
+        )
+    return tuple(documents)
 
 def compose_skill_injections(skills: Sequence[SkillContent]) -> str | None:
     """Format skill content for --append-system-prompt injection.
@@ -449,6 +470,7 @@ __all__ = [
     "compose_run_prompt",
     "compose_run_prompt_text",
     "compose_skill_injections",
+    "compose_skill_prompt_documents",
     "dedupe_skill_contents",
     "dedupe_skill_names",
     "load_skill_contents",

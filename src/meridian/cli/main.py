@@ -50,6 +50,7 @@ from meridian.cli.bootstrap import (
 from meridian.cli.bootstrap import (
     validate_top_level_command as _bootstrap_validate_top_level_command,
 )
+from meridian.cli.bootstrap_cmd import register_bootstrap_command
 from meridian.cli.chat_cmd import register_chat_command
 from meridian.cli.config_cmd import register_config_commands
 from meridian.cli.doctor_cmd import register_doctor_command
@@ -632,6 +633,12 @@ def _register_group_commands() -> None:
     register_chat_command(app)
     register_workspace_commands(workspace_app, emit)
     register_doctor_command(app, emit)
+    register_bootstrap_command(
+        app,
+        emit,
+        get_passthrough_args=lambda: get_global_options().passthrough_args,
+        get_global_harness=lambda: get_global_options().harness,
+    )
     # kg commands register via @kg_app.command decorators at import time.
     import meridian.cli.kg_cmd as _kg_cmd
     import meridian.cli.mermaid_cmd as _mermaid_cmd

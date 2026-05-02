@@ -67,6 +67,7 @@ from .prompt import (
     build_context_prompt,
     build_report_instruction,
     compose_skill_injections,
+    compose_skill_prompt_documents,
     dedupe_skill_names,
     sanitize_prior_output,
     strip_stale_report_paths,
@@ -521,7 +522,7 @@ def _resolve_surface_request(
         )
         prompt = cleaned_user_prompt
 
-        skill_injection = compose_skill_injections(resolved_skills.loaded_skills) or ""
+        supplemental_documents = compose_skill_prompt_documents(resolved_skills.loaded_skills)
 
         agent_profile_body = ""
         # When harness supports native agents, agent body is delivered separately
@@ -542,7 +543,7 @@ def _resolve_surface_request(
         context_prompt = build_context_prompt(project_root=project_paths.project_root) or ""
 
         spawn_composed_content = ComposedLaunchContent(
-            skill_injection=skill_injection,
+            supplemental_documents=supplemental_documents,
             agent_profile_body=agent_profile_body,
             report_instruction=build_report_instruction(),
             inventory_prompt=inventory_prompt,
@@ -630,7 +631,10 @@ def _resolve_surface_request(
                 normalize_system_prompt_passthrough_args(seeded_passthrough_args)
             )
             final_passthrough_args = passthrough_args
-            skill_injection = compose_skill_injections(resolved_skills.loaded_skills) or ""
+            supplemental_documents = (
+                *compose_skill_prompt_documents(resolved_skills.loaded_skills),
+                *request.supplemental_prompt_documents,
+            )
             agent_profile_body = ""
             # When harness supports native agents, agent body is delivered separately
             # (e.g. Claude's adhoc_agent_payload). Otherwise include it in composition.
@@ -642,7 +646,7 @@ def _resolve_surface_request(
                 agent_profile_body = profile.body.strip()
 
             composed = ComposedLaunchContent(
-                skill_injection=skill_injection,
+                supplemental_documents=supplemental_documents,
                 agent_profile_body=agent_profile_body,
                 report_instruction="",
                 inventory_prompt=inventory_prompt or "",

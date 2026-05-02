@@ -2,6 +2,11 @@
 from pathlib import Path
 
 from meridian.lib.core.domain import SkillContent
+from meridian.lib.launch.composition import (
+    ComposedLaunchContent,
+    PromptDocument,
+    render_system_instruction_blocks,
+)
 from meridian.lib.launch.prompt import compose_run_prompt_text
 from meridian.lib.launch.reference import load_reference_items
 
@@ -109,3 +114,28 @@ def test_compose_prompt_mixed_files_and_directories(tmp_path: Path) -> None:
     assert "inner.py" in composed
     # Directory content should NOT be inlined
     assert "# Inner" not in composed
+
+
+
+def test_system_instruction_renders_skill_docs_then_bootstrap_docs() -> None:
+    content = ComposedLaunchContent(
+        supplemental_documents=(
+            PromptDocument(kind="bootstrap", logical_name="b", path="/b", content="BOOTSTRAP"),
+            PromptDocument(kind="skill", logical_name="s", path="/s", content="SKILL"),
+        ),
+        agent_profile_body="PROFILE",
+        report_instruction="REPORT",
+        inventory_prompt="INVENTORY",
+        context_prompt="CONTEXT",
+        passthrough_system_fragments=("PASSTHROUGH",),
+        user_task_prompt="USER",
+        reference_items=(),
+        prior_output="",
+    )
+
+    rendered = render_system_instruction_blocks(content)
+    assert [rendered.index(part) for part in (
+        "SKILL", "BOOTSTRAP", "PROFILE", "REPORT", "INVENTORY", "CONTEXT", "PASSTHROUGH"
+    )] == sorted(rendered.index(part) for part in (
+        "SKILL", "BOOTSTRAP", "PROFILE", "REPORT", "INVENTORY", "CONTEXT", "PASSTHROUGH"
+    ))

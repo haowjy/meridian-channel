@@ -20,7 +20,7 @@ from meridian.lib.launch.reference import render_reference_blocks
 
 # Named canonical orders for SYSTEM_INSTRUCTION composition.
 SYSTEM_INSTRUCTION_BLOCK_ORDER: tuple[str, ...] = (
-    "skill_injection",
+    "supplemental_documents",
     "agent_profile_body",
     "report_instruction",
     "inventory_prompt",
@@ -34,6 +34,16 @@ INLINE_BLOCK_ORDER: tuple[str, ...] = (
     "task_context",
     "user_task_prompt",
 )
+
+
+@dataclass(frozen=True)
+class PromptDocument:
+    """Typed supplemental document injected into launch prompts."""
+
+    kind: Literal["skill", "bootstrap"]
+    logical_name: str
+    path: str
+    content: str
 
 
 @dataclass(frozen=True)
@@ -93,8 +103,8 @@ class ComposedLaunchContent:
     """
 
     # SYSTEM_INSTRUCTION blocks
-    skill_injection: str
-    """Composed skill content (from compose_skill_injections)."""
+    supplemental_documents: tuple[PromptDocument, ...]
+    """Typed supplemental docs; rendered skill docs before bootstrap docs."""
 
     agent_profile_body: str
     """Agent body (when not delivered via native agents)."""
@@ -179,12 +189,21 @@ def join_content_blocks(*blocks: str) -> str:
 def render_system_instruction_blocks(content: ComposedLaunchContent) -> str:
     """Render SYSTEM_INSTRUCTION blocks in canonical order.
 
-    Order: skill_injection, agent_profile_body, report_instruction,
-    inventory_prompt, then passthrough_system_fragments last.
+    Order: skill supplemental documents, bootstrap supplemental documents,
+    agent_profile_body, report_instruction, inventory_prompt, context_prompt,
+    then passthrough_system_fragments last.
     """
-    ordered_blocks = tuple(
-        getattr(content, field_name) for field_name in SYSTEM_INSTRUCTION_BLOCK_ORDER
-    )
+    ordered_blocks: list[str] = []
+    for field_name in SYSTEM_INSTRUCTION_BLOCK_ORDER:
+        if field_name == "supplemental_documents":
+            ordered_blocks.extend(
+                document.content
+                for kind in ("skill", "bootstrap")
+                for document in content.supplemental_documents
+                if document.kind == kind
+            )
+            continue
+        ordered_blocks.append(getattr(content, field_name))
     return join_content_blocks(*ordered_blocks, *content.passthrough_system_fragments)
 
 
@@ -245,6 +264,7 @@ __all__ = [
     "ComposedLaunchContent",
     "ProjectedContent",
     "ProjectionChannels",
+    "PromptDocument",
     "ReferenceRouting",
     "build_reference_routing",
     "join_content_blocks",

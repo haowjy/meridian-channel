@@ -10,14 +10,21 @@ from meridian.lib.harness.projections.project_claude import project_claude_spec_
 from meridian.lib.harness.projections.project_codex_subprocess import (
     project_codex_spec_to_cli_args,
 )
-from meridian.lib.launch.composition import ComposedLaunchContent
+from meridian.lib.launch.composition import ComposedLaunchContent, PromptDocument
 from meridian.lib.launch.reference import ReferenceItem
 from meridian.lib.safety.permissions import PermissionConfig, TieredPermissionResolver
 
 
 def _content() -> ComposedLaunchContent:
     return ComposedLaunchContent(
-        skill_injection="SYSTEM: skill content",
+        supplemental_documents=(
+            PromptDocument(
+                kind="skill",
+                logical_name="skill",
+                path="/repo/skill/SKILL.md",
+                content="SYSTEM: skill content",
+            ),
+        ),
         agent_profile_body="SYSTEM: profile body",
         report_instruction="SYSTEM: report instruction",
         inventory_prompt="SYSTEM: agent inventory",

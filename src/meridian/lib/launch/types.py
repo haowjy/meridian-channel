@@ -6,6 +6,7 @@ from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from meridian.lib.launch.composition import PromptDocument
 from meridian.lib.launch.request import SessionRequest
 
 _CONTINUATION_GUIDANCE = (
@@ -53,6 +54,7 @@ class LaunchRequest(BaseModel):
     autocompact: int | None = None
     passthrough_args: tuple[str, ...] = ()
     pinned_context: str = ""
+    supplemental_prompt_documents: tuple[PromptDocument, ...] = ()
     dry_run: bool = False
     approval: str = "default"
     effort: str | None = None
