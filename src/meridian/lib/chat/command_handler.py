@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, cast
 
@@ -13,6 +14,7 @@ from meridian.lib.chat.session_service import (
     ChatSessionService,
     ConcurrentPromptError,
 )
+from meridian.lib.telemetry import emit_telemetry, make_error_data
 
 if TYPE_CHECKING:
     from meridian.lib.chat.checkpoint import CheckpointService
@@ -33,63 +35,74 @@ class ChatCommandHandler:
         self._checkpoints = checkpoints or {}
 
     async def dispatch(self, command: ChatCommand) -> CommandResult:
+        start = time.monotonic()
+        caught: BaseException | None = None
+        try:
+            result = await self._dispatch(command)
+        except ConcurrentPromptError as exc:
+            caught = exc
+            result = CommandResult(status="rejected", error="concurrent_prompt")
+        except ChatClosedError as exc:
+            caught = exc
+            result = CommandResult(status="rejected", error="chat_closed")
+        except NoActiveExecutionError as exc:
+            caught = exc
+            result = CommandResult(status="rejected", error="no_active_execution")
+        except Exception as exc:
+            caught = exc
+            result = CommandResult(status="rejected", error=str(exc))
+        _emit_command_dispatched(command, result, start, caught)
+        return result
+
+    async def _dispatch(self, command: ChatCommand) -> CommandResult:
         session = self._sessions.get(command.chat_id)
         if session is None:
             return CommandResult(status="rejected", error="chat_not_found")
         if session.state == "closed":
             return CommandResult(status="rejected", error="chat_closed")
 
-        try:
-            match command.type:
-                case "prompt":
-                    text = command.payload.get("text")
-                    if not isinstance(text, str) or not text:
-                        return CommandResult(
-                            status="rejected",
-                            error="invalid_command:missing_text",
-                        )
-                    await session.prompt(text)
-                case "cancel":
-                    await session.cancel()
-                case "approve":
-                    await self._handle_approve(session, command)
-                case "answer_input":
-                    await self._handle_answer_input(session, command)
-                case "close":
-                    await session.close(self._pipelines.get(command.chat_id))
-                case "revert":
-                    checkpoint = self._checkpoints.get(command.chat_id)
-                    if checkpoint is None:
-                        return CommandResult(
-                            status="rejected",
-                            error="checkpoint_not_configured",
-                        )
-                    commit_sha = _required_str(command.payload, "commit_sha")
-                    await checkpoint.revert_to_checkpoint(commit_sha)
-                case "swap_model" | "swap_effort":
-                    # These commands stay schema-recognized so clients can
-                    # share one command vocabulary, but no current harness
-                    # supports runtime model/effort switching through the live
-                    # chat connection. Supporting them requires a harness
-                    # capability plus session/runtime code that safely applies
-                    # the switch to the active execution.
+        match command.type:
+            case "prompt":
+                text = command.payload.get("text")
+                if not isinstance(text, str) or not text:
                     return CommandResult(
                         status="rejected",
-                        error="not_supported_by_current_harness",
+                        error="invalid_command:missing_text",
                     )
-                case _:
+                await session.prompt(text)
+            case "cancel":
+                await session.cancel()
+            case "approve":
+                await self._handle_approve(session, command)
+            case "answer_input":
+                await self._handle_answer_input(session, command)
+            case "close":
+                await session.close(self._pipelines.get(command.chat_id))
+            case "revert":
+                checkpoint = self._checkpoints.get(command.chat_id)
+                if checkpoint is None:
                     return CommandResult(
                         status="rejected",
-                        error=f"unknown_command_type:{command.type}",
+                        error="checkpoint_not_configured",
                     )
-        except ConcurrentPromptError:
-            return CommandResult(status="rejected", error="concurrent_prompt")
-        except ChatClosedError:
-            return CommandResult(status="rejected", error="chat_closed")
-        except NoActiveExecutionError:
-            return CommandResult(status="rejected", error="no_active_execution")
-        except Exception as exc:
-            return CommandResult(status="rejected", error=str(exc))
+                commit_sha = _required_str(command.payload, "commit_sha")
+                await checkpoint.revert_to_checkpoint(commit_sha)
+            case "swap_model" | "swap_effort":
+                # These commands stay schema-recognized so clients can
+                # share one command vocabulary, but no current harness
+                # supports runtime model/effort switching through the live
+                # chat connection. Supporting them requires a harness
+                # capability plus session/runtime code that safely applies
+                # the switch to the active execution.
+                return CommandResult(
+                    status="rejected",
+                    error="not_supported_by_current_harness",
+                )
+            case _:
+                return CommandResult(
+                    status="rejected",
+                    error=f"unknown_command_type:{command.type}",
+                )
         return CommandResult(status="accepted")
 
     async def _handle_approve(self, session: ChatSessionService, command: ChatCommand) -> None:
@@ -158,6 +171,34 @@ def _required_object_dict(value: object) -> dict[str, object]:
         raise ValueError("invalid_command:expected_object")
     typed_value = cast("dict[object, object]", value)
     return {str(key): item for key, item in typed_value.items()}
+
+
+def _emit_command_dispatched(
+    command: ChatCommand,
+    result: CommandResult,
+    start: float,
+    exc: BaseException | None,
+) -> None:
+    data: dict[str, Any] = {
+        "command_type": command.type,
+        "result_status": result.status,
+        "latency_ms": round((time.monotonic() - start) * 1000, 1),
+    }
+    severity = "info"
+    if result.error is not None:
+        data["error"] = result.error
+        severity = "warning"
+    if exc is not None:
+        data.update(make_error_data(exc))
+        severity = "error"
+    emit_telemetry(
+        "chat",
+        "chat.command.dispatched",
+        scope="chat.command_handler",
+        ids={"chat_id": command.chat_id, "command_id": command.command_id},
+        data=data,
+        severity=severity,
+    )
 
 
 __all__ = ["ChatCommandHandler"]

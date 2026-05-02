@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
@@ -21,6 +22,7 @@ from meridian.lib.chat.protocol import CHAT_EXITED, CHAT_STARTED, ChatEvent, utc
 from meridian.lib.chat.session_service import ChatSessionService
 from meridian.lib.chat.ws_fanout import WebSocketFanOut
 from meridian.lib.state.paths import RuntimePaths
+from meridian.lib.telemetry import emit_telemetry
 
 
 @dataclass
@@ -141,7 +143,17 @@ class ChatRuntime(PipelineLookup):
 
         if self._stopped:
             return
+        start = time.monotonic()
+        live_count = len(self._live)
+        persisted_count = len(self._persisted_only)
+        emit_telemetry(
+            "chat",
+            "chat.runtime.stopping",
+            scope="chat.runtime",
+            data={"live_count": live_count, "persisted_count": persisted_count},
+        )
         self._stopped = True
+        chats_cleaned = 0
         try:
             for entry in list(self._live.values()):
                 handle = entry.session.current_execution
@@ -153,10 +165,22 @@ class ChatRuntime(PipelineLookup):
                 with suppress(Exception):
                     await entry.pipeline.stop()
                 entry.fanout = None
+                chats_cleaned += 1
             self._live.clear()
             self._persisted_only.clear()
         finally:
             self._started = False
+            emit_telemetry(
+                "chat",
+                "chat.runtime.stopped",
+                scope="chat.runtime",
+                data={
+                    "chats_cleaned": chats_cleaned,
+                    "live_count": live_count,
+                    "persisted_count": persisted_count,
+                    "latency_ms": round((time.monotonic() - start) * 1000, 1),
+                },
+            )
 
     async def create_chat(self) -> ChatRuntimeView:
         """Create a new chat, register it live, start its pipeline, emit chat.started."""
