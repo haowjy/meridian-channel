@@ -80,6 +80,7 @@ class DebugTracer:
         except Exception as exc:
             self._disabled = True
             from meridian.lib.telemetry import emit_telemetry
+            from meridian.lib.telemetry.events import make_error_data
 
             emit_telemetry(
                 "runtime",
@@ -87,7 +88,7 @@ class DebugTracer:
                 scope="observability.debug_tracer",
                 severity="warning",
                 ids={"spawn_id": self._spawn_id},
-                data={"reason": str(exc)},
+                data=make_error_data(exc=exc),
             )
             logger.warning(
                 "Debug tracer disabled after write failure for spawn %s",

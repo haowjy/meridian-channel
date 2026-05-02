@@ -14,6 +14,7 @@ import httpx
 from meridian.lib.chat.dev_frontend.launcher import BackendEndpoint, LaunchResult
 from meridian.lib.chat.dev_frontend.policy import RawViteExposure
 from meridian.lib.telemetry import emit_telemetry
+from meridian.lib.telemetry.events import make_error_data
 
 
 class RawViteLauncher:
@@ -105,12 +106,17 @@ class RawViteSession:
                         )
                         return
                 if asyncio.get_running_loop().time() >= deadline:
+                    error_data = make_error_data(
+                        message=f"Dev frontend readiness timeout after {timeout}s"
+                    )
+                    error_data["error"]["type"] = "ReadinessTimeout"
                     emit_telemetry(
                         "server",
                         "dev_frontend.readiness_timeout",
                         scope="dev_frontend.supervisor",
                         severity="error",
                         data={
+                            **error_data,
                             "url": self._url,
                             "launcher": "raw_vite",
                             "timeout_s": timeout,

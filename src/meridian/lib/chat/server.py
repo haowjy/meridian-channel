@@ -23,6 +23,7 @@ from meridian.lib.chat.replay import ReplayService
 from meridian.lib.chat.runtime import ChatRuntime
 from meridian.lib.state.user_paths import get_user_home
 from meridian.lib.telemetry import emit_telemetry
+from meridian.lib.telemetry.events import make_error_data
 
 if TYPE_CHECKING:
     from meridian.lib.chat.backend_acquisition import BackendAcquisition
@@ -279,11 +280,13 @@ async def ws_chat(websocket: WebSocket, chat_id: str) -> None:
     last_seq = _parse_last_seq(websocket)
     stream_source = _runtime.get_stream_source(chat_id)
     if stream_source is None:
+        error_data = make_error_data(message="chat_not_found")
+        error_data["error"]["type"] = "WebSocketRejected"
         _emit_ws_event(
             "chat.ws.rejected",
             chat_id=chat_id,
             last_seq=last_seq,
-            data={"close_code": 4004, "reason": "chat_not_found"},
+            data={**error_data, "close_code": 4004},
             severity="warning",
         )
         await websocket.close(code=4004, reason="chat_not_found")

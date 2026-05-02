@@ -720,6 +720,10 @@ class SpawnManager:
                 )
         except asyncio.QueueFull:
             from meridian.lib.telemetry import emit_telemetry
+            from meridian.lib.telemetry.events import make_error_data
+
+            error_data = make_error_data(message="Subscriber queue full, event dropped")
+            error_data["error"]["type"] = "QueueFullBackpressure"
 
             emit_telemetry(
                 "runtime",
@@ -727,7 +731,7 @@ class SpawnManager:
                 scope="streaming.spawn_manager",
                 severity="warning",
                 ids={"spawn_id": str(spawn_id)},
-                data={"event_type": event.event_type, "reason": "queue_full"},
+                data={**error_data, "event_type": event.event_type},
             )
             if session.debug_tracer is not None:
                 session.debug_tracer.emit(
