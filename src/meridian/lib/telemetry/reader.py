@@ -13,14 +13,14 @@ def discover_segments(telemetry_dir: Path) -> list[Path]:
     """Return all JSONL segments sorted by mtime ascending."""
     if not telemetry_dir.is_dir():
         return []
-    segments: list[Path] = []
+    entries: list[tuple[Path, float]] = []
     for path in telemetry_dir.glob("*.jsonl"):
         try:
-            path.stat()
+            entries.append((path, path.stat().st_mtime))
         except OSError:
             continue
-        segments.append(path)
-    return sorted(segments, key=lambda p: p.stat().st_mtime)
+    entries.sort(key=lambda entry: entry[1])
+    return [path for path, _mtime in entries]
 
 
 def _matches_filters(
