@@ -30,13 +30,13 @@ from tests.support.fixtures import write_agent
 def _write_minimal_mars_config(project_root: Path) -> None:
     (project_root / "mars.toml").write_text(
         "[settings]\n"
-        'targets = [".agents"]\n',
+        'targets = [".claude"]\n',
         encoding="utf-8",
     )
 
 
 def _write_agent_profile(project_root: Path, *, name: str, frontmatter: str) -> None:
-    path = project_root / ".agents" / "agents" / f"{name}.md"
+    path = project_root / ".mars" / "agents" / f"{name}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"---\n{frontmatter}\n---\n\n# {name}\n", encoding="utf-8")
 

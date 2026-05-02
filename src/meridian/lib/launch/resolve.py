@@ -105,7 +105,7 @@ def format_missing_skills_warning(missing_skills: tuple[str, ...]) -> str:
     if not missing_skills:
         return ""
 
-    expected_paths = [f".agents/skills/{skill}/SKILL.md" for skill in missing_skills]
+    expected_paths = [f".mars/skills/{skill}/SKILL.md" for skill in missing_skills]
     expected_lines = [f"Expected: {expected_paths[0]}"]
     expected_lines.extend(f"         {path}" for path in expected_paths[1:])
     return "\n".join(
