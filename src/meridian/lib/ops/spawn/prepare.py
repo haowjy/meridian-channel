@@ -10,6 +10,7 @@ from meridian.lib.catalog.models import load_discovered_models, load_merged_alia
 from meridian.lib.config.project_root import resolve_project_root
 from meridian.lib.config.settings import MeridianConfig, load_config
 from meridian.lib.core.context import RuntimeContext
+from meridian.lib.diagnostics import capture_library_diagnostics
 from meridian.lib.harness.registry import HarnessRegistry, get_default_harness_registry
 from meridian.lib.launch.context import build_launch_context
 from meridian.lib.launch.reference import parse_template_assignments, validate_reference_paths
@@ -131,7 +132,7 @@ def _validate_requested_model(
     return None
 
 
-def validate_create_input(payload: SpawnCreateInput) -> tuple[SpawnCreateInput, str | None]:
+def _validate_create_input_impl(payload: SpawnCreateInput) -> tuple[SpawnCreateInput, str | None]:
     if not payload.prompt.strip() and not payload.files:
         raise ValueError("prompt required: use --prompt/-p or attach at least one --file/-f.")
 
@@ -143,7 +144,14 @@ def validate_create_input(payload: SpawnCreateInput) -> tuple[SpawnCreateInput, 
     return payload, model_warning
 
 
-def build_create_payload(
+def validate_create_input(payload: SpawnCreateInput) -> tuple[SpawnCreateInput, str | None]:
+    """Validate spawn input without leaking library warnings to stderr."""
+
+    with capture_library_diagnostics():
+        return _validate_create_input_impl(payload)
+
+
+def _build_create_payload_impl(
     payload: SpawnCreateInput,
     *,
     runtime: OperationRuntime | None = None,
@@ -244,6 +252,24 @@ def build_create_payload(
     return preview_context.resolved_request.model_copy(
         update={"cli_command": preview_context.argv}
     )
+
+
+def build_create_payload(
+    payload: SpawnCreateInput,
+    *,
+    runtime: OperationRuntime | None = None,
+    preflight_warning: str | None = None,
+    ctx: RuntimeContext | None = None,
+) -> SpawnRequest:
+    """Build a spawn request without leaking library warnings to stderr."""
+
+    with capture_library_diagnostics():
+        return _build_create_payload_impl(
+            payload,
+            runtime=runtime,
+            preflight_warning=preflight_warning,
+            ctx=ctx,
+        )
 
 
 __all__ = ["build_create_payload", "validate_create_input"]

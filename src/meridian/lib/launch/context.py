@@ -25,6 +25,7 @@ from meridian.lib.core.child_env import build_child_env_overrides, validate_chil
 from meridian.lib.core.overrides import RuntimeOverrides
 from meridian.lib.core.resolved_context import ResolvedContext
 from meridian.lib.core.types import HarnessId, ModelId
+from meridian.lib.diagnostics import capture_library_diagnostics
 from meridian.lib.harness.adapter import SubprocessHarness
 from meridian.lib.harness.workspace_projection import (
     OPENCODE_CONFIG_CONTENT_ENV,
@@ -788,7 +789,7 @@ def _resolve_surface_request(
     )
 
 
-def build_launch_context(
+def _build_launch_context_impl(
     *,
     spawn_id: str,
     request: SpawnRequest,
@@ -1038,6 +1039,30 @@ def build_launch_context(
         warnings=composition_warnings,
         model_selection=model_selection,
     )
+
+
+def build_launch_context(
+    *,
+    spawn_id: str,
+    request: SpawnRequest,
+    runtime: LaunchRuntime,
+    harness_registry: HarnessRegistry,
+    dry_run: bool = False,
+    plan_overrides: Mapping[str, str] | None = None,
+    runtime_work_id: str | None = None,
+) -> LaunchContext:
+    """Build deterministic launch context without leaking library warnings."""
+
+    with capture_library_diagnostics():
+        return _build_launch_context_impl(
+            spawn_id=spawn_id,
+            request=request,
+            runtime=runtime,
+            harness_registry=harness_registry,
+            dry_run=dry_run,
+            plan_overrides=plan_overrides,
+            runtime_work_id=runtime_work_id,
+        )
 
 
 __all__ = [

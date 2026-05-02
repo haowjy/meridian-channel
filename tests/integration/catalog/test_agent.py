@@ -10,6 +10,7 @@ from meridian.lib.catalog.agent import (
     parse_agent_profile,
     scan_agent_profiles,
 )
+from meridian.lib.diagnostics import capture_library_diagnostics
 
 
 def _write_profile(tmp_path: Path, filename: str, frontmatter_lines: list[str]) -> Path:
@@ -323,7 +324,7 @@ def test_parse_agent_profile_models_discards_invalid_entries_and_warns(
     assert "empty models key" in warning_text
 
 
-def test_scan_agent_profiles_quiet_suppresses_parse_warnings(
+def test_scan_agent_profiles_warnings_can_be_captured_at_boundary(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -344,10 +345,18 @@ def test_scan_agent_profiles_quiet_suppresses_parse_warnings(
     )
     caplog.set_level(logging.WARNING, logger="meridian.lib.catalog.agent")
 
-    profiles = scan_agent_profiles(project_root=project_root, quiet=True)
+    with capture_library_diagnostics() as diag:
+        profiles = scan_agent_profiles(project_root=project_root)
 
     assert [profile.name for profile in profiles] == ["Planner"]
     assert caplog.records == []
+    assert [record.getMessage() for record in diag.records] == [
+        "Agent profile 'Planner' has unknown effort 'invalid'.",
+        "Agent profile 'Planner' has autocompact 150 outside valid range.",
+        "Agent profile 'Planner' has invalid models entry for 'bad-effort'; entry ignored.",
+        "Agent profile 'Planner' uses legacy models without model-policies or fanout; "
+        "models is deprecated for fan-out display and policy overrides.",
+    ]
 
 
 def test_parse_agent_profile_keeps_valid_profile_autocompact(tmp_path: Path) -> None:

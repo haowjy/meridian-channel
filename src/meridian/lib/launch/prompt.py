@@ -283,7 +283,7 @@ def build_agent_inventory_prompt(*, project_root: Path) -> str | None:
     """Render installed agent inventory grouped by mode."""
 
     agents = sorted(
-        scan_agent_profiles(project_root=project_root, quiet=True),
+        scan_agent_profiles(project_root=project_root),
         key=lambda profile: profile.name,
     )
 
