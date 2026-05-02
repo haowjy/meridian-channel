@@ -102,3 +102,13 @@ def test_truncated_lines_are_skipped_gracefully(tmp_path: Path) -> None:
     path = _write_segment(telemetry_dir, "123-0001.jsonl", [event], extra='{"truncated"')
 
     assert list(read_events(path)) == [event]
+
+
+def test_status_text_includes_rootless_limitation(tmp_path: Path) -> None:
+    status = compute_status(tmp_path)
+
+    rendered = status.format_text()
+
+    assert "Rootless processes" in rendered
+    assert "stderr only" in rendered
+    assert "outside the scope of local segment readers" in rendered

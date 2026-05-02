@@ -28,7 +28,7 @@ def _ids_filter(
     chat_id: str = "",
     work_id: str = "",
 ) -> dict[str, str] | None:
-    filters = {}
+    filters: dict[str, str] = {}
     if spawn_id:
         filters["spawn_id"] = spawn_id
     if chat_id:

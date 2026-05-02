@@ -35,9 +35,10 @@ def _matches_filters(
     if domain and envelope.get("domain") != domain:
         return False
     if ids_filter:
-        event_ids = envelope.get("ids") or {}
-        if not isinstance(event_ids, dict):
+        raw_ids = envelope.get("ids") or {}
+        if not isinstance(raw_ids, dict):
             return False
+        event_ids: dict[str, Any] = raw_ids
         return all(event_ids.get(key) == value for key, value in ids_filter.items())
     return True
 
@@ -60,11 +61,12 @@ def read_events(
                 if not line:
                     continue
                 try:
-                    envelope = json.loads(line)
+                    loaded = json.loads(line)
                 except (json.JSONDecodeError, ValueError):
                     continue
-                if not isinstance(envelope, dict):
+                if not isinstance(loaded, dict):
                     continue
+                envelope: dict[str, Any] = loaded
                 if _matches_filters(
                     envelope,
                     since_ts=since_ts,
@@ -114,11 +116,12 @@ def tail_events(
                         if not line:
                             continue
                         try:
-                            envelope = json.loads(line)
+                            loaded = json.loads(line)
                         except (json.JSONDecodeError, ValueError):
                             continue
-                        if not isinstance(envelope, dict):
+                        if not isinstance(loaded, dict):
                             continue
+                        envelope: dict[str, Any] = loaded
                         if _matches_filters(envelope, domain=domain, ids_filter=ids_filter):
                             found_new = True
                             yield envelope
