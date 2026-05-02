@@ -139,7 +139,7 @@ def test_spawn_create_dry_run_emits_usage_events(
     )
     usage_events = {event.event: event for event in sink.events if event.domain == "usage"}
     assert usage_events["usage.model.selected"].data == {
-        "model_family": "gpt-5",
+        "model_family": "gpt-5.3",
         "harness": "codex",
     }
     assert "gpt-5.3-codex" not in json.dumps(usage_events["usage.model.selected"].to_dict())

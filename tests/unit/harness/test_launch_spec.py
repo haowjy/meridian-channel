@@ -93,11 +93,11 @@ def test_codex_resolve_launch_spec_uses_permission_config_values() -> None:
     assert spec.permission_resolver.config.sandbox == "workspace-write"
 
 
-def test_opencode_resolve_launch_spec_strips_prefix_and_maps_fields() -> None:
+def test_opencode_resolve_launch_spec_maps_fields() -> None:
     resolver = _resolver()
     run = SpawnParams(
         prompt="test prompt",
-        model=ModelId("opencode-gpt-5.3-codex"),
+        model=ModelId("gpt-5.3-codex"),
         effort="high",
         agent="worker",
         skills=("skill-a", "skill-b"),
@@ -116,20 +116,14 @@ def test_opencode_resolve_launch_spec_strips_prefix_and_maps_fields() -> None:
 
 def test_opencode_resolve_launch_spec_normalizes_provider_model_once() -> None:
     resolver = _resolver()
-    run_prefixed = SpawnParams(
-        prompt="test prompt",
-        model=ModelId("opencode-openrouter/qwen/qwen3-coder:free"),
-    )
-    run_unprefixed = SpawnParams(
+    run = SpawnParams(
         prompt="test prompt",
         model=ModelId("openrouter/qwen/qwen3-coder:free"),
     )
 
-    prefixed_spec = OpenCodeAdapter().resolve_launch_spec(run_prefixed, resolver)
-    unprefixed_spec = OpenCodeAdapter().resolve_launch_spec(run_unprefixed, resolver)
+    spec = OpenCodeAdapter().resolve_launch_spec(run, resolver)
 
-    assert prefixed_spec.model == "openrouter/qwen/qwen3-coder:free"
-    assert unprefixed_spec.model == "openrouter/qwen/qwen3-coder:free"
+    assert spec.model == "openrouter/qwen/qwen3-coder:free"
 
 
 @pytest.mark.parametrize(
@@ -137,15 +131,7 @@ def test_opencode_resolve_launch_spec_normalizes_provider_model_once() -> None:
     (
         (ModelId("gpt-5.3-codex"), "gpt-5.3-codex"),
         (ModelId("anthropic/claude-sonnet-4-5"), "anthropic/claude-sonnet-4-5"),
-        (ModelId("opencode-anthropic/claude-sonnet-4-5"), "anthropic/claude-sonnet-4-5"),
-        (
-            ModelId("opencode-openrouter/anthropic/claude-sonnet-4-5"),
-            "openrouter/anthropic/claude-sonnet-4-5",
-        ),
-        (
-            ModelId("opencode-opencode-anthropic/claude-sonnet-4-5"),
-            "opencode-anthropic/claude-sonnet-4-5",
-        ),
+        (ModelId("opencode-go/kimi-k2.6"), "opencode-go/kimi-k2.6"),
         (ModelId(""), None),
         (None, None),
     ),
@@ -166,7 +152,7 @@ def test_opencode_subprocess_rejects_mcp_tools() -> None:
     resolver = _resolver()
     run = SpawnParams(
         prompt="test prompt",
-        model=ModelId("opencode-gpt-5.3-codex"),
+        model=ModelId("gpt-5.3-codex"),
         mcp_tools=("tool-a=echo a",),
     )
 
@@ -176,7 +162,7 @@ def test_opencode_subprocess_rejects_mcp_tools() -> None:
 
 def test_opencode_build_command_does_not_emit_dangerous_skip_permissions() -> None:
     command = OpenCodeAdapter().build_command(
-        SpawnParams(prompt="test prompt", model=ModelId("opencode-gpt-5.3-codex")),
+        SpawnParams(prompt="test prompt", model=ModelId("gpt-5.3-codex")),
         _resolver(approval="yolo"),
     )
 
@@ -325,3 +311,19 @@ def test_continue_fork_valid_combinations_pass(
 
     assert spec.continue_session_id == continue_session_id
     assert spec.continue_fork is continue_fork
+
+
+def test_opencode_explicit_harness_allows_raw_provider_model() -> None:
+    """When harness is explicit, raw provider/model IDs pass through unchanged."""
+    resolver = _resolver()
+    run = SpawnParams(
+        prompt="test prompt",
+        model=ModelId("opencode-go/kimi-k2.6"),
+        harness="opencode",
+    )
+
+    spec = OpenCodeAdapter().resolve_launch_spec(run, resolver)
+    assert spec.model == "opencode-go/kimi-k2.6"
+
+    command = OpenCodeAdapter().build_command(run, resolver)
+    assert "opencode-go/kimi-k2.6" in command

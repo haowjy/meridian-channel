@@ -57,19 +57,21 @@ OPENCODE_SESSION_CREATED_RE = re.compile(
 )
 
 
-def _strip_opencode_prefix(model: str) -> str:
-    return model[len("opencode-") :] if model.startswith("opencode-") else model
-
-
 def _normalize_opencode_model(model: str) -> str:
-    stripped = _strip_opencode_prefix(model.strip())
-    provider, separator, model_name = stripped.partition("/")
+    """Normalize whitespace in a provider/model identifier.
+
+    OpenCode accepts raw provider/model IDs (e.g. ``opencode-go/kimi-k2.6``).
+    Meridian no longer strips harness-routing prefixes; use ``--harness``
+    to force routing instead.
+    """
+    normalized = model.strip()
+    provider, separator, model_name = normalized.partition("/")
     if not separator:
-        return stripped
+        return normalized
     provider = provider.strip()
     model_name = model_name.strip()
     if not provider or not model_name:
-        return stripped
+        return normalized
     return f"{provider}/{model_name}"
 
 

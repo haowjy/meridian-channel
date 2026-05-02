@@ -33,7 +33,7 @@ class ModelVisibilityConfig(BaseModel):
 DEFAULT_HARNESS_PATTERNS: dict[HarnessId, tuple[str, ...]] = {
     HarnessId.CLAUDE: ("claude-*", "opus*", "sonnet*", "haiku*"),
     HarnessId.CODEX: ("gpt-*", "o1*", "o3*", "o4*", "codex*"),
-    HarnessId.OPENCODE: ("opencode-*", "gemini*", "*/*"),
+    HarnessId.OPENCODE: ("gemini*",),
 }
 
 DEFAULT_MODEL_VISIBILITY = ModelVisibilityConfig()

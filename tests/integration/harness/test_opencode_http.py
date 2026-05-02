@@ -280,7 +280,7 @@ async def test_create_session_uses_spec_model_not_connection_config(tmp_path) ->
 @pytest.mark.asyncio
 async def test_create_session_uses_already_normalized_model_from_launch_spec() -> None:
     resolver = TieredPermissionResolver(config=PermissionConfig())
-    run = SpawnParams(prompt="hello", model=ModelId("opencode-gpt-5.3-codex"))
+    run = SpawnParams(prompt="hello", model=ModelId("gpt-5.3-codex"))
     spec = OpenCodeAdapter().resolve_launch_spec(run, resolver)
 
     connection = _TestableOpenCodeConnection(responses=[(200, {"session_id": "sess-2"}, "")])
@@ -312,7 +312,7 @@ async def test_create_session_omits_skills_when_default_prompt_inline_policy_is_
     resolver = TieredPermissionResolver(config=PermissionConfig())
     run = SpawnParams(
         prompt="hello",
-        model=ModelId("opencode-gpt-5.3-codex"),
+        model=ModelId("gpt-5.3-codex"),
         skills=("skill-a", "skill-b"),
     )
     spec = OpenCodeAdapter().resolve_launch_spec(run, resolver)

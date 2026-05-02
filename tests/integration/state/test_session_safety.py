@@ -514,7 +514,7 @@ def test_empty_harness_session_id_flows_through_start_update_and_record(tmp_path
         runtime_root,
         harness="opencode",
         harness_session_id="",
-        model="opencode-gpt-5.3-codex",
+        model="gpt-5.3-codex",
         chat_id="c42",
     )
     try:
