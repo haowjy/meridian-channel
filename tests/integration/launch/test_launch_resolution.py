@@ -87,7 +87,7 @@ def test_primary_launch_injects_inventory_by_harness_family(
         else preview.run_params.prompt
     )
     assert "# Meridian Agents" in text
-    assert "AGENTS" in text
+    assert "## Subagent" in text
     assert "- dev-orchestrator" in text
     assert f"- {peer_name}" in text
     assert "SKILLS" not in text
@@ -368,7 +368,7 @@ def test_spawn_prepare_system_field_harnesses_route_agent_inventory_to_system_pr
     assert preview.projected_content is not None
     inventory_channel = preview.projected_content.system_prompt
     assert "# Meridian Agents" in inventory_channel
-    assert "AGENTS" in inventory_channel
+    assert "## Subagent" in inventory_channel
     assert "- dev-orchestrator" in inventory_channel
     assert "- reviewer" in inventory_channel
     assert "# Meridian Agents" not in preview.projected_content.user_turn_content
@@ -425,7 +425,7 @@ def test_spawn_prepare_claude_projects_skills_inventory_and_report_to_system_pro
     assert f"# Skill: {skill_path}" in projected.system_prompt
     assert "Use verification checklist." in projected.system_prompt
     assert "# Meridian Agents" in projected.system_prompt
-    assert "AGENTS" in projected.system_prompt
+    assert "## Subagent" in projected.system_prompt
     assert "- dev-orchestrator" in projected.system_prompt
     assert "- reviewer" in projected.system_prompt
     assert "# Report" in projected.system_prompt

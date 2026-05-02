@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from meridian.lib.catalog.agent import AgentModelEntry, AgentProfile, FanoutEntry
 from meridian.lib.catalog.model_aliases import entry
@@ -19,6 +20,7 @@ def _profile(
     model: str | None = None,
     models: dict[str, AgentModelEntry] | None = None,
     fanout: tuple[FanoutEntry, ...] = (),
+    mode: Literal["primary", "subagent"] = "subagent",
 ) -> AgentProfile:
     return AgentProfile(
         name=name,
@@ -33,6 +35,7 @@ def _profile(
         effort=None,
         approval=None,
         autocompact=None,
+        mode=mode,
         models=models or {},
         fanout=fanout,
         body="",
@@ -108,13 +111,54 @@ def test_build_agent_inventory_prompt_renders_model_and_fan_out_metadata(
     assert alias_load_count == 1
     lines = prompt.splitlines()
     assert lines[0] == "# Meridian Agents"
-    assert lines[4] == "AGENTS"
+    assert lines[4] == "## Subagent"
     assert (
         "- alpha: Primary reviewer | Model: gpt54 | Fan-out: gpt54, gpt55, unknown_alias"
         in lines
     )
     assert "- beta: Fan-out only | Fan-out: opus46" in lines
     assert "- zeta: No model metadata" in lines
+
+
+def test_build_agent_inventory_prompt_groups_by_mode(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    profiles = [
+        _profile(
+            tmp_path=tmp_path,
+            name="coder",
+            description="Worker",
+        ),
+        _profile(
+            tmp_path=tmp_path,
+            name="orchestrator",
+            description="Primary",
+            mode="primary",
+        ),
+    ]
+
+    monkeypatch.setattr(
+        "meridian.lib.launch.prompt.scan_agent_profiles",
+        lambda *, project_root: profiles,
+    )
+    monkeypatch.setattr(
+        "meridian.lib.launch.prompt.load_merged_aliases",
+        lambda *, project_root: [],
+    )
+
+    prompt = build_agent_inventory_prompt(project_root=tmp_path)
+
+    assert prompt is not None
+    lines = prompt.splitlines()
+    assert lines[4:] == [
+        "## Primary",
+        "- orchestrator: Primary",
+        "",
+        "## Subagent",
+        "- coder: Worker",
+    ]
+    assert "Mode:" not in prompt
 
 
 def test_build_agent_inventory_prompt_uses_explicit_fanout_for_display(
@@ -204,3 +248,11 @@ def test_dedupe_fan_out_aliases_preserves_unknown_aliases_verbatim() -> None:
         catalog,
     )
     assert result == ["gpt", "custom-gpt", "another-custom"]
+
+
+def test_dedupe_fan_out_aliases_dedupes_literal_model_ids_against_aliases() -> None:
+    catalog = {
+        "gpt55": entry(alias="gpt55", model_id="gpt-5.5"),
+    }
+    result = _dedupe_fan_out_aliases(["gpt55", "gpt-5.5"], catalog)
+    assert result == ["gpt55"]

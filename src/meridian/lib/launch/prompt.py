@@ -158,14 +158,21 @@ def _dedupe_fan_out_aliases(
     alias_keys: Sequence[str],
     alias_catalog: Mapping[str, AliasEntry],
 ) -> list[str]:
-    """Deduplicate alias keys by resolved model id while preserving profile order."""
+    """Deduplicate display entries by resolved model id preserving profile order.
+
+    Alias entries are resolved through the alias catalog. Entries that are not
+    known aliases may be literal model ids from structured fanout, so their
+    display value is treated as the canonical model id for deduplication.
+    """
 
     deduped: list[str] = []
     seen_model_ids: set[str] = set()
     for alias_key in alias_keys:
         catalog_entry = alias_catalog.get(alias_key)
         if catalog_entry is None:
-            # Unknown aliases are shown verbatim and are exempt from deduplication.
+            if alias_key in seen_model_ids:
+                continue
+            seen_model_ids.add(alias_key)
             deduped.append(alias_key)
             continue
         model_id = str(catalog_entry.model_id)
@@ -186,6 +193,28 @@ def _get_fan_out_aliases(agent: AgentProfile) -> tuple[str, ...]:
     if agent.models:
         return tuple(agent.models.keys())
     return ()
+
+
+def _render_agent_line(
+    agent: AgentProfile,
+    alias_catalog: Mapping[str, AliasEntry],
+) -> str:
+    description = agent.description.strip()
+    suffix_parts: list[str] = []
+    if agent.model:
+        suffix_parts.append(f"Model: {agent.model}")
+    display_aliases = _get_fan_out_aliases(agent)
+    if display_aliases:
+        fan_out_aliases = _dedupe_fan_out_aliases(
+            display_aliases,
+            alias_catalog,
+        )
+        if fan_out_aliases:
+            suffix_parts.append(f"Fan-out: {', '.join(fan_out_aliases)}")
+    line = f"- {agent.name}: {description}" if description else f"- {agent.name}"
+    if suffix_parts:
+        line = f"{line} | {' | '.join(suffix_parts)}"
+    return line
 
 
 def build_context_prompt(*, project_root: Path) -> str | None:
@@ -218,7 +247,7 @@ def build_context_prompt(*, project_root: Path) -> str | None:
 
 
 def build_agent_inventory_prompt(*, project_root: Path) -> str | None:
-    """Render installed agent inventory for launch system context."""
+    """Render installed agent inventory grouped by mode."""
 
     agents = sorted(
         scan_agent_profiles(project_root=project_root), key=lambda profile: profile.name
@@ -239,24 +268,18 @@ def build_agent_inventory_prompt(*, project_root: Path) -> str | None:
         "Installed Meridian agents available at launch time.",
     ]
 
-    lines.extend(["", "AGENTS"])
-    for agent in agents:
-        description = agent.description.strip()
-        suffix_parts: list[str] = []
-        if agent.model:
-            suffix_parts.append(f"Model: {agent.model}")
-        display_aliases = _get_fan_out_aliases(agent)
-        if display_aliases:
-            fan_out_aliases = _dedupe_fan_out_aliases(
-                display_aliases,
-                alias_catalog,
-            )
-            if fan_out_aliases:
-                suffix_parts.append(f"Fan-out: {', '.join(fan_out_aliases)}")
-        line = f"- {agent.name}: {description}" if description else f"- {agent.name}"
-        if suffix_parts:
-            line = f"{line} | {' | '.join(suffix_parts)}"
-        lines.append(line)
+    primary_agents = [agent for agent in agents if agent.mode == "primary"]
+    subagent_agents = [agent for agent in agents if agent.mode != "primary"]
+
+    if primary_agents:
+        lines.extend(["", "## Primary"])
+        for agent in primary_agents:
+            lines.append(_render_agent_line(agent, alias_catalog))
+
+    if subagent_agents:
+        lines.extend(["", "## Subagent"])
+        for agent in subagent_agents:
+            lines.append(_render_agent_line(agent, alias_catalog))
 
     return "\n".join(lines).strip()
 
