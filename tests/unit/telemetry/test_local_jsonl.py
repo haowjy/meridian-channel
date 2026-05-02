@@ -44,6 +44,25 @@ def test_rotation_opens_next_segment_without_renaming_active_file(tmp_path) -> N
     sink.close()
 
 
+def test_write_batch_skips_non_serializable_events(tmp_path) -> None:
+    sink = LocalJSONLSink(tmp_path)
+    bad = TelemetryEnvelope(
+        v=1,
+        ts="2026-05-02T12:00:00Z",
+        domain="chat",
+        event="chat.ws.connected",
+        scope="chat.server.ws",
+        data={"bad": object()},
+    )
+    sink.write_batch([bad, envelope("chat.ws.disconnected")])
+    sink.close()
+
+    segment = tmp_path / "telemetry" / f"{os.getpid()}-0001.jsonl"
+    lines = segment.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    assert json.loads(lines[0])["event"] == "chat.ws.disconnected"
+
+
 def test_close_is_idempotent(tmp_path) -> None:
     sink = LocalJSONLSink(tmp_path)
     sink.write_batch([envelope()])

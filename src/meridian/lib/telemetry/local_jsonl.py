@@ -44,7 +44,11 @@ class LocalJSONLSink:
             return
         file = self._ensure_open()
         for event in events:
-            file.write(json.dumps(event.to_dict(), separators=(",", ":")))
+            try:
+                line = json.dumps(event.to_dict(), separators=(",", ":"))
+            except (TypeError, ValueError):
+                continue
+            file.write(line)
             file.write("\n")
         file.flush()
         if self.active_path.stat().st_size > self._max_segment_bytes:
