@@ -102,6 +102,7 @@ def _validate_requested_model(
     requested_model: str,
     *,
     project_root: str | None,
+    explicit_harness: str | None = None,
 ) -> str | None:
     normalized = requested_model.strip()
     if not normalized:
@@ -109,8 +110,15 @@ def _validate_requested_model(
 
     explicit_root = Path(project_root).expanduser().resolve() if project_root else None
     try:
+        # Validation-only path: launch policy resolution remains the source of
+        # truth for canonical model identity/provenance. A future cleanup can
+        # collapse this preflight check into the resolve-once policy pipeline.
         resolve_model(normalized, project_root=explicit_root)
     except ValueError:
+        if explicit_harness:
+            # Harness is explicitly specified; allow raw provider/model IDs
+            # that may not match any catalog pattern.
+            return None
         validation_context = _model_validation_context(normalized, project_root=explicit_root)
         message = (
             f"Unknown model '{normalized}'. Run `meridian mars models list` "
@@ -130,6 +138,7 @@ def validate_create_input(payload: SpawnCreateInput) -> tuple[SpawnCreateInput, 
     model_warning = _validate_requested_model(
         payload.model,
         project_root=payload.project_root,
+        explicit_harness=payload.harness,
     )
     return payload, model_warning
 

@@ -328,6 +328,9 @@ def test_spawn_validation_preserves_alias_token_for_policy_defaults(
 
     assert prepared.model == "gpt-5.5"
     assert prepared.effort == "low"
+    assert prepared.model_selection_requested_token == "gpt55"
+    assert prepared.model_selection_canonical_id == "gpt-5.5"
+    assert prepared.model_selection_harness_provenance == "mars-provided"
     assert 'model_reasoning_effort="low"' in prepared.cli_command
 
 
@@ -378,6 +381,12 @@ def test_primary_and_spawn_alias_effort_defaults_match(
     assert spawn.resolved_request.model == "gpt-5.5"
     assert primary.resolved_request.effort == "low"
     assert spawn.resolved_request.effort == "low"
+    assert primary.model_selection is not None
+    assert primary.model_selection.requested_token == "gpt55"
+    assert primary.model_selection.canonical_model_id == "gpt-5.5"
+    assert spawn.model_selection is not None
+    assert spawn.model_selection.requested_token == "gpt55"
+    assert spawn.model_selection.canonical_model_id == "gpt-5.5"
 
 
 def test_resolve_policies_cli_model_override_can_replace_profile_harness(tmp_path: Path) -> None:

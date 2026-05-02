@@ -60,7 +60,7 @@ from .permissions import (
     resolve_nested_claude_permission_request,
     resolve_permission_pipeline,
 )
-from .policies import resolve_policies
+from .policies import ModelSelectionContext, resolve_policies
 from .prompt import (
     build_agent_inventory_prompt,
     build_context_prompt,
@@ -220,6 +220,7 @@ class LaunchContext:
     is_bypass: bool = False
     # I-13: adapter input transformations surface here instead of silently mutating.
     warnings: tuple[CompositionWarning, ...] = ()
+    model_selection: ModelSelectionContext | None = None
 
 
 @dataclass(frozen=True)
@@ -232,6 +233,7 @@ class _SurfaceResolution:
     profile_tools_for_deny_optout: tuple[str, ...]
     has_profile_for_deny_optout: bool
     projected_content: ProjectedContent | None
+    model_selection: ModelSelectionContext | None
     seed_session_args: tuple[str, ...] = ()
 
 
@@ -459,6 +461,7 @@ def _resolve_surface_request(
     profile = policies.profile
     has_profile = profile is not None
     resolved = policies.resolved_overrides
+    model_selection = policies.model_selection
     harness = policies.adapter
     resolved_skills = policies.resolved_skills
     if request.skills:
@@ -677,6 +680,17 @@ def _resolve_surface_request(
     warning = summarize_composition_warnings(composition_warnings)
 
     agent_metadata = dict(request.agent_metadata)
+    model_selection_update: dict[str, str | None] = {
+        "model_selection_requested_token": None,
+        "model_selection_canonical_id": None,
+        "model_selection_harness_provenance": None,
+    }
+    if model_selection is not None:
+        model_selection_update = {
+            "model_selection_requested_token": model_selection.requested_token,
+            "model_selection_canonical_id": model_selection.canonical_model_id,
+            "model_selection_harness_provenance": model_selection.harness_provenance,
+        }
     resolved_agent_name = profile.name if profile is not None else request.agent
     session_agent_path = resolve_profile_path(profile)
     if resolved_agent_name is not None:
@@ -723,6 +737,7 @@ def _resolve_surface_request(
             "warning": warning,
             "agent_metadata": agent_metadata,
             "skill_paths": resolve_skill_paths(resolved_skills.loaded_skills),
+            **model_selection_update,
         }
     )
     return _SurfaceResolution(
@@ -734,6 +749,7 @@ def _resolve_surface_request(
         profile_tools_for_deny_optout=profile_tools_for_deny_optout,
         has_profile_for_deny_optout=has_profile,
         projected_content=projected_content,
+        model_selection=model_selection,
         seed_session_args=seed_session_args,
     )
 
@@ -769,6 +785,7 @@ def build_launch_context(
     projected_content: ProjectedContent | None = None
     seed_harness_session_id = (request.session.requested_harness_session_id or "").strip() or None
     seed_harness_session_args: tuple[str, ...] = ()
+    model_selection: ModelSelectionContext | None = None
     if runtime.composition_surface != LaunchCompositionSurface.DIRECT:
         surface = _resolve_surface_request(
             request=request,
@@ -786,6 +803,7 @@ def build_launch_context(
         has_profile_for_deny_optout = surface.has_profile_for_deny_optout
         projected_content = surface.projected_content
         seed_harness_session_args = surface.seed_session_args
+        model_selection = surface.model_selection
     else:
         harness_id = _resolve_harness_id(request=request, runtime=runtime)
         harness = harness_registry.get_subprocess_harness(harness_id)
@@ -937,6 +955,8 @@ def build_launch_context(
         child_spawn_id=spawn_id,
         increment_depth=increment_depth,
     )
+    # Informational: tells the child its own harness for yield timing.
+    # Not a policy override — from_env() does not read it back.
     runtime_overrides["MERIDIAN_HARNESS"] = harness.id.value
     merged_overrides = merge_env_overrides(
         plan_overrides=plan_overrides or {},
@@ -982,6 +1002,7 @@ def build_launch_context(
         seed_harness_session_args=seed_harness_session_args,
         is_bypass=is_bypass,
         warnings=composition_warnings,
+        model_selection=model_selection,
     )
 
 
