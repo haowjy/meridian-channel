@@ -13,7 +13,11 @@ from meridian.lib.launch.plan import (
     build_primary_launch_runtime,
     build_primary_spawn_request,
 )
-from meridian.lib.launch.policies import resolve_policies
+from meridian.lib.launch.policies import (
+    _resolve_model_policy_overrides,
+    resolve_policies,
+    validate_harness_compatibility,
+)
 from meridian.lib.launch.request import (
     LaunchArgvIntent,
     LaunchCompositionSurface,
@@ -83,6 +87,57 @@ def _patch_alias_resolution(
         "meridian.lib.launch.policies.load_merged_aliases",
         list_entries,
     )
+
+
+def test_resolve_model_policy_overrides_resolves_full_runtime_policy_fields() -> None:
+    resolved = _resolve_model_policy_overrides(
+        explicit_user_overrides=RuntimeOverrides(sandbox="workspace-write"),
+        profile_model_overrides=RuntimeOverrides(harness="codex", approval="auto"),
+        profile_defaults=RuntimeOverrides(effort="medium", sandbox="read-only"),
+        config_overrides=RuntimeOverrides(effort="high", approval="confirm", autocompact=70),
+        alias_defaults=RuntimeOverrides(effort="low", autocompact=30),
+    )
+
+    assert resolved.harness == "codex"
+    assert resolved.sandbox == "workspace-write"
+    assert resolved.approval == "auto"
+    assert resolved.effort == "medium"
+    assert resolved.autocompact == 70
+
+
+def test_validate_harness_compatibility_allows_policy_reroute() -> None:
+    registry = get_default_harness_registry()
+    model_entry = AliasEntry(
+        alias="claude",
+        model_id=ModelId("claude-haiku-4-5"),
+        resolved_harness=HarnessId.CLAUDE,
+    )
+
+    validate_harness_compatibility(
+        model="claude-haiku-4-5",
+        harness_id=HarnessId.CODEX,
+        model_entry=model_entry,
+        harness_registry=registry,
+        is_policy_reroute=True,
+    )
+
+
+def test_validate_harness_compatibility_rejects_same_layer_contradiction() -> None:
+    registry = get_default_harness_registry()
+    model_entry = AliasEntry(
+        alias="claude",
+        model_id=ModelId("claude-haiku-4-5"),
+        resolved_harness=HarnessId.CLAUDE,
+    )
+
+    with pytest.raises(ValueError, match="incompatible with model"):
+        validate_harness_compatibility(
+            model="claude-haiku-4-5",
+            harness_id=HarnessId.CODEX,
+            model_entry=model_entry,
+            harness_registry=registry,
+            is_policy_reroute=False,
+        )
 
 
 def test_resolve_policies_warns_and_uses_no_profile_when_config_agent_is_missing(

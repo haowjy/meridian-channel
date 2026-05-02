@@ -147,7 +147,7 @@ def _resolve_profile_model_overrides(
     return _entry_to_overrides(profile.models[winner]), warning, True
 
 
-def _resolve_effort_autocompact_overrides(
+def _resolve_model_policy_overrides(
     *,
     explicit_user_overrides: RuntimeOverrides,
     profile_model_overrides: RuntimeOverrides,
@@ -155,7 +155,7 @@ def _resolve_effort_autocompact_overrides(
     config_overrides: RuntimeOverrides,
     alias_defaults: RuntimeOverrides,
 ) -> RuntimeOverrides:
-    """Resolve effort/autocompact precedence for launch policies.
+    """Resolve model-scoped runtime policy precedence for launch policies.
 
     Precedence ladder:
     1) explicit user (CLI/ENV layers)
@@ -167,16 +167,10 @@ def _resolve_effort_autocompact_overrides(
     """
 
     return resolve(
-        RuntimeOverrides(
-            effort=explicit_user_overrides.effort,
-            autocompact=explicit_user_overrides.autocompact,
-        ),
+        explicit_user_overrides,
         profile_model_overrides,
         profile_defaults,
-        RuntimeOverrides(
-            effort=config_overrides.effort,
-            autocompact=config_overrides.autocompact,
-        ),
+        config_overrides,
         alias_defaults,
     )
 
@@ -200,13 +194,21 @@ def _log_unmatched_profile_model_defaults(
     )
 
 
-def _validate_same_layer_harness_override(
+def validate_harness_compatibility(
     *,
-    final_model: str,
-    selected_entry: AliasEntry | None,
+    model: str,
     harness_id: HarnessId,
+    model_entry: AliasEntry | None,
     harness_registry: HarnessRegistry,
+    is_policy_reroute: bool = False,
 ) -> None:
+    """Validate harness/model compatibility with provenance awareness.
+
+    Policy-driven reroutes intentionally override the model-derived harness, so
+    they only need the harness to be supported for primary launch. Same-layer
+    user overrides also validate that the harness matches the model route.
+    """
+
     supported_primary_harnesses = tuple(
         harness_id_candidate
         for harness_id_candidate in harness_registry.ids()
@@ -219,12 +221,12 @@ def _validate_same_layer_harness_override(
             f"Unsupported harness '{harness_id}'. Expected one of: {supported_text}."
         )
 
-    if selected_entry is None:
+    if is_policy_reroute or model_entry is None:
         return
-    if harness_id != selected_entry.harness:
+    if harness_id != model_entry.harness:
         raise ValueError(
-            f"Harness '{harness_id}' is incompatible with model '{final_model}' "
-            f"(routes to '{selected_entry.harness}')."
+            f"Harness '{harness_id}' is incompatible with model '{model}' "
+            f"(routes to '{model_entry.harness}')."
         )
 
 
@@ -366,11 +368,12 @@ def resolve_policies(
     if final_model and user_explicit_same_precedence:
         if model_resolution_error is not None:
             raise model_resolution_error
-        _validate_same_layer_harness_override(
-            final_model=final_model,
-            selected_entry=resolved_model_entry,
+        validate_harness_compatibility(
+            model=final_model,
             harness_id=harness_id,
+            model_entry=resolved_model_entry,
             harness_registry=harness_registry,
+            is_policy_reroute=False,
         )
     selected_entry: AliasEntry | None = resolved_model_entry
     model_selection: ModelSelectionContext | None = None
@@ -399,7 +402,7 @@ def resolve_policies(
         autocompact=profile_overrides.autocompact,
     )
     explicit_user_overrides = resolve(*layers)
-    effort_resolved = _resolve_effort_autocompact_overrides(
+    model_policy_resolved = _resolve_model_policy_overrides(
         explicit_user_overrides=explicit_user_overrides,
         profile_model_overrides=profile_model_overrides,
         profile_defaults=profile_effort_overrides,
@@ -414,8 +417,8 @@ def resolve_policies(
     )
     resolved = resolved.model_copy(
         update={
-            "effort": effort_resolved.effort,
-            "autocompact": effort_resolved.autocompact,
+            "effort": model_policy_resolved.effort,
+            "autocompact": model_policy_resolved.autocompact,
         }
     )
 
@@ -445,4 +448,5 @@ __all__ = [
     "ResolvedPolicies",
     "resolve_harness_routing",
     "resolve_policies",
+    "validate_harness_compatibility",
 ]

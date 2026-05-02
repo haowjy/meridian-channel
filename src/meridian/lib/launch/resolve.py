@@ -7,6 +7,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.catalog.agent import AgentProfile, load_agent_profile
+from meridian.lib.catalog.model_aliases import AliasEntry
 from meridian.lib.catalog.skill import SkillRegistry
 from meridian.lib.core.domain import SkillContent
 from meridian.lib.core.types import HarnessId, ModelId
@@ -132,37 +133,32 @@ def resolve_skill_paths(loaded_skills: tuple[SkillContent, ...]) -> tuple[str, .
 def resolve_harness(
     *,
     model: ModelId,
+    model_entry: AliasEntry | None,
     harness_override: str | None,
     harness_registry: HarnessRegistry,
-    project_root: Path,
+    is_policy_reroute: bool = False,
 ) -> HarnessId:
-    from meridian.lib.catalog.models import resolve_model
-
-    resolved = resolve_model(str(model), project_root=project_root)
-    routed_harness_id = resolved.harness
-    supported_primary_harnesses = tuple(
-        harness_id
-        for harness_id in harness_registry.ids()
-        if harness_registry.get(harness_id).capabilities.supports_primary_launch
-    )
-    supported_primary_set = set(supported_primary_harnesses)
+    """Determine final primary-launch harness from a resolved model entry."""
 
     normalized_override = (harness_override or "").strip()
     if not normalized_override:
-        return routed_harness_id
+        if model_entry is None:
+            raise ValueError(
+                f"Unknown model '{model}'. Run `meridian mars models list` "
+                "to inspect supported models."
+            )
+        return model_entry.harness
 
     override_harness = HarnessId(normalized_override)
-    if override_harness not in supported_primary_set:
-        supported_text = ", ".join(str(harness_id) for harness_id in supported_primary_harnesses)
-        raise ValueError(
-            f"Unsupported harness '{normalized_override}'. Expected one of: {supported_text}."
-        )
-    if override_harness != routed_harness_id:
-        message = (
-            f"Harness '{override_harness}' is incompatible with model '{model}' "
-            f"(routes to '{routed_harness_id}')."
-        )
-        raise ValueError(message)
+    from .policies import validate_harness_compatibility
+
+    validate_harness_compatibility(
+        model=str(model),
+        harness_id=override_harness,
+        model_entry=model_entry,
+        harness_registry=harness_registry,
+        is_policy_reroute=is_policy_reroute,
+    )
     return override_harness
 
 __all__ = [
