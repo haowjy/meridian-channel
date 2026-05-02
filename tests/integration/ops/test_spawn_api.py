@@ -1,4 +1,6 @@
 import json
+import time
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -14,6 +16,28 @@ from meridian.lib.ops.spawn.models import (
 )
 from meridian.lib.state import spawn_store
 from meridian.lib.state.paths import resolve_project_runtime_root_for_write
+from meridian.lib.telemetry import init_telemetry
+from meridian.lib.telemetry.events import TelemetryEnvelope
+
+
+class RecordingTelemetrySink:
+    def __init__(self) -> None:
+        self.events: list[TelemetryEnvelope] = []
+
+    def write_batch(self, events: Sequence[TelemetryEnvelope]) -> None:
+        self.events.extend(events)
+
+    def close(self) -> None:
+        pass
+
+
+def wait_for_telemetry(predicate: object, timeout: float = 1.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():  # type: ignore[operator]
+            return
+        time.sleep(0.01)
+    raise AssertionError("telemetry event not observed")
 
 
 @pytest.fixture(autouse=True)
@@ -82,6 +106,44 @@ def test_spawn_create_dry_run_resolves_project_root_from_nested_cwd(
         str(resolved_reference) in composed_prompt
         or resolved_reference.as_posix() in composed_prompt
     )
+
+
+def test_spawn_create_dry_run_emits_usage_events(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    (project_root / ".git").mkdir()
+    (project_root / "mars.toml").write_text("", encoding="utf-8")
+    monkeypatch.chdir(project_root)
+    monkeypatch.setattr(spawn_api, "setup_telemetry", lambda runtime_root: None)
+    sink = RecordingTelemetrySink()
+    init_telemetry(sink=sink)
+
+    result = spawn_api.spawn_create_sync(
+        SpawnCreateInput(
+            prompt="run",
+            model="gpt-5.3-codex",
+            harness="codex",
+            project_root=project_root.as_posix(),
+            dry_run=True,
+        )
+    )
+
+    assert result.status == "dry-run"
+    wait_for_telemetry(
+        lambda: {"usage.model.selected", "usage.spawn.launched"}.issubset(
+            {event.event for event in sink.events}
+        )
+    )
+    usage_events = {event.event: event for event in sink.events if event.domain == "usage"}
+    assert usage_events["usage.model.selected"].data == {
+        "model_family": "gpt-5",
+        "harness": "codex",
+    }
+    assert "gpt-5.3-codex" not in json.dumps(usage_events["usage.model.selected"].to_dict())
+    assert usage_events["usage.spawn.launched"].data == {"harness": "codex"}
 
 
 def test_spawn_stats_includes_finalizing_bucket(tmp_path: Path) -> None:

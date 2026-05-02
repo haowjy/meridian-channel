@@ -21,6 +21,33 @@ def test_main_rejects_unknown_command(capsys: pytest.CaptureFixture[str]) -> Non
     assert "Unknown command: exec" in capsys.readouterr().err
 
 
+def test_main_emits_normalized_usage_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: list[dict[str, object]] = []
+
+    def _fake_emit_telemetry(
+        domain: str,
+        event: str,
+        *,
+        scope: str,
+        data: dict[str, object] | None = None,
+        **kwargs: object,
+    ) -> None:
+        captured.append({"domain": domain, "event": event, "scope": scope, "data": data})
+
+    monkeypatch.setattr(cli_main, "emit_telemetry", _fake_emit_telemetry)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main.main(["spawn", "wait", "p1", "--timeout", "0"])
+
+    assert exc_info.value.code == 1
+    assert captured[0] == {
+        "domain": "usage",
+        "event": "usage.command.invoked",
+        "scope": "cli.dispatch",
+        "data": {"command": "spawn.wait"},
+    }
+
+
 def test_main_harness_shortcut_routes_into_primary_launch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

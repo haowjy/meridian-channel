@@ -44,6 +44,7 @@ from meridian.lib.state.paths import (
     resolve_work_scratch_dir,
 )
 from meridian.lib.state.session_store import get_session_active_work_id
+from meridian.lib.telemetry import emit_telemetry
 from meridian.plugin_api.git import resolve_clone_path
 
 from .command import (
@@ -382,6 +383,29 @@ def _resolve_harness_id(
             raise ValueError(f"Unknown harness '{explicit_harness}'.") from exc
 
     raise ValueError("SpawnRequest.harness is required.")
+
+
+def normalize_usage_model_family(model: str | None) -> str | None:
+    """Map provider model identifiers to stable usage aggregation families."""
+
+    normalized = (model or "").strip().lower()
+    if not normalized:
+        return None
+
+    parts = [part for part in normalized.replace("_", "-").split("-") if part]
+    if not parts:
+        return None
+
+    if parts[0] == "gpt" and len(parts) >= 2:
+        major = parts[1].split(".", maxsplit=1)[0]
+        return f"gpt-{major}"
+    if parts[0] == "claude" and len(parts) >= 2:
+        return f"claude-{parts[1]}"
+    if "codex" in parts:
+        return "codex"
+    if parts[0].startswith("o") and any(char.isdigit() for char in parts[0]):
+        return "openai-o"
+    return parts[0]
 
 
 def _resolve_report_output_path(
@@ -863,6 +887,15 @@ def build_launch_context(
 
     resolved_agent_metadata = resolved_request.agent_metadata
     model = (resolved_request.model or "").strip()
+    model_family = normalize_usage_model_family(model)
+    if model_family is not None:
+        emit_telemetry(
+            "usage",
+            "usage.model.selected",
+            scope="core.launch",
+            ids={"spawn_id": spawn_id},
+            data={"model_family": model_family, "harness": harness.id.value},
+        )
     requested_harness_session_id = (
         resolved_request.session.requested_harness_session_id or ""
     ).strip() or None
@@ -991,4 +1024,5 @@ __all__ = [
     "LaunchContext",
     "build_launch_context",
     "merge_env_overrides",
+    "normalize_usage_model_family",
 ]

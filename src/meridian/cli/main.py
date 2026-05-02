@@ -77,6 +77,7 @@ from meridian.lib.ops.doctor_cache import (
 )
 from meridian.lib.ops.mars import check_upgrade_availability, format_upgrade_availability
 from meridian.lib.ops.spawn.api import SpawnActionOutput, SpawnDetailOutput, SpawnWaitMultiOutput
+from meridian.lib.telemetry import emit_telemetry
 from meridian.server.main import run_server
 
 
@@ -684,6 +685,26 @@ def _is_root_help_request(argv: Sequence[str]) -> bool:
     return _bootstrap_is_root_help_request(argv)
 
 
+def _normalized_usage_command(argv: Sequence[str]) -> str:
+    group, subcommand = _resolve_command_path(argv)
+    if group is None:
+        return "root"
+    if group == "spawn":
+        return f"spawn.{subcommand or 'create'}"
+    if subcommand is not None and subcommand != group:
+        return f"{group}.{subcommand}"
+    return group
+
+
+def _emit_usage_command_invoked(argv: Sequence[str]) -> None:
+    emit_telemetry(
+        "usage",
+        "usage.command.invoked",
+        scope="cli.dispatch",
+        data={"command": _normalized_usage_command(argv)},
+    )
+
+
 def _print_agent_root_help() -> None:
     print(_AGENT_ROOT_HELP, end="")
 
@@ -737,6 +758,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
 
     if cleaned_args and cleaned_args[0] == "mars":
+        _emit_usage_command_invoked(cleaned_args)
         _run_mars_passthrough(cleaned_args[1:], output_format=options.output.format)
 
     if effective_agent_mode and (not cleaned_args or _is_root_help_request(cleaned_args)):
@@ -744,6 +766,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         return
 
     _validate_top_level_command(cleaned_args, global_harness=options.harness)
+    _emit_usage_command_invoked(cleaned_args)
 
     maybe_bootstrap_runtime_state(cleaned_args, agent_mode=agent_mode_enabled())
 

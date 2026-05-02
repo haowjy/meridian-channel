@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from meridian.lib.launch.context import normalize_usage_model_family
 from meridian.lib.telemetry import (
     EVENT_REGISTRY,
     TelemetryEnvelope,
@@ -101,3 +102,12 @@ def test_make_error_data_shape() -> None:
     assert make_error_data() == {
         "error": {"type": "UnknownError", "message": "Unknown error"}
     }
+
+
+def test_usage_model_family_normalization_omits_raw_model_ids() -> None:
+    assert normalize_usage_model_family("gpt-5.3-codex") == "gpt-5"
+    assert normalize_usage_model_family("gpt-5.5") == "gpt-5"
+    assert normalize_usage_model_family("claude-sonnet-4-6") == "claude-sonnet"
+    assert normalize_usage_model_family("claude-opus-4-6") == "claude-opus"
+    assert normalize_usage_model_family("codex-latest") == "codex"
+    assert normalize_usage_model_family("o4-mini") == "openai-o"
