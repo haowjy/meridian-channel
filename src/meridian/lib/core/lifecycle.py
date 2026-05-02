@@ -284,7 +284,7 @@ class SpawnLifecycleService:
         exited_at: str | None = None,
         clock: Clock | None = None,
     ) -> None:
-        """Record process exit — no lifecycle event dispatched."""
+        """Record process exit and emit spawn.process_exited telemetry."""
         # Authoritative transition write still happens in spawn_store.
         spawn_store.record_spawn_exited(
             self._runtime_root,
@@ -293,6 +293,11 @@ class SpawnLifecycleService:
             exited_at=exited_at,
             clock=clock,
             repository=self._repository,
+        )
+        self._emit_telemetry_event(
+            "spawn.process_exited",
+            spawn_id,
+            payload={"exit_code": exit_code},
         )
 
     def finalize(

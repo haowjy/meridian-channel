@@ -168,6 +168,34 @@ def test_record_exited_stores_exit_code(tmp_path: Path) -> None:
     assert record.process_exit_code == 42
 
 
+def test_record_exited_emits_process_exited_telemetry_after_write(tmp_path: Path) -> None:
+    """record_exited() must emit spawn.process_exited after the store write."""
+    repo = FakeSpawnRepository()
+    telemetry_events: list[telemetry.LifecycleEvent] = []
+
+    class RecordingTelemetryObserver:
+        def on_event(self, event: telemetry.LifecycleEvent) -> None:
+            telemetry_events.append(event)
+
+    telemetry.register_observer(RecordingTelemetryObserver())
+    svc = _make_service(tmp_path, repository=repo)
+    spawn_id = _start_spawn(svc, status="running")
+
+    svc.record_exited(spawn_id, exit_code=42)
+
+    process_exited_events = [
+        event for event in telemetry_events if event.event == "spawn.process_exited"
+    ]
+    assert len(process_exited_events) == 1
+    event = process_exited_events[0]
+    assert event.spawn_id == spawn_id
+    assert event.payload == {"exit_code": 42}
+
+    record = spawn_store.get_spawn(tmp_path, spawn_id, repository=repo)
+    assert record is not None
+    assert record.process_exit_code == 42
+
+
 def test_finalize_transitions_spawn_to_terminal(tmp_path: Path) -> None:
     """Service finalize() must commit terminal status/origin through spawn_store."""
     repo = FakeSpawnRepository()

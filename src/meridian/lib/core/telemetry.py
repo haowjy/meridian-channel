@@ -175,6 +175,7 @@ CORE_EVENTS = frozenset(
     {
         "spawn.queued",
         "spawn.running",
+        "spawn.process_exited",
         "spawn.finalizing",
         "spawn.succeeded",
         "spawn.failed",
