@@ -1,4 +1,5 @@
 import subprocess
+from contextlib import suppress
 from types import SimpleNamespace
 
 import httpx
@@ -19,10 +20,8 @@ class FakeLoop:
         self._last = times[-1] if times else 0.0
 
     def time(self) -> float:
-        try:
+        with suppress(StopIteration):
             self._last = next(self._times)
-        except StopIteration:
-            pass
         return self._last
 
 
@@ -91,6 +90,8 @@ def test_raw_vite_launcher_scrubs_inherited_env_and_sets_proxy_targets(
     monkeypatch.setenv("__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS", "polluted")
     monkeypatch.setenv("HOST", "0.0.0.0")
     monkeypatch.setenv("PORT", "3000")
+    monkeypatch.setenv("VITE_API_URL", "https://api.meridian.localhost")
+    monkeypatch.setenv("VITE_WS_URL", "wss://api.meridian.localhost")
     monkeypatch.setattr("meridian.lib.chat.dev_frontend.raw_vite._find_free_port", lambda: 43123)
     monkeypatch.setattr(
         "meridian.lib.chat.dev_frontend.raw_vite.subprocess.Popen",
@@ -108,6 +109,8 @@ def test_raw_vite_launcher_scrubs_inherited_env_and_sets_proxy_targets(
     assert "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS" not in env
     assert "HOST" not in env
     assert "PORT" not in env
+    assert env["VITE_API_URL"] == ""
+    assert env["VITE_WS_URL"] == ""
     assert result.share_url is None
     assert result.session.url == "http://localhost:43123"
 
@@ -130,7 +133,7 @@ def test_raw_vite_launcher_wires_allowed_hosts_and_normalizes_wildcard_bind_host
         exposure=RawViteExposure(bind_host="::", allowed_hosts=("one.example", "two.example"))
     ).launch(frontend_root, backend_endpoint)
 
-    (cmd, cwd, env), = popen_calls
+    (cmd, _cwd, env), = popen_calls
     assert cmd == ["pnpm", "dev", "--port", "43124", "--host", "0.0.0.0"]
     assert env["VITE_DEV_ALLOWED_HOSTS"] == "one.example,two.example"
     assert result.session.url == "http://localhost:43124"
@@ -168,7 +171,9 @@ async def test_raw_vite_session_wait_until_ready_returns_after_non_5xx_response(
     )
     monkeypatch.setattr(
         "meridian.lib.chat.dev_frontend.raw_vite.httpx.AsyncClient",
-        lambda **kwargs: FakeAsyncClient([httpx.ConnectError("not yet"), SimpleNamespace(status_code=200)]),
+        lambda **kwargs: FakeAsyncClient(
+            [httpx.ConnectError("not yet"), SimpleNamespace(status_code=200)]
+        ),
     )
     monkeypatch.setattr("meridian.lib.chat.dev_frontend.raw_vite.asyncio.sleep", _async_noop)
     loop = FakeLoop(0.0, 0.1, 0.2)
@@ -211,7 +216,13 @@ async def test_raw_vite_session_wait_until_ready_times_out(monkeypatch):
     )
     monkeypatch.setattr(
         "meridian.lib.chat.dev_frontend.raw_vite.httpx.AsyncClient",
-        lambda **kwargs: FakeAsyncClient([httpx.ConnectError("not yet"), httpx.ConnectError("still not"), httpx.ConnectError("again")]),
+        lambda **kwargs: FakeAsyncClient(
+            [
+                httpx.ConnectError("not yet"),
+                httpx.ConnectError("still not"),
+                httpx.ConnectError("again"),
+            ]
+        ),
     )
     monkeypatch.setattr("meridian.lib.chat.dev_frontend.raw_vite.asyncio.sleep", _async_noop)
     loop = FakeLoop(0.0, 0.3, 0.6)

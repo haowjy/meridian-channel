@@ -25,9 +25,13 @@ _PORTLESS_VAR = re.compile(r"^PORTLESS", re.IGNORECASE)
 
 
 def _sanitized_portless_env(base_env: dict[str, str]) -> dict[str, str]:
-    """Return env with ALL PORTLESS_* vars stripped out."""
+    """Return env with ambient dev-server routing overrides stripped out."""
 
-    return {key: value for key, value in base_env.items() if not _PORTLESS_VAR.match(key)}
+    return {
+        key: value
+        for key, value in base_env.items()
+        if not _PORTLESS_VAR.match(key) and key not in {"VITE_API_URL", "VITE_WS_URL"}
+    }
 
 
 class PortlessLauncher:
@@ -43,6 +47,8 @@ class PortlessLauncher:
         env = _sanitized_portless_env(dict(os.environ))
         env.update(
             {
+                "VITE_API_URL": "",
+                "VITE_WS_URL": "",
                 "VITE_API_PROXY_TARGET": backend.http_origin,
                 "VITE_WS_PROXY_TARGET": backend.ws_origin,
             }

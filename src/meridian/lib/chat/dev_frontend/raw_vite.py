@@ -30,6 +30,8 @@ class RawViteLauncher:
         env.pop("PORT", None)
         env.pop("VITE_DEV_ALLOWED_HOSTS", None)
         env.pop("__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS", None)
+        env["VITE_API_URL"] = ""
+        env["VITE_WS_URL"] = ""
         env["VITE_API_PROXY_TARGET"] = backend.http_origin
         env["VITE_WS_PROXY_TARGET"] = backend.ws_origin
         if self.exposure.allowed_hosts:

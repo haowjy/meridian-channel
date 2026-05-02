@@ -1,5 +1,6 @@
 import io
 import subprocess
+from contextlib import suppress
 from types import SimpleNamespace
 
 import httpx
@@ -28,10 +29,8 @@ class FakeLoop:
         self._last = times[-1] if times else 0.0
 
     def time(self) -> float:
-        try:
+        with suppress(StopIteration):
             self._last = next(self._times)
-        except StopIteration:
-            pass
         return self._last
 
 
@@ -96,6 +95,8 @@ def test_sanitized_portless_env_removes_all_portless_variables():
         "PORTLESS_URL": "https://old",
         "portless_debug": "1",
         "PoRtLeSs_token": "secret",
+        "VITE_API_URL": "https://api.meridian.localhost",
+        "VITE_WS_URL": "wss://api.meridian.localhost",
         "PATH": "/bin",
     }
 
@@ -138,7 +139,9 @@ def test_portless_launcher_scrubs_inherited_env_and_builds_expected_command(
 ):
     frontend_root = tmp_path / "frontend"
     frontend_root.mkdir()
-    process = FakeProcess(wait_result=subprocess.TimeoutExpired(cmd="portless", timeout=2), returncode=0)
+    process = FakeProcess(
+        wait_result=subprocess.TimeoutExpired(cmd="portless", timeout=2), returncode=0
+    )
     popen_calls = []
 
     monkeypatch.setenv("PORTLESS_URL", "https://polluted")
@@ -165,6 +168,8 @@ def test_portless_launcher_scrubs_inherited_env_and_builds_expected_command(
     assert cwd == frontend_root
     assert env["VITE_API_PROXY_TARGET"] == backend_endpoint.http_origin
     assert env["VITE_WS_PROXY_TARGET"] == backend_endpoint.ws_origin
+    assert env["VITE_API_URL"] == ""
+    assert env["VITE_WS_URL"] == ""
     assert "PORTLESS_URL" not in env
     assert "PORTLESS_DEBUG" not in env
     assert "VITE_DEV_ALLOWED_HOSTS" not in env
@@ -181,7 +186,9 @@ def test_portless_launcher_sets_allowed_hosts_from_exposure(
 ):
     frontend_root = tmp_path / "frontend"
     frontend_root.mkdir()
-    process = FakeProcess(wait_result=subprocess.TimeoutExpired(cmd="portless", timeout=2), returncode=0)
+    process = FakeProcess(
+        wait_result=subprocess.TimeoutExpired(cmd="portless", timeout=2), returncode=0
+    )
     popen_calls = []
 
     monkeypatch.setattr(
@@ -212,13 +219,17 @@ def test_portless_launcher_uses_default_url_when_lookup_missing(
 ):
     frontend_root = tmp_path / "frontend"
     frontend_root.mkdir()
-    process = FakeProcess(wait_result=subprocess.TimeoutExpired(cmd="portless", timeout=2), returncode=0)
+    process = FakeProcess(
+        wait_result=subprocess.TimeoutExpired(cmd="portless", timeout=2), returncode=0
+    )
 
     monkeypatch.setattr(
         "meridian.lib.chat.dev_frontend.portless.subprocess.Popen",
         lambda cmd, cwd, env, stderr=None: process,
     )
-    monkeypatch.setattr("meridian.lib.chat.dev_frontend.portless.get_portless_url", lambda name: None)
+    monkeypatch.setattr(
+        "meridian.lib.chat.dev_frontend.portless.get_portless_url", lambda name: None
+    )
 
     result = PortlessLauncher(
         exposure=PortlessExposure(service_name="custom"),
@@ -292,7 +303,10 @@ def test_portless_launcher_raises_funnel_specific_error_on_failure(
         retry_policy=PortlessRetryPolicy(force_takeover=False),
     )
 
-    with pytest.raises(FrontendLaunchError, match=r"portless failed to start with --funnel \(exit code 7\)"):
+    with pytest.raises(
+        FrontendLaunchError,
+        match=r"portless failed to start with --funnel \(exit code 7\)",
+    ):
         launcher.launch(frontend_root, backend_endpoint)
 
 
@@ -352,7 +366,9 @@ async def test_portless_session_wait_until_ready_returns_after_non_5xx_response(
     )
     monkeypatch.setattr(
         "meridian.lib.chat.dev_frontend.portless.httpx.AsyncClient",
-        lambda **kwargs: FakeAsyncClient([httpx.ConnectError("not yet"), SimpleNamespace(status_code=404)]),
+        lambda **kwargs: FakeAsyncClient(
+            [httpx.ConnectError("not yet"), SimpleNamespace(status_code=404)]
+        ),
     )
     monkeypatch.setattr("meridian.lib.chat.dev_frontend.portless.asyncio.sleep", _async_noop)
     loop = FakeLoop(0.0, 0.1, 0.2)
@@ -393,7 +409,13 @@ async def test_portless_session_wait_until_ready_times_out(monkeypatch):
     )
     monkeypatch.setattr(
         "meridian.lib.chat.dev_frontend.portless.httpx.AsyncClient",
-        lambda **kwargs: FakeAsyncClient([httpx.ConnectError("not yet"), httpx.ConnectError("still not"), httpx.ConnectError("again")]),
+        lambda **kwargs: FakeAsyncClient(
+            [
+                httpx.ConnectError("not yet"),
+                httpx.ConnectError("still not"),
+                httpx.ConnectError("again"),
+            ]
+        ),
     )
     monkeypatch.setattr("meridian.lib.chat.dev_frontend.portless.asyncio.sleep", _async_noop)
     loop = FakeLoop(0.0, 0.4, 0.6)
