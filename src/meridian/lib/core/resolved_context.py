@@ -85,7 +85,7 @@ class ResolvedContext:
         project_root_raw = os.getenv("MERIDIAN_PROJECT_DIR", "").strip()
         runtime_root_raw = os.getenv("MERIDIAN_RUNTIME_DIR", "").strip()
         chat_id_raw = os.getenv("MERIDIAN_CHAT_ID", "").strip()
-        work_id_raw = os.getenv("MERIDIAN_WORK_ID", "").strip()
+        work_id_raw = os.getenv("MERIDIAN_ACTIVE_WORK_ID", "").strip()
         explicit_work_id_raw = (explicit_work_id or "").strip()
 
         depth = parse_meridian_depth(depth_raw)
@@ -102,7 +102,7 @@ class ResolvedContext:
         )
 
         # Authoritative work-ID precedence:
-        # explicit override > MERIDIAN_WORK_ID > session active work lookup.
+        # explicit override > MERIDIAN_ACTIVE_WORK_ID > session active work lookup.
         work_id: str | None = None
         if explicit_work_id_raw:
             work_id = explicit_work_id_raw
@@ -182,9 +182,9 @@ class ResolvedContext:
         if self.chat_id:
             overrides["MERIDIAN_CHAT_ID"] = self.chat_id
         if self.work_id:
-            overrides["MERIDIAN_WORK_ID"] = self.work_id
+            overrides["MERIDIAN_ACTIVE_WORK_ID"] = self.work_id
         if self.work_dir is not None:
-            overrides["MERIDIAN_WORK_DIR"] = self.work_dir.as_posix()
+            overrides["MERIDIAN_ACTIVE_WORK_DIR"] = self.work_dir.as_posix()
         for context_name, context_dir in self.context_dirs:
             env_key = context_env_key(context_name)
             if env_key == "MERIDIAN_CONTEXT__DIR":

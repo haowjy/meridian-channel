@@ -186,8 +186,8 @@ def test_external_runner_omits_null_context_variables(tmp_path: Path) -> None:
     script.write_text(
         "import os\n"
         "print('MERIDIAN_SPAWN_ERROR' in os.environ)\n"
-        "print('MERIDIAN_WORK_ID' in os.environ)\n"
-        "print('MERIDIAN_WORK_DIR' in os.environ)\n",
+        "print('MERIDIAN_ACTIVE_WORK_ID' in os.environ)\n"
+        "print('MERIDIAN_ACTIVE_WORK_DIR' in os.environ)\n",
         encoding="utf-8",
     )
 

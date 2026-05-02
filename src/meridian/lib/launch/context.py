@@ -128,7 +128,7 @@ class ChildEnvContext:
         parent_chat_id = parent_ctx.chat_id.strip() or None
         parent_depth = parent_ctx.depth
 
-        work_id = parent_ctx.work_id or os.getenv("MERIDIAN_WORK_ID", "").strip() or None
+        work_id = parent_ctx.work_id or os.getenv("MERIDIAN_ACTIVE_WORK_ID", "").strip() or None
         if work_id is None and parent_chat_id:
             # Keep launch semantics: runtime_root decides active work lookup.
             try:
@@ -452,6 +452,11 @@ def _resolve_surface_request(
             ),
         )
 
+    active_work_dir = ResolvedContext.from_environment(
+        explicit_project_root=project_paths.project_root,
+        explicit_runtime_root=Path(runtime.runtime_root).expanduser().resolve(),
+    ).work_dir
+
     route_warning = None
     prompt_policy = harness.run_prompt_policy()
     resolved_context_from = request.context_from
@@ -507,7 +512,13 @@ def _resolve_surface_request(
         inventory_prompt = (
             build_agent_inventory_prompt(project_root=project_paths.project_root) or ""
         )
-        context_prompt = build_context_prompt(project_root=project_paths.project_root) or ""
+        context_prompt = (
+            build_context_prompt(
+                project_root=project_paths.project_root,
+                active_work_dir=active_work_dir,
+            )
+            or ""
+        )
 
         spawn_composed_content = ComposedLaunchContent(
             supplemental_documents=supplemental_documents,
@@ -573,7 +584,8 @@ def _resolve_surface_request(
                 project_root=project_paths.project_root
             )
             context_prompt_primary = build_context_prompt(
-                project_root=project_paths.project_root
+                project_root=project_paths.project_root,
+                active_work_dir=active_work_dir,
             )
 
         seed = harness.seed_session(

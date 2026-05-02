@@ -56,7 +56,7 @@ def test_hook_context_to_env_and_json() -> None:
     assert env["MERIDIAN_HOOK_EVENT_ID"] == str(event_id)
     assert env["MERIDIAN_HOOK_SCHEMA_VERSION"] == "1"
     assert env["MERIDIAN_SPAWN_ID"] == "p123"
-    assert env["MERIDIAN_WORK_ID"] == "ref-ame-009"
+    assert env["MERIDIAN_ACTIVE_WORK_ID"] == "ref-ame-009"
 
     assert payload["schema_version"] == 1
     assert payload["event_name"] == "spawn.finalized"

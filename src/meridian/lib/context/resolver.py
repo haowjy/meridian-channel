@@ -165,29 +165,21 @@ def render_context_lines(
 
     lines: list[str] = []
 
-    work_resolved = resolved.work_root.as_posix()
-    work_env_key = context_env_key("work")
-    if check_env:
-        if os.getenv(work_env_key, "") == work_resolved:
-            lines.append(f"work: ${work_env_key}")
-        else:
-            lines.append(f"work: {work_resolved}")
-    else:
-        lines.append(f"work: ${work_env_key} ({work_resolved})")
-
     active_work_resolved = (
         active_work_dir.as_posix()
         if active_work_dir is not None
-        else os.getenv("MERIDIAN_WORK_DIR", "").strip()
+        else os.getenv("MERIDIAN_ACTIVE_WORK_DIR", "").strip()
     )
     if active_work_resolved:
         if check_env:
-            if os.getenv("MERIDIAN_WORK_DIR", "") == active_work_resolved:
-                lines.append("  active: $MERIDIAN_WORK_DIR")
+            if os.getenv("MERIDIAN_ACTIVE_WORK_DIR", "") == active_work_resolved:
+                lines.append("work: $MERIDIAN_ACTIVE_WORK_DIR")
             else:
-                lines.append(f"  active: {active_work_resolved}")
+                lines.append(f"work: {active_work_resolved}")
         else:
-            lines.append(f"  active: $MERIDIAN_WORK_DIR ({active_work_resolved})")
+            lines.append(f"work: $MERIDIAN_ACTIVE_WORK_DIR ({active_work_resolved})")
+    else:
+        lines.append("work: (no active work item — run 'meridian work start')")
 
     archive_resolved = resolved.work_archive.as_posix()
     if archive_resolved:

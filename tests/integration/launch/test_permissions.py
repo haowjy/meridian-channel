@@ -28,8 +28,8 @@ _MERIDIAN_RUNTIME_KEYS = (
     "MERIDIAN_DEPTH",
     "MERIDIAN_CHAT_ID",
     "MERIDIAN_CONTEXT_KB_DIR",
-    "MERIDIAN_WORK_ID",
-    "MERIDIAN_WORK_DIR",
+    "MERIDIAN_ACTIVE_WORK_ID",
+    "MERIDIAN_ACTIVE_WORK_DIR",
     "MERIDIAN_CONTEXT_WORK_DIR",
     "MERIDIAN_CONTEXT_WORK_ARCHIVE_DIR",
 )
@@ -254,8 +254,8 @@ def test_merge_env_overrides_accepts_runtime_meridian_keys() -> None:
         "MERIDIAN_DEPTH": "2",
         "MERIDIAN_CHAT_ID": "c-parent",
         "MERIDIAN_CONTEXT_KB_DIR": "/repo/.meridian/kb",
-        "MERIDIAN_WORK_ID": "current",
-        "MERIDIAN_WORK_DIR": "/repo/.meridian/work/current",
+        "MERIDIAN_ACTIVE_WORK_ID": "current",
+        "MERIDIAN_ACTIVE_WORK_DIR": "/repo/.meridian/work/current",
         "MERIDIAN_CONTEXT_WORK_DIR": "/repo/.meridian/work",
         "MERIDIAN_CONTEXT_WORK_ARCHIVE_DIR": "/repo/.meridian/archive/work",
     }

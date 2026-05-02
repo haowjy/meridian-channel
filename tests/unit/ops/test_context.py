@@ -15,9 +15,11 @@ from meridian.lib.ops.context import (
     ContextInput,
     ContextOutput,
     WorkCurrentInput,
+    WorkRootInput,
     _resolve_runtime_context,
     context_sync,
     work_current_sync,
+    work_root_sync,
 )
 
 if TYPE_CHECKING:
@@ -28,6 +30,7 @@ if TYPE_CHECKING:
 def _clear_context_env(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.delenv("MERIDIAN_CONTEXT_WORK_DIR", raising=False)
     monkeypatch.delenv("MERIDIAN_CONTEXT_KB_DIR", raising=False)
+    monkeypatch.delenv("MERIDIAN_ACTIVE_WORK_DIR", raising=False)
     for key in tuple(os.environ):
         if key.startswith("MERIDIAN_CONTEXT_") and key.endswith("_DIR"):
             monkeypatch.delenv(key, raising=False)
@@ -218,6 +221,7 @@ def test_context_sync_includes_arbitrary_named_contexts(monkeypatch: MonkeyPatch
 
 def test_context_output_shows_env_var_names_when_matching(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setenv("MERIDIAN_CONTEXT_WORK_DIR", "/repo/.meridian/work")
+    monkeypatch.setenv("MERIDIAN_ACTIVE_WORK_DIR", "/repo/.meridian/work/current")
     monkeypatch.setenv("MERIDIAN_CONTEXT_KB_DIR", "/repo/.meridian/kb")
     monkeypatch.setenv("MERIDIAN_CONTEXT_STRATEGY_DIR", "/repo/strategy")
     output = ContextOutput(
@@ -239,16 +243,15 @@ def test_context_output_shows_env_var_names_when_matching(monkeypatch: MonkeyPat
     )
     text = output.format_text()
     assert text == (
-        "work: $MERIDIAN_CONTEXT_WORK_DIR\n"
+        "work: $MERIDIAN_ACTIVE_WORK_DIR\n"
         "  archive: /repo/.meridian/archive/work\n"
         "kb: $MERIDIAN_CONTEXT_KB_DIR\n"
         "strategy: $MERIDIAN_CONTEXT_STRATEGY_DIR"
     )
 
 
-def test_context_output_shows_paths_when_env_mismatches(monkeypatch: MonkeyPatch) -> None:
-    # Env var points to a work item dir, but resolved is the work root — don't alias
-    monkeypatch.setenv("MERIDIAN_CONTEXT_WORK_DIR", "/repo/.meridian/work/some-item")
+def test_context_output_uses_active_work_env(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("MERIDIAN_ACTIVE_WORK_DIR", "/repo/.meridian/work/some-item")
     monkeypatch.setenv("MERIDIAN_CONTEXT_KB_DIR", "/repo/.meridian/kb")
     output = ContextOutput(
         work_path=".meridian/work",
@@ -261,7 +264,7 @@ def test_context_output_shows_paths_when_env_mismatches(monkeypatch: MonkeyPatch
         kb_source="local",
     )
     text = output.format_text()
-    assert "work: /repo/.meridian/work" in text
+    assert "work: $MERIDIAN_ACTIVE_WORK_DIR" in text
     assert "$MERIDIAN_CONTEXT_WORK_DIR" not in text
     assert "kb: $MERIDIAN_CONTEXT_KB_DIR" in text
 
@@ -289,7 +292,7 @@ def test_context_output_shows_paths_when_env_not_set(monkeypatch: MonkeyPatch) -
     )
     text = output.format_text()
     assert text == (
-        "work: /repo/.meridian/work\n"
+        "work: (no active work item — run 'meridian work start')\n"
         "  archive: /repo/.meridian/archive/work\n"
         "kb: /repo/.meridian/kb\n"
         "strategy: /repo/strategy"
@@ -320,7 +323,7 @@ def test_context_output_text_formats_default_and_verbose(monkeypatch: MonkeyPatc
 
     assert (
         output.format_text()
-        == "work: /repo/.meridian/work\n"
+        == "work: (no active work item — run 'meridian work start')\n"
         "  archive: /repo/.meridian/archive/work\n"
         "kb: /repo/.meridian/kb\n"
         "strategy: /repo/strategy"
@@ -407,6 +410,48 @@ def test_work_current_sync_uses_resolved_context(monkeypatch: MonkeyPatch) -> No
     output = work_current_sync(WorkCurrentInput())
 
     assert output.work_dir == "/repo/.meridian/work/current"
+
+
+def test_work_root_sync_prefers_env(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("MERIDIAN_CONTEXT_WORK_DIR", "/env/work/root")
+
+    output = work_root_sync(WorkRootInput())
+
+    assert output.work_root == "/env/work/root"
+
+
+def test_work_root_sync_falls_back_to_context_config(monkeypatch: MonkeyPatch) -> None:
+    project_root = Path("/repo")
+
+    def fake_resolve_project_root() -> Path:
+        return project_root
+
+    def fake_load_context_config(_repo: Path) -> None:
+        return None
+
+    def fake_resolve_context_paths(
+        _repo: Path,
+        config: ContextConfig,
+    ) -> ResolvedContextPaths:
+        return ResolvedContextPaths(
+            work_root=Path("/resolved/work"),
+            work_archive=Path("/resolved/archive/work"),
+            work_source=config.work.source,
+            kb_root=Path("/resolved/kb"),
+            kb_source=config.kb.source,
+            extra={},
+        )
+
+    monkeypatch.setattr("meridian.lib.ops.context.resolve_project_root", fake_resolve_project_root)
+    monkeypatch.setattr("meridian.lib.ops.context.load_context_config", fake_load_context_config)
+    monkeypatch.setattr(
+        "meridian.lib.ops.context.resolve_context_paths",
+        fake_resolve_context_paths,
+    )
+
+    output = work_root_sync(WorkRootInput())
+
+    assert output.work_root == "/resolved/work"
 
 
 def test_context_sync_falls_back_to_config_when_session_env_incomplete(

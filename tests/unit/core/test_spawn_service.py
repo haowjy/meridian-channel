@@ -309,7 +309,7 @@ async def test_prepare_spawn_projects_connection_config_from_launch_context(
             work_id="work-123",
             env_overrides={
                 "MERIDIAN_SPAWN_ID": spawn_id,
-                "MERIDIAN_WORK_ID": "work-123",
+                "MERIDIAN_ACTIVE_WORK_ID": "work-123",
                 "EXTRA_FLAG": "1",
             },
             system_prompt="system from profile",
@@ -334,7 +334,7 @@ async def test_prepare_spawn_projects_connection_config_from_launch_context(
     assert prepared.connection_config.project_root == project_root
     assert prepared.connection_config.env_overrides == {
         "MERIDIAN_SPAWN_ID": str(prepared.spawn_id),
-        "MERIDIAN_WORK_ID": "work-123",
+        "MERIDIAN_ACTIVE_WORK_ID": "work-123",
         "EXTRA_FLAG": "1",
     }
     assert prepared.connection_config.system == "system from profile"

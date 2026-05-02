@@ -53,9 +53,10 @@ _WORK_SUPPLEMENT = (
     "Quick reference:\n\n"
     "  work start LABEL       Create or switch to a work item\n\n"
     "  work current           Print active work item directory path\n\n"
+    "  work root              Print work root directory path\n\n"
     "  work done WORK_ID      Mark done and archive scratch directory\n\n"
     "  work sessions WORK_ID  Sessions tied to this item (--all for archived)\n\n"
-    "Artifact placement: $MERIDIAN_WORK_DIR for this item,\n"
+    "Artifact placement: $MERIDIAN_ACTIVE_WORK_DIR for this item,\n"
     "$MERIDIAN_CONTEXT_KB_DIR for project-wide knowledge.\n"
 )
 

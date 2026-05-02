@@ -154,7 +154,7 @@ def test_build_launch_context_projects_runtime_child_env_paths(
 ) -> None:
     monkeypatch.setenv("MERIDIAN_CHAT_ID", "c-parent")
     monkeypatch.setenv("MERIDIAN_DEPTH", "2")
-    monkeypatch.setenv("MERIDIAN_WORK_ID", "work-alpha")
+    monkeypatch.setenv("MERIDIAN_ACTIVE_WORK_ID", "work-alpha")
     request = _build_spawn_request()
     runtime = _build_launch_runtime(tmp_path=tmp_path)
 
@@ -173,8 +173,8 @@ def test_build_launch_context_projects_runtime_child_env_paths(
     assert runtime_ctx.env_overrides["MERIDIAN_RUNTIME_DIR"] == (
         tmp_path / ".meridian"
     ).as_posix()
-    assert runtime_ctx.env_overrides["MERIDIAN_WORK_ID"] == "work-alpha"
-    assert runtime_ctx.env_overrides["MERIDIAN_WORK_DIR"] == (
+    assert runtime_ctx.env_overrides["MERIDIAN_ACTIVE_WORK_ID"] == "work-alpha"
+    assert runtime_ctx.env_overrides["MERIDIAN_ACTIVE_WORK_DIR"] == (
         tmp_path / ".meridian" / "work" / "work-alpha"
     ).as_posix()
     assert runtime_ctx.env_overrides["MERIDIAN_CONTEXT_WORK_DIR"] == (
@@ -272,7 +272,7 @@ def test_build_launch_context_primary_exports_configured_context_dirs(
     tmp_path: Path,
 ) -> None:
     _write_minimal_mars_config(tmp_path)
-    monkeypatch.delenv("MERIDIAN_WORK_ID", raising=False)
+    monkeypatch.delenv("MERIDIAN_ACTIVE_WORK_ID", raising=False)
     (tmp_path / "meridian.local.toml").write_text(
         "\n".join(
             [
@@ -368,7 +368,7 @@ def test_build_launch_context_projects_context_paths_to_workspace_roots(
 ) -> None:
     """CONTEXT-PROJ-1: Context paths are included in workspace projection."""
     _write_minimal_mars_config(tmp_path)
-    monkeypatch.delenv("MERIDIAN_WORK_ID", raising=False)
+    monkeypatch.delenv("MERIDIAN_ACTIVE_WORK_ID", raising=False)
     (tmp_path / "meridian.local.toml").write_text(
         "\n".join(
             [
@@ -439,7 +439,7 @@ def test_build_launch_context_opencode_includes_context_paths_in_external_direct
     import json
 
     _write_minimal_mars_config(tmp_path)
-    monkeypatch.delenv("MERIDIAN_WORK_ID", raising=False)
+    monkeypatch.delenv("MERIDIAN_ACTIVE_WORK_ID", raising=False)
     monkeypatch.delenv("OPENCODE_CONFIG_CONTENT", raising=False)
     (tmp_path / "meridian.local.toml").write_text(
         "\n".join(

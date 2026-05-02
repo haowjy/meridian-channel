@@ -20,8 +20,8 @@ ALLOWED_CHILD_ENV_KEYS: frozenset[str] = frozenset(
         "MERIDIAN_RUNTIME_DIR",
         "MERIDIAN_DEPTH",
         "MERIDIAN_CHAT_ID",
-        "MERIDIAN_WORK_ID",
-        "MERIDIAN_WORK_DIR",
+        "MERIDIAN_ACTIVE_WORK_ID",
+        "MERIDIAN_ACTIVE_WORK_DIR",
     }
 )
 
@@ -81,9 +81,9 @@ def build_child_env_overrides(
         Spawn ID to assign to the child via ``MERIDIAN_SPAWN_ID``. When
         omitted, ``parent_spawn_id`` is reused for compatibility.
     work_id:
-        Work item ID, or ``None`` to omit ``MERIDIAN_WORK_ID``.
+        Work item ID, or ``None`` to omit ``MERIDIAN_ACTIVE_WORK_ID``.
     work_dir:
-        Active work item directory, or ``None`` to omit ``MERIDIAN_WORK_DIR``.
+        Active work item directory, or ``None`` to omit ``MERIDIAN_ACTIVE_WORK_DIR``.
     context_dirs:
         Resolved named context root directories to expose as
         ``MERIDIAN_CONTEXT_{NAME}_DIR``.

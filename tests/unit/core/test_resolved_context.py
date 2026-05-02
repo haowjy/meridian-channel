@@ -15,8 +15,8 @@ _MERIDIAN_ENV_KEYS = (
     "MERIDIAN_PROJECT_DIR",
     "MERIDIAN_RUNTIME_DIR",
     "MERIDIAN_CHAT_ID",
-    "MERIDIAN_WORK_ID",
-    "MERIDIAN_WORK_DIR",
+    "MERIDIAN_ACTIVE_WORK_ID",
+    "MERIDIAN_ACTIVE_WORK_DIR",
 )
 
 
@@ -67,7 +67,7 @@ def test_from_environment_without_env_vars(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_from_environment_prefers_explicit_work_id(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Explicit work override must win over MERIDIAN_WORK_ID in resolver precedence."""
+    """Explicit work override must win over MERIDIAN_ACTIVE_WORK_ID in resolver precedence."""
     _clear_meridian_env(monkeypatch)
     project_root = Path("/repo")
     runtime_root = Path("/runtime/state")
@@ -75,7 +75,7 @@ def test_from_environment_prefers_explicit_work_id(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setenv("MERIDIAN_PROJECT_DIR", project_root.as_posix())
     monkeypatch.setenv("MERIDIAN_RUNTIME_DIR", runtime_root.as_posix())
-    monkeypatch.setenv("MERIDIAN_WORK_ID", "work-from-env")
+    monkeypatch.setenv("MERIDIAN_ACTIVE_WORK_ID", "work-from-env")
 
     resolved = ResolvedContext.from_environment(
         explicit_work_id="  explicit-work  ",
@@ -88,13 +88,13 @@ def test_from_environment_prefers_explicit_work_id(monkeypatch: pytest.MonkeyPat
 
 
 def test_from_environment_uses_meridian_work_id(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Resolver must honor MERIDIAN_WORK_ID when no explicit override is provided."""
+    """Resolver must honor MERIDIAN_ACTIVE_WORK_ID when no explicit override is provided."""
     _clear_meridian_env(monkeypatch)
     project_root = Path("/repo")
     backend = FakeBackend()
 
     monkeypatch.setenv("MERIDIAN_PROJECT_DIR", project_root.as_posix())
-    monkeypatch.setenv("MERIDIAN_WORK_ID", "work-from-env")
+    monkeypatch.setenv("MERIDIAN_ACTIVE_WORK_ID", "work-from-env")
 
     resolved = ResolvedContext.from_environment(backend=backend)
 
@@ -148,8 +148,8 @@ def test_child_env_overrides_output_format() -> None:
         "MERIDIAN_PROJECT_DIR": "/repo",
         "MERIDIAN_RUNTIME_DIR": "/runtime/state",
         "MERIDIAN_CHAT_ID": "c9",
-        "MERIDIAN_WORK_ID": "work-123",
-        "MERIDIAN_WORK_DIR": "/repo/.meridian/work/work-123",
+        "MERIDIAN_ACTIVE_WORK_ID": "work-123",
+        "MERIDIAN_ACTIVE_WORK_DIR": "/repo/.meridian/work/work-123",
         "MERIDIAN_CONTEXT_WORK_DIR": "/repo/.meridian/work",
         "MERIDIAN_CONTEXT_WORK_ARCHIVE_DIR": "/repo/.meridian/archive/work",
         "MERIDIAN_CONTEXT_KB_DIR": "/repo/.meridian/kb",
@@ -211,7 +211,7 @@ def test_work_dir_prefers_repo_state_root_over_runtime_state_root(
 
     monkeypatch.setenv("MERIDIAN_PROJECT_DIR", "/repo")
     monkeypatch.setenv("MERIDIAN_RUNTIME_DIR", "/runtime/state")
-    monkeypatch.setenv("MERIDIAN_WORK_ID", "selected-work")
+    monkeypatch.setenv("MERIDIAN_ACTIVE_WORK_ID", "selected-work")
 
     resolved = ResolvedContext.from_environment(backend=backend)
 
@@ -269,9 +269,9 @@ def test_from_environment_empty_project_root_treated_as_absent(
 def test_from_environment_empty_work_id_env_treated_as_absent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An empty MERIDIAN_WORK_ID must not set work_id or trigger backend calls."""
+    """An empty MERIDIAN_ACTIVE_WORK_ID must not set work_id or trigger backend calls."""
     _clear_meridian_env(monkeypatch)
-    monkeypatch.setenv("MERIDIAN_WORK_ID", "")
+    monkeypatch.setenv("MERIDIAN_ACTIVE_WORK_ID", "")
     backend = FakeBackend()
 
     resolved = ResolvedContext.from_environment(backend=backend)
@@ -293,7 +293,7 @@ def test_from_environment_empty_explicit_work_id_falls_back_to_env(
 ) -> None:
     """An empty explicit_work_id must not override the env-var work ID."""
     _clear_meridian_env(monkeypatch)
-    monkeypatch.setenv("MERIDIAN_WORK_ID", "env-work")
+    monkeypatch.setenv("MERIDIAN_ACTIVE_WORK_ID", "env-work")
     backend = FakeBackend()
 
     resolved = ResolvedContext.from_environment(explicit_work_id="", backend=backend)
@@ -335,7 +335,7 @@ def test_work_dir_uses_state_root_directly_when_no_project_root(
     backend = FakeBackend()
 
     monkeypatch.setenv("MERIDIAN_RUNTIME_DIR", runtime_root.as_posix())
-    monkeypatch.setenv("MERIDIAN_WORK_ID", "my-work")
+    monkeypatch.setenv("MERIDIAN_ACTIVE_WORK_ID", "my-work")
 
     resolved = ResolvedContext.from_environment(backend=backend)
 
@@ -368,7 +368,7 @@ def test_from_environment_uses_context_config_for_repo_paths(
 ) -> None:
     _clear_meridian_env(monkeypatch)
     monkeypatch.setenv("MERIDIAN_PROJECT_DIR", "/repo")
-    monkeypatch.setenv("MERIDIAN_WORK_ID", "my-work")
+    monkeypatch.setenv("MERIDIAN_ACTIVE_WORK_ID", "my-work")
     config = ContextConfig.model_validate(
         {
             "work": {"path": "contexts/work", "archive": "contexts/archive/work"},

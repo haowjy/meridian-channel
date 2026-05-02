@@ -137,6 +137,24 @@ class WorkCurrentOutput(BaseModel):
         return self.work_dir or ""
 
 
+class WorkRootInput(BaseModel):
+    """Input for work root operation."""
+
+    model_config = ConfigDict(frozen=True)
+
+
+class WorkRootOutput(BaseModel):
+    """Output for work root operation."""
+
+    model_config = ConfigDict(frozen=True)
+
+    work_root: str
+
+    def format_text(self, ctx: FormatContext | None = None) -> str:
+        _ = ctx
+        return self.work_root
+
+
 def _resolve_runtime_context(project_root: Path, runtime_root: Path) -> ResolvedContext:
     """Resolve context with explicit roots — no env mutation needed."""
 
@@ -213,10 +231,32 @@ def work_current_sync(input: WorkCurrentInput) -> WorkCurrentOutput:
     )
 
 
+def work_root_sync(input: WorkRootInput) -> WorkRootOutput:
+    """Synchronous handler for work root query."""
+
+    _ = input
+    import os
+
+    env_work_root = os.getenv("MERIDIAN_CONTEXT_WORK_DIR", "").strip()
+    if env_work_root:
+        return WorkRootOutput(work_root=env_work_root)
+
+    project_root = resolve_project_root()
+    context_config = load_context_config(project_root) or ContextConfig()
+    resolved_paths = resolve_context_paths(project_root, context_config)
+    return WorkRootOutput(work_root=resolved_paths.work_root.as_posix())
+
+
 async def work_current(input: WorkCurrentInput) -> WorkCurrentOutput:
     """Async handler for work current query."""
 
     return await asyncio.to_thread(work_current_sync, input)
+
+
+async def work_root(input: WorkRootInput) -> WorkRootOutput:
+    """Async handler for work root query."""
+
+    return await asyncio.to_thread(work_root_sync, input)
 
 
 __all__ = [
@@ -225,8 +265,12 @@ __all__ = [
     "ContextOutput",
     "WorkCurrentInput",
     "WorkCurrentOutput",
+    "WorkRootInput",
+    "WorkRootOutput",
     "context",
     "context_sync",
     "work_current",
     "work_current_sync",
+    "work_root",
+    "work_root_sync",
 ]

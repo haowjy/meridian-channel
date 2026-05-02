@@ -108,7 +108,7 @@ def test_build_omits_none_fields() -> None:
     assert "MERIDIAN_PROJECT_DIR" not in result
     assert "MERIDIAN_RUNTIME_DIR" not in result
     assert "MERIDIAN_CHAT_ID" not in result
-    assert "MERIDIAN_WORK_ID" not in result
+    assert "MERIDIAN_ACTIVE_WORK_ID" not in result
 
 
 def test_build_full_overrides() -> None:
@@ -135,8 +135,8 @@ def test_build_full_overrides() -> None:
         "MERIDIAN_PROJECT_DIR": "/repo",
         "MERIDIAN_RUNTIME_DIR": "/runtime/state",
         "MERIDIAN_CHAT_ID": "c99",
-        "MERIDIAN_WORK_ID": "w1",
-        "MERIDIAN_WORK_DIR": "/repo/.meridian/work/w1",
+        "MERIDIAN_ACTIVE_WORK_ID": "w1",
+        "MERIDIAN_ACTIVE_WORK_DIR": "/repo/.meridian/work/w1",
         "MERIDIAN_CONTEXT_WORK_DIR": "/repo/.meridian/work",
         "MERIDIAN_CONTEXT_WORK_ARCHIVE_DIR": "/repo/.meridian/archive/work",
         "MERIDIAN_CONTEXT_KB_DIR": "/repo/.meridian/kb",

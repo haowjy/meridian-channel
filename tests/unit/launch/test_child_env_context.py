@@ -34,7 +34,7 @@ def test_child_env_context_from_environment_uses_resolved_context_parent_fields(
     project_paths = _project_paths(tmp_path)
     runtime_state_root = tmp_path / "runtime-state"
     runtime_state_root.mkdir()
-    monkeypatch.setenv("MERIDIAN_WORK_ID", "work-explicit")
+    monkeypatch.setenv("MERIDIAN_ACTIVE_WORK_ID", "work-explicit")
 
     def fake_from_environment(cls, **kwargs: object) -> ResolvedContext:
         _ = cls
@@ -68,7 +68,7 @@ def test_child_env_context_from_environment_falls_back_to_session_lookup(
     project_paths = _project_paths(tmp_path)
     runtime_state_root = tmp_path / "runtime-state"
     runtime_state_root.mkdir()
-    monkeypatch.delenv("MERIDIAN_WORK_ID", raising=False)
+    monkeypatch.delenv("MERIDIAN_ACTIVE_WORK_ID", raising=False)
 
     seen_lookup: list[tuple[Path, str]] = []
 
@@ -108,7 +108,7 @@ def test_child_env_context_from_environment_ignores_session_lookup_failures(
     project_paths = _project_paths(tmp_path)
     runtime_state_root = tmp_path / "runtime-state"
     runtime_state_root.mkdir()
-    monkeypatch.delenv("MERIDIAN_WORK_ID", raising=False)
+    monkeypatch.delenv("MERIDIAN_ACTIVE_WORK_ID", raising=False)
 
     def fake_from_environment(cls, **kwargs: object) -> ResolvedContext:
         _ = cls
@@ -146,7 +146,7 @@ def test_child_env_context_keeps_repo_root_when_execution_cwd_is_spawn_artifact(
     execution_cwd.mkdir(parents=True)
     project_paths = ProjectConfigPaths(project_root=project_root, execution_cwd=execution_cwd)
     runtime_state_root = tmp_path / "runtime"
-    monkeypatch.setenv("MERIDIAN_WORK_ID", "nested-spawn")
+    monkeypatch.setenv("MERIDIAN_ACTIVE_WORK_ID", "nested-spawn")
 
     def fake_from_environment(cls, **kwargs: object) -> ResolvedContext:
         _ = cls
@@ -166,7 +166,7 @@ def test_child_env_context_keeps_repo_root_when_execution_cwd_is_spawn_artifact(
     assert resolved.work_dir == (project_root / ".meridian" / "work" / "nested-spawn").resolve()
     assert resolved.context_dirs == _default_context_dirs(project_root)
     assert env["MERIDIAN_PROJECT_DIR"] == project_root.resolve().as_posix()
-    assert env["MERIDIAN_WORK_DIR"] == (
+    assert env["MERIDIAN_ACTIVE_WORK_DIR"] == (
         project_root / ".meridian" / "work" / "nested-spawn"
     ).resolve().as_posix()
     assert env["MERIDIAN_CONTEXT_WORK_DIR"] == (
@@ -197,8 +197,8 @@ def test_child_env_context_child_context_routes_through_contract_helpers(
         "MERIDIAN_PROJECT_DIR": ctx.project_root.as_posix(),
         "MERIDIAN_RUNTIME_DIR": ctx.runtime_root.as_posix(),
         "MERIDIAN_CHAT_ID": "chat-parent",
-        "MERIDIAN_WORK_ID": "work-55",
-        "MERIDIAN_WORK_DIR": (tmp_path / "repo/.meridian/work/work-55").as_posix(),
+        "MERIDIAN_ACTIVE_WORK_ID": "work-55",
+        "MERIDIAN_ACTIVE_WORK_DIR": (tmp_path / "repo/.meridian/work/work-55").as_posix(),
         "MERIDIAN_CONTEXT_WORK_DIR": (tmp_path / "repo/.meridian/work").as_posix(),
         "MERIDIAN_CONTEXT_KB_DIR": (tmp_path / "repo/.meridian/kb").as_posix(),
         "MERIDIAN_CONTEXT_DOCS_DIR": (tmp_path / "repo/.meridian/docs").as_posix(),

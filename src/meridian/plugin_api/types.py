@@ -89,8 +89,8 @@ class HookContext:
                 None if self.spawn_cost_usd is None else str(self.spawn_cost_usd)
             ),
             "MERIDIAN_SPAWN_ERROR": self.spawn_error,
-            "MERIDIAN_WORK_ID": self.work_id,
-            "MERIDIAN_WORK_DIR": self.work_dir,
+            "MERIDIAN_ACTIVE_WORK_ID": self.work_id,
+            "MERIDIAN_ACTIVE_WORK_DIR": self.work_dir,
         }
         return {key: value for key, value in env.items() if value is not None}
 

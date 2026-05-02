@@ -48,8 +48,8 @@ def test_hook_context_to_env_includes_required_and_present_optional_fields() -> 
     assert env["MERIDIAN_RUNTIME_DIR"] == "/repo/.meridian"
     assert env["MERIDIAN_SPAWN_ID"] == "p123"
     assert env["MERIDIAN_SPAWN_STATUS"] == "cancelled"
-    assert env["MERIDIAN_WORK_ID"] == "hook-system-design"
-    assert env["MERIDIAN_WORK_DIR"] == "/repo/.meridian/work/hook-system-design"
+    assert env["MERIDIAN_ACTIVE_WORK_ID"] == "hook-system-design"
+    assert env["MERIDIAN_ACTIVE_WORK_DIR"] == "/repo/.meridian/work/hook-system-design"
 
 
 def test_hook_context_to_json_serializes_spawn_and_work_payloads() -> None:

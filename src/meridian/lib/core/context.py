@@ -53,14 +53,14 @@ class RuntimeContext(BaseModel):
         if self.chat_id:
             overrides["MERIDIAN_CHAT_ID"] = self.chat_id
         if self.work_id:
-            overrides["MERIDIAN_WORK_ID"] = self.work_id
+            overrides["MERIDIAN_ACTIVE_WORK_ID"] = self.work_id
             if self.project_root is not None:
-                overrides["MERIDIAN_WORK_DIR"] = resolve_work_scratch_dir(
+                overrides["MERIDIAN_ACTIVE_WORK_DIR"] = resolve_work_scratch_dir(
                     resolve_project_paths(self.project_root).root_dir,
                     self.work_id,
                 ).as_posix()
             elif self.runtime_root is not None:
-                overrides["MERIDIAN_WORK_DIR"] = resolve_work_scratch_dir(
+                overrides["MERIDIAN_ACTIVE_WORK_DIR"] = resolve_work_scratch_dir(
                     self.runtime_root,
                     self.work_id,
                 ).as_posix()

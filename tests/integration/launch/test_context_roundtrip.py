@@ -19,7 +19,7 @@ def test_launch_context_child_env_roundtrips_through_resolved_context(
 ) -> None:
     monkeypatch.setenv("MERIDIAN_CHAT_ID", "chat-parent")
     monkeypatch.setenv("MERIDIAN_DEPTH", "2")
-    monkeypatch.setenv("MERIDIAN_WORK_ID", "work-parent")
+    monkeypatch.setenv("MERIDIAN_ACTIVE_WORK_ID", "work-parent")
 
     launch_context = build_launch_context(
         spawn_id="p-roundtrip",
@@ -39,6 +39,7 @@ def test_launch_context_child_env_roundtrips_through_resolved_context(
         dry_run=True,
     )
 
+    # MERIDIAN_HARNESS is informational (yield timing), not a policy override.
     assert launch_context.env["MERIDIAN_HARNESS"] == HarnessId.CODEX.value
     assert launch_context.env_overrides["MERIDIAN_HARNESS"] == HarnessId.CODEX.value
 

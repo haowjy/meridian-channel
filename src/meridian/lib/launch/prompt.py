@@ -247,7 +247,9 @@ def _render_agent_line(
     return line
 
 
-def build_context_prompt(*, project_root: Path) -> str | None:
+def build_context_prompt(
+    *, project_root: Path, active_work_dir: Path | None = None
+) -> str | None:
     """Render resolved context paths for launch system context.
 
     Produces a block showing available context directories and their
@@ -271,6 +273,7 @@ def build_context_prompt(*, project_root: Path) -> str | None:
     context_lines = render_context_lines(
         resolved,
         check_env=False,
+        active_work_dir=active_work_dir,
     )
 
     return "\n".join([*header, *context_lines]).strip()
