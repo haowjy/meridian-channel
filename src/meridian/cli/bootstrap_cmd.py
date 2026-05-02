@@ -80,6 +80,7 @@ def register_bootstrap_command(
 
         emit(
             primary_launch.run_primary_launch(
+                project_root=project_root,
                 continue_ref=None,
                 fork_ref=None,
                 model=model,

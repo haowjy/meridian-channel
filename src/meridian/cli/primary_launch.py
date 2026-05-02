@@ -100,6 +100,7 @@ def resolve_session_target(
 
 def run_primary_launch(
     *,
+    project_root: Path | None = None,
     continue_ref: str | None,
     fork_ref: str | None,
     model: str,
@@ -123,7 +124,9 @@ def run_primary_launch(
             return None
         return "; ".join(parts)
 
-    project_root = Path.cwd().resolve()
+    project_root = (
+        project_root.resolve() if project_root is not None else Path.cwd().resolve()
+    )
     harness_registry = get_default_harness_registry()
     normalized_continue_ref = continue_ref.strip() if continue_ref is not None else ""
     normalized_fork_ref = fork_ref.strip() if fork_ref is not None else ""

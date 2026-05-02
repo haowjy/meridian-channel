@@ -246,6 +246,7 @@ def test_bootstrap_command_forwards_flags_and_attaches_docs(
     assert captured["model"] == "m1"
     assert captured["harness"] == "codex"
     assert captured["agent"] == "custom"
+    assert captured["project_root"] == tmp_path.resolve()
     docs = captured["supplemental_prompt_documents"]
     assert len(docs) == 1
     assert docs[0].content == "# Bootstrap: setup\n\nsetup docs"
@@ -301,6 +302,7 @@ def test_bootstrap_command_resolves_project_root_from_subdirectory(
         cli_main.main(["bootstrap", "--dry-run"])
 
     assert exc_info.value.code == 0
+    assert captured["project_root"] == tmp_path.resolve()
     docs = captured["supplemental_prompt_documents"]
     assert len(docs) == 1
     assert docs[0].content == "# Bootstrap: setup\n\nsetup docs"
