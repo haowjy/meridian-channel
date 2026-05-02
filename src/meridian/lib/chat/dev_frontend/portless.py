@@ -17,6 +17,7 @@ from meridian.lib.chat.dev_frontend.launcher import (
     FrontendSession,
     PortlessRouteOccupiedError,
 )
+from meridian.lib.chat.dev_frontend.discovery import detect_tailscale_dns_name
 from meridian.lib.chat.dev_frontend.policy import PortlessExposure, PortlessRetryPolicy
 
 
@@ -46,6 +47,12 @@ class PortlessLauncher:
                 "VITE_WS_PROXY_TARGET": backend.ws_origin,
             }
         )
+        # Portless injects __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS for .localhost
+        # but NOT for tailscale hostnames. We need to explicitly allow them.
+        if self._exposure.share_mode in ("tailscale", "funnel"):
+            dns_name = detect_tailscale_dns_name()
+            if dns_name:
+                env["VITE_DEV_ALLOWED_HOSTS"] = dns_name
 
         cmd = ["portless", self._exposure.service_name]
         if self._retry_policy.force_takeover:
