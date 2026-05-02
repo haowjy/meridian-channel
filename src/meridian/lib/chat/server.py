@@ -11,9 +11,12 @@ from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
 from meridian.lib.chat.commands import ChatCommand, CommandResult
+from meridian.lib.chat.frontend import FrontendAssets
 from meridian.lib.chat.protocol import utc_now_iso
 from meridian.lib.chat.replay import ReplayService
 from meridian.lib.chat.runtime import ChatRuntime
@@ -293,6 +296,32 @@ def _parse_chat_command(raw: dict[str, object], path_chat_id: str) -> ChatComman
     )
 
 
+def mount_frontend(application: FastAPI, assets: FrontendAssets) -> None:
+    """Mount SPA static serving on an existing FastAPI app.
+
+    Must be called after all API and WebSocket routes are registered so those
+    routes retain priority over the catch-all SPA fallback.
+    """
+
+    application.router.routes = [
+        route
+        for route in application.router.routes
+        if getattr(route, "name", None) not in {"frontend-assets", "spa_fallback"}
+    ]
+
+    if assets.assets_dir.is_dir():
+        application.mount(
+            "/assets",
+            StaticFiles(directory=str(assets.assets_dir)),
+            name="frontend-assets",
+        )
+
+    @application.get("/{path:path}")
+    async def spa_fallback(path: str) -> FileResponse:
+        _ = path
+        return FileResponse(str(assets.index_html), media_type="text/html")
+
+
 def _parse_last_seq(websocket: WebSocket) -> int | None:
     raw = websocket.query_params.get("last_seq")
     if raw is None or raw == "":
@@ -303,4 +332,4 @@ def _parse_last_seq(websocket: WebSocket) -> int | None:
         return None
 
 
-__all__ = ["app", "configure"]
+__all__ = ["app", "configure", "mount_frontend"]

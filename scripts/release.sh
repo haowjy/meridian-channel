@@ -191,6 +191,13 @@ main() {
   # Keep pytest output visible so the long-running full suite doesn't look hung.
   uv run python -m pytest -x -q || die "tests failed — fix failing tests first"
   printf 'pass\n'
+  printf '  frontend... '
+  if command -v pnpm >/dev/null 2>&1 && [[ -d "$ROOT_DIR/../meridian-web" ]]; then
+    make -C "$ROOT_DIR" build-frontend >/dev/null 2>&1 || die "frontend build failed"
+    printf 'pass\n'
+  else
+    printf 'skip (pnpm or meridian-web not found)\n'
+  fi
 
   local current_version
   current_version="$(read_current_version)"
@@ -224,6 +231,10 @@ main() {
   fi
 
   git -C "$ROOT_DIR" add "$VERSION_FILE"
+  # Stage frontend assets if they were built
+  if [[ -f "$ROOT_DIR/src/meridian/web_dist/index.html" ]]; then
+    git -C "$ROOT_DIR" add src/meridian/web_dist/
+  fi
   git -C "$ROOT_DIR" commit -m "$commit_msg"
   git -C "$ROOT_DIR" tag -a "$tag" -m "$commit_msg"
 

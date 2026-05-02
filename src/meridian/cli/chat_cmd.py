@@ -7,6 +7,7 @@ import json
 import os
 import socket
 import sys
+import webbrowser
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,9 +17,11 @@ from urllib.parse import urlparse
 from cyclopts import App, Parameter
 
 from meridian.lib.chat.backend_acquisition import ColdSpawnAcquisition
+from meridian.lib.chat.frontend import FrontendAssets, resolve_frontend_assets
 from meridian.lib.chat.normalization.base import EventNormalizer
 from meridian.lib.chat.normalization.registry import get_normalizer_factory
 from meridian.lib.chat.runtime import ChatRuntime, PipelineLookup
+from meridian.lib.config.project_root import resolve_project_root
 from meridian.lib.harness.ids import HarnessId
 from meridian.lib.harness.launch_spec import (
     ClaudeLaunchSpec,
@@ -65,12 +68,50 @@ def _chat(
     ] = "127.0.0.1",
     headless: Annotated[
         bool,
-        Parameter(name="--headless", help="Run API-only backend; --no-headless is reserved."),
-    ] = True,
+        Parameter(name="--headless", help="Run API-only backend without frontend UI."),
+    ] = False,
+    dev: Annotated[
+        bool,
+        Parameter(name="--dev", help="Dev mode: Vite subprocess, verbose logging."),
+    ] = False,
+    frontend_root: Annotated[
+        str | None,
+        Parameter(name="--frontend-root", help="Path to meridian-web source checkout (dev mode)."),
+    ] = None,
+    frontend_dist: Annotated[
+        str | None,
+        Parameter(name="--frontend-dist", help="Path to built frontend assets directory."),
+    ] = None,
+    open_browser: Annotated[
+        bool,
+        Parameter(name="--open", help="Open browser after server starts."),
+    ] = False,
+    tailscale: Annotated[
+        bool,
+        Parameter(
+            name="--tailscale",
+            help="Share dev server on Tailscale network (requires portless).",
+        ),
+    ] = False,
+    no_portless: Annotated[
+        bool,
+        Parameter(name="--no-portless", help="Disable portless in dev mode; use raw Vite."),
+    ] = False,
+    funnel: Annotated[
+        bool,
+        Parameter(name="--funnel", help="Expose the dev UI publicly via Tailscale Funnel."),
+    ] = False,
+    portless_force: Annotated[
+        bool,
+        Parameter(name="--portless-force", help="Take over an occupied portless dev route."),
+    ] = False,
 ) -> None:
     """Start the local chat backend server."""
 
     from meridian.cli.main import get_global_options
+
+    if not dev and not headless and os.environ.get("MERIDIAN_ENV") == "dev":
+        dev = True
 
     effective_harness = harness or get_global_options().harness
     run_chat_server(
@@ -79,6 +120,14 @@ def _chat(
         port=port,
         host=host,
         headless=headless,
+        dev=dev,
+        frontend_root=frontend_root,
+        frontend_dist=frontend_dist,
+        open_browser=open_browser,
+        tailscale=tailscale,
+        no_portless=no_portless,
+        funnel=funnel,
+        portless_force=portless_force,
     )
 
 
@@ -145,7 +194,15 @@ def run_chat_server(
     harness: str | None = None,
     port: int = 0,
     host: str = "127.0.0.1",
-    headless: bool = True,
+    headless: bool = False,
+    dev: bool = False,
+    frontend_root: str | None = None,
+    frontend_dist: str | None = None,
+    open_browser: bool = False,
+    tailscale: bool = False,
+    no_portless: bool = False,
+    funnel: bool = False,
+    portless_force: bool = False,
     uvicorn_run: Callable[..., Any] | None = None,
     stdout: Any | None = None,
 ) -> int:
@@ -160,7 +217,7 @@ def run_chat_server(
         raise ValueError("port must be between 0 and 65535")
 
     runtime_root = get_user_home()
-    project_root = Path.cwd()
+    project_root = resolve_project_root()
     harness_id = _resolve_harness_id(harness)
     runtime = ChatRuntime(
         runtime_root=runtime_root,
@@ -175,13 +232,170 @@ def run_chat_server(
     env_port = int(os.environ.get("PORT", "0") or "0")
     actual_port = port if port != 0 else (env_port or _find_free_port(host))
     output = stdout if stdout is not None else sys.stdout
+    display_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
+    url = f"http://{display_host}:{actual_port}"
+
+    if open_browser and headless:
+        print("Warning: --open is ignored in headless mode.", file=output, flush=True)
+        open_browser = False
+
+    if dev and frontend_dist is not None:
+        print("Error: --frontend-dist cannot be combined with --dev.", file=output, flush=True)
+        sys.exit(1)
+    if not dev and frontend_root is not None:
+        print("Error: --frontend-root is only valid with --dev.", file=output, flush=True)
+        sys.exit(1)
+    if not dev and no_portless:
+        print("Error: --no-portless is only valid with --dev.", file=output, flush=True)
+        sys.exit(1)
+    if not dev and (tailscale or funnel):
+        print("Error: --tailscale and --funnel are only valid with --dev.", file=output, flush=True)
+        sys.exit(1)
+    if headless and dev:
+        print("Error: --dev cannot be combined with --headless.", file=output, flush=True)
+        sys.exit(1)
+    if headless and (no_portless or tailscale or funnel or portless_force):
+        print(
+            "Error: dev frontend flags cannot be combined with --headless.", file=output, flush=True
+        )
+        sys.exit(1)
+    if not dev and portless_force:
+        print(
+            "Error: --portless-force is only valid with portless dev mode.", file=output, flush=True
+        )
+        sys.exit(1)
+
+    if dev:
+        from meridian.lib.chat.dev_frontend import (
+            DevFrontendConfigurationError,
+            DevSupervisor,
+            resolve_dev_frontend_launcher,
+            resolve_dev_frontend_root,
+            validate_dev_prerequisites,
+        )
+        from meridian.lib.chat.dev_frontend.launcher import FrontendLaunchError
+
+        try:
+            launcher = resolve_dev_frontend_launcher(
+                backend_host=host,
+                no_portless=no_portless,
+                tailscale=tailscale,
+                funnel=funnel,
+                force_takeover=portless_force,
+            )
+        except DevFrontendConfigurationError as exc:
+            print(f"Error: {exc}", file=output, flush=True)
+            sys.exit(1)
+
+        resolved_frontend_root = resolve_dev_frontend_root(explicit=frontend_root)
+        if resolved_frontend_root is None:
+            print(
+                "Error: Dev frontend checkout not found.\n"
+                "\n"
+                "To fix this, either:\n"
+                "  1. Pass a checkout: meridian chat --dev --frontend-root /path/to/meridian-web\n"
+                "  2. Set MERIDIAN_DEV_FRONTEND_ROOT=/path/to/meridian-web\n"
+                "  3. Place meridian-web next to meridian-cli as ../meridian-web\n"
+                "  4. Run headless (API only): meridian chat --headless\n",
+                file=output,
+                flush=True,
+            )
+            sys.exit(1)
+        prerequisite_error = validate_dev_prerequisites(resolved_frontend_root)
+        if prerequisite_error is not None:
+            print(f"Error: {prerequisite_error}", file=output, flush=True)
+            sys.exit(1)
+
+        if host in ("0.0.0.0", "::"):
+            print(
+                "Warning: Backend is bound to all interfaces. "
+                "The frontend sharing mode does not restrict backend API access.",
+                file=output,
+                flush=True,
+            )
+
+        _write_server_discovery(host=display_host, port=actual_port, runtime_root=runtime_root)
+        supervisor = DevSupervisor(
+            backend_host=host,
+            backend_port=actual_port,
+            frontend_root=resolved_frontend_root,
+            chat_app=chat_app,
+            open_browser=open_browser,
+            launcher=launcher,
+        )
+        try:
+            exit_code = asyncio.run(supervisor.run())
+        except FrontendLaunchError as exc:
+            print(f"Error: {exc}", file=output, flush=True)
+            sys.exit(1)
+        if exit_code != 0:
+            sys.exit(exit_code)
+        return actual_port
+
     if not headless:
-        print("frontend not yet available, running in headless mode", file=output, flush=True)
-    print(f"Chat backend: http://{host}:{actual_port}", file=output, flush=True)
-    _write_server_discovery(host=host, port=actual_port, runtime_root=runtime_root)
+        assets = resolve_frontend_assets(
+            explicit_dist=Path(frontend_dist) if frontend_dist else None,
+        )
+        if assets is None:
+            if frontend_dist is not None:
+                print(
+                    "Error: Built frontend assets not found at the specified path.\n"
+                    "\n"
+                    "To fix this, either:\n"
+                    "  1. Build assets: cd ../meridian-web && pnpm build\n"
+                    "  2. Correct the path: meridian chat --frontend-dist /path/to/dist\n"
+                    "  3. Run headless (API only): meridian chat --headless\n",
+                    file=output,
+                    flush=True,
+                )
+                sys.exit(1)
+            print(
+                "Note: Frontend assets not found. Running in headless mode.\n"
+                "To serve the UI, build assets first: cd ../meridian-web && pnpm build",
+                file=output,
+                flush=True,
+            )
+            headless = True
+        else:
+            from meridian.lib.chat.server import mount_frontend
+
+            mount_frontend(chat_app, assets)
+            _check_stale_assets(assets, output)
+            print(f"Chat UI: {url}", file=output, flush=True)
+
+    if headless:
+        print(f"Chat backend: {url}", file=output, flush=True)
+
+    _write_server_discovery(host=display_host, port=actual_port, runtime_root=runtime_root)
+    if not headless and open_browser:
+        webbrowser.open(url)
+
     runner = uvicorn_run or uvicorn.run
     runner(chat_app, host=host, port=actual_port)
     return actual_port
+
+
+def _check_stale_assets(assets: FrontendAssets, output: Any) -> None:
+    """Warn if checkout-local frontend source appears newer than built assets."""
+
+    try:
+        source_dir = resolve_project_root().parent / "meridian-web" / "src"
+        if not source_dir.is_dir():
+            return
+
+        dist_mtime = assets.index_html.stat().st_mtime
+        for pattern in ("*.ts", "*.tsx"):
+            for source_file in source_dir.rglob(pattern):
+                if source_file.stat().st_mtime > dist_mtime:
+                    print(
+                        "Warning: Frontend source is newer than built assets. "
+                        "Consider rebuilding: cd ../meridian-web && pnpm build",
+                        file=output,
+                        flush=True,
+                    )
+                    return
+    except Exception:
+        return
 
 
 def _resolve_harness_id(harness: str | None) -> HarnessId:
@@ -267,8 +481,7 @@ def _format_chat_table(rows: list[dict[str, object]]) -> str:
     lines = ["  ".join(header.ljust(widths[index]) for index, header in enumerate(headers))]
     lines.append("  ".join("-" * width for width in widths))
     lines.extend(
-        "  ".join(value.ljust(widths[index]) for index, value in enumerate(row))
-        for row in values
+        "  ".join(value.ljust(widths[index]) for index, value in enumerate(row)) for row in values
     )
     return "\n".join(lines)
 
@@ -347,6 +560,7 @@ def _build_backend_acquisition(
             model=model,
         ),
         project_root=project_root,
+        runtime_root=runtime_root,
         harness_id=harness_id,
     )
 

@@ -69,53 +69,115 @@ and the new tag.
 uv run meridian --help
 ```
 
-## App Server + Frontend
+## Workspace conventions
 
-The app is a FastAPI backend serving a Vite/React frontend. Local dev uses
-[portless](https://github.com/vercel-labs/portless) for stable, worktree-aware
-URLs — no port juggling, and multiple worktrees run the full stack simultaneously.
+Workspace config declares sibling directories that harnesses may access during launches.
+Commit shared repo-layout conventions in `meridian.toml` with `[workspace.NAME]` entries. Put machine-specific overrides and additions in gitignored `meridian.local.toml`.
 
-### Prerequisites
+If your repos are not at the paths in `meridian.toml`, create `[workspace]` overrides in `meridian.local.toml`:
 
-```bash
-npm install -g portless        # one-time
-portless trust                 # trust the local CA (one-time)
-cd frontend && pnpm install    # frontend deps (first time)
+```toml
+[workspace.frontend]
+path = "/home/you/src/meridian-web"
 ```
 
-### Dev workflow
+Missing committed paths are silently skipped so partial checkouts work. Missing local override paths produce `workspace_local_missing_root` because they usually indicate a typo or stale local config. There is no `enabled` field and no subtractive override for disabling an existing committed entry; that limitation is intentional and can be extended later if needed.
+
+See [docs/configuration.md](docs/configuration.md#workspace) for the full schema, projection behavior, and migration details.
+
+## Chat Server + Frontend
+
+The chat backend (`meridian chat`) serves the frontend from built assets by
+default. For development with hot reload, use `--dev` mode.
+
+### Quick Start
 
 ```bash
-# Terminal 1: backend
-make backend
-# → https://api.meridian.localhost
+# Serve UI from built assets (end user / backend dev path)
+make chat
 
-# Terminal 2: frontend
-make frontend
-# → https://app.meridian.localhost (proxies /api and /ws to backend)
+# Dev mode with hot reload (frontend dev path)
+make chat-dev
 ```
 
-In a git worktree (e.g. `feature/new-ui`), URLs auto-prefix automatically:
-`https://new-ui.app.meridian.localhost`, `https://new-ui.api.meridian.localhost`.
+### Static mode (default)
 
-### Share over Tailscale
+`meridian chat` serves pre-built frontend assets alongside the API. No
+Node.js required at runtime.
 
 ```bash
-make backend-share
-make frontend-share
+# Build frontend assets from the sibling meridian-web checkout
+make build-frontend
+
+# Serve with built assets
+meridian chat --open
 ```
 
-### Backend only (no portless)
+Asset resolution order:
+1. `--frontend-dist <path>` explicit override
+2. Packaged assets (from installed wheel)
+3. `../meridian-web/dist` convenience fallback
+
+If no assets are found, the server falls back to headless (API-only) mode.
+
+### Dev mode
+
+`meridian chat --dev` starts the backend and a Vite dev server with hot reload:
 
 ```bash
-uv run meridian chat --port 7676
-# → http://localhost:7676
+meridian chat --dev --open
 ```
 
-### Production build
+Frontend root resolution:
+1. `--frontend-root <path>` explicit flag
+2. `MERIDIAN_DEV_FRONTEND_ROOT` env var
+3. `../meridian-web` sibling convention
+
+Set `MERIDIAN_ENV=dev` in `.env` for persistent dev mode.
+
+### Portless integration (optional)
+
+When [portless](https://github.com/vercel-labs/portless) is installed, dev
+mode uses it automatically for stable HTTPS URLs. Portless is optional — raw
+Vite on localhost is the fallback.
 
 ```bash
-make build
-uv run meridian app --port 7676
-# Frontend served at http://localhost:7676
+# Install portless (one-time)
+npm install -g portless
+portless trust
+
+# Dev mode auto-detects portless
+meridian chat --dev
+
+# Force raw Vite (skip portless)
+meridian chat --dev --no-portless
+```
+
+### Network sharing (dev mode only)
+
+Share your dev UI on Tailscale or publicly via Funnel. These require
+portless and are always explicit opt-in:
+
+```bash
+# Share on your tailnet
+meridian chat --dev --tailscale
+
+# Share publicly (requires Funnel ACL)
+meridian chat --dev --funnel
+```
+
+If a portless route is occupied:
+```bash
+# Clean up stale routes
+portless prune
+
+# Or take over explicitly
+meridian chat --dev --portless-force
+```
+
+### Headless mode
+
+```bash
+meridian chat --headless
+# → API-only at http://127.0.0.1:<port>
 ```

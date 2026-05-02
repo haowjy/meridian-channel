@@ -115,3 +115,74 @@ def test_restart_recovery_marks_unclosed_active_chat_idle_with_error(tmp_path: P
             "turn.started",
             "runtime.error",
         ]
+
+
+def _frontend_assets(tmp_path: Path):
+    from meridian.lib.chat.frontend import FrontendAssets
+
+    root = tmp_path / "dist"
+    assets_dir = root / "assets"
+    assets_dir.mkdir(parents=True)
+    index = root / "index.html"
+    index.write_text("<html><body>SPA</body></html>", encoding="utf-8")
+    (assets_dir / "app.js").write_text("console.log('spa')", encoding="utf-8")
+    return FrontendAssets(root=root, index_html=index, assets_dir=assets_dir)
+
+
+def test_frontend_mount_serves_root_spa_and_assets(tmp_path: Path) -> None:
+    from meridian.lib.chat.server import mount_frontend
+
+    configure(runtime_root=tmp_path / "runtime", backend_acquisition=Acquisition())
+    mount_frontend(app, _frontend_assets(tmp_path))
+
+    with TestClient(app) as client:
+        root_response = client.get("/")
+        assert root_response.status_code == 200
+        assert root_response.headers["content-type"].startswith("text/html")
+        assert "SPA" in root_response.text
+
+        asset_response = client.get("/assets/app.js")
+        assert asset_response.status_code == 200
+        assert asset_response.headers["content-type"].startswith("text/javascript")
+        assert "console.log" in asset_response.text
+
+
+def test_frontend_mount_preserves_api_priority_and_spa_catchall(tmp_path: Path) -> None:
+    from meridian.lib.chat.server import mount_frontend
+
+    configure(runtime_root=tmp_path / "runtime", backend_acquisition=Acquisition())
+    mount_frontend(app, _frontend_assets(tmp_path))
+
+    with TestClient(app) as client:
+        created = client.post("/chat", json={})
+        assert created.status_code == 200
+        chat_id = created.json()["chat_id"]
+        assert client.get(f"/chat/{chat_id}/state").json()["state"] == "idle"
+        with client.websocket_connect(f"/ws/chat/{chat_id}") as ws:
+            assert ws.receive_json()["type"] == "chat.started"
+
+        fallback = client.get("/nested/client/route")
+        assert fallback.status_code == 200
+        assert fallback.headers["content-type"].startswith("text/html")
+        assert "SPA" in fallback.text
+
+
+def test_frontend_mount_is_idempotent(tmp_path: Path) -> None:
+    from meridian.lib.chat.server import mount_frontend
+
+    configure(runtime_root=tmp_path / "runtime", backend_acquisition=Acquisition())
+    first_assets = _frontend_assets(tmp_path / "first")
+    second_assets = _frontend_assets(tmp_path / "second")
+    second_assets.index_html.write_text("<html><body>Second SPA</body></html>", encoding="utf-8")
+
+    mount_frontend(app, first_assets)
+    mount_frontend(app, second_assets)
+
+    route_names = [getattr(route, "name", None) for route in app.router.routes]
+    assert route_names.count("frontend-assets") == 1
+    assert route_names.count("spa_fallback") == 1
+
+    with TestClient(app) as client:
+        fallback = client.get("/nested/client/route")
+        assert fallback.status_code == 200
+        assert "Second SPA" in fallback.text
