@@ -757,7 +757,7 @@ def test_resolve_policies_falls_back_to_first_available_fanout_before_model_poli
     assert policies.model == "gpt-5.5"
     assert policies.harness == HarnessId.CODEX
     assert policies.model_selection is not None
-    assert policies.model_selection.requested_token == "codex-fanout"
+    assert policies.model_selection.requested_token == "claude-choice"
     assert policies.model_selection.selected_model_token == "codex-fanout"
     assert policies.model_selection.harness_provenance == "availability-fallback"
 
@@ -1380,6 +1380,36 @@ def test_resolve_policies_config_overrides_win_over_alias_defaults(
 
     assert policies.resolved_overrides.effort == "high"
     assert policies.resolved_overrides.autocompact == 70
+
+
+def test_resolve_policies_harness_default_alias_canonicalizes_final_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_minimal_mars_config(tmp_path)
+    alias = _mock_alias(alias="gpt", model_id="gpt-5.4", harness=HarnessId.CODEX)
+    _patch_alias_resolution(
+        monkeypatch,
+        resolved_entries={"gpt": alias},
+        catalog_entries=[alias],
+    )
+
+    policies = resolve_policies(
+        project_root=tmp_path,
+        layers=(),
+        config_overrides=RuntimeOverrides(),
+        config=MeridianConfig.model_validate(
+            {"harness": {"codex": {"model": "gpt"}}}
+        ),
+        harness_registry=get_default_harness_registry(),
+        configured_default_harness="codex",
+    )
+
+    assert policies.model == "gpt-5.4"
+    assert policies.model_selection is not None
+    assert policies.model_selection.requested_token == "gpt-5.4"
+    assert policies.model_selection.selected_model_token == "gpt"
+    assert policies.model_selection.canonical_model_id == "gpt-5.4"
 
 
 def test_resolve_policies_no_overrides_at_any_layer_yields_none(

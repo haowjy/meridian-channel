@@ -72,7 +72,8 @@ def _resolve_final_model(
     if not fallback_model:
         return "", None
     try:
-        return fallback_model, resolve_model_entry(fallback_model, project_root=project_root)
+        entry = resolve_model_entry(fallback_model, project_root=project_root)
+        return str(entry.model_id), entry
     except ValueError:
         return fallback_model, None
 
@@ -439,6 +440,7 @@ def resolve_policies(
     model_explicit = (
         model_layer_index is not None and model_layer_index < pre_profile_layer_count
     )
+    original_requested_token = resolved.model or ""
     fallback = _try_harness_availability_fallback(
         harness_id=harness_id,
         harness_registry=harness_registry,
@@ -508,7 +510,7 @@ def resolve_policies(
             else final_model
         )
         model_selection = ModelSelectionContext(
-            requested_token=resolved.model or final_model,
+            requested_token=original_requested_token or final_model,
             selected_model_token=selected_model_token,
             canonical_model_id=(
                 str(selected_entry.model_id) if selected_entry is not None else final_model
