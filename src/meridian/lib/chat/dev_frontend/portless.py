@@ -17,7 +17,6 @@ from meridian.lib.chat.dev_frontend.launcher import (
     FrontendSession,
     PortlessRouteOccupiedError,
 )
-from meridian.lib.chat.dev_frontend.discovery import detect_tailscale_dns_name
 from meridian.lib.chat.dev_frontend.policy import PortlessExposure, PortlessRetryPolicy
 
 
@@ -106,11 +105,9 @@ class PortlessLauncher:
 
         if self._exposure.share_mode not in ("tailscale", "funnel"):
             return {}
-        dns_name = detect_tailscale_dns_name()
-        if not dns_name:
+        tailscale_url = _get_portless_tailscale_url(self._exposure.service_name)
+        if not tailscale_url:
             return {}
-        # Portless uses port 8443 for tailscale HTTPS
-        tailscale_url = f"https://{dns_name}:8443"
         label = "Funnel (public)" if self._exposure.share_mode == "funnel" else "Tailscale"
         return {label: tailscale_url}
 
@@ -196,4 +193,35 @@ def _get_portless_url(name: str) -> str | None:
         return None
     if result.returncode == 0 and result.stdout.strip():
         return result.stdout.strip()
+    return None
+
+
+def _get_portless_tailscale_url(name: str) -> str | None:
+    """Get the tailscale URL for a portless route by parsing ``portless list``."""
+
+    try:
+        result = subprocess.run(
+            ["portless", "list"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+
+    # Parse output like:
+    #   https://app.meridian.localhost:1355  ->  localhost:4568  (pid 123)
+    #     tailscale: https://pop-os.tail852a76.ts.net:8444
+    found_route = False
+    for line in result.stdout.splitlines():
+        stripped = line.strip()
+        if f"{name}.localhost" in stripped and "->" in stripped:
+            found_route = True
+        elif found_route and stripped.startswith("tailscale:"):
+            return stripped.split("tailscale:", 1)[1].strip()
+        elif found_route and stripped and "->" in stripped:
+            # Next route — stop searching
+            break
     return None
