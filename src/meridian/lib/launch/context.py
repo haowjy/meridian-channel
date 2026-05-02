@@ -385,27 +385,49 @@ def _resolve_harness_id(
     raise ValueError("SpawnRequest.harness is required.")
 
 
-def normalize_usage_model_family(model: str | None) -> str | None:
-    """Map provider model identifiers to stable usage aggregation families."""
+_KNOWN_MODEL_FAMILIES: dict[str, str] = {
+    "gpt-5": "gpt-5",
+    "gpt-5.3": "gpt-5.3",
+    "gpt-5.4": "gpt-5.4",
+    "gpt-5.5": "gpt-5.5",
+    "gpt-55": "gpt-5.5",
+    "gpt-5-mini": "gpt-5-mini",
+    "gpt-5.3-mini": "gpt-5.3-mini",
+    "gpt-5.4-mini": "gpt-5.4-mini",
+    "gpt-4o": "gpt-4o",
+    "gpt-4o-mini": "gpt-4o-mini",
+    "claude-opus": "claude-opus",
+    "claude-sonnet": "claude-sonnet",
+    "claude-haiku": "claude-haiku",
+    "codex": "codex",
+    "codex-mini": "codex-mini",
+    "o3": "openai-o",
+    "o4-mini": "openai-o",
+}
+
+
+def normalize_usage_model_family(model: str | None) -> str:
+    """Map provider model identifiers to a finite usage aggregation vocabulary."""
 
     normalized = (model or "").strip().lower()
     if not normalized:
-        return None
+        return "other"
 
-    parts = [part for part in normalized.replace("_", "-").split("-") if part]
-    if not parts:
-        return None
+    normalized = "-".join(part for part in normalized.replace("_", "-").split("-") if part)
+    if not normalized:
+        return "other"
 
-    if parts[0] == "gpt" and len(parts) >= 2:
-        major = parts[1].split(".", maxsplit=1)[0]
-        return f"gpt-{major}"
-    if parts[0] == "claude" and len(parts) >= 2:
-        return f"claude-{parts[1]}"
+    parts = normalized.split("-")
+    for end in range(len(parts), 0, -1):
+        candidate = "-".join(parts[:end])
+        if candidate in _KNOWN_MODEL_FAMILIES:
+            return _KNOWN_MODEL_FAMILIES[candidate]
+
     if "codex" in parts:
         return "codex"
     if parts[0].startswith("o") and any(char.isdigit() for char in parts[0]):
         return "openai-o"
-    return parts[0]
+    return "other"
 
 
 def _resolve_report_output_path(
@@ -888,14 +910,13 @@ def build_launch_context(
     resolved_agent_metadata = resolved_request.agent_metadata
     model = (resolved_request.model or "").strip()
     model_family = normalize_usage_model_family(model)
-    if model_family is not None:
-        emit_telemetry(
-            "usage",
-            "usage.model.selected",
-            scope="core.launch",
-            ids={"spawn_id": spawn_id},
-            data={"model_family": model_family, "harness": harness.id.value},
-        )
+    emit_telemetry(
+        "usage",
+        "usage.model.selected",
+        scope="core.launch",
+        ids={"spawn_id": spawn_id},
+        data={"model_family": model_family, "harness": harness.id.value},
+    )
     requested_harness_session_id = (
         resolved_request.session.requested_harness_session_id or ""
     ).strip() or None

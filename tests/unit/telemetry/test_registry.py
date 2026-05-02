@@ -105,9 +105,19 @@ def test_make_error_data_shape() -> None:
 
 
 def test_usage_model_family_normalization_omits_raw_model_ids() -> None:
-    assert normalize_usage_model_family("gpt-5.3-codex") == "gpt-5"
-    assert normalize_usage_model_family("gpt-5.5") == "gpt-5"
+    assert normalize_usage_model_family("gpt-5") == "gpt-5"
+    assert normalize_usage_model_family("gpt-5.5") == "gpt-5.5"
+    assert normalize_usage_model_family("gpt-55") == "gpt-5.5"
+    assert normalize_usage_model_family("gpt-5-mini") == "gpt-5-mini"
+    assert normalize_usage_model_family("gpt-5.4-mini") == "gpt-5.4-mini"
+    assert normalize_usage_model_family("gpt-5.4-mini-2026-01-01") == "gpt-5.4-mini"
+    assert normalize_usage_model_family("gpt_4o_mini_2026_01_01") == "gpt-4o-mini"
     assert normalize_usage_model_family("claude-sonnet-4-6") == "claude-sonnet"
     assert normalize_usage_model_family("claude-opus-4-6") == "claude-opus"
+    assert normalize_usage_model_family("claude-haiku-4-6") == "claude-haiku"
+    assert normalize_usage_model_family("gpt-5.3-codex") == "codex"
     assert normalize_usage_model_family("codex-latest") == "codex"
     assert normalize_usage_model_family("o4-mini") == "openai-o"
+    assert normalize_usage_model_family("o3-2026-01-01") == "openai-o"
+    assert normalize_usage_model_family("vendor-custom-model") == "other"
+    assert normalize_usage_model_family("") == "other"
