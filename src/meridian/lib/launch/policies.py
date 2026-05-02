@@ -216,7 +216,10 @@ def _fallback_entry_for_token(
         entry = resolve_model_entry(token, project_root=project_root)
     except ValueError:
         return None
-    harness_id = entry.harness
+    try:
+        harness_id = entry.harness
+    except ValueError:
+        return None
     if not _harness_is_available(harness_id, harness_registry):
         return None
     return token, harness_id, entry

@@ -762,6 +762,57 @@ def test_resolve_policies_falls_back_to_first_available_fanout_before_model_poli
     assert policies.model_selection.harness_provenance == "availability-fallback"
 
 
+def test_resolve_policies_fanout_skips_raw_model_with_unresolvable_harness(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_minimal_mars_config(tmp_path)
+    _write_agent_profile(
+        tmp_path,
+        name="reviewer",
+        frontmatter=(
+            "name: reviewer\n"
+            "model: claude-choice\n"
+            "fanout:\n"
+            "  - alias: opencode-go/kimi-k2.6\n"
+            "  - alias: codex-fanout\n"
+        ),
+    )
+
+    aliases = {
+        "claude-choice": _mock_alias(
+            alias="claude-choice", model_id="claude-haiku-4-5", harness=HarnessId.CLAUDE
+        ),
+        "opencode-go/kimi-k2.6": AliasEntry(
+            alias="",
+            model_id=ModelId("opencode-go/kimi-k2.6"),
+            resolved_harness=None,
+        ),
+        "codex-fanout": _mock_alias(
+            alias="codex-fanout", model_id="gpt-5.5", harness=HarnessId.CODEX
+        ),
+    }
+    _patch_alias_resolution(monkeypatch, resolved_entries=aliases)
+    registry = HarnessRegistry()
+    registry.register(CodexAdapter())
+
+    policies = resolve_policies(
+        project_root=tmp_path,
+        layers=(RuntimeOverrides(agent="reviewer"), RuntimeOverrides()),
+        config_overrides=RuntimeOverrides(),
+        config=MeridianConfig(),
+        harness_registry=registry,
+        configured_default_harness="claude",
+    )
+
+    assert policies.model == "gpt-5.5"
+    assert policies.harness == HarnessId.CODEX
+    assert policies.model_selection is not None
+    assert policies.model_selection.requested_token == "claude-choice"
+    assert policies.model_selection.selected_model_token == "codex-fanout"
+    assert policies.model_selection.harness_provenance == "availability-fallback"
+
+
 def test_resolve_policies_explicit_model_skips_harness_availability_fallback(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
