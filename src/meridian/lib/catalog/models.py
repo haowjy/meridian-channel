@@ -26,7 +26,6 @@ from meridian.lib.catalog.model_policy import (
     ModelVisibilityConfig,
     compute_superseded_ids,
     is_default_visible_model,
-    pattern_fallback_harness,
 )
 from meridian.lib.config.project_root import resolve_project_root
 from meridian.lib.core.types import HarnessId, ModelId
@@ -59,8 +58,6 @@ def resolve_model(name_or_alias: str, project_root: Path | None = None) -> Alias
         if isinstance(harness, str) and harness.strip():
             with suppress(ValueError):
                 resolved_harness = HarnessId(harness.strip())
-        if resolved_harness is None:
-            resolved_harness = pattern_fallback_harness(normalized)
 
         description = model.get("description")
         return AliasEntry(
@@ -87,10 +84,6 @@ def resolve_model(name_or_alias: str, project_root: Path | None = None) -> Alias
         if isinstance(harness, str) and harness.strip():
             with suppress(ValueError):
                 resolved_harness = HarnessId(harness.strip())
-
-        if resolved_harness is None:
-            # Mars resolved the alias but didn't provide harness -> pattern fallback
-            resolved_harness = pattern_fallback_harness(resolved_model_id)
 
         raw_default_effort = mars_result.get("default_effort")
         raw_default_autocompact = mars_result.get("autocompact")
@@ -139,8 +132,7 @@ def resolve_model(name_or_alias: str, project_root: Path | None = None) -> Alias
     # expensive all-model exact-ID guard when mars cannot resolve the input; the
     # guard only exists for mars prefix-match collisions where mars returned a
     # different model ID than the literal input.
-    resolved_harness = pattern_fallback_harness(normalized)
-    return AliasEntry(alias="", model_id=ModelId(normalized), resolved_harness=resolved_harness)
+    return AliasEntry(alias="", model_id=ModelId(normalized), resolved_harness=None)
 
 
 _MODELS_DEV_URL = "https://models.dev/api.json"

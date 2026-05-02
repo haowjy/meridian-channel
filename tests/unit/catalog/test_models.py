@@ -105,6 +105,8 @@ def test_resolve_model_exact_full_model_id_beats_mars_prefix_match(
     assert str(result.model_id) == "gpt-5.4"
     assert result.alias == ""
     assert result.harness == HarnessId.CODEX
+    assert result.resolved_harness == HarnessId.CODEX
+    assert result.mars_provided_harness == HarnessId.CODEX
 
 
 def test_resolve_model_skips_exact_id_guard_when_mars_cannot_resolve(
@@ -174,6 +176,42 @@ def test_resolve_model_exact_full_model_id_preserves_mars_defaults(
     assert result.default_autocompact == 70
 
 
+def test_resolve_model_exact_full_model_id_without_mars_harness_keeps_raw_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "meridian.lib.catalog.models.run_mars_models_list_all",
+        lambda project_root=None: [
+            {"id": "gpt-5.4", "harness": None, "description": "GPT-5.4"},
+        ],
+    )
+
+    def mock_mars_resolve(
+        name: str, project_root: object = None
+    ) -> dict[str, object] | None:
+        if name == "gpt-5.4":
+            return {
+                "name": "gpt-5.4",
+                "model_id": "gpt-5.4-mini",
+                "harness": "codex",
+                "source": "alias_prefix",
+            }
+        return None
+
+    monkeypatch.setattr(
+        "meridian.lib.catalog.models.run_mars_models_resolve",
+        mock_mars_resolve,
+    )
+
+    result = resolve_model("gpt-5.4")
+
+    assert str(result.model_id) == "gpt-5.4"
+    assert result.alias == ""
+    assert result.harness == HarnessId.CODEX
+    assert result.resolved_harness is None
+    assert result.mars_provided_harness is None
+
+
 def test_resolve_model_keeps_unavailable_explicit_harness_from_mars(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -217,6 +255,8 @@ def test_resolve_model_raw_model_id_pattern_fallback(
     assert str(result.model_id) == "claude-opus-4-6"
     assert result.alias == ""
     assert result.harness == HarnessId.CLAUDE
+    assert result.resolved_harness is None
+    assert result.mars_provided_harness is None
     assert result.default_effort is None
     assert result.default_autocompact is None
 
@@ -231,8 +271,11 @@ def test_resolve_model_unknown_raises(monkeypatch: pytest.MonkeyPatch) -> None:
         "meridian.lib.catalog.models.run_mars_models_resolve",
         mock_mars_resolve,
     )
+    result = resolve_model("some-unknown-model")
+    assert str(result.model_id) == "some-unknown-model"
+    assert result.resolved_harness is None
     with pytest.raises(ValueError, match="Unknown model"):
-        resolve_model("some-unknown-model")
+        _ = result.harness
 
 
 def test_resolve_model_unavailable_harness_without_explicit_route_uses_pattern_fallback(
@@ -258,6 +301,8 @@ def test_resolve_model_unavailable_harness_without_explicit_route_uses_pattern_f
 
     assert str(result.model_id) == "claude-opus-4-6"
     assert result.harness == HarnessId.CLAUDE
+    assert result.resolved_harness is None
+    assert result.mars_provided_harness is None
 
 
 def test_resolve_model_empty_raises() -> None:

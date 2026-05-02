@@ -43,6 +43,10 @@ class AliasEntry(BaseModel):
             return self.resolved_harness
         return pattern_fallback_harness(str(self.model_id))
 
+    @property
+    def mars_provided_harness(self) -> HarnessId | None:
+        return self.resolved_harness
+
     def format_text(self, ctx: object | None = None) -> str:
         _ = ctx
         from meridian.lib.core.formatting import kv_block
