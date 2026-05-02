@@ -719,6 +719,16 @@ class SpawnManager:
                     data={"event_type": event.event_type},
                 )
         except asyncio.QueueFull:
+            from meridian.lib.telemetry import emit_telemetry
+
+            emit_telemetry(
+                "runtime",
+                "runtime.stream_event_dropped",
+                scope="streaming.spawn_manager",
+                severity="warning",
+                ids={"spawn_id": str(spawn_id)},
+                data={"event_type": event.event_type, "reason": "queue_full"},
+            )
             if session.debug_tracer is not None:
                 session.debug_tracer.emit(
                     "drain",

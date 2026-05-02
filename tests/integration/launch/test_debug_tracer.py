@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import sys
 import threading
+import time
+from collections.abc import Sequence
 from pathlib import Path
 from unittest.mock import patch
 
@@ -15,6 +17,28 @@ from meridian.lib.observability.trace_helpers import (
     trace_wire_recv,
     trace_wire_send,
 )
+from meridian.lib.telemetry import init_telemetry
+from meridian.lib.telemetry.events import TelemetryEnvelope
+
+
+class RecordingTelemetrySink:
+    def __init__(self) -> None:
+        self.events: list[TelemetryEnvelope] = []
+
+    def write_batch(self, events: Sequence[TelemetryEnvelope]) -> None:
+        self.events.extend(events)
+
+    def close(self) -> None:
+        pass
+
+
+def wait_for_telemetry(predicate: object, timeout: float = 1.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():  # type: ignore[operator]
+            return
+        time.sleep(0.01)
+    raise AssertionError("telemetry event not observed")
 
 
 class TestDebugTracer:
@@ -112,6 +136,24 @@ class TestDebugTracer:
         # Subsequent emits are silently no-ops
         tracer.emit("wire", "also_bad")
         debug_path.chmod(0o644)
+
+    def test_first_failure_emits_runtime_telemetry(self, tmp_path: Path) -> None:
+        sink = RecordingTelemetrySink()
+        init_telemetry(sink=sink)
+        debug_path = tmp_path / "debug.jsonl"
+        tracer = DebugTracer(spawn_id="p1", debug_path=debug_path)
+
+        with patch.object(Path, "open", side_effect=OSError("disk full")):
+            tracer.emit("wire", "bad")
+
+        assert tracer._disabled
+        wait_for_telemetry(lambda: len(sink.events) == 1)
+        assert [event.event for event in sink.events] == ["runtime.debug_tracer_disabled"]
+        event = sink.events[0]
+        assert event.scope == "observability.debug_tracer"
+        assert event.severity == "warning"
+        assert event.ids == {"spawn_id": "p1"}
+        assert event.data == {"reason": "disk full"}
 
     def test_close_is_idempotent(self, tmp_path: Path) -> None:
         debug_path = tmp_path / "debug.jsonl"

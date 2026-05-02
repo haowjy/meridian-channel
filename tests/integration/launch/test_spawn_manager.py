@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
+from collections.abc import Sequence
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -18,8 +20,30 @@ from meridian.lib.safety.permissions import UnsafeNoOpPermissionResolver
 from meridian.lib.state.paths import resolve_runtime_paths
 from meridian.lib.state.spawn_store import start_spawn
 from meridian.lib.streaming import spawn_manager as spawn_manager_module
-from meridian.lib.streaming.spawn_manager import SpawnManager
+from meridian.lib.streaming.spawn_manager import SpawnManager, SpawnSession
 from meridian.lib.streaming.types import InjectResult
+from meridian.lib.telemetry import init_telemetry
+from meridian.lib.telemetry.events import TelemetryEnvelope
+
+
+class RecordingTelemetrySink:
+    def __init__(self) -> None:
+        self.events: list[TelemetryEnvelope] = []
+
+    def write_batch(self, events: Sequence[TelemetryEnvelope]) -> None:
+        self.events.extend(events)
+
+    def close(self) -> None:
+        pass
+
+
+def wait_for_telemetry(predicate: object, timeout: float = 1.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():  # type: ignore[operator]
+            return
+        time.sleep(0.01)
+    raise AssertionError("telemetry event not observed")
 
 
 def _build_config(spawn_id: SpawnId, project_root: Path) -> ConnectionConfig:
@@ -174,3 +198,49 @@ async def test_wait_for_completion_survives_cleanup_without_private_hooks(
         release_cleanup.set()
         await asyncio.sleep(0)
         await manager.stop_spawn(spawn_id)
+
+
+@pytest.mark.asyncio
+async def test_backpressure_drop_emits_runtime_telemetry(tmp_path: Path) -> None:
+    sink = RecordingTelemetrySink()
+    init_telemetry(sink=sink)
+    project_root = tmp_path
+    runtime_root = resolve_runtime_paths(project_root).root_dir
+    spawn_id = SpawnId("p-drop")
+    manager = SpawnManager(runtime_root=runtime_root, project_root=project_root)
+
+    class FakeConnection:
+        @property
+        def harness_id(self) -> HarnessId:
+            return HarnessId.CODEX
+
+        async def stop(self) -> None:
+            return None
+
+    class FakeControlServer:
+        async def stop(self) -> None:
+            return None
+
+    completion_future: asyncio.Future = asyncio.get_running_loop().create_future()
+    manager._sessions[spawn_id] = SpawnSession(
+        connection=cast("Any", FakeConnection()),
+        drain_task=asyncio.create_task(asyncio.sleep(0)),
+        subscriber=asyncio.Queue(maxsize=1),
+        control_server=cast("Any", FakeControlServer()),
+        started_monotonic=time.monotonic(),
+        completion_future=completion_future,
+    )
+
+    first = HarnessEvent(event_type="first", harness_id="codex", payload={})
+    second = HarnessEvent(event_type="second", harness_id="codex", payload={})
+    manager._fan_out_event(spawn_id, first)
+    manager._fan_out_event(spawn_id, second)
+
+    wait_for_telemetry(
+        lambda: any(event.event == "runtime.stream_event_dropped" for event in sink.events)
+    )
+    event = next(event for event in sink.events if event.event == "runtime.stream_event_dropped")
+    assert event.scope == "streaming.spawn_manager"
+    assert event.severity == "warning"
+    assert event.ids == {"spawn_id": "p-drop"}
+    assert event.data == {"event_type": "second", "reason": "queue_full"}

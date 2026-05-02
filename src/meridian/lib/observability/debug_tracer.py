@@ -77,8 +77,18 @@ class DebugTracer:
             if self._echo_stderr:
                 sys.stderr.write(line)
                 sys.stderr.flush()
-        except Exception:
+        except Exception as exc:
             self._disabled = True
+            from meridian.lib.telemetry import emit_telemetry
+
+            emit_telemetry(
+                "runtime",
+                "runtime.debug_tracer_disabled",
+                scope="observability.debug_tracer",
+                severity="warning",
+                ids={"spawn_id": self._spawn_id},
+                data={"reason": str(exc)},
+            )
             logger.warning(
                 "Debug tracer disabled after write failure for spawn %s",
                 self._spawn_id,
