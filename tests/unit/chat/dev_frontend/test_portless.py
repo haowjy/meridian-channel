@@ -176,6 +176,37 @@ def test_portless_launcher_scrubs_inherited_env_and_builds_expected_command(
     assert not stderr.closed
 
 
+def test_portless_launcher_sets_allowed_hosts_from_exposure(
+    monkeypatch, tmp_path, backend_endpoint: BackendEndpoint
+):
+    frontend_root = tmp_path / "frontend"
+    frontend_root.mkdir()
+    process = FakeProcess(wait_result=subprocess.TimeoutExpired(cmd="portless", timeout=2), returncode=0)
+    popen_calls = []
+
+    monkeypatch.setattr(
+        "meridian.lib.chat.dev_frontend.portless.subprocess.Popen",
+        lambda cmd, cwd, env, stderr=None: popen_calls.append((cmd, cwd, env, stderr)) or process,
+    )
+    monkeypatch.setattr(
+        "meridian.lib.chat.dev_frontend.portless.get_portless_url",
+        lambda name: f"https://{name}.example.test",
+    )
+
+    launcher = PortlessLauncher(
+        exposure=PortlessExposure(
+            share_mode="tailscale",
+            allowed_hosts=("tailnet.example.ts.net",),
+        ),
+        retry_policy=PortlessRetryPolicy(),
+    )
+
+    launcher.launch(frontend_root, backend_endpoint)
+
+    (_cmd, _cwd, env, _stderr), = popen_calls
+    assert env["VITE_DEV_ALLOWED_HOSTS"] == "tailnet.example.ts.net"
+
+
 def test_portless_launcher_uses_default_url_when_lookup_missing(
     monkeypatch, tmp_path, backend_endpoint: BackendEndpoint
 ):

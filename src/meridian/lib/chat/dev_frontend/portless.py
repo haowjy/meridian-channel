@@ -47,6 +47,8 @@ class PortlessLauncher:
                 "VITE_WS_PROXY_TARGET": backend.ws_origin,
             }
         )
+        if self._exposure.allowed_hosts:
+            env["VITE_DEV_ALLOWED_HOSTS"] = ",".join(self._exposure.allowed_hosts)
 
         cmd = ["portless", self._exposure.service_name]
         if self._retry_policy.force_takeover:

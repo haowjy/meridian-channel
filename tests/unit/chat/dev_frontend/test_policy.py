@@ -131,8 +131,13 @@ def test_resolve_dev_frontend_launcher_keeps_loopback_raw_vite_local(monkeypatch
     ],
 )
 def test_resolve_dev_frontend_launcher_builds_portless_policy(
-    tailscale: bool, funnel: bool, share_mode: str
+    monkeypatch, tailscale: bool, funnel: bool, share_mode: str
 ):
+    monkeypatch.setattr(
+        "meridian.lib.chat.dev_frontend.policy.detect_tailscale_dns_name",
+        lambda: "tailnet.example.ts.net",
+    )
+
     launcher = resolve_dev_frontend_launcher(
         backend_host="127.0.0.1",
         no_portless=False,
@@ -142,8 +147,11 @@ def test_resolve_dev_frontend_launcher_builds_portless_policy(
         portless_available=True,
     )
 
+    expected_hosts = ("tailnet.example.ts.net",) if share_mode != "local" else ()
     assert isinstance(launcher, PortlessLauncher)
-    assert launcher._exposure == PortlessExposure(share_mode=share_mode)
+    assert launcher._exposure == PortlessExposure(
+        share_mode=share_mode, allowed_hosts=expected_hosts
+    )
     assert launcher._retry_policy == PortlessRetryPolicy(force_takeover=funnel)
 
 

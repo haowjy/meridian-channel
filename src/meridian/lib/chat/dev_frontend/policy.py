@@ -35,6 +35,7 @@ class PortlessExposure:
 
     service_name: str = "app.meridian"
     share_mode: Literal["local", "tailscale", "funnel"] = "local"
+    allowed_hosts: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -105,7 +106,16 @@ def resolve_dev_frontend_launcher(
 
     from meridian.lib.chat.dev_frontend.portless import PortlessLauncher
 
+    portless_allowed_hosts: tuple[str, ...] = ()
+    if _policy.exposure in ("tailscale", "funnel"):
+        dns_name = detect_tailscale_dns_name()
+        if dns_name is not None:
+            portless_allowed_hosts = (dns_name,)
+
     return PortlessLauncher(
-        exposure=PortlessExposure(share_mode=_policy.exposure),
+        exposure=PortlessExposure(
+            share_mode=_policy.exposure,
+            allowed_hosts=portless_allowed_hosts,
+        ),
         retry_policy=PortlessRetryPolicy(force_takeover=_policy.force_takeover),
     )
