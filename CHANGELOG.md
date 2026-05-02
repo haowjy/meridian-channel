@@ -5,6 +5,7 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 ### Added
 - `meridian bootstrap` primary launch command. Loads typed skill/package bootstrap docs from `.mars`, injects after skill prompts, forwards launch flags, and still runs without docs.
+- Skill variant runtime selection. 4-step exact-match specificity ladder: model-token+harness > canonical-id+harness > harness > base. Base frontmatter authoritative; variants replace body only.
 - Workspace system redesign. Named `[workspace.<name>]` entries in `meridian.toml` (committed, shared) and `meridian.local.toml` (gitignored, per-machine overrides) replace unnamed `[[context-roots]]` in `workspace.local.toml`. Two-tier merge by name — local overrides committed paths. `meridian workspace migrate` converts legacy config. Legacy fallback with deprecation warnings. Doctor and config-show updated for new format.
 - Unified dev frontend (`meridian chat --dev`). Portless auto-detection, `--tailscale`/`--funnel` sharing, `--portless-force` route takeover. `LaunchResult` dataclass bundles session + display metadata. Policy layer resolves tailscale DNS names into `PortlessExposure.allowed_hosts`. HOST/PORT scrubbed from raw Vite child env to prevent accidental network exposure.
 
@@ -57,7 +58,7 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Frontend chat: multi-column spawn view, chat composer with submit/clear, thread activity tracking, session list sidebar, spawn header with streaming controls, ChatContext LRU eviction, conversation effects refactor.
 
 ### Removed
-- `MERIDIAN_HARNESS_COMMAND` launch escape hatch. Adapter command building now only path.
+- `MERIDIAN_HARNESS_COMMAND` env var. Harness adapters are the only launch path.
 - `backlog/` directory deleted — tracking moved to GitHub Issues.
 - Windows CI matrix. Ubuntu-only until Windows support is re-validated.
 - Archived old frontend, FastAPI app server, HCP chat stack, `meridian app` command, app-backed tests, and built UI artifacts. Active codebase clear for fresh `meridian chat` / `meridian app` rebuild.
