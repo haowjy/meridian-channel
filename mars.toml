@@ -13,7 +13,7 @@ url = "https://github.com/meridian-flow/meridian-prompter"
 
 [settings]
 targets = [
-    ".agents",
     ".claude",
+    ".opencode",
 ]
 models_cache_ttl_hours = 24
