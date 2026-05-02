@@ -8,6 +8,7 @@ build/
 .pytest_cache/
 .ruff_cache/
 .playwright-mcp/
+.playwright-cli/
 
 .env
 
