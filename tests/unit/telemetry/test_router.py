@@ -73,3 +73,24 @@ def test_error_severity_wakes_writer_promptly() -> None:
     wait_for(lambda: len(sink.events) == 1)
     assert sink.events[0].severity == "error"
     router.close()
+
+
+def test_queue_overflow_produces_dropped_event() -> None:
+    sink = RecordingSink()
+    router = TelemetryRouter(sink, max_queue=1, flush_interval_secs=10.0, batch_size=10)
+    router.enqueue(
+        TelemetryEnvelope(v=1, ts="t", domain="chat", event="chat.ws.connected", scope="s")
+    )
+    router.enqueue(
+        TelemetryEnvelope(v=1, ts="t", domain="chat", event="chat.ws.disconnected", scope="s")
+    )
+    wait_for(lambda: any(event.event == "runtime.telemetry.dropped" for event in sink.events))
+    router.close()
+
+
+def test_sink_failure_disables_sink() -> None:
+    router = TelemetryRouter(FailingSink(), flush_interval_secs=0.01)
+    router.emit("chat", "chat.ws.connected", scope="chat.server.ws", ids={"chat_id": "c1"})
+    wait_for(lambda: router._sink is None)
+    router.emit("chat", "chat.ws.disconnected", scope="chat.server.ws", ids={"chat_id": "c1"})
+    router.close()

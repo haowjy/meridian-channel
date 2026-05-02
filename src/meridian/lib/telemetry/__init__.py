@@ -10,6 +10,7 @@ from meridian.lib.telemetry.events import (
     concerns_for_event,
     make_error_data,
 )
+from meridian.lib.telemetry.local_jsonl import LocalJSONLSink
 from meridian.lib.telemetry.observers import (
     DebugTraceObserver,
     LifecycleObserver,
@@ -25,11 +26,7 @@ from meridian.lib.telemetry.sinks import NoopSink, StderrSink, TelemetrySink
 def init_telemetry(*, sink: TelemetrySink | None = None, runtime_root: Path | None = None) -> None:
     """Initialize the process-wide telemetry router."""
     if sink is None:
-        # LocalJSONLSink arrives in Phase 2.2. Until then runtime-root processes
-        # intentionally route to NoopSink while rootless callers use setup_telemetry
-        # to select StderrSink explicitly.
-        _ = runtime_root
-        sink = NoopSink()
+        sink = LocalJSONLSink(runtime_root) if runtime_root is not None else NoopSink()
     set_global_router(TelemetryRouter(sink))
 
 
@@ -38,6 +35,7 @@ __all__ = [
     "DebugTraceObserver",
     "LifecycleObserver",
     "LifecycleObserverTier",
+    "LocalJSONLSink",
     "NoopSink",
     "StderrSink",
     "TelemetryEnvelope",

@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from meridian.lib.telemetry import init_telemetry
+from meridian.lib.telemetry.local_jsonl import LocalJSONLSink
 from meridian.lib.telemetry.sinks import NoopSink, StderrSink, TelemetrySink
 
 
@@ -21,6 +22,7 @@ def setup_telemetry(
     if rootless and runtime_root is None:
         init_telemetry(sink=StderrSink())
         return
-    # LocalJSONLSink is introduced in Phase 2.2; runtime-root processes use a
-    # placeholder NoopSink for the 2.1 contract.
+    if runtime_root is not None:
+        init_telemetry(sink=LocalJSONLSink(runtime_root), runtime_root=runtime_root)
+        return
     init_telemetry(sink=NoopSink(), runtime_root=runtime_root)
