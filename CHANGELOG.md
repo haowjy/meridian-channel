@@ -4,6 +4,13 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 ### Added
+- `meridian work root` command — prints the work items container path. Escape hatch for the root that's no longer shown in agent prompts.
+
+### Changed
+- Env vars renamed: `MERIDIAN_WORK_DIR` → `MERIDIAN_ACTIVE_WORK_DIR`, `MERIDIAN_WORK_ID` → `MERIDIAN_ACTIVE_WORK_ID`. Agents confused the context root (`$MERIDIAN_CONTEXT_WORK_DIR`) with the active item dir when both said "WORK_DIR."
+- Context prompt injection no longer shows work root path. Shows `$MERIDIAN_ACTIVE_WORK_DIR` when a work item is active, explicit "(no active work item)" when none. Prevents agents from writing to the container.
+
+### Added
 - `meridian bootstrap` primary launch command. Loads typed skill/package bootstrap docs from `.mars`, injects after skill prompts, forwards launch flags, and still runs without docs.
 - Skill variant runtime selection. 4-step exact-match specificity ladder: model-token+harness > canonical-id+harness > harness > base. Base frontmatter authoritative; variants replace body only.
 - Workspace system redesign. Named `[workspace.<name>]` entries in `meridian.toml` (committed, shared) and `meridian.local.toml` (gitignored, per-machine overrides) replace unnamed `[[context-roots]]` in `workspace.local.toml`. Two-tier merge by name — local overrides committed paths. `meridian workspace migrate` converts legacy config. Legacy fallback with deprecation warnings. Doctor and config-show updated for new format.
@@ -457,7 +464,7 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`psutil`-based process liveness**: cross-platform (Linux, macOS, Windows). PID-reuse detection via `create_time()`. Replaces `/proc/stat` parsing and `os.kill(pid, 0)`.
 - **`SpawnExitedEvent`**: new event type separating process exit from finalization. Spawn stays `running` after process exits until report extraction completes — prevents false orphan detection.
 - **`runner_pid` tracking**: each spawn records which PID is responsible for finalization. Foreground spawns set it in `start` event; background spawns set it in `update` after wrapper launches.
-- **`MERIDIAN_WORK_DIR` and `MERIDIAN_WORK_ID` exported** into harness sessions.
+- **`MERIDIAN_ACTIVE_WORK_DIR` and `MERIDIAN_ACTIVE_WORK_ID` exported** into harness sessions.
 - `CHANGELOG.md` resumed after staleness. Now in caveman style.
 
 ### Changed
