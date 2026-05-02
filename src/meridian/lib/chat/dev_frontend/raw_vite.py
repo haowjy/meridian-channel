@@ -13,6 +13,7 @@ import httpx
 
 from meridian.lib.chat.dev_frontend.launcher import BackendEndpoint, LaunchResult
 from meridian.lib.chat.dev_frontend.policy import RawViteExposure
+from meridian.lib.telemetry import emit_telemetry
 
 
 class RawViteLauncher:
@@ -43,10 +44,22 @@ class RawViteLauncher:
 
         process = subprocess.Popen(cmd, cwd=frontend_root, env=env)
         display_host = _display_host(self.exposure.bind_host)
+        url = f"http://{display_host}:{vite_port}"
+        emit_telemetry(
+            "server",
+            "dev_frontend.launched",
+            scope="dev_frontend.supervisor",
+            data={
+                "url": url,
+                "launcher": "raw_vite",
+                "vite_port": vite_port,
+                "bind_host": self.exposure.bind_host,
+            },
+        )
         return LaunchResult(
             session=RawViteSession(
                 process=process,
-                url=f"http://{display_host}:{vite_port}",
+                url=url,
                 vite_port=vite_port,
             )
         )
@@ -59,6 +72,7 @@ class RawViteSession:
         self._process = process
         self._url = url
         self._vite_port = vite_port
+        self._exit_emitted = False
 
     @property
     def url(self) -> str:
@@ -73,23 +87,51 @@ class RawViteSession:
         readiness_url = f"http://localhost:{self._vite_port}"
         async with httpx.AsyncClient(timeout=1.0) as client:
             while True:
-                if self._process.poll() is not None:
-                    raise RuntimeError(
-                        "Vite dev server exited during startup "
-                        f"with code {self._process.returncode}"
-                    )
+                code = self.poll()
+                if code is not None:
+                    raise RuntimeError(f"Vite dev server exited during startup with code {code}")
                 with suppress(httpx.HTTPError):
                     response = await client.get(readiness_url)
                     if response.status_code < 500:
+                        emit_telemetry(
+                            "server",
+                            "dev_frontend.ready",
+                            scope="dev_frontend.supervisor",
+                            data={
+                                "url": self._url,
+                                "launcher": "raw_vite",
+                                "timeout_s": timeout,
+                            },
+                        )
                         return
                 if asyncio.get_running_loop().time() >= deadline:
+                    emit_telemetry(
+                        "server",
+                        "dev_frontend.readiness_timeout",
+                        scope="dev_frontend.supervisor",
+                        severity="error",
+                        data={
+                            "url": self._url,
+                            "launcher": "raw_vite",
+                            "timeout_s": timeout,
+                        },
+                    )
                     raise TimeoutError(f"Timed out waiting for Vite dev server at {readiness_url}")
                 await asyncio.sleep(0.2)
 
     def poll(self) -> int | None:
         """Return the process exit code if Vite exited, otherwise ``None``."""
 
-        return self._process.poll()
+        code = self._process.poll()
+        if code is not None and not self._exit_emitted:
+            self._exit_emitted = True
+            emit_telemetry(
+                "server",
+                "dev_frontend.exited",
+                scope="dev_frontend.supervisor",
+                data={"url": self._url, "launcher": "raw_vite", "exit_code": code},
+            )
+        return code
 
     def terminate(self, grace_period: float = 5.0) -> None:
         """Terminate Vite, escalating to kill after ``grace_period`` seconds."""

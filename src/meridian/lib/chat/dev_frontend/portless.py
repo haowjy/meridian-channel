@@ -20,6 +20,7 @@ from meridian.lib.chat.dev_frontend.launcher import (
     PortlessRouteOccupiedError,
 )
 from meridian.lib.chat.dev_frontend.policy import PortlessExposure, PortlessRetryPolicy
+from meridian.lib.telemetry import emit_telemetry
 
 _PORTLESS_VAR = re.compile(r"^PORTLESS", re.IGNORECASE)
 
@@ -74,6 +75,17 @@ class PortlessLauncher:
                 url = get_portless_url(self._exposure.service_name) or (
                     f"https://{self._exposure.service_name}.localhost"
                 )
+                emit_telemetry(
+                    "server",
+                    "dev_frontend.launched",
+                    scope="dev_frontend.supervisor",
+                    data={
+                        "url": url,
+                        "launcher": "portless",
+                        "service_name": self._exposure.service_name,
+                        "share_mode": self._exposure.share_mode,
+                    },
+                )
                 return self._launch_result(process=process, url=url, resource_owner=stack.pop_all())
 
             stderr_tmp.seek(0)
@@ -107,6 +119,17 @@ class PortlessLauncher:
 
         url = get_portless_url(self._exposure.service_name) or (
             f"https://{self._exposure.service_name}.localhost"
+        )
+        emit_telemetry(
+            "server",
+            "dev_frontend.launched",
+            scope="dev_frontend.supervisor",
+            data={
+                "url": url,
+                "launcher": "portless",
+                "service_name": self._exposure.service_name,
+                "share_mode": self._exposure.share_mode,
+            },
         )
         return self._launch_result(process=process, url=url)
 
@@ -162,6 +185,7 @@ class PortlessSession:
         self._process = process
         self._url = url
         self._resource_owner = resource_owner
+        self._exit_emitted = False
 
     @property
     def url(self) -> str:
@@ -172,30 +196,57 @@ class PortlessSession:
     async def wait_until_ready(self, timeout: float) -> None:
         """Wait until the portless-managed dev server responds or fails startup."""
 
-        if self._process.poll() is not None:
-            raise RuntimeError(
-                f"Vite dev server exited during startup with code {self._process.returncode}"
-            )
+        code = self.poll()
+        if code is not None:
+            raise RuntimeError(f"Vite dev server exited during startup with code {code}")
         deadline = asyncio.get_running_loop().time() + timeout
         async with httpx.AsyncClient(timeout=2.0, verify=False) as client:
             while True:
-                if self._process.poll() is not None:
-                    raise RuntimeError(
-                        "Vite dev server exited during startup "
-                        f"with code {self._process.returncode}"
-                    )
+                code = self.poll()
+                if code is not None:
+                    raise RuntimeError(f"Vite dev server exited during startup with code {code}")
                 with suppress(httpx.HTTPError):
                     response = await client.get(self._url)
                     if response.status_code < 500:
+                        emit_telemetry(
+                            "server",
+                            "dev_frontend.ready",
+                            scope="dev_frontend.supervisor",
+                            data={
+                                "url": self._url,
+                                "launcher": "portless",
+                                "timeout_s": timeout,
+                            },
+                        )
                         return
                 if asyncio.get_running_loop().time() >= deadline:
+                    emit_telemetry(
+                        "server",
+                        "dev_frontend.readiness_timeout",
+                        scope="dev_frontend.supervisor",
+                        severity="error",
+                        data={
+                            "url": self._url,
+                            "launcher": "portless",
+                            "timeout_s": timeout,
+                        },
+                    )
                     raise TimeoutError(f"Timed out waiting for portless dev server at {self._url}")
                 await asyncio.sleep(0.5)
 
     def poll(self) -> int | None:
         """Return the process exit code if portless exited, otherwise ``None``."""
 
-        return self._process.poll()
+        code = self._process.poll()
+        if code is not None and not self._exit_emitted:
+            self._exit_emitted = True
+            emit_telemetry(
+                "server",
+                "dev_frontend.exited",
+                scope="dev_frontend.supervisor",
+                data={"url": self._url, "launcher": "portless", "exit_code": code},
+            )
+        return code
 
     def terminate(self, grace_period: float = 5.0) -> None:
         """Terminate portless, escalating to kill after ``grace_period`` seconds."""
