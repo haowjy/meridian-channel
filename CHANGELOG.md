@@ -3,6 +3,14 @@
 Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [SemVer](https://semver.org/). Versions `0.0.6` through `0.0.25` in git history only — changelog fell stale, resumed at `[Unreleased]`.
 
 ## [Unreleased]
+### Added
+- Workspace system redesign. Named `[workspace.<name>]` entries in `meridian.toml` (committed, shared) and `meridian.local.toml` (gitignored, per-machine overrides) replace unnamed `[[context-roots]]` in `workspace.local.toml`. Two-tier merge by name — local overrides committed paths. `meridian workspace migrate` converts legacy config. Legacy fallback with deprecation warnings. Doctor and config-show updated for new format.
+- Unified dev frontend (`meridian chat --dev`). Portless auto-detection, `--tailscale`/`--funnel` sharing, `--portless-force` route takeover. `LaunchResult` dataclass bundles session + display metadata. Policy layer resolves tailscale DNS names into `PortlessExposure.allowed_hosts`. HOST/PORT scrubbed from raw Vite child env to prevent accidental network exposure.
+
+### Fixed
+- Vite host validation in portless tailscale/funnel mode. Portless HTTPS does not bypass Vite's Host header check — tailscale hostnames were blocked with 403. Policy layer now resolves the tailscale DNS name and passes it through `VITE_DEV_ALLOWED_HOSTS`.
+- Portless error classification. All immediate non-zero exits were treated as route-occupied collisions. Now captures stderr via tempfile and matches known collision indicators; generic failures surface actual stderr output.
+
 ### Changed
 - Mars compiled store migrated from `.agents/` to `.mars/`. `meridian mars sync` passthrough uses managed env. Remaining `.agents` path references cleaned up in resolve.py and test fixtures.
 - Mars model identity now separates harness affinity from model ID.
