@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from meridian.lib.catalog.agent import parse_agent_profile
+from meridian.lib.catalog.agent import FanoutEntry, ModelPolicyRule, parse_agent_profile
 
 
 def _write_profile(tmp_path: Path, filename: str, frontmatter_lines: list[str]) -> Path:
@@ -39,6 +39,7 @@ def test_parse_agent_profile_disallowed_tools(tmp_path: Path) -> None:
 
 def test_parse_agent_profile_models_preserves_supported_overrides(
     tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     profile_path = _write_profile(
         tmp_path,
@@ -55,6 +56,8 @@ def test_parse_agent_profile_models_preserves_supported_overrides(
         ],
     )
 
+    caplog.set_level(logging.WARNING, logger="meridian.lib.catalog.agent")
+
     profile = parse_agent_profile(profile_path)
 
     assert tuple(profile.models.keys()) == ("gpt55", "unknown-only")
@@ -62,6 +65,7 @@ def test_parse_agent_profile_models_preserves_supported_overrides(
     assert profile.models["gpt55"].autocompact == 35
     assert profile.models["unknown-only"].effort is None
     assert profile.models["unknown-only"].autocompact is None
+    assert "uses legacy models" in caplog.text
 
 
 def test_parse_agent_profile_fanout_is_display_only_alias_list(
@@ -84,7 +88,114 @@ def test_parse_agent_profile_fanout_is_display_only_alias_list(
     profile = parse_agent_profile(profile_path)
 
     assert tuple(profile.models.keys()) == ("policy-only",)
-    assert profile.fanout == ("gpt54", "gpt55")
+    assert profile.fanout == (
+        FanoutEntry(entry_type="alias", value="gpt54"),
+        FanoutEntry(entry_type="alias", value="gpt55"),
+    )
+
+
+def test_parse_agent_profile_model_policies_and_structured_fanout(tmp_path: Path) -> None:
+    profile_path = _write_profile(
+        tmp_path,
+        "reviewer.md",
+        [
+            "name: Reviewer",
+            "mode: primary",
+            "model-policies:",
+            "  - match:",
+            "      model: gpt-5.5",
+            "    override:",
+            "      effort: high",
+            "      autocompact: 80",
+            "  - match:",
+            "      alias: opus",
+            "    override:",
+            "      harness: claude",
+            "fanout:",
+            "  - alias: opus",
+            "  - model: gemini-2.0-flash",
+        ],
+    )
+
+    profile = parse_agent_profile(profile_path)
+
+    assert profile.mode == "primary"
+    assert profile.model_policies == (
+        ModelPolicyRule(
+            match_type="model",
+            match_value="gpt-5.5",
+            overrides={"effort": "high", "autocompact": 80},
+        ),
+        ModelPolicyRule(
+            match_type="alias",
+            match_value="opus",
+            overrides={"harness": "claude"},
+        ),
+    )
+    assert profile.fanout == (
+        FanoutEntry(entry_type="alias", value="opus"),
+        FanoutEntry(entry_type="model", value="gemini-2.0-flash"),
+    )
+
+
+def test_parse_agent_profile_rejects_invalid_mode(tmp_path: Path) -> None:
+    profile_path = _write_profile(tmp_path, "bad.md", ["name: Bad", "mode: worker"])
+
+    with pytest.raises(ValueError, match="invalid mode"):
+        parse_agent_profile(profile_path)
+
+
+@pytest.mark.parametrize(
+    "lines, match",
+    [
+        (
+            [
+                "model-policies:",
+                "  - match:",
+                "      model: gpt-5.5",
+                "      alias: gpt",
+                "    override:",
+                "      effort: high",
+            ],
+            "exactly one match key",
+        ),
+        (
+            [
+                "model-policies:",
+                "  - match:",
+                "      model: gpt-5.5",
+                "    override: {}",
+            ],
+            "at least one override",
+        ),
+    ],
+)
+def test_parse_agent_profile_rejects_invalid_model_policies(
+    tmp_path: Path,
+    lines: list[str],
+    match: str,
+) -> None:
+    profile_path = _write_profile(tmp_path, "bad.md", ["name: Bad", *lines])
+
+    with pytest.raises(ValueError, match=match):
+        parse_agent_profile(profile_path)
+
+
+@pytest.mark.parametrize(
+    "fanout_lines",
+    [
+        ["fanout:", "  - alias: opus", "    model: claude-opus-4-6"],
+        ["fanout:", "  - {}"],
+    ],
+)
+def test_parse_agent_profile_rejects_invalid_structured_fanout(
+    tmp_path: Path,
+    fanout_lines: list[str],
+) -> None:
+    profile_path = _write_profile(tmp_path, "bad.md", ["name: Bad", *fanout_lines])
+
+    with pytest.raises(ValueError, match="exactly one of alias or model"):
+        parse_agent_profile(profile_path)
 
 
 def test_parse_agent_profile_models_discards_invalid_entries_and_warns(

@@ -182,7 +182,7 @@ def _get_fan_out_aliases(agent: AgentProfile) -> tuple[str, ...]:
     Uses explicit fanout field when available, falls back to models keys.
     """
     if agent.fanout:
-        return agent.fanout
+        return tuple(entry.value for entry in agent.fanout)
     if agent.models:
         return tuple(agent.models.keys())
     return ()

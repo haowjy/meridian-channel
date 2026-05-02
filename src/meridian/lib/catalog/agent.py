@@ -3,7 +3,7 @@
 import logging
 from collections.abc import Mapping
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -56,6 +56,25 @@ class AgentModelEntry(BaseModel):
         return RuntimeOverrides(autocompact=value).autocompact
 
 
+class ModelPolicyRule(BaseModel):
+    """One model-policy override rule from profile frontmatter."""
+
+    model_config = ConfigDict(frozen=True)
+
+    match_type: Literal["model", "alias", "model-glob"]
+    match_value: str
+    overrides: Mapping[str, object]
+
+
+class FanoutEntry(BaseModel):
+    """One fan-out display entry."""
+
+    model_config = ConfigDict(frozen=True)
+
+    entry_type: Literal["alias", "model"]
+    value: str
+
+
 class AgentProfile(BaseModel):
     """Parsed agent profile with frontmatter defaults + markdown body."""
 
@@ -73,8 +92,10 @@ class AgentProfile(BaseModel):
     effort: str | None
     approval: str | None = None
     autocompact: int | None = None
+    mode: Literal["primary", "subagent"] = "subagent"
+    model_policies: tuple[ModelPolicyRule, ...] = ()
     models: Mapping[str, AgentModelEntry] = Field(default_factory=dict)
-    fanout: tuple[str, ...] = ()
+    fanout: tuple[FanoutEntry, ...] = ()
     body: str
     path: Path
     raw_content: str
@@ -145,6 +166,129 @@ def _parse_model_overrides(
     return parsed
 
 
+def _parse_model_policies(
+    raw_policies: object,
+    *,
+    profile_name: str,
+) -> tuple[ModelPolicyRule, ...]:
+    if raw_policies is None:
+        return ()
+    if not isinstance(raw_policies, list):
+        raise ValueError(
+            f"Agent profile '{profile_name}' has invalid model-policies: expected list."
+        )
+
+    parsed: list[ModelPolicyRule] = []
+    allowed_match_keys = {"model", "alias", "model-glob"}
+    for index, raw_rule in enumerate(cast("list[object]", raw_policies), start=1):
+        if not isinstance(raw_rule, Mapping):
+            raise ValueError(
+                f"Agent profile '{profile_name}' has invalid model-policies[{index}]: "
+                "expected mapping."
+            )
+        rule = cast("Mapping[object, object]", raw_rule)
+        raw_match = rule.get("match")
+        raw_override = rule.get("override")
+        if not isinstance(raw_match, Mapping):
+            raise ValueError(
+                f"Agent profile '{profile_name}' has invalid model-policies[{index}].match: "
+                "expected mapping."
+            )
+        match = cast("Mapping[object, object]", raw_match)
+        normalized_match = {str(key).strip(): value for key, value in match.items()}
+        if len(normalized_match) != 1:
+            raise ValueError(
+                f"Agent profile '{profile_name}' model-policies[{index}] must have exactly "
+                "one match key: model, alias, or model-glob."
+            )
+        match_key = next(iter(normalized_match))
+        if match_key not in allowed_match_keys:
+            raise ValueError(
+                f"Agent profile '{profile_name}' model-policies[{index}] has unknown match "
+                f"key '{match_key}': expected model, alias, or model-glob."
+            )
+        match_value = str(normalized_match.get(match_key, "")).strip()
+        if not match_value:
+            raise ValueError(
+                f"Agent profile '{profile_name}' model-policies[{index}] match '{match_key}' "
+                "must not be empty."
+            )
+        if not isinstance(raw_override, Mapping):
+            raise ValueError(
+                f"Agent profile '{profile_name}' has invalid model-policies[{index}].override: "
+                "expected mapping."
+            )
+        overrides = {
+            str(key).strip(): value
+            for key, value in cast("Mapping[object, object]", raw_override).items()
+            if str(key).strip()
+        }
+        if not overrides:
+            raise ValueError(
+                f"Agent profile '{profile_name}' model-policies[{index}] must set at least "
+                "one override field."
+            )
+        parsed.append(
+            ModelPolicyRule(
+                match_type=cast("Literal['model', 'alias', 'model-glob']", match_key),
+                match_value=match_value,
+                overrides=overrides,
+            )
+        )
+    return tuple(parsed)
+
+
+def _parse_fanout_entries(
+    raw_fanout: object,
+    *,
+    profile_name: str,
+) -> tuple[FanoutEntry, ...]:
+    if raw_fanout is None:
+        return ()
+    if isinstance(raw_fanout, str):
+        normalized = raw_fanout.strip()
+        return (FanoutEntry(entry_type="alias", value=normalized),) if normalized else ()
+    if not isinstance(raw_fanout, list):
+        raise ValueError(f"Agent profile '{profile_name}' has invalid fanout: expected list.")
+
+    entries: list[FanoutEntry] = []
+    for index, raw_entry in enumerate(cast("list[object]", raw_fanout), start=1):
+        if isinstance(raw_entry, str):
+            normalized = raw_entry.strip()
+            if normalized:
+                entries.append(FanoutEntry(entry_type="alias", value=normalized))
+            continue
+        if not isinstance(raw_entry, Mapping):
+            raise ValueError(
+                f"Agent profile '{profile_name}' has invalid fanout[{index}]: expected mapping."
+            )
+        entry = cast("Mapping[object, object]", raw_entry)
+        normalized_entry = {str(key).strip(): value for key, value in entry.items()}
+        if len(normalized_entry) != 1:
+            raise ValueError(
+                f"Agent profile '{profile_name}' fanout[{index}] must have exactly one of "
+                "alias or model."
+            )
+        entry_key = next(iter(normalized_entry))
+        if entry_key not in {"alias", "model"}:
+            raise ValueError(
+                f"Agent profile '{profile_name}' fanout[{index}] has unknown key "
+                f"'{entry_key}': expected alias or model."
+            )
+        value = str(normalized_entry.get(entry_key, "")).strip()
+        if not value:
+            raise ValueError(
+                f"Agent profile '{profile_name}' fanout[{index}] {entry_key} must not be empty."
+            )
+        entries.append(
+            FanoutEntry(
+                entry_type=cast("Literal['alias', 'model']", entry_key),
+                value=value,
+            )
+        )
+    return tuple(entries)
+
+
 def parse_agent_profile(path: Path) -> AgentProfile:
     """Parse a single markdown agent profile file."""
 
@@ -159,6 +303,8 @@ def parse_agent_profile(path: Path) -> AgentProfile:
     effort_value = frontmatter.get("effort")
     approval_value = frontmatter.get("approval")
     autocompact_value = frontmatter.get("autocompact")
+    mode_value = frontmatter.get("mode")
+    model_policies_value = frontmatter.get("model-policies")
     models_value = frontmatter.get("models")
     fanout_value = frontmatter.get("fanout")
 
@@ -204,6 +350,25 @@ def parse_agent_profile(path: Path) -> AgentProfile:
                 autocompact = None
 
     models = _parse_model_overrides(models_value, profile_name=profile_name)
+    model_policies = _parse_model_policies(
+        model_policies_value,
+        profile_name=profile_name,
+    )
+    fanout = _parse_fanout_entries(fanout_value, profile_name=profile_name)
+
+    mode = str(mode_value).strip() if mode_value is not None else "subagent"
+    if mode not in {"primary", "subagent"}:
+        raise ValueError(
+            f"Agent profile '{profile_name}' has invalid mode '{mode}': "
+            "expected 'primary' or 'subagent'."
+        )
+
+    if models_value is not None and model_policies_value is None and fanout_value is None:
+        logger.warning(
+            "Agent profile '%s' uses legacy models without model-policies or fanout; "
+            "models is deprecated for fan-out display and policy overrides.",
+            profile_name,
+        )
 
     return AgentProfile(
         name=profile_name,
@@ -218,8 +383,10 @@ def parse_agent_profile(path: Path) -> AgentProfile:
         effort=effort,
         approval=approval,
         autocompact=autocompact,
+        mode=cast("Literal['primary', 'subagent']", mode),
+        model_policies=model_policies,
         models=models,
-        fanout=_normalize_string_list(fanout_value),
+        fanout=fanout,
         body=body,
         path=path.resolve(),
         raw_content=markdown,

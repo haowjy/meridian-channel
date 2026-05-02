@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from meridian.lib.catalog.agent import AgentModelEntry, AgentProfile
+from meridian.lib.catalog.agent import AgentModelEntry, AgentProfile, FanoutEntry
 from meridian.lib.catalog.model_aliases import entry
 from meridian.lib.launch.prompt import (
     _dedupe_fan_out_aliases,
@@ -18,7 +18,7 @@ def _profile(
     description: str,
     model: str | None = None,
     models: dict[str, AgentModelEntry] | None = None,
-    fanout: tuple[str, ...] = (),
+    fanout: tuple[FanoutEntry, ...] = (),
 ) -> AgentProfile:
     return AgentProfile(
         name=name,
@@ -127,7 +127,10 @@ def test_build_agent_inventory_prompt_uses_explicit_fanout_for_display(
             name="reviewer",
             description="Explicit fanout",
             models={"policy-only": AgentModelEntry()},
-            fanout=("gpt54", "gpt55"),
+            fanout=(
+                FanoutEntry(entry_type="alias", value="gpt54"),
+                FanoutEntry(entry_type="alias", value="gpt55"),
+            ),
         ),
     ]
 
@@ -168,7 +171,10 @@ def test_get_fan_out_aliases_prefers_explicit_fanout(tmp_path: Path) -> None:
         name="reviewer",
         description="Explicit",
         models={"policy-only": AgentModelEntry()},
-        fanout=("gpt54", "gpt55"),
+        fanout=(
+            FanoutEntry(entry_type="alias", value="gpt54"),
+            FanoutEntry(entry_type="alias", value="gpt55"),
+        ),
     )
 
     assert _get_fan_out_aliases(profile) == ("gpt54", "gpt55")
