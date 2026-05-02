@@ -85,6 +85,14 @@ def test_queue_overflow_produces_dropped_event() -> None:
         TelemetryEnvelope(v=1, ts="t", domain="chat", event="chat.ws.disconnected", scope="s")
     )
     wait_for(lambda: any(event.event == "runtime.telemetry.dropped" for event in sink.events))
+    dropped = next(event for event in sink.events if event.event == "runtime.telemetry.dropped")
+    assert dropped.data == {
+        "error": {
+            "type": "QueueOverflow",
+            "message": "1 telemetry event(s) dropped due to queue overflow",
+        },
+        "count": 1,
+    }
     router.close()
 
 

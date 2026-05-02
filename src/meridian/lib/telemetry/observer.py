@@ -69,6 +69,13 @@ def _extract_terminal_data(event: LifecycleEvent) -> dict[str, object]:
         value = event.payload.get(key)
         if value is not None:
             data[key] = value
+    if event.event == "spawn.failed":
+        from meridian.lib.telemetry.events import make_error_data
+
+        reason = event.payload.get("reason", "Spawn failed")
+        error_data = make_error_data(message=str(reason))
+        error_data["error"]["type"] = "SpawnFailed"
+        data.update(error_data)
     return data
 
 

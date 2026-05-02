@@ -9,7 +9,12 @@ from collections.abc import Sequence
 from contextlib import suppress
 from typing import Any
 
-from meridian.lib.telemetry.events import TelemetryEnvelope, utc_timestamp, validate_event
+from meridian.lib.telemetry.events import (
+    TelemetryEnvelope,
+    make_error_data,
+    utc_timestamp,
+    validate_event,
+)
 from meridian.lib.telemetry.sinks import NoopSink, TelemetrySink
 
 logger = logging.getLogger(__name__)
@@ -119,6 +124,10 @@ class TelemetryRouter:
             if self._dropped:
                 dropped = self._dropped
                 self._dropped = 0
+                error_data = make_error_data(
+                    message=f"{dropped} telemetry event(s) dropped due to queue overflow"
+                )
+                error_data["error"]["type"] = "QueueOverflow"
                 batch.append(
                     TelemetryEnvelope(
                         v=1,
@@ -127,7 +136,7 @@ class TelemetryRouter:
                         event="runtime.telemetry.dropped",
                         scope="telemetry.router",
                         severity="warning",
-                        data={"count": dropped},
+                        data={**error_data, "count": dropped},
                     )
                 )
             while self._queue and len(batch) < self._batch_size:
