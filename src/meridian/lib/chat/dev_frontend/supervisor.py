@@ -10,6 +10,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import httpx
 import uvicorn
 
 from meridian.lib.chat.dev_frontend.launcher import (
@@ -52,14 +53,22 @@ class DevSupervisor:
         server_task = asyncio.create_task(server.serve())
 
         try:
-            await asyncio.sleep(0.1)
-            if server_task.done():
-                server_task.result()
+            while not server.started:
+                if server_task.done():
+                    server_task.result()
+                await asyncio.sleep(0.05)
+
+            endpoint = _backend_endpoint(self.backend_host, self.backend_port)
+            async with httpx.AsyncClient() as client:
+                response = await client.post(f"{endpoint.http_origin}/chat", json={}, timeout=5.0)
+                response.raise_for_status()
+                chat_id = response.json()["chat_id"]
+            print(f"Chat ID: {chat_id}", file=sys.stderr, flush=True)
 
             try:
                 result = self.launcher.launch(
                     self.frontend_root,
-                    _backend_endpoint(self.backend_host, self.backend_port),
+                    endpoint,
                 )
                 self._frontend_session = result.session
                 await self._frontend_session.wait_until_ready(timeout=30.0)
@@ -67,7 +76,8 @@ class DevSupervisor:
                 raise
             except (RuntimeError, TimeoutError) as exc:
                 raise FrontendLaunchError(str(exc)) from exc
-            url = self._frontend_session.url
+            frontend_url = self._frontend_session.url
+            url = f"{frontend_url}?chat_id={chat_id}"
 
             print(f"Chat UI (dev): {url}", flush=True)
             if result.share_url:
