@@ -36,7 +36,7 @@ class SegmentInfo:
 
     @property
     def orphaned(self) -> bool:
-        return not self.live
+        return self.owner is None
 
 
 def parse_segment_owner(path: Path) -> SegmentOwner | None:
@@ -57,8 +57,11 @@ def parse_segment_owner(path: Path) -> SegmentOwner | None:
         parts = instance_and_seq.split("-", 1)
         if len(parts) == 2:
             try:
-                pid = int(parts[0])
-                int(parts[1])
+                pid_text, seq_text = parts
+                if not pid_text.isdigit() or not seq_text.isdigit():
+                    return None
+                pid = int(pid_text)
+                int(seq_text)
                 return SegmentOwner(logical_owner=logical_owner, pid=pid)
             except ValueError:
                 pass

@@ -1,5 +1,6 @@
 """Cyclopts CLI entry point for meridian."""
 
+import os
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -735,7 +736,8 @@ def upgrade_cli_telemetry_to_project(project_root: Path) -> None:
         from meridian.lib.telemetry.local_jsonl import LocalJSONLSink
 
         runtime_root = resolve_project_runtime_root_for_write(project_root)
-        real_sink = LocalJSONLSink(runtime_root)
+        logical_owner = os.environ.get("MERIDIAN_SPAWN_ID") or "cli"
+        real_sink = LocalJSONLSink(runtime_root, logical_owner=logical_owner)
         _cli_buffering_sink.upgrade(real_sink)
     except Exception:
         pass
