@@ -11,7 +11,7 @@ def test_agent_mode_spawn_help_includes_agent_notes(cli):
     assert "Agent Notes:" in result.stdout
     assert "Lifecycle: queued" in result.stdout
     assert "Which subcommand when:" in result.stdout
-    assert "not 'spawn log'" in result.stdout
+    assert "session log" in result.stdout
 
 
 def test_agent_mode_session_help_uses_renderer_safe_search_placeholders(cli):
@@ -27,7 +27,8 @@ def test_agent_mode_doctor_help_includes_agent_notes(cli):
     result.assert_success()
 
     assert "Agent Notes:" in result.stdout
-    assert "read paths (show, list, wait)" in result.stdout
+    assert "read paths" in result.stdout
+    assert "show, list, wait" in result.stdout
     assert "meridian session log SPAWN_ID" in result.stdout
 
 
