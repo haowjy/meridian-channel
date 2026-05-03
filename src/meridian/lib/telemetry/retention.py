@@ -15,9 +15,21 @@ _DEFAULT_MAX_TOTAL_BYTES = 100_000_000
 
 
 @dataclass(frozen=True)
+class SegmentOwner:
+    """Parsed identity from a segment filename."""
+
+    logical_owner: str
+    pid: int
+
+    @property
+    def is_cli_or_chat(self) -> bool:
+        return self.logical_owner in ("cli", "chat")
+
+
+@dataclass(frozen=True)
 class SegmentInfo:
     path: Path
-    pid: int
+    owner: SegmentOwner | None
     size: int
     mtime: float
     live: bool
@@ -27,23 +39,43 @@ class SegmentInfo:
         return not self.live
 
 
-def parse_segment_pid(path: Path) -> int | None:
-    """Parse the PID from a <pid>-<seq>.jsonl segment filename."""
+def parse_segment_owner(path: Path) -> SegmentOwner | None:
+    """Parse owner from compound telemetry segment filenames.
+
+    Compound format: <logical_owner>.<pid>-<seq>.jsonl.
+    Legacy format <pid>-<seq>.jsonl is returned as None so retention treats it
+    as orphaned.
+    """
     if path.suffix != ".jsonl":
         return None
-    parts = path.stem.split("-", 1)
-    if len(parts) != 2:
-        return None
-    try:
-        int(parts[1])
-        return int(parts[0])
-    except ValueError:
-        return None
+    stem = path.stem
+
+    dot_idx = stem.rfind(".")
+    if dot_idx > 0:
+        logical_owner = stem[:dot_idx]
+        instance_and_seq = stem[dot_idx + 1 :]
+        parts = instance_and_seq.split("-", 1)
+        if len(parts) == 2:
+            try:
+                pid = int(parts[0])
+                int(parts[1])
+                return SegmentOwner(logical_owner=logical_owner, pid=pid)
+            except ValueError:
+                pass
+
+    return None
+
+
+def parse_segment_pid(path: Path) -> int | None:
+    """Deprecated compatibility wrapper for compound segment PID parsing."""
+    owner = parse_segment_owner(path)
+    return owner.pid if owner is not None else None
 
 
 def run_retention_cleanup(
     telemetry_dir: Path,
     *,
+    runtime_root: Path | None = None,
     max_age_days: int = _DEFAULT_MAX_AGE_DAYS,
     max_total_bytes: int = _DEFAULT_MAX_TOTAL_BYTES,
 ) -> None:
@@ -51,11 +83,13 @@ def run_retention_cleanup(
     telemetry_dir.mkdir(parents=True, exist_ok=True)
     now = time.time()
     current_pid = os.getpid()
-    segments = _list_segments(telemetry_dir)
+    segments = _list_segments(telemetry_dir, runtime_root=runtime_root)
     max_age_secs = max_age_days * 24 * 60 * 60
 
     for segment in list(segments):
-        if segment.pid == current_pid or segment.live:
+        if segment.owner is not None and segment.owner.pid == current_pid:
+            continue
+        if segment.live:
             continue
         if now - segment.mtime > max_age_secs and _delete_segment(segment.path):
             segments.remove(segment)
@@ -73,7 +107,13 @@ def run_retention_cleanup(
 
     # Last resort: closed files not owned by the current or any live process.
     for segment in sorted(
-        (s for s in segments if s.pid != current_pid and not s.live and s.path.exists()),
+        (
+            s
+            for s in segments
+            if (s.owner is None or s.owner.pid != current_pid)
+            and not s.live
+            and s.path.exists()
+        ),
         key=lambda s: s.mtime,
     ):
         if total_size <= max_total_bytes:
@@ -89,24 +129,37 @@ def run_retention_cleanup(
             )
 
 
-def _list_segments(telemetry_dir: Path) -> list[SegmentInfo]:
+def _list_segments(
+    telemetry_dir: Path,
+    *,
+    runtime_root: Path | None = None,
+) -> list[SegmentInfo]:
     # Import lazily to avoid telemetry/core lifecycle import cycles at module load time.
-    from meridian.lib.state.liveness import is_process_alive
+    from meridian.lib.state.liveness import is_process_alive, is_spawn_genuinely_active
 
+    current_pid = os.getpid()
     segments: list[SegmentInfo] = []
     for path in telemetry_dir.glob("*.jsonl"):
-        pid = parse_segment_pid(path)
-        if pid is None:
-            continue
+        owner = parse_segment_owner(path)
         with suppress(OSError):
             stat = path.stat()
+            live = False
+            if owner is not None:
+                if owner.pid == current_pid:
+                    live = True
+                elif owner.is_cli_or_chat:
+                    live = is_process_alive(owner.pid)
+                elif runtime_root is not None:
+                    live = is_spawn_genuinely_active(runtime_root, owner.logical_owner)
+                else:
+                    live = is_process_alive(owner.pid)
             segments.append(
                 SegmentInfo(
                     path=path,
-                    pid=pid,
+                    owner=owner,
                     size=stat.st_size,
                     mtime=stat.st_mtime,
-                    live=is_process_alive(pid),
+                    live=live,
                 )
             )
     return segments

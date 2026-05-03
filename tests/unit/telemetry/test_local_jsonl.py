@@ -19,12 +19,12 @@ def envelope(event: str = "chat.ws.connected") -> TelemetryEnvelope:
     )
 
 
-def test_write_batch_creates_pid_owned_segment_with_json_lines(tmp_path) -> None:
+def test_write_batch_creates_compound_segment_with_json_lines(tmp_path) -> None:
     sink = LocalJSONLSink(tmp_path)
     sink.write_batch([envelope()])
     sink.close()
 
-    segment = tmp_path / "telemetry" / f"{os.getpid()}-0001.jsonl"
+    segment = tmp_path / "telemetry" / f"cli.{os.getpid()}-0001.jsonl"
     assert segment.exists()
     lines = segment.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 1
@@ -34,8 +34,8 @@ def test_write_batch_creates_pid_owned_segment_with_json_lines(tmp_path) -> None
 def test_rotation_opens_next_segment_without_renaming_active_file(tmp_path) -> None:
     sink = LocalJSONLSink(tmp_path, max_segment_bytes=1)
     sink.write_batch([envelope()])
-    first = tmp_path / "telemetry" / f"{os.getpid()}-0001.jsonl"
-    second = tmp_path / "telemetry" / f"{os.getpid()}-0002.jsonl"
+    first = tmp_path / "telemetry" / f"cli.{os.getpid()}-0001.jsonl"
+    second = tmp_path / "telemetry" / f"cli.{os.getpid()}-0002.jsonl"
 
     assert first.exists()
     assert second.exists()
@@ -57,10 +57,21 @@ def test_write_batch_skips_non_serializable_events(tmp_path) -> None:
     sink.write_batch([bad, envelope("chat.ws.disconnected")])
     sink.close()
 
-    segment = tmp_path / "telemetry" / f"{os.getpid()}-0001.jsonl"
+    segment = tmp_path / "telemetry" / f"cli.{os.getpid()}-0001.jsonl"
     lines = segment.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 1
     assert json.loads(lines[0])["event"] == "chat.ws.disconnected"
+
+
+def test_custom_logical_owner_in_segment_filename(tmp_path) -> None:
+    sink = LocalJSONLSink(tmp_path, logical_owner="p42")
+    sink.write_batch([envelope()])
+    sink.close()
+
+    segment = tmp_path / "telemetry" / f"p42.{os.getpid()}-0001.jsonl"
+    assert segment.exists()
+    lines = segment.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
 
 
 def test_close_is_idempotent(tmp_path) -> None:

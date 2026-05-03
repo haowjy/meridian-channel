@@ -68,7 +68,7 @@ def test_retention_cleanup_deletes_old_orphaned_files(tmp_path) -> None:
 def test_retention_preserves_files_from_live_processes(tmp_path) -> None:
     telemetry_dir = tmp_path / "telemetry"
     telemetry_dir.mkdir()
-    live = telemetry_dir / f"{os.getpid()}-0001.jsonl"
+    live = telemetry_dir / f"cli.{os.getpid()}-0001.jsonl"
     live.write_text('{"event":"live"}\n', encoding="utf-8")
     old_time = time.time() - 10 * 24 * 60 * 60
     os.utime(live, (old_time, old_time))

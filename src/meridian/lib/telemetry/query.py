@@ -26,7 +26,7 @@ def parse_since(since: str) -> str:
 
 
 def query_events(
-    telemetry_dir: Path,
+    telemetry_dir: Path | list[Path],
     *,
     since: str | None = None,
     domain: str | None = None,
@@ -38,10 +38,24 @@ def query_events(
     Reads all segments in mtime order, applying filters.
     """
     since_ts = parse_since(since) if since else None
+    dirs = telemetry_dir if isinstance(telemetry_dir, list) else [telemetry_dir]
+
+    all_segments: list[Path] = []
+    for directory in dirs:
+        all_segments.extend(discover_segments(directory))
+    all_segments.sort(key=_segment_mtime_or_zero)
+
     count = 0
-    for segment in discover_segments(telemetry_dir):
+    for segment in all_segments:
         for event in read_events(segment, since_ts=since_ts, domain=domain, ids_filter=ids_filter):
             yield event
             count += 1
             if limit is not None and count >= limit:
                 return
+
+
+def _segment_mtime_or_zero(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0

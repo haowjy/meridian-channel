@@ -7,9 +7,9 @@ from pathlib import Path
 from typing import Any, cast
 
 from meridian.lib.core.util import FormatContext
-from meridian.lib.state.liveness import is_process_alive
+from meridian.lib.state.liveness import is_process_alive, is_spawn_genuinely_active
 from meridian.lib.telemetry.reader import discover_segments
-from meridian.lib.telemetry.retention import parse_segment_pid
+from meridian.lib.telemetry.retention import parse_segment_owner
 
 ROOTLESS_LIMITATION_NOTE = (
     "Rootless processes (MCP stdio server) emit telemetry to stderr only "
@@ -21,10 +21,11 @@ ROOTLESS_LIMITATION_NOTE = (
 class TelemetryStatus:
     """Health summary of the local telemetry sink."""
 
-    telemetry_dir: Path
+    telemetry_dir: Path | list[Path]
     segment_count: int
     total_bytes: int
-    active_pids: list[int]
+    active_writers: list[str]
+    legacy_segments: int = 0
     rootless_note: str = ROOTLESS_LIMITATION_NOTE
 
     @property
@@ -45,48 +46,89 @@ class TelemetryStatus:
 def status_to_dict(status: TelemetryStatus) -> dict[str, Any]:
     """Return a JSON-serializable telemetry status payload."""
     result = asdict(status)
-    result["telemetry_dir"] = str(result["telemetry_dir"])
+    telemetry_dir = result["telemetry_dir"]
+    if isinstance(telemetry_dir, list):
+        directories = cast("list[object]", telemetry_dir)
+        result["telemetry_dir"] = [str(directory) for directory in directories]
+    else:
+        result["telemetry_dir"] = str(telemetry_dir)
     result["total_size_human"] = status.total_size_human
     return result
 
 
 def format_status_dict(status: dict[str, Any]) -> str:
     """Render a telemetry status payload as human-readable text."""
-    active_pids = status.get("active_pids", [])
-    if isinstance(active_pids, list):
-        pid_values = cast("list[object]", active_pids)
-        active = ", ".join(str(pid) for pid in pid_values) or "none"
+    active_writers = status.get("active_writers", [])
+    if isinstance(active_writers, list):
+        writer_values = cast("list[object]", active_writers)
+        active = ", ".join(str(writer) for writer in writer_values) or "none"
     else:
         active = "none"
-    return "\n".join(
-        [
-            f"Telemetry directory: {status.get('telemetry_dir', '')}",
-            f"Segment count: {status.get('segment_count', 0)}",
-            f"Total size: {status.get('total_size_human', '')}",
-            f"Active writer PIDs: {active}",
-            f"Note: {status.get('rootless_note', ROOTLESS_LIMITATION_NOTE)}",
-        ]
-    )
+    telemetry_dir = status.get("telemetry_dir", "")
+    if isinstance(telemetry_dir, list):
+        directories = cast("list[object]", telemetry_dir)
+        dir_str = ", ".join(str(directory) for directory in directories)
+    else:
+        dir_str = str(telemetry_dir)
+    lines = [
+        f"Telemetry directory: {dir_str}",
+        f"Segment count: {status.get('segment_count', 0)}",
+        f"Total size: {status.get('total_size_human', '')}",
+        f"Active writers: {active}",
+        f"Note: {status.get('rootless_note', ROOTLESS_LIMITATION_NOTE)}",
+    ]
+    legacy = status.get("legacy_segments", 0)
+    if isinstance(legacy, int) and legacy > 0:
+        lines.append(
+            "Legacy: "
+            f"{legacy} segment(s) in ~/.meridian/telemetry/ from a previous version "
+            "(will age out via retention)"
+        )
+    return "\n".join(lines)
 
 
-def compute_status(runtime_root: Path) -> TelemetryStatus:
+def compute_status(
+    runtime_root: Path,
+    *,
+    telemetry_dirs: list[Path] | None = None,
+    legacy_dir: Path | None = None,
+) -> TelemetryStatus:
     """Compute telemetry sink status from disk state."""
-    telemetry_dir = runtime_root / "telemetry"
-    segments = discover_segments(telemetry_dir)
+    dirs = telemetry_dirs if telemetry_dirs is not None else [runtime_root / "telemetry"]
+    segments: list[Path] = []
+    for directory in dirs:
+        segments.extend(discover_segments(directory))
+
     total_bytes = 0
-    pids: set[int] = set()
+    writers: set[str] = set()
     for segment in segments:
         try:
             total_bytes += segment.stat().st_size
         except OSError:
             continue
-        pid = parse_segment_pid(segment)
-        if pid is not None and is_process_alive(pid):
-            pids.add(pid)
+        owner = parse_segment_owner(segment)
+        if owner is None:
+            continue
+        writer = f"{owner.logical_owner}.{owner.pid}"
+        if owner.is_cli_or_chat:
+            if is_process_alive(owner.pid):
+                writers.add(writer)
+        else:
+            # Segments live at <runtime_root>/telemetry/<segment>.jsonl. Derive
+            # the runtime root from each segment so global status checks spawn
+            # liveness against the owning project's runtime state.
+            segment_runtime_root = segment.parent.parent
+            if is_spawn_genuinely_active(segment_runtime_root, owner.logical_owner):
+                writers.add(writer)
+
+    legacy_count = 0
+    if legacy_dir is not None and legacy_dir.is_dir():
+        legacy_count = len(discover_segments(legacy_dir))
 
     return TelemetryStatus(
-        telemetry_dir=telemetry_dir,
+        telemetry_dir=dirs[0] if len(dirs) == 1 else dirs,
         segment_count=len(segments),
         total_bytes=total_bytes,
-        active_pids=sorted(pids),
+        active_writers=sorted(writers),
+        legacy_segments=legacy_count,
     )

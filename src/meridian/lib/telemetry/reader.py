@@ -6,7 +6,18 @@ import json
 import time
 from collections.abc import Generator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+
+
+def _as_string_key_dict(value: object) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    raw_dict = cast("dict[object, object]", value)
+    keys = list(raw_dict)
+    for key in keys:
+        if not isinstance(key, str):
+            return None
+    return cast("dict[str, Any]", value)
 
 
 def discover_segments(telemetry_dir: Path) -> list[Path]:
@@ -35,10 +46,9 @@ def _matches_filters(
     if domain and envelope.get("domain") != domain:
         return False
     if ids_filter:
-        raw_ids = envelope.get("ids") or {}
-        if not isinstance(raw_ids, dict):
+        event_ids = _as_string_key_dict(envelope.get("ids"))
+        if event_ids is None:
             return False
-        event_ids: dict[str, Any] = raw_ids
         return all(event_ids.get(key) == value for key, value in ids_filter.items())
     return True
 
@@ -64,9 +74,9 @@ def read_events(
                     loaded = json.loads(line)
                 except (json.JSONDecodeError, ValueError):
                     continue
-                if not isinstance(loaded, dict):
+                envelope = _as_string_key_dict(loaded)
+                if envelope is None:
                     continue
-                envelope: dict[str, Any] = loaded
                 if _matches_filters(
                     envelope,
                     since_ts=since_ts,
@@ -79,7 +89,7 @@ def read_events(
 
 
 def tail_events(
-    telemetry_dir: Path,
+    telemetry_dir: Path | list[Path],
     *,
     domain: str | None = None,
     ids_filter: dict[str, str] | None = None,
@@ -90,43 +100,46 @@ def tail_events(
     Watches for new lines in existing segments and new segments appearing.
     Like ``tail -f`` but across rotating JSONL segment files.
     """
+    dirs = telemetry_dir if isinstance(telemetry_dir, list) else [telemetry_dir]
     seen_files: dict[Path, int] = {}
 
-    for segment in discover_segments(telemetry_dir):
-        try:
-            seen_files[segment] = segment.stat().st_size
-        except OSError:
-            continue
+    for directory in dirs:
+        for segment in discover_segments(directory):
+            try:
+                seen_files[segment] = segment.stat().st_size
+            except OSError:
+                continue
 
     while True:
         found_new = False
-        for segment in discover_segments(telemetry_dir):
-            offset = seen_files.get(segment, 0)
-            try:
-                size = segment.stat().st_size
-            except OSError:
-                continue
-            if size <= offset:
-                continue
-            try:
-                with segment.open("r", encoding="utf-8") as file:
-                    file.seek(offset)
-                    for line in file:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            loaded = json.loads(line)
-                        except (json.JSONDecodeError, ValueError):
-                            continue
-                        if not isinstance(loaded, dict):
-                            continue
-                        envelope: dict[str, Any] = loaded
-                        if _matches_filters(envelope, domain=domain, ids_filter=ids_filter):
-                            found_new = True
-                            yield envelope
-                    seen_files[segment] = file.tell()
-            except OSError:
-                continue
+        for directory in dirs:
+            for segment in discover_segments(directory):
+                offset = seen_files.get(segment, 0)
+                try:
+                    size = segment.stat().st_size
+                except OSError:
+                    continue
+                if size <= offset:
+                    continue
+                try:
+                    with segment.open("r", encoding="utf-8") as file:
+                        file.seek(offset)
+                        for line in file:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                loaded = json.loads(line)
+                            except (json.JSONDecodeError, ValueError):
+                                continue
+                            envelope = _as_string_key_dict(loaded)
+                            if envelope is None:
+                                continue
+                            if _matches_filters(envelope, domain=domain, ids_filter=ids_filter):
+                                found_new = True
+                                yield envelope
+                        seen_files[segment] = file.tell()
+                except OSError:
+                    continue
         if not found_new:
             time.sleep(poll_interval)
