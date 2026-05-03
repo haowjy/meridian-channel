@@ -2,7 +2,7 @@
 
 Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [SemVer](https://semver.org/). Versions `0.0.6` through `0.0.25` in git history only — changelog fell stale, resumed at `[Unreleased]`.
 
-## [Unreleased]
+## [0.0.48] - 2026-05-03
 ### Added
 - `meridian session export` command. Emits stitched full-session markdown transcripts; optional child spawn report appendix.
 - Diagnostic guard test for launch warning suppression. Catches catalog/config warnings leaking through spawn prompt assembly.
