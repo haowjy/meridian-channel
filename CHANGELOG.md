@@ -17,6 +17,8 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `meridian work root` command — prints the work items container path. Escape hatch for the root that's no longer shown in agent prompts.
 
 ### Changed
+- Bumped mars-agents 0.2.5→0.2.6. Skill schema: `invocation: explicit|implicit` replaced by `model-invocable` + `user-invocable` booleans. Old fields are hard errors.
+- CLAUDE.md: release docs clarified — `meridian mars version` for prompt packages, `scripts/release.sh` for mars-agents and meridian-cli.
 - Env vars renamed: `MERIDIAN_WORK_DIR` → `MERIDIAN_ACTIVE_WORK_DIR`, `MERIDIAN_WORK_ID` → `MERIDIAN_ACTIVE_WORK_ID`. Agents confused the context root (`$MERIDIAN_CONTEXT_WORK_DIR`) with the active item dir when both said "WORK_DIR."
 - Context prompt injection no longer shows work root path. Shows `$MERIDIAN_ACTIVE_WORK_DIR` when a work item is active, explicit "(no active work item)" when none. Prevents agents from writing to the container.
 

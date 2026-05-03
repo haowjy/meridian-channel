@@ -140,16 +140,25 @@ scripts/release.sh 0.2.0 --push   # explicit version, push tag
 
 ### Releasing Prompt Packages
 
-Prompt packages (meridian-base, meridian-dev-workflow, meridian-prompter) use `mars version` to release. It bumps `mars.toml`, promotes CHANGELOG.md `[Unreleased]` → `[X.Y.Z] - YYYY-MM-DD`, commits, and tags in one step.
+Prompt packages (meridian-base, meridian-dev-workflow, meridian-prompter) use `meridian mars version` to release. It bumps `mars.toml`, promotes CHANGELOG.md `[Unreleased]` → `[X.Y.Z] - YYYY-MM-DD`, commits, and tags in one step.
 
 ```bash
 # From the prompt repo root:
-mars version patch              # bump, commit, tag locally
-mars version patch --push       # bump, commit, tag, push to origin
-mars version minor --push       # minor bump when scope warrants it
+meridian mars version patch              # bump, commit, tag locally
+meridian mars version patch --push       # bump, commit, tag, push to origin
+meridian mars version minor --push       # minor bump when scope warrants it
 ```
 
-Update CHANGELOG.md entries under `[Unreleased]` as you work — `mars version` promotes them automatically. If `[Unreleased]` is empty, it warns but proceeds.
+Update CHANGELOG.md entries under `[Unreleased]` as you work — `meridian mars version` promotes them automatically. If `[Unreleased]` is empty, it warns but proceeds.
+
+### Releasing mars-agents and meridian-cli
+
+Both repos use their own `scripts/release.sh`. Do not use `meridian mars version` for these — that's for prompt packages only.
+
+```bash
+scripts/release.sh patch          # bump, commit, tag locally
+scripts/release.sh patch --push   # bump, commit, tag, push to origin
+```
 
 ### Changelogs
 
