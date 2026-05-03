@@ -1,8 +1,8 @@
 from pathlib import Path
 
-import meridian.lib.ops.spawn.api as spawn_api
 import pytest
 
+import meridian.lib.ops.spawn.api as spawn_api
 from meridian.lib.catalog.model_aliases import AliasEntry
 from meridian.lib.core.types import HarnessId, ModelId
 from meridian.lib.ops.spawn.models import SpawnCreateInput
