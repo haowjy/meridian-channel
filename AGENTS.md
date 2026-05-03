@@ -134,9 +134,13 @@ Omit `minor` and `major` in normal release flow. Use an explicit version only wh
 Usually just bump patch:
 
 ```bash
-scripts/release.sh patch          # 0.0.2 → 0.0.3 (default choice)
-scripts/release.sh 0.2.0 --push   # explicit version, push tag
+scripts/release.sh patch          # 0.0.2 → 0.0.3 (pushes, waits for CI, then tags)
+scripts/release.sh rc             # 0.0.3 → 0.0.4-rc.1 (no CI gate)
+scripts/release.sh 0.2.0          # explicit version
+scripts/release.sh patch --skip-ci  # bypass CI gate for stable release
 ```
+
+Stable releases push the commit first, wait for GitHub CI to pass, then tag. RCs tag immediately without a CI gate. Use `--skip-ci` to bypass the gate when needed.
 
 ### Releasing Prompt Packages
 
@@ -153,11 +157,12 @@ Update CHANGELOG.md entries under `[Unreleased]` as you work — `meridian mars 
 
 ### Releasing mars-agents and meridian-cli
 
-Both repos use their own `scripts/release.sh`. Do not use `meridian mars version` for these — that's for prompt packages only.
+Both repos use their own `scripts/release.sh`. Do not use `meridian mars version` for these — that's for prompt packages only. Stable releases are CI-gated (push → wait for green → tag); RCs are not.
 
 ```bash
-scripts/release.sh patch          # bump, commit, tag locally
-scripts/release.sh patch --push   # bump, commit, tag, push to origin
+scripts/release.sh patch          # stable: push, CI gate, tag
+scripts/release.sh rc             # RC: commit + tag, no CI gate
+scripts/release.sh rc --push      # RC: commit + tag + push
 ```
 
 ### Changelogs
