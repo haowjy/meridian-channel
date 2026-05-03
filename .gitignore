@@ -18,6 +18,7 @@ tmp/
 .orchestrate/
 .scratch/
 .codex/
+.opencode/
 
 err
 out
