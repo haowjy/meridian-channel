@@ -252,14 +252,13 @@ def test_workspace_roots_append_after_claude_preflight_projection(
 
     runtime_root = tmp_path / ".meridian"
     assert preview.child_cwd == tmp_path
-    assert preview.run_params.extra_args == (
-        "--user-tail",
-        "1",
-        "--add-dir",
-        shared_root.as_posix(),
-        "--add-dir",
-        runtime_root.as_posix(),
-    )
+    args = preview.run_params.extra_args
+    # Preflight passthrough args come first
+    assert args[:2] == ("--user-tail", "1")
+    # Workspace roots follow (may include system temp dir)
+    add_dirs = [args[i + 1] for i in range(len(args) - 1) if args[i] == "--add-dir"]
+    assert shared_root.as_posix() in add_dirs
+    assert runtime_root.as_posix() in add_dirs
 
 
 def test_named_workspace_roots_project_through_codex_launch_context(tmp_path: Path) -> None:
