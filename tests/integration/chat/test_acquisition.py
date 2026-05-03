@@ -131,6 +131,34 @@ async def test_cold_acquisition_registers_observer_before_start_and_uses_persist
 
 
 @pytest.mark.asyncio
+async def test_cold_acquisition_default_config_injects_harness_and_meridian_context(
+    tmp_path: Path,
+):
+    manager = SpawnManager()
+    runtime_root = tmp_path / "runtime"
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    acquisition = ColdSpawnAcquisition(
+        spawn_manager=manager,
+        normalizer_factory=lambda chat_id, execution_id: Normalizer(),
+        pipeline_lookup=PipelineLookup(),
+        project_root=project_root,
+        runtime_root=runtime_root,
+        harness_id=HarnessId.CODEX,
+    )
+
+    handle = await acquisition.acquire("c1", "hello")
+
+    assert manager.started_config is not None
+    env_overrides = manager.started_config.env_overrides
+    assert env_overrides["MERIDIAN_HARNESS"] == "codex"
+    assert env_overrides["MERIDIAN_SPAWN_ID"] == str(handle.spawn_id)
+    assert env_overrides["MERIDIAN_PROJECT_DIR"] == str(project_root.resolve())
+    assert env_overrides["MERIDIAN_RUNTIME_DIR"] == str(runtime_root.resolve())
+
+
+@pytest.mark.asyncio
 async def test_cold_acquisition_unregisters_observer_when_start_fails(tmp_path: Path):
     manager = SpawnManager()
     manager.fail_start = True

@@ -487,6 +487,8 @@ def mount_frontend(application: FastAPI, assets: FrontendAssets) -> None:
         _ = path
         return FileResponse(str(assets.index_html), media_type="text/html")
 
+    _ = spa_fallback
+
 
 def _parse_last_seq(websocket: WebSocket) -> int | None:
     raw = websocket.query_params.get("last_seq")
