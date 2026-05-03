@@ -217,9 +217,12 @@ def run_chat_server(
     if port < 0 or port > 65535:
         raise ValueError("port must be between 0 and 65535")
 
-    runtime_root = get_user_home()
-    setup_telemetry(runtime_root=runtime_root)
     project_root = resolve_project_root()
+    from meridian.lib.state.paths import resolve_project_runtime_root_for_write
+
+    telemetry_runtime_root = resolve_project_runtime_root_for_write(project_root)
+    setup_telemetry(runtime_root=telemetry_runtime_root, logical_owner="chat")
+    runtime_root = get_user_home()  # kept for ChatRuntime — not telemetry
     harness_id = _resolve_harness_id(harness)
     runtime = ChatRuntime(
         runtime_root=runtime_root,

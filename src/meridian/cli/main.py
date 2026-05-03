@@ -4,6 +4,7 @@ import subprocess
 import sys
 from collections.abc import Sequence
 from contextvars import ContextVar
+from pathlib import Path
 from typing import Annotated, cast
 
 from cyclopts import Parameter
@@ -80,6 +81,7 @@ from meridian.lib.ops.doctor_cache import (
 from meridian.lib.ops.mars import check_upgrade_availability, format_upgrade_availability
 from meridian.lib.ops.spawn.api import SpawnActionOutput, SpawnDetailOutput, SpawnWaitMultiOutput
 from meridian.lib.telemetry import emit_telemetry
+from meridian.lib.telemetry.sinks import BufferingSink
 from meridian.server.main import run_server
 
 
@@ -104,6 +106,7 @@ class GlobalOptions(BaseModel):
 
 
 _GLOBAL_OPTIONS: ContextVar[GlobalOptions | None] = ContextVar("_GLOBAL_OPTIONS", default=None)
+_cli_buffering_sink: BufferingSink | None = None
 
 PrimaryLaunchOutput = primary_launch.PrimaryLaunchOutput
 
@@ -709,17 +712,33 @@ def _emit_usage_command_invoked(argv: Sequence[str]) -> None:
 
 
 def _try_setup_cli_telemetry() -> None:
-    """Install the baseline CLI telemetry sink without risking CLI startup."""
+    """Install a BufferingSink for early CLI event capture."""
 
+    global _cli_buffering_sink
     try:
-        from meridian.lib.state.user_paths import get_user_home
-        from meridian.lib.telemetry.init import setup_telemetry
+        from meridian.lib.telemetry import init_telemetry
 
-        setup_telemetry(runtime_root=get_user_home())
+        _cli_buffering_sink = BufferingSink()
+        init_telemetry(sink=_cli_buffering_sink)
     except Exception:
-        # Telemetry must never make CLI dispatch fail. If state root resolution
-        # or sink initialization fails, command behavior continues unchanged.
         return
+
+
+def upgrade_cli_telemetry_to_project(project_root: Path) -> None:
+    """Upgrade the buffering sink to a project-local LocalJSONLSink."""
+
+    global _cli_buffering_sink
+    if _cli_buffering_sink is None:
+        return
+    try:
+        from meridian.lib.state.paths import resolve_project_runtime_root_for_write
+        from meridian.lib.telemetry.local_jsonl import LocalJSONLSink
+
+        runtime_root = resolve_project_runtime_root_for_write(project_root)
+        real_sink = LocalJSONLSink(runtime_root)
+        _cli_buffering_sink.upgrade(real_sink)
+    except Exception:
+        pass
 
 
 def _print_agent_root_help() -> None:
@@ -787,6 +806,13 @@ def main(argv: Sequence[str] | None = None) -> None:
     _emit_usage_command_invoked(cleaned_args)
 
     maybe_bootstrap_runtime_state(cleaned_args, agent_mode=agent_mode_enabled())
+    # Upgrade telemetry to project-local sink after project-root resolution.
+    try:
+        from meridian.lib.config.project_root import resolve_project_root
+
+        upgrade_cli_telemetry_to_project(resolve_project_root())
+    except Exception:
+        pass
 
     active_sink = create_sink(options.output)
     options = options.model_copy(update={"sink": active_sink})
