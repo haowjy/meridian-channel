@@ -7,6 +7,13 @@ Caveman style. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `meridian session export` command. Emits stitched full-session markdown transcripts; optional child spawn report appendix.
 - Diagnostic guard test for launch warning suppression. Catches catalog/config warnings leaking through spawn prompt assembly.
 - Telemetry v1 contract surface: 8-field envelope, event registry, process router, noop/stderr sinks, and startup sink selection.
+- Telemetry v1 instrumentation: HTTP/WS lifecycle, command dispatch, dev frontend, MCP invocations, work transitions, debug tracer, stream backpressure, usage events (command invoked, model selected, spawn launched).
+- `meridian telemetry tail`, `query`, `status` CLI commands. Domain/correlation filters, truncation-tolerant reader, crash-safe segment discovery.
+- `--global` flag on telemetry tail/query/status. Aggregates across all project telemetry dirs plus legacy user-level segments.
+- `BufferingSink` for CLI early-event capture. Buffers events before project root resolution, in-place upgrade to project-local sink.
+- Per-project telemetry storage under `<project_runtime_root>/telemetry/`. Compound segment naming: `<logical_owner>.<pid>-<seq>.jsonl`.
+- Spawn-store-based retention. Read-only reconciled liveness (heartbeat + runner PID + store status) replaces raw PID liveness checks.
+- Legacy telemetry migration UX. Old `~/.meridian/telemetry/` segments read-only, visible via `--global`, age out via retention.
 - `meridian work root` command — prints the work items container path. Escape hatch for the root that's no longer shown in agent prompts.
 
 ### Changed
