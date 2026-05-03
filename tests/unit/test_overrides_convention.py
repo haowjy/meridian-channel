@@ -56,7 +56,11 @@ def test_runtime_overrides_fields_are_exposed_across_env_config_and_cli_layers()
     with _env_overrides(env_values):
         from_env = RuntimeOverrides.from_env()
 
+    # harness is intentionally not read from env (spawn-local, not a policy override)
+    env_excluded = {"harness"}
     for field_name in runtime_fields:
+        if field_name in env_excluded:
+            continue
         assert getattr(from_env, field_name) is not None
 
     primary = PrimaryConfig(

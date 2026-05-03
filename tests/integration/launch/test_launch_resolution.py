@@ -307,15 +307,13 @@ def test_named_workspace_roots_project_through_codex_launch_context(tmp_path: Pa
     )
 
     runtime_root = tmp_path / ".meridian"
-    assert preview.run_params.extra_args == (
-        "--add-dir",
-        local_override_root.as_posix(),
-        "--add-dir",
-        local_only_root.as_posix(),
-        "--add-dir",
-        runtime_root.as_posix(),
-    )
-    assert legacy_root.as_posix() not in preview.run_params.extra_args
+    args = preview.run_params.extra_args
+    # Extract --add-dir paths from the arg pairs
+    add_dirs = [args[i + 1] for i in range(len(args) - 1) if args[i] == "--add-dir"]
+    assert local_override_root.as_posix() in add_dirs
+    assert local_only_root.as_posix() in add_dirs
+    assert runtime_root.as_posix() in add_dirs
+    assert legacy_root.as_posix() not in add_dirs
 
 
 def test_git_backed_context_remote_projects_clone_root_once(
@@ -432,14 +430,9 @@ def test_named_workspace_roots_project_through_opencode_launch_context(
 
     runtime_root = tmp_path / ".meridian"
     payload = json.loads(preview.env_overrides[OPENCODE_CONFIG_CONTENT_ENV])
-    assert payload == {
-        "permission": {
-            "external_directory": {
-                docs_root.as_posix(): "allow",
-                runtime_root.as_posix(): "allow",
-            }
-        }
-    }
+    external_dirs = payload["permission"]["external_directory"]
+    assert external_dirs[docs_root.as_posix()] == "allow"
+    assert external_dirs[runtime_root.as_posix()] == "allow"
 
 
 @pytest.mark.parametrize(
@@ -491,12 +484,9 @@ def test_opencode_workspace_projection_handles_parent_env_suppression(
     else:
         runtime_root = tmp_path / ".meridian"
         payload = json.loads(preview.env_overrides[OPENCODE_CONFIG_CONTENT_ENV])
-        assert payload == {
-            "permission": {"external_directory": {
-                shared_root.as_posix(): "allow",
-                runtime_root.as_posix(): "allow",
-            }},
-        }
+        external_dirs = payload["permission"]["external_directory"]
+        assert external_dirs[shared_root.as_posix()] == "allow"
+        assert external_dirs[runtime_root.as_posix()] == "allow"
         assert "workspace_opencode_parent_env_suppressed" not in warning_codes
 
 

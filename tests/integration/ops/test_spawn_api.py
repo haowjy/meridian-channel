@@ -117,7 +117,7 @@ def test_spawn_create_dry_run_emits_usage_events(
     (project_root / ".git").mkdir()
     (project_root / "mars.toml").write_text("", encoding="utf-8")
     monkeypatch.chdir(project_root)
-    monkeypatch.setattr(spawn_api, "setup_telemetry", lambda runtime_root: None)
+    monkeypatch.setattr(spawn_api, "setup_telemetry", lambda **_kwargs: None)
     sink = RecordingTelemetrySink()
     init_telemetry(sink=sink)
 
