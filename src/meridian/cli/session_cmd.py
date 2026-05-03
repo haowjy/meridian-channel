@@ -8,6 +8,7 @@ from cyclopts import App, Parameter
 
 from meridian.cli.ext_registration import register_extension_cli_group
 from meridian.lib.extensions.registry import get_first_party_registry
+from meridian.lib.ops.session_export import SessionExportInput, session_export_sync
 from meridian.lib.ops.session_log import SessionLogInput, session_log_sync
 from meridian.lib.ops.session_search import SessionSearchInput, session_search_sync
 
@@ -70,6 +71,40 @@ def _session_log(
     )
 
 
+def _session_export(
+    emit: Emitter,
+    ref: Annotated[
+        str,
+        Parameter(
+            help=("Session reference: chat id (c123), spawn id (p123), or harness session id.")
+        ),
+    ] = "",
+    file_path: Annotated[
+        str | None,
+        Parameter(
+            name="--file",
+            help="Read this session JSONL file directly instead of resolving REF.",
+        ),
+    ] = None,
+    include_spawns: Annotated[
+        bool,
+        Parameter(
+            name="--include-spawns",
+            help="Append terminal child-spawn reports as markdown appendices.",
+        ),
+    ] = False,
+) -> None:
+    emit(
+        session_export_sync(
+            SessionExportInput(
+                ref=ref,
+                file_path=file_path,
+                include_spawns=include_spawns,
+            )
+        )
+    )
+
+
 def _session_search(
     emit: Emitter,
     query: Annotated[
@@ -106,6 +141,7 @@ def register_session_commands(app: App, emit: Emitter) -> tuple[set[str], dict[s
 
     handlers: dict[str, Callable[[], Callable[..., None]]] = {
         "meridian.session.log": lambda: partial(_session_log, emit),
+        "meridian.session.export": lambda: partial(_session_export, emit),
         "meridian.session.search": lambda: partial(_session_search, emit),
     }
     return register_extension_cli_group(
@@ -122,6 +158,11 @@ def register_session_commands(app: App, emit: Emitter) -> tuple[set[str], dict[s
                 "  meridian session log c123 -c 0 -n 0    # latest segment, all messages\n\n"
                 "  meridian session log c123 -c 2          # older segment "
                 "(higher numbers walk backward)\n"
+            ),
+            "meridian.session.export": (
+                "Examples:\n\n"
+                "  meridian session export c123 > transcript.md\n\n"
+                "  meridian session export p107 --include-spawns > transcript.md\n"
             ),
             "meridian.session.search": (
                 "Example:\n\n"

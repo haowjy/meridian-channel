@@ -76,6 +76,12 @@ from meridian.lib.ops.report import (
     report_show,
     report_show_sync,
 )
+from meridian.lib.ops.session_export import (
+    SessionExportInput,
+    SessionExportOutput,
+    session_export,
+    session_export_sync,
+)
 from meridian.lib.ops.session_log import (
     SessionLogInput,
     SessionLogOutput,
@@ -399,6 +405,19 @@ _OP_SPECS: tuple[ExtensionCommandSpec, ...] = (
         output_type=SessionLogOutput,
         cli_group="session",
         cli_name="log",
+        agent_default_format="text",
+        surfaces=frozenset({ExtensionSurface.CLI, ExtensionSurface.HTTP}),
+    ),
+    ExtensionCommandSpec.from_op(
+        extension_id="meridian.session",
+        command_id="export",
+        summary="Export a full session transcript as clean markdown.",
+        handler=session_export,
+        sync_handler=session_export_sync,
+        input_type=SessionExportInput,
+        output_type=SessionExportOutput,
+        cli_group="session",
+        cli_name="export",
         agent_default_format="text",
         surfaces=frozenset({ExtensionSurface.CLI, ExtensionSurface.HTTP}),
     ),
