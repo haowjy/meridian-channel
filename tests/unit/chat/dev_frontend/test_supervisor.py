@@ -4,10 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
-REAL_ASYNCIO_SLEEP = asyncio.sleep
-
 from meridian.lib.chat.dev_frontend.launcher import FrontendLaunchError, LaunchResult
 from meridian.lib.chat.dev_frontend.supervisor import DevSupervisor
+
+REAL_ASYNCIO_SLEEP = asyncio.sleep
 
 
 class FakeLoop:
@@ -113,7 +113,9 @@ def _patch_httpx(monkeypatch) -> None:
     )
 
 
-def _make_supervisor(*, launcher: FakeLauncher, tmp_path: Path, open_browser: bool = False) -> DevSupervisor:
+def _make_supervisor(
+    *, launcher: FakeLauncher, tmp_path: Path, open_browser: bool = False
+) -> DevSupervisor:
     frontend_root = tmp_path / "frontend"
     frontend_root.mkdir()
     return DevSupervisor(

@@ -7,7 +7,11 @@ from pathlib import Path
 import pytest
 
 import meridian.lib.chat.dev_frontend.supervisor as supervisor_module
-from meridian.lib.chat.dev_frontend.launcher import BackendEndpoint, FrontendLaunchError, LaunchResult
+from meridian.lib.chat.dev_frontend.launcher import (
+    BackendEndpoint,
+    FrontendLaunchError,
+    LaunchResult,
+)
 from meridian.lib.chat.dev_frontend.supervisor import DevSupervisor
 
 
@@ -85,7 +89,12 @@ class FakeSession:
 
 
 class FakeLauncher:
-    def __init__(self, *, session: FakeSession | None = None, launch_error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        session: FakeSession | None = None,
+        launch_error: Exception | None = None,
+    ) -> None:
         self.session = session
         self.launch_error = launch_error
         self.calls: list[tuple[Path, BackendEndpoint]] = []
@@ -166,7 +175,9 @@ def test_dev_supervisor_opens_browser_after_readiness_and_uses_local_client_endp
             return original_launch(frontend_root, backend)
 
         launcher.launch = capture_launch  # type: ignore[method-assign]
-        monkeypatch.setattr(supervisor_module.webbrowser, "open", lambda url: events.append(f"open:{url}"))
+        monkeypatch.setattr(
+            supervisor_module.webbrowser, "open", lambda url: events.append(f"open:{url}")
+        )
 
         supervisor = DevSupervisor(
             backend_host="0.0.0.0",

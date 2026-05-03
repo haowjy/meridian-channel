@@ -157,7 +157,8 @@ def replace_skill_body(base: SkillDocument, body: str) -> str:
     if not base.body:
         return f"{base.content}{body}"
     logger.warning(
-        "Could not isolate frontmatter prefix for skill '%s'; using variant body without base prefix",
+        "Could not isolate frontmatter prefix for skill '%s';"
+        " using variant body without base prefix",
         base.name,
     )
     return body

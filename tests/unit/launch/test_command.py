@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
+import pytest  # noqa: TC002 — used at runtime (pytest.raises, fixtures)
 
 from meridian.lib.core.types import ModelId
 from meridian.lib.harness.claude import ClaudeAdapter

@@ -9,7 +9,7 @@ def test_format_workspace_source_path_defaults_to_legacy_filename_when_empty() -
     )
 
 
-def test_format_workspace_source_path_uses_relative_project_paths_and_absolute_external_paths() -> None:
+def test_format_workspace_source_path_uses_relative_and_absolute() -> None:
     project_root = Path("/repo")
 
     assert _format_workspace_source_path(

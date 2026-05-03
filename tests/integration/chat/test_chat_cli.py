@@ -149,7 +149,7 @@ def test_chat_cli_static_mode_mounts_assets_and_writes_server_discovery(
 
     assert actual_port == 8765
     assert stdout.getvalue().splitlines()[-1] == "Chat UI: http://127.0.0.1:8765"
-    assert cast(object, mounted["assets"]).root == dist.resolve()
+    assert cast("object", mounted["assets"]).root == dist.resolve()
     discovery = runtime_root / "chat-server.json"
     assert discovery.exists()
     assert '"url": "http://127.0.0.1:8765"' in discovery.read_text(encoding="utf-8")
@@ -158,7 +158,9 @@ def test_chat_cli_static_mode_mounts_assets_and_writes_server_discovery(
 def test_chat_cli_static_mode_uses_default_asset_resolution(monkeypatch, tmp_path) -> None:
     runtime_root = tmp_path / "runtime"
     dist = _write_dist(tmp_path)
-    assets = chat_cmd.FrontendAssets(root=dist, index_html=dist / "index.html", assets_dir=dist / "assets")
+    assets = chat_cmd.FrontendAssets(
+        root=dist, index_html=dist / "index.html", assets_dir=dist / "assets"
+    )
     mounted: dict[str, object] = {}
 
     def fake_mount(app, resolved_assets) -> None:
@@ -479,12 +481,21 @@ def test_chat_command_headless_takes_precedence_over_meridian_env_dev(monkeypatc
 @pytest.mark.parametrize(
     ("kwargs", "expected_error"),
     [
-        ({"dev": True, "frontend_dist": "/tmp/dist"}, "Error: --frontend-dist cannot be combined with --dev.\n"),
-        ({"frontend_root": "/tmp/frontend"}, "Error: --frontend-root is only valid with --dev.\n"),
+        (
+            {"dev": True, "frontend_dist": "/tmp/dist"},
+            "Error: --frontend-dist cannot be combined with --dev.\n",
+        ),
+        (
+            {"frontend_root": "/tmp/frontend"},
+            "Error: --frontend-root is only valid with --dev.\n",
+        ),
         ({"no_portless": True}, "Error: --no-portless is only valid with --dev.\n"),
         ({"tailscale": True}, "Error: --tailscale and --funnel are only valid with --dev.\n"),
         ({"funnel": True}, "Error: --tailscale and --funnel are only valid with --dev.\n"),
-        ({"portless_force": True}, "Error: --portless-force is only valid with portless dev mode.\n"),
+        (
+            {"portless_force": True},
+            "Error: --portless-force is only valid with portless dev mode.\n",
+        ),
     ],
 )
 def test_chat_cli_rejects_invalid_flag_combinations_before_startup(
@@ -537,10 +548,22 @@ def test_chat_cli_headless_rejects_dev_mode(monkeypatch, tmp_path) -> None:
 @pytest.mark.parametrize(
     ("kwargs", "expected_error"),
     [
-        ({"headless": True, "no_portless": True}, "Error: --no-portless is only valid with --dev.\n"),
-        ({"headless": True, "tailscale": True}, "Error: --tailscale and --funnel are only valid with --dev.\n"),
-        ({"headless": True, "funnel": True}, "Error: --tailscale and --funnel are only valid with --dev.\n"),
-        ({"headless": True, "portless_force": True}, "Error: dev frontend flags cannot be combined with --headless.\n"),
+        (
+            {"headless": True, "no_portless": True},
+            "Error: --no-portless is only valid with --dev.\n",
+        ),
+        (
+            {"headless": True, "tailscale": True},
+            "Error: --tailscale and --funnel are only valid with --dev.\n",
+        ),
+        (
+            {"headless": True, "funnel": True},
+            "Error: --tailscale and --funnel are only valid with --dev.\n",
+        ),
+        (
+            {"headless": True, "portless_force": True},
+            "Error: dev frontend flags cannot be combined with --headless.\n",
+        ),
     ],
 )
 def test_chat_cli_headless_rejects_dev_frontend_flags(
@@ -557,7 +580,9 @@ def test_chat_cli_headless_rejects_dev_frontend_flags(
     assert stdout.getvalue() == expected_error
 
 
-def test_chat_cli_dev_mode_reports_missing_frontend_checkout_actionably(monkeypatch, tmp_path) -> None:
+def test_chat_cli_dev_mode_reports_missing_frontend_checkout_actionably(
+    monkeypatch, tmp_path
+) -> None:
     runtime_root = tmp_path / "runtime"
     monkeypatch.setattr("meridian.cli.chat_cmd.get_user_home", lambda: runtime_root)
     monkeypatch.setattr(
@@ -593,7 +618,8 @@ def test_chat_cli_dev_mode_reports_prerequisite_failures(monkeypatch, tmp_path) 
         )
 
     assert exc_info.value.code == 1
-    assert stdout.getvalue() == f"Error: Frontend root is missing package.json: {frontend_root.resolve()}\n"
+    expected = f"Error: Frontend root is missing package.json: {frontend_root.resolve()}\n"
+    assert stdout.getvalue() == expected
 
 
 def test_chat_cli_dev_mode_surfaces_launcher_configuration_errors(monkeypatch, tmp_path) -> None:
@@ -618,7 +644,9 @@ def test_chat_cli_dev_mode_surfaces_launcher_configuration_errors(monkeypatch, t
     assert stdout.getvalue() == "Error: --tailscale/--funnel require portless\n"
 
 
-def test_chat_cli_dev_mode_uses_frontend_root_launcher_supervisor_and_warning(monkeypatch, tmp_path) -> None:
+def test_chat_cli_dev_mode_uses_frontend_root_launcher_supervisor_and_warning(
+    monkeypatch, tmp_path
+) -> None:
     runtime_root = tmp_path / "runtime"
     frontend_root = _write_dev_frontend(tmp_path)
     launcher = _FakeLauncher()
@@ -657,7 +685,8 @@ def test_chat_cli_dev_mode_uses_frontend_root_launcher_supervisor_and_warning(mo
     assert captured["launcher"] is launcher
     assert captured["ran"] is True
     assert stdout.getvalue() == (
-        "Warning: Backend is bound to all interfaces. The frontend sharing mode does not restrict backend API access.\n"
+        "Warning: Backend is bound to all interfaces."
+        " The frontend sharing mode does not restrict backend API access.\n"
     )
     discovery = runtime_root / "chat-server.json"
     assert discovery.exists()

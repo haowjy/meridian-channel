@@ -45,7 +45,9 @@ def test_launch_primary_aggregates_bootstrap_docs_with_skill_tier_first_and_sort
     (project_root / '.meridian').mkdir(parents=True)
     (project_root / 'mars.toml').write_text('[settings]\ntargets=[".agents"]\n', encoding='utf-8')
 
-    alpha_skill_doc = project_root / '.mars' / 'skills' / 'alpha-skill' / 'resources' / 'BOOTSTRAP.md'
+    alpha_skill_doc = (
+        project_root / '.mars' / 'skills' / 'alpha-skill' / 'resources' / 'BOOTSTRAP.md'
+    )
     alpha_skill_doc.parent.mkdir(parents=True)
     alpha_skill_doc.write_text('alpha skill docs', encoding='utf-8')
 

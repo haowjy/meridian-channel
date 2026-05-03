@@ -256,7 +256,10 @@ def test_user_global_workspace_config_is_ignored_for_snapshot_and_launch(
     assert snapshot.roots == ()
     assert snapshot.findings == ()
     assert user_workspace_root.as_posix() not in runtime_ctx.env_overrides.values()
-    assert all(user_workspace_root.as_posix() not in arg for arg in runtime_ctx.run_params.extra_args)
+    assert all(
+        user_workspace_root.as_posix() not in arg
+        for arg in runtime_ctx.run_params.extra_args
+    )
 
 
 def test_workspace_snapshot_skips_committed_missing_and_reports_local_missing(
@@ -481,7 +484,9 @@ def test_named_workspace_resolves_absolute_paths(tmp_path: Path) -> None:
     assert snapshot.findings == ()
 
 
-def test_named_workspace_expands_tilde_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_named_workspace_expands_tilde_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     project_root = _repo(tmp_path)
     fake_home = tmp_path / "home"
     fake_home.mkdir()
