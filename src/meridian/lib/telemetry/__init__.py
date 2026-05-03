@@ -20,7 +20,7 @@ from meridian.lib.telemetry.observers import (
     register_observer,
 )
 from meridian.lib.telemetry.router import TelemetryRouter, emit_telemetry, set_global_router
-from meridian.lib.telemetry.sinks import NoopSink, StderrSink, TelemetrySink
+from meridian.lib.telemetry.sinks import BufferingSink, NoopSink, StderrSink, TelemetrySink
 
 
 def init_telemetry(*, sink: TelemetrySink | None = None, runtime_root: Path | None = None) -> None:
@@ -32,6 +32,7 @@ def init_telemetry(*, sink: TelemetrySink | None = None, runtime_root: Path | No
 
 __all__ = [
     "EVENT_REGISTRY",
+    "BufferingSink",
     "DebugTraceObserver",
     "LifecycleObserver",
     "LifecycleObserverTier",

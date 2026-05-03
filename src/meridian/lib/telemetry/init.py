@@ -14,6 +14,7 @@ def setup_telemetry(
     runtime_root: Path | None = None,
     rootless: bool = False,
     sink: TelemetrySink | None = None,
+    logical_owner: str | None = None,
 ) -> None:
     """Select and install the process telemetry sink."""
     if sink is not None:
@@ -23,6 +24,9 @@ def setup_telemetry(
         init_telemetry(sink=StderrSink())
         return
     if runtime_root is not None:
-        init_telemetry(sink=LocalJSONLSink(runtime_root), runtime_root=runtime_root)
+        init_telemetry(
+            sink=LocalJSONLSink(runtime_root, logical_owner=logical_owner),
+            runtime_root=runtime_root,
+        )
         return
     init_telemetry(sink=NoopSink(), runtime_root=runtime_root)

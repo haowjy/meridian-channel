@@ -82,7 +82,7 @@ def test_full_pipeline_emit_queue_writer_segment(tmp_path) -> None:
     setup_telemetry(runtime_root=tmp_path)
     emit_telemetry("chat", "chat.ws.connected", scope="chat.server.ws", ids={"chat_id": "c1"})
 
-    segment = tmp_path / "telemetry" / f"{os.getpid()}-0001.jsonl"
+    segment = tmp_path / "telemetry" / f"cli.{os.getpid()}-0001.jsonl"
     wait_for(lambda: segment.exists() and segment.read_text(encoding="utf-8"))
     event = json.loads(segment.read_text(encoding="utf-8").splitlines()[0])
     assert event["event"] == "chat.ws.connected"

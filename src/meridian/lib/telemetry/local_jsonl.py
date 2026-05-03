@@ -1,4 +1,4 @@
-"""Local JSONL telemetry sink with PID-owned rotating segments."""
+"""Local JSONL telemetry sink with compound owner/PID rotating segments."""
 
 from __future__ import annotations
 
@@ -22,10 +22,12 @@ class LocalJSONLSink:
         runtime_root: Path,
         *,
         max_segment_bytes: int = _DEFAULT_MAX_SEGMENT_BYTES,
+        logical_owner: str | None = None,
     ) -> None:
         self.telemetry_dir = runtime_root / "telemetry"
         self.telemetry_dir.mkdir(parents=True, exist_ok=True)
         run_retention_cleanup(self.telemetry_dir)
+        self._logical_owner = logical_owner or "cli"
         self._pid = os.getpid()
         self._seq = self._next_sequence()
         self._max_segment_bytes = max_segment_bytes
@@ -36,7 +38,9 @@ class LocalJSONLSink:
     @property
     def active_path(self) -> Path:
         """Return the current active segment path."""
-        return self.telemetry_dir / f"{self._pid}-{self._seq:04d}.jsonl"
+        return self.telemetry_dir / (
+            f"{self._logical_owner}.{self._pid}-{self._seq:04d}.jsonl"
+        )
 
     def write_batch(self, events: Sequence[TelemetryEnvelope]) -> None:
         """Append compact JSON lines to the active segment."""
@@ -66,7 +70,8 @@ class LocalJSONLSink:
 
     def _next_sequence(self) -> int:
         seqs: list[int] = []
-        for path in self.telemetry_dir.glob(f"{self._pid}-*.jsonl"):
+        pattern = f"{self._logical_owner}.{self._pid}-*.jsonl"
+        for path in self.telemetry_dir.glob(pattern):
             try:
                 seqs.append(int(path.stem.rsplit("-", 1)[1]))
             except (IndexError, ValueError):
