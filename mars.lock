@@ -6,18 +6,18 @@ commit = "5128e1865d670f5d6c9cef000e6dfc4e951fb5b9"
 
 [dependencies.meridian-base]
 url = "https://github.com/meridian-flow/meridian-base"
-version = "v0.2.5"
-commit = "a2292ac7c6be98dba3806e15e214ae59664e0778"
+version = "v0.2.6"
+commit = "78c3b007fe4570c01c82da0b69710036784c8132"
 
 [dependencies.meridian-dev-workflow]
 url = "https://github.com/meridian-flow/meridian-dev-workflow"
-version = "v0.3.6"
-commit = "0e06815a4611dd62b9a78eca02c39a4d35b10fc9"
+version = "v0.3.7"
+commit = "dcfc7a7ff091c80d517945001fa2cf45ae8eff77"
 
 [dependencies.meridian-prompter]
 url = "https://github.com/meridian-flow/meridian-prompter"
-version = "v0.1.9"
-commit = "656f5f54ca5f3f6b03943d4553bd5f09b437ff0d"
+version = "v0.1.10"
+commit = "74dca5127916a085e686d94afdded3ceb79906e8"
 
 [dependencies.playwright-cli]
 url = "https://github.com/microsoft/playwright-cli"
@@ -81,13 +81,13 @@ installed_checksum = "sha256:cb977714be29849e52b1c15c84222a215c60d5ce97b2aec5a58
 [items."agent/design-lead"]
 source = "meridian-dev-workflow"
 kind = "agent"
-version = "v0.3.1"
-source_checksum = "sha256:64eb4f48dcaa83a5ca199988ce40f2c291120bdb561c8083cc3ae44096ea2d26"
+version = "v0.3.7"
+source_checksum = "sha256:38784ac1bdb788e10c812ad56eee1987def966acd84b110af3f21c00603ba412"
 
 [[items."agent/design-lead".outputs]]
 target_root = ".mars"
 dest_path = "agents/design-lead.md"
-installed_checksum = "sha256:64eb4f48dcaa83a5ca199988ce40f2c291120bdb561c8083cc3ae44096ea2d26"
+installed_checksum = "sha256:38784ac1bdb788e10c812ad56eee1987def966acd84b110af3f21c00603ba412"
 
 [items."agent/design-writer"]
 source = "meridian-dev-workflow"
@@ -455,13 +455,13 @@ installed_checksum = "sha256:715c6d477390f7e87b29c39244130c545455a838bde276e773b
 [items."skill/agent-management"]
 source = "meridian-base"
 kind = "skill"
-version = "v0.2.4"
-source_checksum = "sha256:07e6f159dd812d4fe1dc9315d1fd780364bc6a175dab30f5bde3673ac140d98b"
+version = "v0.2.6"
+source_checksum = "sha256:705a992e610ec483b391ef89ea090d1f1583357707d77bb67c46d193db3f208b"
 
 [[items."skill/agent-management".outputs]]
 target_root = ".mars"
 dest_path = "skills/agent-management"
-installed_checksum = "sha256:07e6f159dd812d4fe1dc9315d1fd780364bc6a175dab30f5bde3673ac140d98b"
+installed_checksum = "sha256:705a992e610ec483b391ef89ea090d1f1583357707d77bb67c46d193db3f208b"
 
 [items."skill/agent-staffing"]
 source = "meridian-dev-workflow"

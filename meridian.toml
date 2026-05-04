@@ -75,3 +75,26 @@ path = "strategy"
 [[hooks]]
 builtin = "git-autosync"
 remote = "git@github.com:meridian-flow/docs.git"
+
+# -- Workspace roots ---------------------------------------------------------
+# Prompt repos for agent profile editing
+[workspace.prompts-base]
+path = "../prompts/meridian-base"
+
+[workspace.prompts-dev-workflow]
+path = "../prompts/meridian-dev-workflow"
+
+[workspace.prompts-prompter]
+path = "../prompts/meridian-prompter"
+
+[workspace.prompts-creative-writing]
+path = "../prompts/creative-writing-skills"
+
+[workspace.prompts-jupyter]
+path = "../prompts/jupyter-workbench"
+
+[workspace.prompts-microct]
+path = "../prompts/microct-analysis"
+
+[workspace.prompts-mouse-ct]
+path = "../prompts/mouse-ct"
