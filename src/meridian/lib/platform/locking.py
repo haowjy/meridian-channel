@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import threading
 import time
@@ -60,12 +61,73 @@ def lock_file(lock_path: Path) -> Iterator[IO[bytes]]:
                 _release_posix_lock(handle)
 
 
+@contextmanager
+def try_lock_file(lock_path: Path) -> Iterator[IO[bytes] | None]:
+    """Attempt exclusive file lock, non-blocking. Yields None if already held."""
+    key = lock_path.resolve()
+    held = _held_locks()
+    existing = held.get(key)
+    if existing is not None:
+        handle, depth = existing
+        held[key] = (handle, depth + 1)
+        try:
+            yield handle
+        finally:
+            current_handle, current_depth = held[key]
+            if current_depth <= 1:
+                held.pop(key, None)
+            else:
+                held[key] = (current_handle, current_depth - 1)
+        return
+
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        handle = lock_path.open("a+b")
+    except OSError:
+        yield None
+        return
+
+    try:
+        if not _try_acquire_lock(handle):
+            yield None
+            return
+        held[key] = (handle, 1)
+        try:
+            yield handle
+        finally:
+            held.pop(key, None)
+            if IS_WINDOWS:
+                _release_windows_lock(handle)
+            else:
+                _release_posix_lock(handle)
+    finally:
+        handle.close()
+
+
 def _acquire_posix_lock(handle: IO[bytes]) -> None:
     fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
 
 
 def _release_posix_lock(handle: IO[bytes]) -> None:
     fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _try_acquire_lock(handle: IO[bytes]) -> bool:
+    if IS_WINDOWS:
+        return _try_acquire_windows_lock(handle)
+    return _try_acquire_posix_lock(handle)
+
+
+def _try_acquire_posix_lock(handle: IO[bytes]) -> bool:
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except BlockingIOError:
+        return False
+    except OSError as exc:
+        if exc.errno in (errno.EACCES, errno.EAGAIN):
+            return False
+        raise
 
 
 def _acquire_windows_lock(handle: IO[bytes]) -> None:
@@ -88,6 +150,24 @@ def _acquire_windows_lock(handle: IO[bytes]) -> None:
             time.sleep(0.05)
 
 
+def _try_acquire_windows_lock(handle: IO[bytes]) -> bool:
+    import msvcrt as _msvcrt
+
+    msvcrt = cast("Any", _msvcrt)
+
+    handle.seek(0, os.SEEK_END)
+    if handle.tell() == 0:
+        handle.write(b"\0")
+        handle.flush()
+        os.fsync(handle.fileno())
+    handle.seek(0)
+    try:
+        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        return True
+    except OSError:
+        return False
+
+
 def _release_windows_lock(handle: IO[bytes]) -> None:
     import msvcrt as _msvcrt
 
@@ -97,4 +177,4 @@ def _release_windows_lock(handle: IO[bytes]) -> None:
     msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
 
 
-__all__ = ["lock_file"]
+__all__ = ["lock_file", "try_lock_file"]

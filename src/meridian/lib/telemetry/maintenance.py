@@ -6,6 +6,7 @@ import threading
 import time
 from pathlib import Path
 
+from meridian.lib.platform.locking import try_lock_file
 from meridian.lib.telemetry.retention import run_retention_cleanup
 
 _DEFAULT_COOLDOWN_SECONDS = 3600
@@ -35,8 +36,14 @@ def schedule_maintenance(
         try:
             if _cooldown_active(marker, cooldown_seconds):
                 return
-            run_retention_cleanup(telemetry_dir, runtime_root=runtime_root)
-            _update_marker(marker)
+            lock_path = telemetry_dir / ".retention-lock"
+            with try_lock_file(lock_path) as lock_handle:
+                if lock_handle is None:
+                    return
+                if _cooldown_active(marker, cooldown_seconds):
+                    return
+                run_retention_cleanup(telemetry_dir, runtime_root=runtime_root)
+                _update_marker(marker)
         except Exception:
             return
 

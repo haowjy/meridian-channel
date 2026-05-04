@@ -76,3 +76,35 @@ def test_schedule_maintenance_does_not_run_when_cooldown_active(
     time.sleep(0.05)
 
     assert calls == []
+
+
+def test_schedule_maintenance_skips_cleanup_when_retention_lock_held(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    runtime_root = tmp_path
+    telemetry_dir = runtime_root / "telemetry"
+    telemetry_dir.mkdir()
+    marker = telemetry_dir / maintenance._MARKER_FILENAME
+
+    calls: list[Path] = []
+
+    def fake_cleanup(telemetry_path: Path, *, runtime_root: Path | None = None):
+        calls.append(telemetry_path)
+        return None
+
+    class HeldLock:
+        def __enter__(self):
+            return None
+
+        def __exit__(self, exc_type, exc, traceback):
+            return None
+
+    monkeypatch.setattr(maintenance, "run_retention_cleanup", fake_cleanup)
+    monkeypatch.setattr(maintenance, "try_lock_file", lambda lock_path: HeldLock())
+
+    maintenance.schedule_maintenance(runtime_root, cooldown_seconds=0)
+    time.sleep(0.05)
+
+    assert not marker.exists()
+    assert calls == []
