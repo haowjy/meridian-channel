@@ -562,24 +562,29 @@ def init_alias(
     _run_mars_passthrough(mars_args, output_format=output_format)
 
 
-register_misc_commands(
-    app=app,
-    completion_app=completion_app,
-    streaming_app=streaming_app,
-    test_app=test_app,
-    emit=emit,
-    get_global_options=get_global_options,
-)
-
-
-def _register_group_commands() -> None:
+def _register_group_commands(*, agent_mode: bool = False) -> None:
     global _group_commands_registered
     if _group_commands_registered:
         return
 
+    from meridian.cli.agent_help import agent_help_epilogue
     from meridian.cli.spawn import register_spawn_commands
     from meridian.cli.work_cmd import register_work_commands
 
+    if agent_mode:
+        spawn_app.help_epilogue = agent_help_epilogue("spawn", spawn_app.help_epilogue)
+        session_app.help_epilogue = agent_help_epilogue("session", session_app.help_epilogue)
+        config_app.help_epilogue = agent_help_epilogue("config", config_app.help_epilogue)
+        work_app.help_epilogue = agent_help_epilogue("work", work_app.help_epilogue)
+
+    register_misc_commands(
+        app=app,
+        completion_app=completion_app,
+        streaming_app=streaming_app,
+        test_app=test_app,
+        emit=emit,
+        get_global_options=get_global_options,
+    )
     register_spawn_commands(spawn_app, emit)
     register_report_commands(report_app, emit)
     register_session_commands(session_app, emit)
@@ -595,7 +600,7 @@ def _register_group_commands() -> None:
     register_config_commands(config_app, emit)
     register_chat_command(app)
     register_workspace_commands(workspace_app, emit)
-    register_doctor_command(app, emit)
+    register_doctor_command(app, emit, agent_mode=agent_mode)
     register_bootstrap_command(
         app,
         emit,
@@ -809,11 +814,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     options = options.model_copy(update={"sink": active_sink})
     token = _GLOBAL_OPTIONS.set(options)
     try:
-        _register_group_commands()
-        if effective_agent_mode:
-            from meridian.cli.agent_help import apply_agent_help_supplements
-
-            apply_agent_help_supplements()
+        _register_group_commands(agent_mode=effective_agent_mode)
         with temporary_config_env(options.config_file):
             if (
                 options.output.format == "text"
@@ -840,7 +841,3 @@ def main(argv: Sequence[str] | None = None) -> None:
     finally:
         flush_sink(active_sink)
         _GLOBAL_OPTIONS.reset(token)
-        if effective_agent_mode:
-            from meridian.cli.agent_help import restore_help_supplements
-
-            restore_help_supplements()

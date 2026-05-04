@@ -19,7 +19,38 @@ def _make_doctor_handler(emit: Emitter) -> Callable[..., None]:
     return handler
 
 
-def register_doctor_command(app: App, emit: Emitter) -> tuple[set[str], dict[str, str]]:
+def register_doctor_command(
+    app: App,
+    emit: Emitter,
+    *,
+    agent_mode: bool = False,
+) -> tuple[set[str], dict[str, str]]:
+    base_epilogue = (
+        "Health check and auto-repair for meridian state.\n\n"
+        "Reconciles orphaned spawns (dead PIDs, missing spawn directories),\n"
+        "cleans stale session locks, scans telemetry retention, and warns about\n"
+        "missing or malformed configuration.\n\n"
+        "Use --prune to delete stale spawn artifacts and telemetry segments\n"
+        "for the current project.\n"
+        "Add --global to also prune stale orphan project dirs globally\n"
+        "across ~/.meridian/projects/.\n\n"
+        "Doctor is idempotent - re-running converges on the same result.\n"
+        "It is safe (and intended) to run after a crash, after a force-kill,\n"
+        "or any time `meridian spawn show` reports a status that doesn't match\n"
+        "reality.\n\n"
+        "Examples:\n\n"
+        "  meridian doctor                        # check and repair\n\n"
+        "  meridian doctor --prune               # prune current project artifacts\n\n"
+        "  meridian doctor --prune --global      # also prune other stale projects\n\n"
+        "  meridian doctor --format text          # human-readable summary\n"
+    )
+    if agent_mode:
+        from meridian.cli.agent_help import agent_help_epilogue
+
+        doctor_epilogue = agent_help_epilogue("doctor", base_epilogue)
+    else:
+        doctor_epilogue = base_epilogue
+
     handlers: dict[str, Callable[[], Callable[..., None]]] = {
         "meridian.doctor.doctor": lambda: _make_doctor_handler(emit),
     }
@@ -29,25 +60,7 @@ def register_doctor_command(app: App, emit: Emitter) -> tuple[set[str], dict[str
         group="doctor",
         handlers=handlers,
         command_help_epilogues={
-            "meridian.doctor.doctor": (
-                "Health check and auto-repair for meridian state.\n\n"
-                "Reconciles orphaned spawns (dead PIDs, missing spawn directories),\n"
-                "cleans stale session locks, scans telemetry retention, and warns about\n"
-                "missing or malformed configuration.\n\n"
-                "Use --prune to delete stale spawn artifacts and telemetry segments\n"
-                "for the current project.\n"
-                "Add --global to also prune stale orphan project dirs globally\n"
-                "across ~/.meridian/projects/.\n\n"
-                "Doctor is idempotent - re-running converges on the same result.\n"
-                "It is safe (and intended) to run after a crash, after a force-kill,\n"
-                "or any time `meridian spawn show` reports a status that doesn't match\n"
-                "reality.\n\n"
-                "Examples:\n\n"
-                "  meridian doctor                        # check and repair\n\n"
-                "  meridian doctor --prune               # prune current project artifacts\n\n"
-                "  meridian doctor --prune --global      # also prune other stale projects\n\n"
-                "  meridian doctor --format text          # human-readable summary\n"
-            )
+            "meridian.doctor.doctor": doctor_epilogue or ""
         },
         emit=emit,
     )

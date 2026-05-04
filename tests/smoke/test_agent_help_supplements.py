@@ -1,7 +1,6 @@
 """Agent-mode subcommand help supplements."""
 
-from meridian.cli.agent_help import apply_agent_help_supplements, restore_help_supplements
-from meridian.cli.app_tree import spawn_app
+from meridian.cli.agent_help import agent_help_epilogue
 
 
 def test_agent_mode_spawn_help_includes_agent_notes(cli):
@@ -50,12 +49,9 @@ def test_agent_help_supplements_restore_between_invocations(cli):
     assert "Agent Notes:" not in human_result.stdout
 
 
-def test_agent_help_supplements_apply_is_idempotent() -> None:
-    restore_help_supplements()
-    try:
-        apply_agent_help_supplements()
-        apply_agent_help_supplements()
+def test_agent_help_epilogue_composes_once_from_base_text() -> None:
+    epilogue = agent_help_epilogue("spawn", "Examples:\n")
 
-        assert (spawn_app.help_epilogue or "").count("Agent Notes:") == 1
-    finally:
-        restore_help_supplements()
+    assert epilogue is not None
+    assert epilogue.count("Agent Notes:") == 1
+    assert epilogue.startswith("Examples:\n")

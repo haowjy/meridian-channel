@@ -4,7 +4,6 @@ from cyclopts import App
 
 from meridian import __version__
 from meridian.cli.ext_cmd import ext_app
-from meridian.lib.mermaid.validator import detect_tier
 
 # Curated help for agent mode: only commands useful for subagent callers.
 # Not auto-generated — update when adding agent-facing commands.
@@ -46,14 +45,6 @@ Commands:
 Run 'meridian spawn -h' for full spawn usage.
 """
 
-
-def _format_mermaid_help() -> str:
-    tier_desc = "@mermaid-js/parser (node)" if detect_tier() == "js" else "python heuristics"
-    return (
-        "Mermaid diagram validation: extract and check diagram syntax in\n"
-        "markdown files and standalone .mmd/.mermaid files.\n\n"
-        f"Active parser: {tier_desc}"
-    )
 
 app = App(
     name="meridian",
@@ -162,7 +153,10 @@ kg_app = App(
 )
 mermaid_app = App(
     name="mermaid",
-    help=_format_mermaid_help(),
+    help=(
+        "Mermaid diagram validation: extract and check diagram syntax in\n"
+        "markdown files and standalone .mmd/.mermaid files."
+    ),
     help_epilogue=(
         "Examples:\n\n"
         "  meridian mermaid check\n\n"

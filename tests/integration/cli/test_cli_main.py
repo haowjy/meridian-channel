@@ -69,7 +69,7 @@ def test_doctor_cache_warning_runs_for_primary_launch_only_when_bootstrap_not_sk
 ) -> None:
     calls: list[str] = []
 
-    monkeypatch.setattr(cli_main, "_register_group_commands", lambda: None)
+    monkeypatch.setattr(cli_main, "_register_group_commands", lambda **_kwargs: None)
     monkeypatch.setattr(cli_main, "maybe_bootstrap_runtime_state", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(cli_main, "consume_doctor_cache_warning", lambda: calls.append("doctor"))
     monkeypatch.setattr(cli_main, "maybe_start_background_doctor_scan", lambda: False)
@@ -91,7 +91,7 @@ def test_doctor_cache_warning_skips_read_only_commands(
 ) -> None:
     calls: list[str] = []
 
-    monkeypatch.setattr(cli_main, "_register_group_commands", lambda: None)
+    monkeypatch.setattr(cli_main, "_register_group_commands", lambda **_kwargs: None)
     monkeypatch.setattr(cli_main, "maybe_bootstrap_runtime_state", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(cli_main, "consume_doctor_cache_warning", lambda: calls.append("doctor"))
     monkeypatch.setattr(cli_main, "maybe_start_background_doctor_scan", lambda: False)

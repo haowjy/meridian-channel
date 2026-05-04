@@ -2,11 +2,6 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from cyclopts import App
-
 _SPAWN_SUPPLEMENT = (
     "Agent Notes:\n\n"
     "Lifecycle: queued → running → finalizing → succeeded | failed | cancelled.\n"
@@ -83,46 +78,18 @@ AGENT_HELP_SUPPLEMENTS: dict[str, str] = {
     "doctor": _DOCTOR_SUPPLEMENT,
 }
 
-_ORIGINAL_EPILOGUES: dict[str, str | None] = {}
+
+def agent_help_epilogue(command_name: str, base_epilogue: str | None = None) -> str | None:
+    """Return a command epilogue with the agent supplement appended, if any."""
+
+    supplement = AGENT_HELP_SUPPLEMENTS.get(command_name)
+    if supplement is None:
+        return base_epilogue
+
+    existing = base_epilogue or ""
+    if existing and not existing.endswith("\n"):
+        existing += "\n"
+    return existing + "\n" + supplement
 
 
-def _agent_help_apps() -> dict[str, App]:
-    from cyclopts import App
-
-    from meridian.cli.app_tree import app
-
-    commands = getattr(app, "_commands", {})
-    return {
-        name: app_obj
-        for name in AGENT_HELP_SUPPLEMENTS
-        if isinstance((app_obj := commands.get(name)), App)
-    }
-
-
-def apply_agent_help_supplements() -> None:
-    """Mutate App help_epilogue to include agent supplements when in agent mode."""
-
-    if _ORIGINAL_EPILOGUES:
-        return
-
-    for name, app_obj in _agent_help_apps().items():
-        if name not in _ORIGINAL_EPILOGUES:
-            _ORIGINAL_EPILOGUES[name] = app_obj.help_epilogue
-        supplement = AGENT_HELP_SUPPLEMENTS.get(name)
-        if supplement is None:
-            continue
-        existing = app_obj.help_epilogue or ""
-        if existing and not existing.endswith("\n"):
-            existing += "\n"
-        app_obj.help_epilogue = existing + "\n" + supplement
-
-
-def restore_help_supplements() -> None:
-    """Restore App help_epilogue values captured before agent supplements."""
-
-    apps = _agent_help_apps()
-    for name, original in _ORIGINAL_EPILOGUES.items():
-        app_obj = apps.get(name)
-        if app_obj is not None:
-            app_obj.help_epilogue = original
-    _ORIGINAL_EPILOGUES.clear()
+__all__ = ["AGENT_HELP_SUPPLEMENTS", "agent_help_epilogue"]
