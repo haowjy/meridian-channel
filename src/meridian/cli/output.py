@@ -2,7 +2,7 @@
 
 import json
 import sys
-from typing import Any, Literal, Protocol, TextIO, cast
+from typing import Any, Literal, Protocol, TextIO, cast, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict
 
@@ -21,6 +21,19 @@ class OutputConfig(BaseModel):
 
     format: OutputFormat
     suppress_events: bool = False
+
+
+@runtime_checkable
+class CLIOutputProtocol(Protocol):
+    """Payload types with custom CLI output shaping implement this."""
+
+    def to_cli_output(
+        self,
+        *,
+        format: str,
+        explicit_format: str | None,
+        agent_mode: bool,
+    ) -> object: ...
 
 
 class _FlushableSink(Protocol):

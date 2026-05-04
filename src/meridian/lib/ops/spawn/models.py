@@ -164,6 +164,21 @@ class SpawnActionOutput(BaseModel):
             wire["warning"] = self.warning
         return wire
 
+    def to_cli_output(
+        self,
+        *,
+        format: str,
+        explicit_format: str | None,
+        agent_mode: bool,
+    ) -> object:
+        """CLI output protocol: shape output for the given format context."""
+        _ = agent_mode
+        if format != "json":
+            return self
+        if explicit_format is None:
+            return self.to_agent_wire()
+        return self.to_wire()
+
     def format_text(self, ctx: FormatContext | None = None) -> str:
         _ = ctx
         lines: list[str] = []
@@ -563,6 +578,20 @@ class SpawnDetailOutput(BaseModel):
             wire["report_body"] = self.report_body
         return wire
 
+    def to_cli_output(
+        self,
+        *,
+        format: str,
+        explicit_format: str | None,
+        agent_mode: bool,
+    ) -> object:
+        """CLI output protocol: shape output for the given format context."""
+        _ = explicit_format
+        _ = agent_mode
+        if format != "json":
+            return self
+        return self.to_cli_wire()
+
     def format_text(self, ctx: FormatContext | None = None) -> str:
         """Key-value detail view for text output mode. Omits None/empty fields."""
         from meridian.lib.core.formatting import kv_block
@@ -798,6 +827,20 @@ class SpawnWaitMultiOutput(BaseModel):
         # Sparse spawn details
         wire["spawns"] = [spawn.to_cli_wire() for spawn in self.spawns]
         return wire
+
+    def to_cli_output(
+        self,
+        *,
+        format: str,
+        explicit_format: str | None,
+        agent_mode: bool,
+    ) -> object:
+        """CLI output protocol: shape output for the given format context."""
+        _ = explicit_format
+        _ = agent_mode
+        if format != "json":
+            return self
+        return self.to_cli_wire()
 
 
 __all__ = [

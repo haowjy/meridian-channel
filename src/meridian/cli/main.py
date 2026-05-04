@@ -59,6 +59,7 @@ from meridian.cli.hooks_commands import register_hooks_commands
 from meridian.cli.misc_commands import register_misc_commands
 from meridian.cli.models_cmd import maybe_handle_models_redirect, register_models_commands
 from meridian.cli.output import (
+    CLIOutputProtocol,
     OutputConfig,
     OutputFormat,
     create_sink,
@@ -81,7 +82,6 @@ from meridian.lib.ops.doctor_cache import (
     maybe_start_background_doctor_scan,
 )
 from meridian.lib.ops.mars import check_upgrade_availability, format_upgrade_availability
-from meridian.lib.ops.spawn.api import SpawnActionOutput, SpawnDetailOutput, SpawnWaitMultiOutput
 from meridian.lib.telemetry import emit_telemetry
 from meridian.server.main import run_server
 
@@ -137,18 +137,15 @@ def emit(payload: object) -> None:
 
     options = get_global_options()
     sink, flush_after = _resolve_sink(options)
-    if isinstance(payload, SpawnActionOutput):
-        if options.output.format == "json":
-            if options.explicit_format is None:
-                emit_output(payload.to_agent_wire(), sink=sink)
-            else:
-                emit_output(payload.to_wire(), sink=sink)
-        else:
-            emit_output(payload, sink=sink)
-    elif isinstance(payload, (SpawnDetailOutput, SpawnWaitMultiOutput)) and (
-        options.output.format == "json"
-    ):
-        emit_output(payload.to_cli_wire(), sink=sink)
+    if isinstance(payload, CLIOutputProtocol):
+        emit_output(
+            payload.to_cli_output(
+                format=options.output.format,
+                explicit_format=options.explicit_format,
+                agent_mode=agent_mode_enabled(),
+            ),
+            sink=sink,
+        )
     else:
         emit_output(payload, sink=sink)
     if flush_after:
