@@ -6,18 +6,18 @@ commit = "5128e1865d670f5d6c9cef000e6dfc4e951fb5b9"
 
 [dependencies.meridian-base]
 url = "https://github.com/meridian-flow/meridian-base"
-version = "v0.2.4"
-commit = "21f60089004e0fea8840a2f722c20098144450ce"
+version = "v0.2.5"
+commit = "a2292ac7c6be98dba3806e15e214ae59664e0778"
 
 [dependencies.meridian-dev-workflow]
 url = "https://github.com/meridian-flow/meridian-dev-workflow"
-version = "v0.3.5"
-commit = "cca777715b7bb5ea8ee96b3e7793a911c329aba0"
+version = "v0.3.6"
+commit = "0e06815a4611dd62b9a78eca02c39a4d35b10fc9"
 
 [dependencies.meridian-prompter]
 url = "https://github.com/meridian-flow/meridian-prompter"
-version = "v0.1.8"
-commit = "4e990409ae06e2cc65bd1202bdb12d3705f37c8b"
+version = "v0.1.9"
+commit = "656f5f54ca5f3f6b03943d4553bd5f09b437ff0d"
 
 [dependencies.playwright-cli]
 url = "https://github.com/microsoft/playwright-cli"
@@ -684,13 +684,13 @@ installed_checksum = "sha256:15f8566d8bc7a36e3735c6bed037e8f749f8cb8ae562120dc0e
 [items."skill/prompt-principles"]
 source = "meridian-prompter"
 kind = "skill"
-version = "v0.1.8"
-source_checksum = "sha256:5d0260a69d18d246c0aeb2b8e122e20c72ae0fd772b3f8bc5c34e3af97eb23fd"
+version = "v0.1.9"
+source_checksum = "sha256:9e90ba11500d5cc1761fd7979c23fc2d2b0ae7a189f4c456223cddd2427fc0fd"
 
 [[items."skill/prompt-principles".outputs]]
 target_root = ".mars"
 dest_path = "skills/prompt-principles"
-installed_checksum = "sha256:5d0260a69d18d246c0aeb2b8e122e20c72ae0fd772b3f8bc5c34e3af97eb23fd"
+installed_checksum = "sha256:9e90ba11500d5cc1761fd7979c23fc2d2b0ae7a189f4c456223cddd2427fc0fd"
 
 [items."skill/prompt-review"]
 source = "meridian-prompter"
