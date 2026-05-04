@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import TextIO
 
 from meridian.lib.telemetry.events import TelemetryEnvelope
-from meridian.lib.telemetry.retention import run_retention_cleanup
 
 _DEFAULT_MAX_SEGMENT_BYTES = 10_000_000
 
@@ -26,7 +25,6 @@ class LocalJSONLSink:
     ) -> None:
         self.telemetry_dir = runtime_root / "telemetry"
         self.telemetry_dir.mkdir(parents=True, exist_ok=True)
-        run_retention_cleanup(self.telemetry_dir, runtime_root=runtime_root)
         self._logical_owner = logical_owner or "cli"
         self._pid = os.getpid()
         self._seq = self._next_sequence()

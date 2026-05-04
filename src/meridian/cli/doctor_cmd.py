@@ -32,9 +32,10 @@ def register_doctor_command(app: App, emit: Emitter) -> tuple[set[str], dict[str
             "meridian.doctor.doctor": (
                 "Health check and auto-repair for meridian state.\n\n"
                 "Reconciles orphaned spawns (dead PIDs, missing spawn directories),\n"
-                "cleans stale session locks, and warns about\n"
+                "cleans stale session locks, scans telemetry retention, and warns about\n"
                 "missing or malformed configuration.\n\n"
-                "Use --prune to delete stale spawn artifacts for the current project.\n"
+                "Use --prune to delete stale spawn artifacts and telemetry segments\n"
+                "for the current project.\n"
                 "Add --global to also prune stale orphan project dirs globally\n"
                 "across ~/.meridian/projects/.\n\n"
                 "Doctor is idempotent - re-running converges on the same result.\n"

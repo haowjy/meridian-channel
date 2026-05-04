@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
-from types import MappingProxyType
+from types import MappingProxyType, SimpleNamespace
+from typing import Any, cast
+
+import pytest
 
 from meridian.lib.config.project_paths import ProjectConfigPaths
+from meridian.lib.core.lifecycle import create_lifecycle_service
 from meridian.lib.core.types import ModelId, SpawnId
 from meridian.lib.harness.launch_spec import OpenCodeLaunchSpec
 from meridian.lib.harness.opencode import OpenCodeAdapter
@@ -18,8 +25,14 @@ from meridian.lib.launch.context import LaunchContext
 from meridian.lib.launch.reference import ReferenceItem
 from meridian.lib.launch.request import LaunchRuntime, SpawnRequest
 from meridian.lib.launch.run_inputs import ResolvedRunInputs
-from meridian.lib.ops.spawn.execute import _write_params_json
+from meridian.lib.ops.spawn.execute import (
+    BackgroundWorkerLaunchRequest,
+    _execute_existing_spawn,
+    _SessionExecutionContext,
+    _write_params_json,
+)
 from meridian.lib.safety.permissions import PermissionConfig, TieredPermissionResolver
+from meridian.lib.state import spawn_store
 
 
 def _resolver() -> TieredPermissionResolver:
@@ -191,3 +204,196 @@ def test_write_params_json_does_not_write_legacy_prompt_md(tmp_path: Path) -> No
     assert not (log_dir / "prompt.md").exists()
 
 
+
+
+def _start_background_spawn_row(
+    *,
+    tmp_path: Path,
+    runtime_root: Path,
+    spawn_id: SpawnId,
+    prompt: str = "stored prompt",
+    model: str = "stored-model",
+    harness: str = "stored-harness",
+) -> None:
+    service = create_lifecycle_service(tmp_path, runtime_root)
+    service.start(
+        chat_id="c1",
+        model=model,
+        agent="",
+        skills=(),
+        skill_paths=(),
+        harness=harness,
+        kind="child",
+        prompt=prompt,
+        spawn_id=str(spawn_id),
+        status="queued",
+        launch_mode="background",
+    )
+
+
+def _background_launch_request(
+    *,
+    tmp_path: Path,
+    prompt: str,
+    harness: str,
+    model: str = "gpt-5.4",
+) -> BackgroundWorkerLaunchRequest:
+    return BackgroundWorkerLaunchRequest(
+        request=SpawnRequest(prompt=prompt, model=model, harness=harness),
+        runtime=LaunchRuntime(
+            runtime_root=(tmp_path / ".runtime").as_posix(),
+            project_paths_project_root=tmp_path.as_posix(),
+            project_paths_execution_cwd=tmp_path.as_posix(),
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("prompt", "harness", "expected_error"),
+    [
+        ("", "codex", "Missing prompt"),
+        ("run it", "", "Missing harness"),
+    ],
+)
+def test_execute_existing_spawn_terminalizes_missing_required_launch_fields(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    prompt: str,
+    harness: str,
+    expected_error: str,
+) -> None:
+    import meridian.lib.ops.spawn.execute as execute_module
+
+    runtime_root = tmp_path / ".runtime"
+    spawn_id = SpawnId("p1")
+    _start_background_spawn_row(
+        tmp_path=tmp_path,
+        runtime_root=runtime_root,
+        spawn_id=spawn_id,
+    )
+    def fake_resolve_runtime_root(_project_root: Path) -> Path:
+        return runtime_root
+
+    def fake_build_runtime(_project_root: str, *, sink: object | None = None) -> SimpleNamespace:
+        return SimpleNamespace(harness_registry=None, artifacts=None)
+
+    monkeypatch.setattr(execute_module, "resolve_runtime_root", fake_resolve_runtime_root)
+    monkeypatch.setattr(
+        execute_module,
+        "build_runtime",
+        fake_build_runtime,
+    )
+
+    result = asyncio.run(
+        _execute_existing_spawn(
+            spawn_id=spawn_id,
+            project_paths=ProjectConfigPaths(project_root=tmp_path, execution_cwd=tmp_path),
+            launch_request=_background_launch_request(
+                tmp_path=tmp_path,
+                prompt=prompt,
+                harness=harness,
+            ),
+        )
+    )
+
+    record = spawn_store.get_spawn(runtime_root, spawn_id)
+    assert result == 1
+    assert record is not None
+    assert record.status == "failed"
+    assert record.terminal_origin == "launch_failure"
+    assert record.error == expected_error
+
+
+def test_execute_existing_spawn_allows_empty_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import meridian.lib.ops.spawn.execute as execute_module
+
+    runtime_root = tmp_path / ".runtime"
+    spawn_id = SpawnId("p1")
+    _start_background_spawn_row(
+        tmp_path=tmp_path,
+        runtime_root=runtime_root,
+        spawn_id=spawn_id,
+        model="stored-model-must-not-be-used",
+        harness="codex",
+    )
+
+    class _HarnessRegistry:
+        def get_subprocess_harness(self, _harness_id: object) -> OpenCodeAdapter:
+            return OpenCodeAdapter()
+
+    @contextmanager
+    def fake_session_execution_context(**_kwargs: object) -> Iterator[_SessionExecutionContext]:
+        yield _SessionExecutionContext(
+            chat_id="c1",
+            work_id=None,
+            resolved_agent_name=None,
+            harness_session_id_observer=lambda _session_id: None,
+        )
+
+    captured: dict[str, object] = {}
+
+    async def fake_execute_with_streaming(*args: object, **kwargs: object) -> int:
+        captured["spawn"] = args[0]
+        captured["request"] = kwargs["request"]
+        return 0
+
+    def fake_resolve_runtime_root(_project_root: Path) -> Path:
+        return runtime_root
+
+    def fake_build_runtime(_project_root: str, *, sink: object | None = None) -> SimpleNamespace:
+        return SimpleNamespace(
+            harness_registry=_HarnessRegistry(),
+            artifacts=None,
+        )
+
+    def fake_build_launch_context(**kwargs: Any) -> SimpleNamespace:
+        return SimpleNamespace(resolved_request=kwargs["request"])
+
+    def fake_write_projection_artifacts(**_kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(execute_module, "resolve_runtime_root", fake_resolve_runtime_root)
+    monkeypatch.setattr(
+        execute_module,
+        "build_runtime",
+        fake_build_runtime,
+    )
+    monkeypatch.setattr(
+        execute_module,
+        "_session_execution_context",
+        fake_session_execution_context,
+    )
+    monkeypatch.setattr(
+        execute_module,
+        "build_launch_context",
+        fake_build_launch_context,
+    )
+    monkeypatch.setattr(
+        execute_module,
+        "write_projection_artifacts",
+        fake_write_projection_artifacts,
+    )
+    monkeypatch.setattr(execute_module, "execute_with_streaming", fake_execute_with_streaming)
+
+    result = asyncio.run(
+        _execute_existing_spawn(
+            spawn_id=spawn_id,
+            project_paths=ProjectConfigPaths(project_root=tmp_path, execution_cwd=tmp_path),
+            launch_request=_background_launch_request(
+                tmp_path=tmp_path,
+                prompt="run it",
+                harness="codex",
+                model="",
+            ),
+        )
+    )
+
+    assert result == 0
+    assert cast("Any", captured["spawn"]).model == ""
+    assert cast("Any", captured["request"]).model == ""
+    record = spawn_store.get_spawn(runtime_root, spawn_id)
+    assert record is not None
+    assert record.status == "queued"

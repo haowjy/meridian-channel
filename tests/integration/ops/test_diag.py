@@ -320,6 +320,66 @@ def test_doctor_text_output_prefixes_warning_code(
     assert "warning: updates_check_failed: Could not check for dependency updates" in text
 
 
+def test_doctor_reports_telemetry_retention_stats_and_warning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = _create_project_root(tmp_path)
+    _create_agent_skill_dirs(project_root)
+    runtime_root = resolve_project_runtime_root_for_write(project_root)
+    old_segment = runtime_root / "telemetry" / "123-0001.jsonl"
+    _write_text(old_segment, '{"event":"old"}\n')
+    _set_path_mtime(old_segment, 1_600_000_000.0)
+    monkeypatch.setattr(
+        diag,
+        "check_upgrade_availability",
+        lambda *_args, **_kwargs: mars_ops.UpgradeAvailability(),
+    )
+
+    result = doctor_sync(DoctorInput(project_root=project_root.as_posix()))
+
+    assert result.telemetry_cleanup is not None
+    assert result.telemetry_cleanup.total_segments == 1
+    assert result.telemetry_cleanup.expired_segments == 1
+    assert result.telemetry_cleanup.deleted_segments == 0
+    warning = _warning_by_code(result, "stale_telemetry_segments")
+    assert warning.payload == {
+        "total_segments": 1,
+        "total_bytes": old_segment.stat().st_size,
+        "expired_segments": 1,
+        "max_total_bytes": 100_000_000,
+    }
+    assert "--prune" in warning.message
+    assert old_segment.exists()
+
+
+def test_doctor_prune_deletes_expired_telemetry_segments(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = _create_project_root(tmp_path)
+    _create_agent_skill_dirs(project_root)
+    runtime_root = resolve_project_runtime_root_for_write(project_root)
+    old_segment = runtime_root / "telemetry" / "123-0001.jsonl"
+    _write_text(old_segment, '{"event":"old"}\n')
+    _set_path_mtime(old_segment, 1_600_000_000.0)
+    monkeypatch.setattr(
+        diag,
+        "check_upgrade_availability",
+        lambda *_args, **_kwargs: mars_ops.UpgradeAvailability(),
+    )
+
+    result = doctor_sync(DoctorInput(project_root=project_root.as_posix(), prune=True))
+
+    assert result.telemetry_cleanup is not None
+    assert result.telemetry_cleanup.total_segments == 1
+    assert result.telemetry_cleanup.deleted_segments == 1
+    assert result.telemetry_cleanup.deleted_bytes > 0
+    assert "telemetry_segments" in result.repaired
+    assert all(warning.code != "stale_telemetry_segments" for warning in result.warnings)
+    assert not old_segment.exists()
+
+
 def test_doctor_surfaces_workspace_invalid_warning(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

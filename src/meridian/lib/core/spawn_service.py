@@ -242,7 +242,7 @@ class SpawnApplicationService:
 
         # Extract resolved metadata from launch context
         resolved_request = launch_ctx.resolved_request
-        resolved_model = (resolved_request.model or "").strip() or "unknown"
+        resolved_model = (resolved_request.model or "").strip()
         resolved_harness = (resolved_request.harness or "").strip()
         resolved_agent = (resolved_request.agent or "").strip() or None
 
@@ -268,7 +268,7 @@ class SpawnApplicationService:
             harness_registry=harness_registry,
         )
         resolved_request = launch_ctx.resolved_request
-        resolved_model = (resolved_request.model or "").strip() or "unknown"
+        resolved_model = (resolved_request.model or "").strip()
         resolved_harness = (resolved_request.harness or "").strip()
         resolved_agent = (resolved_request.agent or "").strip() or None
         if not resolved_harness:

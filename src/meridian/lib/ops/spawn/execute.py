@@ -485,149 +485,189 @@ async def _execute_existing_spawn(
     if spawn_record is None:
         logger.error("Spawn not found for background execution.", spawn_id=str(spawn_id))
         return 1
+
+    lifecycle_service = create_lifecycle_service(project_paths.project_root, runtime_root)
+
     request = launch_request.request
     runtime_request = launch_request.runtime
-    resolved_model = (request.model or spawn_record.model or "").strip()
-    resolved_harness_id = (request.harness or spawn_record.harness or "").strip()
-    resolved_prompt = (request.prompt or spawn_record.prompt or "").strip()
-    if not resolved_prompt or not resolved_model or not resolved_harness_id:
-        logger.error(
-            "Background spawn request missing required launch fields.",
-            spawn_id=str(spawn_id),
-            model=resolved_model,
-            harness=resolved_harness_id,
+    resolved_model = (request.model or "").strip()
+    resolved_harness_id = (request.harness or "").strip()
+    resolved_prompt = (request.prompt or "").strip()
+    if not resolved_prompt:
+        await SpawnApplicationService(runtime_root, lifecycle_service).complete_spawn(
+            spawn_id,
+            "failed",
+            1,
+            origin="launch_failure",
+            error="Missing prompt",
+        )
+        return 1
+    if not resolved_harness_id:
+        await SpawnApplicationService(runtime_root, lifecycle_service).complete_spawn(
+            spawn_id,
+            "failed",
+            1,
+            origin="launch_failure",
+            error="Missing harness",
         )
         return 1
 
-    harness_id = HarnessId(resolved_harness_id)
-    harness_adapter = runtime.harness_registry.get_subprocess_harness(harness_id)
-    resolved_session = _resolve_session_continuation(
-        request=request,
-        harness_id=harness_id,
-        harness_adapter=harness_adapter,
-    )
-    spawn_status: SpawnStatus = (
-        spawn_record.status if spawn_record.status != "unknown" else "queued"
-    )
-    spawn = Spawn(
-        spawn_id=SpawnId(spawn_record.id),
-        prompt=resolved_prompt,
-        model=ModelId(resolved_model),
-        status=spawn_status,
-    )
-
-    autocompact = request.autocompact
-    resolved_agent_name = request.agent if request.agent is not None else spawn_record.agent
-    resolved_agent_path = spawn_record.agent_path or request.agent_metadata.get(
-        "session_agent_path", ""
-    )
-    resolved_skills = request.skills or spawn_record.skills
-    resolved_skill_paths = spawn_record.skill_paths
-    resolved_execution_cwd = (
-        (runtime_request.project_paths_execution_cwd or "").strip() or None
-    )
-    if not resolved_execution_cwd:
-        resolved_execution_cwd = str(
-            resolve_child_execution_cwd(
-                project_root=project_paths.project_root,
-                spawn_id=str(spawn_id),
-                harness_id=resolved_harness_id,
-            )
+    pre_launch_complete = False
+    try:
+        harness_id = HarnessId(resolved_harness_id)
+        harness_adapter = runtime.harness_registry.get_subprocess_harness(harness_id)
+        resolved_session = _resolve_session_continuation(
+            request=request,
+            harness_id=harness_id,
+            harness_adapter=harness_adapter,
+        )
+        spawn_status: SpawnStatus = (
+            spawn_record.status if spawn_record.status != "unknown" else "queued"
+        )
+        spawn = Spawn(
+            spawn_id=SpawnId(spawn_record.id),
+            prompt=resolved_prompt,
+            model=ModelId(resolved_model),
+            status=spawn_status,
         )
 
-    # Build a resolved SpawnRequest with finalized model/harness/agent/session.
-    resolved_request = request.model_copy(
-        update={
-            "model": resolved_model,
-            "harness": resolved_harness_id,
-            "prompt": resolved_prompt,
-            "agent": resolved_agent_name,
-            "session": resolved_session,
-            "skill_paths": resolved_skill_paths,
-        }
-    )
+        autocompact = request.autocompact
+        resolved_agent_name = request.agent if request.agent is not None else spawn_record.agent
+        resolved_agent_path = spawn_record.agent_path or request.agent_metadata.get(
+            "session_agent_path", ""
+        )
+        resolved_skills = request.skills or spawn_record.skills
+        resolved_skill_paths = spawn_record.skill_paths
+        resolved_execution_cwd = (
+            (runtime_request.project_paths_execution_cwd or "").strip() or None
+        )
+        if not resolved_execution_cwd:
+            resolved_execution_cwd = str(
+                resolve_child_execution_cwd(
+                    project_root=project_paths.project_root,
+                    spawn_id=str(spawn_id),
+                    harness_id=resolved_harness_id,
+                )
+            )
 
-    with _session_execution_context(
-        runtime_root=runtime_root,
-        harness_id=resolved_harness_id,
-        harness_session_id=(
-            resolved_session.requested_harness_session_id or spawn_record.harness_session_id or ""
-        ),
-        model=resolved_model,
-        session_agent=spawn_record.agent or request.agent_metadata.get("session_agent", ""),
-        session_agent_path=resolved_agent_path,
-        skills=resolved_skills,
-        session_skill_paths=resolved_skill_paths,
-        run_agent_name=resolved_agent_name,
-        inherited_work_id=spawn_record.work_id,
-        forked_from_chat_id=resolved_session.forked_from_chat_id,
-        execution_cwd=resolved_execution_cwd,
-    ) as session_context:
-        resolved_request = resolved_request.model_copy(
-            update={"agent": session_context.resolved_agent_name}
-        )
-        # I-10/I-11: spawn row AND chat row now both exist.  Materialize any
-        # pending fork via the sole owner so the spawn row receives the forked
-        # session ID via update_spawn (not pre-populated on the start row).
-        if resolved_session.continue_fork and resolved_session.requested_harness_session_id:
-            forked_session_id = materialize_fork(
-                adapter=harness_adapter,
-                source_session_id=resolved_session.requested_harness_session_id,
-                runtime_root=runtime_root,
-                spawn_id=spawn.spawn_id,
-            )
-            resolved_request = resolved_request.model_copy(
-                update={
-                    "session": resolved_request.session.model_copy(
-                        update={
-                            "requested_harness_session_id": forked_session_id,
-                            "continue_fork": False,
-                        }
-                    )
-                }
-            )
-        run_env_overrides = _spawn_child_env(
-            str(spawn.spawn_id),
-            work_id=session_context.work_id or spawn_record.work_id,
-            runtime_root=runtime_root,
-            autocompact=autocompact,
-            ctx=resolved_context,
-        )
-        runtime_work_id = session_context.work_id or spawn_record.work_id
-        final_request = resolved_request.model_copy(
-            update={"work_id_hint": runtime_work_id}
-        )
-        launch_runtime = runtime_request.model_copy(
+        # Build a resolved SpawnRequest with finalized model/harness/agent/session.
+        resolved_request = request.model_copy(
             update={
-                "argv_intent": LaunchArgvIntent.SPEC_ONLY,
-                "runtime_root": runtime_root.as_posix(),
-                "project_paths_project_root": project_paths.project_root.as_posix(),
-                "project_paths_execution_cwd": resolved_execution_cwd,
+                "model": resolved_model,
+                "harness": resolved_harness_id,
+                "prompt": resolved_prompt,
+                "agent": resolved_agent_name,
+                "session": resolved_session,
+                "skill_paths": resolved_skill_paths,
             }
         )
-        launch_context = build_launch_context(
-            spawn_id=str(spawn.spawn_id),
-            request=final_request,
-            runtime=launch_runtime,
-            harness_registry=runtime.harness_registry,
-            plan_overrides=run_env_overrides,
-            runtime_work_id=runtime_work_id,
-        )
-        write_projection_artifacts(
-            log_dir=resolve_spawn_log_dir(project_paths.project_root, spawn.spawn_id),
-            launch_context=launch_context,
-            surface="spawn",
-        )
-        return await execute_with_streaming(
-            spawn,
-            request=final_request,
-            launch_context=launch_context,
-            project_root=project_paths.project_root,
+
+        with _session_execution_context(
             runtime_root=runtime_root,
-            artifacts=runtime.artifacts,
-            harness_session_id_observer=session_context.harness_session_id_observer,
-            debug=runtime_request.debug,
+            harness_id=resolved_harness_id,
+            harness_session_id=(
+                resolved_session.requested_harness_session_id
+                or spawn_record.harness_session_id
+                or ""
+            ),
+            model=resolved_model,
+            session_agent=spawn_record.agent or request.agent_metadata.get("session_agent", ""),
+            session_agent_path=resolved_agent_path,
+            skills=resolved_skills,
+            session_skill_paths=resolved_skill_paths,
+            run_agent_name=resolved_agent_name,
+            inherited_work_id=spawn_record.work_id,
+            forked_from_chat_id=resolved_session.forked_from_chat_id,
+            execution_cwd=resolved_execution_cwd,
+        ) as session_context:
+            resolved_request = resolved_request.model_copy(
+                update={"agent": session_context.resolved_agent_name}
+            )
+            # I-10/I-11: spawn row AND chat row now both exist.  Materialize any
+            # pending fork via the sole owner so the spawn row receives the forked
+            # session ID via update_spawn (not pre-populated on the start row).
+            if resolved_session.continue_fork and resolved_session.requested_harness_session_id:
+                forked_session_id = materialize_fork(
+                    adapter=harness_adapter,
+                    source_session_id=resolved_session.requested_harness_session_id,
+                    runtime_root=runtime_root,
+                    spawn_id=spawn.spawn_id,
+                )
+                resolved_request = resolved_request.model_copy(
+                    update={
+                        "session": resolved_request.session.model_copy(
+                            update={
+                                "requested_harness_session_id": forked_session_id,
+                                "continue_fork": False,
+                            }
+                        )
+                    }
+                )
+            run_env_overrides = _spawn_child_env(
+                str(spawn.spawn_id),
+                work_id=session_context.work_id or spawn_record.work_id,
+                runtime_root=runtime_root,
+                autocompact=autocompact,
+                ctx=resolved_context,
+            )
+            runtime_work_id = session_context.work_id or spawn_record.work_id
+            final_request = resolved_request.model_copy(
+                update={"work_id_hint": runtime_work_id}
+            )
+            launch_runtime = runtime_request.model_copy(
+                update={
+                    "argv_intent": LaunchArgvIntent.SPEC_ONLY,
+                    "runtime_root": runtime_root.as_posix(),
+                    "project_paths_project_root": project_paths.project_root.as_posix(),
+                    "project_paths_execution_cwd": resolved_execution_cwd,
+                }
+            )
+            launch_context = build_launch_context(
+                spawn_id=str(spawn.spawn_id),
+                request=final_request,
+                runtime=launch_runtime,
+                harness_registry=runtime.harness_registry,
+                plan_overrides=run_env_overrides,
+                runtime_work_id=runtime_work_id,
+            )
+            write_projection_artifacts(
+                log_dir=resolve_spawn_log_dir(project_paths.project_root, spawn.spawn_id),
+                launch_context=launch_context,
+                surface="spawn",
+            )
+            pre_launch_complete = True
+            return await execute_with_streaming(
+                spawn,
+                request=final_request,
+                launch_context=launch_context,
+                project_root=project_paths.project_root,
+                runtime_root=runtime_root,
+                artifacts=runtime.artifacts,
+                harness_session_id_observer=session_context.harness_session_id_observer,
+                debug=runtime_request.debug,
+            )
+    except Exception as exc:
+        if pre_launch_complete:
+            # execute_with_streaming owns spawn finalization. If it unexpectedly
+            # raises after launch setup completed, avoid relabeling the failure
+            # as launch_failure or double-finalizing the spawn.
+            logger.exception(
+                "Unexpected exception from background spawn execution.",
+                spawn_id=str(spawn_id),
+            )
+            return 1
+        await SpawnApplicationService(runtime_root, lifecycle_service).complete_spawn(
+            spawn_id,
+            "failed",
+            1,
+            origin="launch_failure",
+            error=str(exc),
         )
+        logger.exception(
+            "Background spawn pre-launch failed.",
+            spawn_id=str(spawn_id),
+        )
+        return 1
 
 
 def _build_background_worker_command(

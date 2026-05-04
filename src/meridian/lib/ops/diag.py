@@ -25,6 +25,12 @@ from meridian.lib.ops.runtime import resolve_runtime_root
 from meridian.lib.state import spawn_store
 from meridian.lib.state.session_store import cleanup_stale_sessions
 from meridian.lib.state.user_paths import get_user_home
+from meridian.lib.telemetry.retention import (
+    DEFAULT_MAX_TOTAL_BYTES,
+    RetentionStats,
+    run_retention_cleanup,
+    scan_telemetry_segments,
+)
 
 
 class DoctorInput(BaseModel):
@@ -33,6 +39,18 @@ class DoctorInput(BaseModel):
     project_root: str | None = None
     prune: bool = False
     global_: bool = False
+
+
+class TelemetryCleanupStats(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    total_segments: int = 0
+    total_bytes: int = 0
+    live_segments: int = 0
+    orphaned_segments: int = 0
+    expired_segments: int = 0
+    deleted_segments: int = 0
+    deleted_bytes: int = 0
 
 
 class DoctorOutput(BaseModel):
@@ -47,6 +65,7 @@ class DoctorOutput(BaseModel):
     stale_spawn_artifacts: tuple[StaleSpawnArtifact, ...] = ()
     pruned_orphan_dirs: int = 0
     pruned_spawn_artifacts: int = 0
+    telemetry_cleanup: TelemetryCleanupStats | None = None
     warnings: tuple["DoctorWarning", ...] = ()
     repaired: tuple[str, ...] = ()
 
@@ -67,6 +86,17 @@ class DoctorOutput(BaseModel):
             ("pruned_spawn_artifacts", str(self.pruned_spawn_artifacts)),
             ("repaired", ", ".join(self.repaired) if self.repaired else "none"),
         ]
+        if self.telemetry_cleanup is not None:
+            tc = self.telemetry_cleanup
+            pairs.append(("telemetry_segments", str(tc.total_segments)))
+            pairs.append(("telemetry_bytes", f"{tc.total_bytes:,}"))
+            if tc.deleted_segments > 0:
+                pairs.append(
+                    (
+                        "telemetry_pruned",
+                        f"{tc.deleted_segments} segments ({tc.deleted_bytes:,} bytes)",
+                    )
+                )
         result = kv_block(pairs)
         for warning in self.warnings:
             result += f"\nwarning: {warning.code}: {warning.message}"
@@ -79,6 +109,18 @@ class DoctorWarning(BaseModel):
     code: str
     message: str
     payload: dict[str, object] | None = None
+
+
+def _telemetry_cleanup_stats(stats: RetentionStats) -> TelemetryCleanupStats:
+    return TelemetryCleanupStats(
+        total_segments=stats.total_segments,
+        total_bytes=stats.total_bytes,
+        live_segments=stats.live_segments,
+        orphaned_segments=stats.orphaned_segments,
+        expired_segments=stats.expired_segments,
+        deleted_segments=stats.deleted_segments,
+        deleted_bytes=stats.deleted_bytes,
+    )
 
 
 def _repair_stale_session_locks(project_root: Path) -> int:
@@ -144,6 +186,24 @@ def doctor_sync(payload: DoctorInput) -> DoctorOutput:
         if pruned_spawn_artifacts > 0:
             repaired.append("spawn_artifacts")
 
+    telemetry_dir = runtime_root / "telemetry"
+    telemetry_retention = (
+        run_retention_cleanup(
+            telemetry_dir,
+            runtime_root=runtime_root,
+            max_age_days=retention_days,
+        )
+        if payload.prune
+        else scan_telemetry_segments(
+            telemetry_dir,
+            runtime_root=runtime_root,
+            max_age_days=retention_days,
+        )
+    )
+    telemetry_cleanup = _telemetry_cleanup_stats(telemetry_retention)
+    if telemetry_cleanup.deleted_segments > 0:
+        repaired.append("telemetry_segments")
+
     agents_dir = project_root / ".mars" / "agents"
     skills_dir = project_root / ".mars" / "skills"
     agents_dirs = [agents_dir] if agents_dir.is_dir() else []
@@ -182,6 +242,33 @@ def doctor_sync(payload: DoctorInput) -> DoctorOutput:
                 payload={
                     "spawn_ids": [item.spawn_id for item in stale_spawn_artifacts],
                     "paths": [item.path for item in stale_spawn_artifacts],
+                },
+            )
+        )
+    if not payload.prune and (
+        telemetry_cleanup.expired_segments > 0
+        or telemetry_cleanup.total_bytes > DEFAULT_MAX_TOTAL_BYTES
+    ):
+        reasons: list[str] = []
+        if telemetry_cleanup.expired_segments > 0:
+            reasons.append(f"{telemetry_cleanup.expired_segments} expired segment(s)")
+        if telemetry_cleanup.total_bytes > DEFAULT_MAX_TOTAL_BYTES:
+            reasons.append(
+                f"{telemetry_cleanup.total_bytes:,} bytes exceeds "
+                f"{DEFAULT_MAX_TOTAL_BYTES:,} byte cap"
+            )
+        warnings.append(
+            DoctorWarning(
+                code="stale_telemetry_segments",
+                message=(
+                    "Telemetry retention cleanup would prune local segment(s) with "
+                    f"--prune: {'; '.join(reasons)}."
+                ),
+                payload={
+                    "total_segments": telemetry_cleanup.total_segments,
+                    "total_bytes": telemetry_cleanup.total_bytes,
+                    "expired_segments": telemetry_cleanup.expired_segments,
+                    "max_total_bytes": DEFAULT_MAX_TOTAL_BYTES,
                 },
             )
         )
@@ -252,6 +339,7 @@ def doctor_sync(payload: DoctorInput) -> DoctorOutput:
         stale_spawn_artifacts=tuple(stale_spawn_artifacts),
         pruned_orphan_dirs=pruned_orphan_dirs,
         pruned_spawn_artifacts=pruned_spawn_artifacts,
+        telemetry_cleanup=telemetry_cleanup,
         warnings=tuple(warnings),
         repaired=tuple(sorted(set(repaired))),
     )

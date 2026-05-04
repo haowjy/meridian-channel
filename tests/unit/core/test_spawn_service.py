@@ -21,7 +21,9 @@ from meridian.lib.state.spawn.repository import FileSpawnRepository
 
 
 @pytest.fixture(autouse=True)
-def _reset_telemetry_globals(monkeypatch: pytest.MonkeyPatch) -> None:
+def _reset_telemetry_globals(  # pyright: ignore[reportUnusedFunction]
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(telemetry_observers, "_GLOBAL_OBSERVERS", [])
     monkeypatch.setattr(telemetry, "_GLOBAL_EVENT_COUNTER", telemetry.SpawnEventCounter())
     monkeypatch.setattr(telemetry_observers, "_debug_trace_registered", False)
@@ -60,7 +62,7 @@ def mock_harness_registry(monkeypatch: pytest.MonkeyPatch) -> None:
         "meridian.lib.harness.registry.get_default_harness_registry",
         lambda: mock_registry,
     )
-    return mock_registry
+    return None
 
 
 class _EventCollector:
@@ -286,6 +288,95 @@ async def test_prepare_spawn_persists_trimmed_resolved_metadata(
 
 
 @pytest.mark.asyncio
+async def test_prepare_spawn_persists_empty_resolved_model_truthfully(
+    tmp_path: Path,
+    mock_harness_registry: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Empty resolved model is valid and persists as empty, not as a sentinel."""
+    from meridian.lib.harness.registry import get_default_harness_registry
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    runtime_root = tmp_path
+
+    def build_launch_context(**kwargs: object) -> SimpleNamespace:
+        return _mock_launch_context(
+            spawn_id=str(kwargs["spawn_id"]),
+            child_cwd=project_root,
+            model="",
+            harness="codex",
+            agent="coder",
+            prompt="resolved prompt",
+        )
+
+    monkeypatch.setattr(
+        "meridian.lib.core.spawn_service.build_launch_context",
+        build_launch_context,
+    )
+
+    lifecycle = SpawnLifecycleService(runtime_root)
+    service = SpawnApplicationService(runtime_root, lifecycle)
+    prepared = await service.prepare_spawn(
+        request=SpawnRequest(prompt="request prompt", harness="codex"),
+        runtime=_launch_runtime(project_root, runtime_root),
+        harness_registry=get_default_harness_registry(),
+        chat_id="chat-1",
+        initial_status="running",
+    )
+
+    record = spawn_store.get_spawn(runtime_root, prepared.spawn_id)
+    assert prepared.resolved_model == ""
+    assert record is not None
+    assert record.model == ""
+    assert record.model != "unknown"
+
+
+@pytest.mark.asyncio
+async def test_prepare_spawn_persists_concrete_resolved_model(
+    tmp_path: Path,
+    mock_harness_registry: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Concrete resolved model still persists after removing the empty sentinel."""
+    from meridian.lib.harness.registry import get_default_harness_registry
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    runtime_root = tmp_path
+
+    def build_launch_context(**kwargs: object) -> SimpleNamespace:
+        return _mock_launch_context(
+            spawn_id=str(kwargs["spawn_id"]),
+            child_cwd=project_root,
+            model="gpt-5.4",
+            harness="codex",
+            agent="coder",
+            prompt="resolved prompt",
+        )
+
+    monkeypatch.setattr(
+        "meridian.lib.core.spawn_service.build_launch_context",
+        build_launch_context,
+    )
+
+    lifecycle = SpawnLifecycleService(runtime_root)
+    service = SpawnApplicationService(runtime_root, lifecycle)
+    prepared = await service.prepare_spawn(
+        request=SpawnRequest(prompt="request prompt", harness="codex"),
+        runtime=_launch_runtime(project_root, runtime_root),
+        harness_registry=get_default_harness_registry(),
+        chat_id="chat-1",
+        initial_status="running",
+    )
+
+    record = spawn_store.get_spawn(runtime_root, prepared.spawn_id)
+    assert prepared.resolved_model == "gpt-5.4"
+    assert record is not None
+    assert record.model == "gpt-5.4"
+
+
+@pytest.mark.asyncio
 async def test_prepare_spawn_projects_connection_config_from_launch_context(
     tmp_path: Path,
     mock_harness_registry: None,
@@ -359,6 +450,7 @@ async def test_prepare_spawn_allocates_distinct_ids_under_concurrency(
     def build_launch_context(**kwargs: object) -> SimpleNamespace:
         spawn_id = str(kwargs["spawn_id"])
         request = kwargs["request"]
+        assert isinstance(request, SpawnRequest)
         if spawn_id.startswith("pending-"):
             barrier.wait(timeout=2)
         return _mock_launch_context(

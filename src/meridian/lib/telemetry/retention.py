@@ -10,8 +10,10 @@ from pathlib import Path
 
 from meridian.lib.telemetry.router import emit_telemetry
 
-_DEFAULT_MAX_AGE_DAYS = 7
-_DEFAULT_MAX_TOTAL_BYTES = 100_000_000
+DEFAULT_MAX_AGE_DAYS = 7
+DEFAULT_MAX_TOTAL_BYTES = 100_000_000
+_DEFAULT_MAX_AGE_DAYS = DEFAULT_MAX_AGE_DAYS
+_DEFAULT_MAX_TOTAL_BYTES = DEFAULT_MAX_TOTAL_BYTES
 
 
 @dataclass(frozen=True)
@@ -75,13 +77,55 @@ def parse_segment_pid(path: Path) -> int | None:
     return owner.pid if owner is not None else None
 
 
+@dataclass(frozen=True)
+class RetentionStats:
+    """Summary of a retention scan or cleanup pass."""
+
+    total_segments: int
+    total_bytes: int
+    live_segments: int
+    orphaned_segments: int
+    expired_segments: int
+    deleted_segments: int
+    deleted_bytes: int
+
+
+def scan_telemetry_segments(
+    telemetry_dir: Path,
+    *,
+    runtime_root: Path | None = None,
+    max_age_days: int = _DEFAULT_MAX_AGE_DAYS,
+) -> RetentionStats:
+    """Scan telemetry segments and return stats without deleting anything."""
+    if not telemetry_dir.is_dir():
+        return RetentionStats(0, 0, 0, 0, 0, 0, 0)
+    now = time.time()
+    max_age_secs = max_age_days * 24 * 60 * 60
+    segments = _list_segments(telemetry_dir, runtime_root=runtime_root)
+    total_bytes = sum(s.size for s in segments)
+    live = sum(1 for s in segments if s.live)
+    orphaned = sum(1 for s in segments if s.orphaned)
+    expired = sum(
+        1 for s in segments if not s.live and now - s.mtime > max_age_secs
+    )
+    return RetentionStats(
+        total_segments=len(segments),
+        total_bytes=total_bytes,
+        live_segments=live,
+        orphaned_segments=orphaned,
+        expired_segments=expired,
+        deleted_segments=0,
+        deleted_bytes=0,
+    )
+
+
 def run_retention_cleanup(
     telemetry_dir: Path,
     *,
     runtime_root: Path | None = None,
     max_age_days: int = _DEFAULT_MAX_AGE_DAYS,
     max_total_bytes: int = _DEFAULT_MAX_TOTAL_BYTES,
-) -> None:
+) -> RetentionStats:
     """Delete eligible telemetry segments by age and total-size cap."""
     telemetry_dir.mkdir(parents=True, exist_ok=True)
     now = time.time()
@@ -89,24 +133,40 @@ def run_retention_cleanup(
     segments = _list_segments(telemetry_dir, runtime_root=runtime_root)
     max_age_secs = max_age_days * 24 * 60 * 60
 
+    deleted_count = 0
+    deleted_bytes = 0
+    initial_total = sum(s.size for s in segments)
+
     for segment in list(segments):
         if segment.owner is not None and segment.owner.pid == current_pid:
             continue
         if segment.live:
             continue
         if now - segment.mtime > max_age_secs and _delete_segment(segment.path):
+            deleted_count += 1
+            deleted_bytes += segment.size
             segments.remove(segment)
 
     total_size = sum(segment.size for segment in segments if segment.path.exists())
     if total_size <= max_total_bytes:
-        return
+        return RetentionStats(
+            total_segments=len(segments) + deleted_count,
+            total_bytes=initial_total,
+            live_segments=sum(1 for s in segments if s.live),
+            orphaned_segments=sum(1 for s in segments if s.orphaned),
+            expired_segments=0,
+            deleted_segments=deleted_count,
+            deleted_bytes=deleted_bytes,
+        )
 
     # Prefer orphaned segments when enforcing the hard cap.
     for segment in sorted((s for s in segments if s.orphaned), key=lambda s: s.mtime):
         if total_size <= max_total_bytes:
-            return
+            break
         if _delete_segment(segment.path):
             total_size -= segment.size
+            deleted_count += 1
+            deleted_bytes += segment.size
 
     # Last resort: closed files not owned by the current or any live process.
     for segment in sorted(
@@ -120,9 +180,11 @@ def run_retention_cleanup(
         key=lambda s: s.mtime,
     ):
         if total_size <= max_total_bytes:
-            return
+            break
         if _delete_segment(segment.path):
             total_size -= segment.size
+            deleted_count += 1
+            deleted_bytes += segment.size
             emit_telemetry(
                 "runtime",
                 "runtime.telemetry.consumer_data_lost",
@@ -130,6 +192,17 @@ def run_retention_cleanup(
                 severity="warning",
                 data={"segment": segment.path.name, "bytes_lost": segment.size},
             )
+
+    remaining = [s for s in segments if s.path.exists()]
+    return RetentionStats(
+        total_segments=len(remaining) + deleted_count,
+        total_bytes=initial_total,
+        live_segments=sum(1 for s in remaining if s.live),
+        orphaned_segments=sum(1 for s in remaining if s.orphaned),
+        expired_segments=0,
+        deleted_segments=deleted_count,
+        deleted_bytes=deleted_bytes,
+    )
 
 
 def _list_segments(
