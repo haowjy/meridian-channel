@@ -43,69 +43,11 @@ def test_main_skips_bootstrap_for_subcommand_help(
         )
 
     monkeypatch.setattr(cli_main, "maybe_bootstrap_runtime_state", _fake_bootstrap)
-    monkeypatch.setattr(
-        cli_main,
-        "consume_doctor_cache_warning",
-        lambda: (_ for _ in ()).throw(
-            AssertionError("doctor cache should be skipped for help")
-        ),
-    )
-    monkeypatch.setattr(
-        cli_main,
-        "maybe_start_background_doctor_scan",
-        lambda: (_ for _ in ()).throw(
-            AssertionError("doctor scan should be skipped for help")
-        ),
-    )
 
     with pytest.raises(SystemExit) as exc_info:
         cli_main.main(["config", "show", "--help"])
 
     assert exc_info.value.code == 0
-
-
-def test_doctor_cache_warning_runs_for_primary_launch_only_when_bootstrap_not_skipped(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[str] = []
-
-    monkeypatch.setattr(cli_main, "_register_group_commands", lambda **_kwargs: None)
-    monkeypatch.setattr(cli_main, "maybe_bootstrap_runtime_state", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(cli_main, "consume_doctor_cache_warning", lambda: calls.append("doctor"))
-    monkeypatch.setattr(cli_main, "maybe_start_background_doctor_scan", lambda: False)
-    monkeypatch.setattr(
-        cli_main,
-        "app",
-        lambda _args: (_ for _ in ()).throw(SystemExit(0)),
-    )
-
-    with pytest.raises(SystemExit) as exc_info:
-        cli_main.main([])
-
-    assert exc_info.value.code == 0
-    assert calls == ["doctor"]
-
-
-def test_doctor_cache_warning_skips_read_only_commands(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[str] = []
-
-    monkeypatch.setattr(cli_main, "_register_group_commands", lambda **_kwargs: None)
-    monkeypatch.setattr(cli_main, "maybe_bootstrap_runtime_state", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(cli_main, "consume_doctor_cache_warning", lambda: calls.append("doctor"))
-    monkeypatch.setattr(cli_main, "maybe_start_background_doctor_scan", lambda: False)
-    monkeypatch.setattr(
-        cli_main,
-        "app",
-        lambda _args: (_ for _ in ()).throw(SystemExit(0)),
-    )
-
-    with pytest.raises(SystemExit) as exc_info:
-        cli_main.main(["config", "show"])
-
-    assert exc_info.value.code == 0
-    assert calls == []
 
 
 def test_main_emits_normalized_usage_command(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -248,8 +190,6 @@ def test_main_does_not_create_segment_telemetry_when_project_root_never_resolves
     monkeypatch.setenv("MERIDIAN_HOME", user_home.as_posix())
     monkeypatch.delenv("MERIDIAN_DEPTH", raising=False)
     monkeypatch.setattr(cli_main, "maybe_bootstrap_runtime_state", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(cli_main, "consume_doctor_cache_warning", lambda: None)
-    monkeypatch.setattr(cli_main, "maybe_start_background_doctor_scan", lambda: False)
     monkeypatch.setattr(
         "meridian.lib.config.project_root.resolve_project_root",
         lambda: (_ for _ in ()).throw(ValueError("no project")),
@@ -366,78 +306,6 @@ def test_agent_root_help_restricted_surface_contract() -> None:
     ):
         assert hidden not in normalized_help
 
-
-def test_main_skips_cached_doctor_warning_for_help_command(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    calls: list[str] = []
-    monkeypatch.delenv("MERIDIAN_DEPTH", raising=False)
-    monkeypatch.setattr(cli_main, "maybe_bootstrap_runtime_state", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(
-        cli_main,
-        "consume_doctor_cache_warning",
-        lambda: calls.append("doctor") or "meridian doctor: 1 other warning.",
-    )
-    monkeypatch.setattr(cli_main, "maybe_start_background_doctor_scan", lambda: False)
-
-    with pytest.raises(SystemExit) as exc_info:
-        cli_main.main(["doctor", "--help"])
-
-    assert exc_info.value.code == 0
-    assert "meridian doctor: 1 other warning." not in capsys.readouterr().err
-    assert calls == []
-
-
-def test_main_suppresses_cached_doctor_warning_for_json_command(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    monkeypatch.delenv("MERIDIAN_DEPTH", raising=False)
-    monkeypatch.setattr(cli_main, "maybe_bootstrap_runtime_state", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(
-        cli_main,
-        "consume_doctor_cache_warning",
-        lambda: "meridian doctor: 1 other warning.",
-    )
-    monkeypatch.setattr(cli_main, "maybe_start_background_doctor_scan", lambda: False)
-
-    with pytest.raises(SystemExit) as exc_info:
-        cli_main.main(["--format", "json", "doctor", "--help"])
-
-    assert exc_info.value.code == 0
-    assert "meridian doctor:" not in capsys.readouterr().err
-
-
-def test_main_starts_background_doctor_scan_only_for_app_launch_paths(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("MERIDIAN_DEPTH", raising=False)
-    monkeypatch.setattr(cli_main, "maybe_bootstrap_runtime_state", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(cli_main, "consume_doctor_cache_warning", lambda: None)
-    starts: list[str] = []
-    monkeypatch.setattr(
-        cli_main,
-        "maybe_start_background_doctor_scan",
-        lambda: starts.append("started") or True,
-    )
-
-    cli_main._GLOBAL_OPTIONS.set(None)
-    with pytest.raises(SystemExit) as dry_run_exit:
-        cli_main.main(["--dry-run"])
-    assert dry_run_exit.value.code == 0
-    cli_main._GLOBAL_OPTIONS.set(None)
-    with pytest.raises(SystemExit) as exc_info:
-        cli_main.main(["doctor", "--help"])
-    cli_main._GLOBAL_OPTIONS.set(None)
-    with pytest.raises(SystemExit) as help_exit:
-        cli_main.main(["--help"])
-
-    assert exc_info.value.code == 0
-    assert help_exit.value.code == 0
-    assert starts == ["started"]
-
-
 def test_bootstrap_command_enables_bootstrap_documents(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -445,8 +313,6 @@ def test_bootstrap_command_enables_bootstrap_documents(
     captured: dict[str, object] = {}
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli_main, "maybe_bootstrap_runtime_state", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(cli_main, "consume_doctor_cache_warning", lambda: None)
-    monkeypatch.setattr(cli_main, "maybe_start_background_doctor_scan", lambda: False)
 
     def _fake_primary_launch(**kwargs: object) -> object:
         captured.update(kwargs)
@@ -468,8 +334,6 @@ def test_bootstrap_command_without_agent_forwards_agent_none(
     captured: dict[str, object] = {}
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli_main, "maybe_bootstrap_runtime_state", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(cli_main, "consume_doctor_cache_warning", lambda: None)
-    monkeypatch.setattr(cli_main, "maybe_start_background_doctor_scan", lambda: False)
 
     def _fake_primary_launch(**kwargs: object) -> object:
         captured.update(kwargs)

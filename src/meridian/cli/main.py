@@ -77,10 +77,6 @@ from meridian.cli.telemetry_cmd import register_telemetry_commands
 from meridian.cli.workspace_cmd import register_workspace_commands
 from meridian.lib.core.depth import is_nested_meridian_process
 from meridian.lib.core.sink import OutputSink
-from meridian.lib.ops.doctor_cache import (
-    consume_doctor_cache_warning,
-    maybe_start_background_doctor_scan,
-)
 from meridian.lib.ops.mars import check_upgrade_availability, format_upgrade_availability
 from meridian.lib.telemetry import emit_telemetry
 from meridian.server.main import run_server
@@ -216,19 +212,6 @@ def _resolve_output_format_for_command(
         agent_mode=agent_mode,
         agent_default_format=agent_default_format,
     )
-
-
-def _is_doctor_scan_launch_path(
-    argv: Sequence[str],
-    *,
-    bootstrap_skipped: bool = False,
-) -> bool:
-    if bootstrap_skipped:
-        return False
-    token = _bootstrap_first_positional_token(argv)
-    return (
-        token is None and not any(arg in {"--help", "-h", "--version"} for arg in argv)
-    ) or token == "app"
 
 
 def _interactive_terminal_attached() -> bool:
@@ -816,20 +799,6 @@ def main(argv: Sequence[str] | None = None) -> None:
     try:
         _register_group_commands(agent_mode=effective_agent_mode)
         with temporary_config_env(options.config_file):
-            if (
-                options.output.format == "text"
-                and not effective_agent_mode
-                and not is_nested_meridian_process()
-                and not bootstrap_skipped
-                and startup_class in {StartupClass.PRIMARY_LAUNCH, StartupClass.WRITE_RUNTIME}
-                and (warning := consume_doctor_cache_warning())
-            ):
-                print(warning, file=sys.stderr)
-            if _is_doctor_scan_launch_path(
-                cleaned_args,
-                bootstrap_skipped=bootstrap_skipped,
-            ) and not is_nested_meridian_process():
-                maybe_start_background_doctor_scan()
             try:
                 app(cleaned_args)
             except SystemExit:
