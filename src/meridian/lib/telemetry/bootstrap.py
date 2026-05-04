@@ -58,4 +58,8 @@ def install(plan: TelemetryPlan) -> TelemetryHandle:
 
     sink = LocalJSONLSink(plan.runtime_root, logical_owner=plan.logical_owner)
     init_telemetry(sink=sink)
+    if plan.schedule_maintenance:
+        from meridian.lib.telemetry.maintenance import schedule_maintenance
+
+        schedule_maintenance(plan.runtime_root)
     return TelemetryHandle(mode=plan.mode)

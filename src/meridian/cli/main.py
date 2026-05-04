@@ -70,6 +70,7 @@ from meridian.cli.report_cmd import register_report_commands
 from meridian.cli.session_cmd import register_session_commands
 from meridian.cli.startup.catalog import COMMAND_CATALOG
 from meridian.cli.startup.classify import classify_invocation
+from meridian.cli.startup.policy import StartupClass
 from meridian.cli.startup.policy import TelemetryMode as StartupTelemetryMode
 from meridian.cli.telemetry_cmd import register_telemetry_commands
 from meridian.cli.workspace_cmd import register_workspace_commands
@@ -663,6 +664,7 @@ def _emit_usage_command_invoked(argv: Sequence[str]) -> None:
 def _install_cli_telemetry(
     *,
     telemetry_mode: StartupTelemetryMode | None,
+    startup_class: StartupClass | None,
     project_root: Path | None,
 ) -> None:
     """Install CLI telemetry from descriptor policy after bootstrap resolution."""
@@ -693,11 +695,20 @@ def _install_cli_telemetry(
             mode = TelemetryMode.SEGMENT
             runtime_root = None
 
+        schedule_maintenance = (
+            mode == TelemetryMode.SEGMENT
+            and startup_class in {
+                StartupClass.WRITE_RUNTIME,
+                StartupClass.PRIMARY_LAUNCH,
+            }
+            and runtime_root is not None
+        )
         install(
             TelemetryPlan(
                 mode=mode,
                 logical_owner=os.environ.get("MERIDIAN_SPAWN_ID") or "cli",
                 runtime_root=runtime_root,
+                schedule_maintenance=schedule_maintenance,
             )
         )
     except Exception:
@@ -778,6 +789,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     _install_cli_telemetry(
         telemetry_mode=descriptor.telemetry_mode if descriptor is not None else None,
+        startup_class=descriptor.startup_class if descriptor is not None else None,
         project_root=project_root,
     )
     _emit_usage_command_invoked(cleaned_args)
