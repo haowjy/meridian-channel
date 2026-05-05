@@ -94,14 +94,27 @@ def _patch_alias_resolution(
 
 def test_resolve_model_policy_overrides_resolves_full_runtime_policy_fields() -> None:
     resolved = _resolve_model_policy_overrides(
-        explicit_user_overrides=RuntimeOverrides(sandbox="workspace-write"),
-        profile_model_overrides=RuntimeOverrides(harness="codex", approval="auto"),
+        explicit_user_overrides=RuntimeOverrides(
+            model="user-model",
+            sandbox="workspace-write",
+        ).model_policy_scope(),
+        profile_model_overrides=RuntimeOverrides(
+            harness="codex",
+            approval="auto",
+        ).model_policy_scope(),
         profile_defaults=RuntimeOverrides(effort="medium", sandbox="read-only"),
-        config_overrides=RuntimeOverrides(effort="high", approval="confirm", autocompact=70),
+        config_overrides=RuntimeOverrides(
+            agent="config-agent",
+            effort="high",
+            approval="confirm",
+            autocompact=70,
+        ).model_policy_scope(),
         alias_defaults=RuntimeOverrides(effort="low", autocompact=30),
     )
 
-    assert resolved.harness == "codex"
+    assert resolved.model is None
+    assert resolved.harness is None
+    assert resolved.agent is None
     assert resolved.sandbox == "workspace-write"
     assert resolved.approval == "auto"
     assert resolved.effort == "medium"
@@ -714,6 +727,125 @@ def test_resolve_policies_model_policy_scalar_overrides_flow_through(
     assert policies.resolved_overrides.timeout == 12.5
 
 
+def test_resolve_policies_profile_generic_approval_flows_through(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_minimal_mars_config(tmp_path)
+    _write_agent_profile(
+        tmp_path,
+        name="reviewer",
+        frontmatter=(
+            "name: reviewer\n"
+            "model: gpt\n"
+            "approval: auto\n"
+        ),
+    )
+    aliases = {"gpt": _mock_alias(alias="gpt", model_id="gpt-5.5")}
+    _patch_alias_resolution(monkeypatch, resolved_entries=aliases, catalog_entries=[aliases["gpt"]])
+
+    policies = resolve_policies(
+        project_root=tmp_path,
+        layers=(RuntimeOverrides(agent="reviewer"), RuntimeOverrides()),
+        config_overrides=RuntimeOverrides(),
+        config=MeridianConfig(),
+        harness_registry=get_default_harness_registry(),
+        configured_default_harness="codex",
+    )
+
+    assert policies.resolved_overrides.approval == "auto"
+
+
+def test_resolve_policies_profile_generic_sandbox_flows_through(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_minimal_mars_config(tmp_path)
+    _write_agent_profile(
+        tmp_path,
+        name="reviewer",
+        frontmatter=(
+            "name: reviewer\n"
+            "model: gpt\n"
+            "sandbox: workspace-write\n"
+        ),
+    )
+    aliases = {"gpt": _mock_alias(alias="gpt", model_id="gpt-5.5")}
+    _patch_alias_resolution(monkeypatch, resolved_entries=aliases, catalog_entries=[aliases["gpt"]])
+
+    policies = resolve_policies(
+        project_root=tmp_path,
+        layers=(RuntimeOverrides(agent="reviewer"), RuntimeOverrides()),
+        config_overrides=RuntimeOverrides(),
+        config=MeridianConfig(),
+        harness_registry=get_default_harness_registry(),
+        configured_default_harness="codex",
+    )
+
+    assert policies.resolved_overrides.sandbox == "workspace-write"
+
+
+def test_resolve_policies_user_approval_beats_profile_generic_approval(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_minimal_mars_config(tmp_path)
+    _write_agent_profile(
+        tmp_path,
+        name="reviewer",
+        frontmatter=(
+            "name: reviewer\n"
+            "model: gpt\n"
+            "approval: auto\n"
+        ),
+    )
+    aliases = {"gpt": _mock_alias(alias="gpt", model_id="gpt-5.5")}
+    _patch_alias_resolution(monkeypatch, resolved_entries=aliases, catalog_entries=[aliases["gpt"]])
+
+    policies = resolve_policies(
+        project_root=tmp_path,
+        layers=(RuntimeOverrides(agent="reviewer", approval="yolo"), RuntimeOverrides()),
+        config_overrides=RuntimeOverrides(),
+        config=MeridianConfig(),
+        harness_registry=get_default_harness_registry(),
+        configured_default_harness="codex",
+    )
+
+    assert policies.resolved_overrides.approval == "yolo"
+
+
+def test_resolve_policies_model_policy_approval_beats_profile_generic_approval(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_minimal_mars_config(tmp_path)
+    _write_agent_profile(
+        tmp_path,
+        name="reviewer",
+        frontmatter=(
+            "name: reviewer\n"
+            "model: gpt\n"
+            "approval: auto\n"
+            "model-policies:\n"
+            "  - match: {alias: gpt}\n"
+            "    override: {approval: confirm}\n"
+        ),
+    )
+    aliases = {"gpt": _mock_alias(alias="gpt", model_id="gpt-5.5")}
+    _patch_alias_resolution(monkeypatch, resolved_entries=aliases, catalog_entries=[aliases["gpt"]])
+
+    policies = resolve_policies(
+        project_root=tmp_path,
+        layers=(RuntimeOverrides(agent="reviewer"), RuntimeOverrides()),
+        config_overrides=RuntimeOverrides(),
+        config=MeridianConfig(),
+        harness_registry=get_default_harness_registry(),
+        configured_default_harness="codex",
+    )
+
+    assert policies.resolved_overrides.approval == "confirm"
+
+
 def test_resolve_policies_cli_harness_beats_model_policy_harness(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1261,7 +1393,7 @@ def test_resolve_policies_unmatched_models_entry_logs_debug_and_uses_profile_def
 
     assert policies.resolved_overrides.effort == "high"
     assert policies.warning is None
-    assert "generic effort/autocompact defaults but no matching models entry" in caplog.text
+    assert "generic model-policy defaults but no matching models entry" in caplog.text
 
 
 def test_resolve_policies_unmatched_model_policy_logs_generic_effort_fallback(
@@ -1303,7 +1435,7 @@ def test_resolve_policies_unmatched_model_policy_logs_generic_effort_fallback(
     assert policies.resolved_overrides.effort == "high"
     assert (
         "No model-policies rule matched for 'gpt-5.5'; using generic profile "
-        "effort/autocompact defaults."
+        "model-policy defaults."
     ) in caplog.text
 
 

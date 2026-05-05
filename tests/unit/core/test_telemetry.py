@@ -4,17 +4,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-import pytest
-
 import meridian.lib.core.telemetry as core_telemetry
 import meridian.lib.telemetry as telemetry
 import meridian.lib.telemetry.observers as telemetry_observers
-
-
-@pytest.fixture(autouse=True)
-def _reset_observer_globals(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(telemetry_observers, "_GLOBAL_OBSERVERS", [])
-    monkeypatch.setattr(telemetry_observers, "_debug_trace_registered", False)
 
 
 def _event() -> core_telemetry.LifecycleEvent:
@@ -78,7 +70,7 @@ def test_diagnostic_observer_exceptions_do_not_block_later_observers() -> None:
     assert seen == ["healthy:spawn.running"]
 
 
-def test_debug_trace_observer_registers_once(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_debug_trace_observer_registers_once(monkeypatch) -> None:
     monkeypatch.setenv("MERIDIAN_DEBUG", "0")
 
     telemetry.register_debug_trace_observer()

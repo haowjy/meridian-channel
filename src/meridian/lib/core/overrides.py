@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 _AUTOCOMPACT_MIN = 1
 _AUTOCOMPACT_MAX = 100
+_ROUTING_OVERRIDE_FIELDS = frozenset({"model", "harness", "agent"})
 
 KNOWN_EFFORT_VALUES = frozenset({"low", "medium", "high", "xhigh"})
 KNOWN_APPROVAL_VALUES = frozenset({"default", "confirm", "auto", "yolo"})
@@ -71,6 +72,18 @@ class RuntimeOverrides(BaseModel):
     approval: str | None = None
     autocompact: int | None = None
     timeout: float | None = None
+
+    def model_policy_scope(self) -> RuntimeOverrides:
+        """Return only fields that participate in model-policy precedence."""
+
+        return type(self).model_validate(
+            {
+                field_name: value
+                for field_name in type(self).model_fields
+                if field_name not in _ROUTING_OVERRIDE_FIELDS
+                and (value := getattr(self, field_name)) is not None
+            }
+        )
 
     @field_validator("effort")
     @classmethod

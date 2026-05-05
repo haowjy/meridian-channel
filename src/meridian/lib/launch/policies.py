@@ -290,7 +290,7 @@ def _resolve_model_policy_overrides(
     )
 
 
-def _log_unmatched_profile_model_defaults(
+def _log_unmatched_profile_policy_defaults(
     *,
     profile: AgentProfile | None,
     selected_entry: AliasEntry | None,
@@ -299,10 +299,10 @@ def _log_unmatched_profile_model_defaults(
 ) -> None:
     if profile is None or not profile.models or selected_entry is None or model_entry_matched:
         return
-    if profile_defaults.effort is None and profile_defaults.autocompact is None:
+    if not profile_defaults.model_dump(exclude_none=True):
         return
     _LOGGER.debug(
-        "Agent profile '%s' has generic effort/autocompact defaults but no matching "
+        "Agent profile '%s' has generic model-policy defaults but no matching "
         "models entry for '%s'; using generic profile defaults.",
         profile.name,
         selected_entry.model_id,
@@ -553,47 +553,35 @@ def resolve_policies(
             alias_catalog=alias_catalog,
         )
     alias_defaults = RuntimeOverrides.from_alias_entry(selected_entry)
-    profile_effort_overrides = RuntimeOverrides(
-        effort=profile_overrides.effort,
-        autocompact=profile_overrides.autocompact,
-    )
+    profile_policy_defaults = profile_overrides.model_policy_scope()
     if (
         profile is not None
         and profile.model_policies
         and matched_policy_rule is None
         and selected_entry is not None
-        and (
-            profile_effort_overrides.effort is not None
-            or profile_effort_overrides.autocompact is not None
-        )
+        and profile_policy_defaults.model_dump(exclude_none=True)
     ):
         _LOGGER.debug(
             "No model-policies rule matched for '%s'; using generic profile "
-            "effort/autocompact defaults.",
+            "model-policy defaults.",
             selected_entry.model_id,
         )
-    explicit_user_overrides = resolve(*layers)
+    explicit_user_overrides = resolve(*layers).model_policy_scope()
     model_policy_resolved = _resolve_model_policy_overrides(
         explicit_user_overrides=explicit_user_overrides,
-        profile_model_overrides=profile_model_overrides,
-        profile_defaults=profile_effort_overrides,
-        config_overrides=config_overrides,
-        alias_defaults=alias_defaults,
+        profile_model_overrides=profile_model_overrides.model_policy_scope(),
+        profile_defaults=profile_policy_defaults,
+        config_overrides=config_overrides.model_policy_scope(),
+        alias_defaults=alias_defaults.model_policy_scope(),
     )
-    _log_unmatched_profile_model_defaults(
+    _log_unmatched_profile_policy_defaults(
         profile=profile,
         selected_entry=selected_entry,
         model_entry_matched=model_entry_matched,
-        profile_defaults=profile_effort_overrides,
+        profile_defaults=profile_policy_defaults,
     )
     resolved = resolved.model_copy(
-        update={
-            "sandbox": model_policy_resolved.sandbox,
-            "approval": model_policy_resolved.approval,
-            "effort": model_policy_resolved.effort,
-            "autocompact": model_policy_resolved.autocompact,
-            "timeout": model_policy_resolved.timeout,
-        }
+        update=model_policy_resolved.model_dump(exclude_none=True)
     )
 
     profile_skills: tuple[str, ...] = ()

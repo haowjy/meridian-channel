@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import importlib
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 import pytest
 
@@ -57,6 +59,12 @@ from meridian.cli.startup.policy import StartupClass, StateRequirement, Telemetr
             StartupClass.READ_PROJECT,
             StateRequirement.PROJECT_READ,
             TelemetryMode.NONE,
+        ),
+        (
+            ["init"],
+            StartupClass.WRITE_PROJECT,
+            StateRequirement.PROJECT_WRITE,
+            TelemetryMode.SEGMENT_OPTIONAL,
         ),
         # Write commands use segment telemetry.
         (
@@ -140,37 +148,56 @@ def test_classifier_contract(
         assert descriptor.telemetry_mode == expected_telemetry
 
 
-def _clear_meridian_modules() -> None:
-    for module_name in tuple(sys.modules):
-        if module_name == "meridian" or module_name.startswith("meridian."):
-            del sys.modules[module_name]
+@contextmanager
+def _isolated_meridian_modules() -> Iterator[None]:
+    """Temporarily clear Meridian modules and restore them after the assertion.
+
+    Import-boundary tests need a cold import surface, but permanently deleting
+    Meridian modules from ``sys.modules`` contaminates later tests that hold
+    references to already-imported module objects.
+    """
+
+    saved = {
+        module_name: module
+        for module_name, module in sys.modules.items()
+        if module_name == "meridian" or module_name.startswith("meridian.")
+    }
+    for module_name in tuple(saved):
+        del sys.modules[module_name]
+    try:
+        yield
+    finally:
+        for module_name in tuple(sys.modules):
+            if module_name == "meridian" or module_name.startswith("meridian."):
+                del sys.modules[module_name]
+        sys.modules.update(saved)
 
 
 def test_startup_catalog_does_not_import_ops() -> None:
     """Startup catalog must be import-cheap."""
-    _clear_meridian_modules()
-    modules_before = set(sys.modules)
+    with _isolated_meridian_modules():
+        modules_before = set(sys.modules)
 
-    importlib.import_module("meridian.cli.startup.catalog")
+        importlib.import_module("meridian.cli.startup.catalog")
 
-    new_modules = set(sys.modules) - modules_before
-    forbidden = {"meridian.lib.ops", "meridian.lib.harness", "meridian.server"}
-    for module_name in new_modules:
-        for forbidden_prefix in forbidden:
-            assert not module_name.startswith(forbidden_prefix), (
-                f"startup.catalog transitively imported {module_name}"
-            )
+        new_modules = set(sys.modules) - modules_before
+        forbidden = {"meridian.lib.ops", "meridian.lib.harness", "meridian.server"}
+        for module_name in new_modules:
+            for forbidden_prefix in forbidden:
+                assert not module_name.startswith(forbidden_prefix), (
+                    f"startup.catalog transitively imported {module_name}"
+                )
 
 
 def test_entrypoint_does_not_import_main_at_module_scope() -> None:
     """Entrypoint must be import-cheap."""
-    _clear_meridian_modules()
-    modules_before = set(sys.modules)
+    with _isolated_meridian_modules():
+        modules_before = set(sys.modules)
 
-    importlib.import_module("meridian.cli.entrypoint")
+        importlib.import_module("meridian.cli.entrypoint")
 
-    new_modules = set(sys.modules) - modules_before
-    assert "meridian.cli.main" not in new_modules
+        new_modules = set(sys.modules) - modules_before
+        assert "meridian.cli.main" not in new_modules
 
 
 def test_catalog_covers_all_top_level_commands() -> None:

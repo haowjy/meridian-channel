@@ -397,7 +397,11 @@ def test_git_backed_context_remote_projects_clone_root_once(
 
 def test_named_workspace_roots_project_through_opencode_launch_context(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Isolate from parent OpenCode session env so workspace projection is not
+    # suppressed.
+    monkeypatch.delenv(OPENCODE_CONFIG_CONTENT_ENV, raising=False)
     _write_minimal_mars_config(tmp_path)
     docs_root = tmp_path / "docs-root"
     docs_root.mkdir()
@@ -432,8 +436,8 @@ def test_named_workspace_roots_project_through_opencode_launch_context(
     runtime_root = tmp_path / ".meridian"
     payload = json.loads(preview.env_overrides[OPENCODE_CONFIG_CONTENT_ENV])
     external_dirs = payload["permission"]["external_directory"]
-    assert external_dirs[docs_root.as_posix()] == "allow"
-    assert external_dirs[runtime_root.as_posix()] == "allow"
+    assert external_dirs[docs_root.as_posix() + "/*"] == "allow"
+    assert external_dirs[runtime_root.as_posix() + "/*"] == "allow"
 
 
 @pytest.mark.parametrize(
@@ -459,6 +463,8 @@ def test_opencode_workspace_projection_handles_parent_env_suppression(
             OPENCODE_CONFIG_CONTENT_ENV,
             '{"permission":{"external_directory":["/existing"]}}',
         )
+    else:
+        monkeypatch.delenv(OPENCODE_CONFIG_CONTENT_ENV, raising=False)
     registry = get_default_harness_registry()
 
     preview = build_launch_context(
@@ -486,8 +492,8 @@ def test_opencode_workspace_projection_handles_parent_env_suppression(
         runtime_root = tmp_path / ".meridian"
         payload = json.loads(preview.env_overrides[OPENCODE_CONFIG_CONTENT_ENV])
         external_dirs = payload["permission"]["external_directory"]
-        assert external_dirs[shared_root.as_posix()] == "allow"
-        assert external_dirs[runtime_root.as_posix()] == "allow"
+        assert external_dirs[shared_root.as_posix() + "/*"] == "allow"
+        assert external_dirs[runtime_root.as_posix() + "/*"] == "allow"
         assert "workspace_opencode_parent_env_suppressed" not in warning_codes
 
 

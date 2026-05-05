@@ -61,8 +61,8 @@ def test_workspace_projection_projects_opencode_external_directories() -> None:
     assert payload == {
         "permission": {
             "external_directory": {
-                "/tmp/workspace/root-a": "allow",
-                "/tmp/workspace/root-b": "allow",
+                "/tmp/workspace/root-a/*": "allow",
+                "/tmp/workspace/root-b/*": "allow",
             }
         }
     }

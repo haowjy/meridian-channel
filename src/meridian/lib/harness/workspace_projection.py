@@ -52,11 +52,15 @@ def _build_opencode_workspace_config(roots: tuple[Path, ...]) -> str:
     # OpenCode permission schema: each key maps to either an Action string
     # ("allow"/"ask"/"deny") or a Record<pattern, Action>.  ``external_directory``
     # takes a per-path object, e.g. ``{"/abs/path": "allow"}``.
+    #
+    # Append ``/*`` so the pattern covers files *inside* the directory, not just
+    # the directory inode itself. Without the trailing wildcard OpenCode denies
+    # reads of any file under the root.
     return json.dumps(
         {
             "permission": {
                 "external_directory": {
-                    root.as_posix(): "allow" for root in roots
+                    root.as_posix() + "/*": "allow" for root in roots
                 },
             }
         },

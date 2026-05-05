@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import threading
 import time
 from datetime import UTC, datetime, timedelta
@@ -185,7 +186,11 @@ def test_tail_events_yields_new_lines_from_multiple_directories(tmp_path: Path) 
     first_path = _write_segment(first_dir, "cli.100-0001.jsonl", [])
     second_path = _write_segment(second_dir, "cli.200-0001.jsonl", [])
     iterator = tail_events([first_dir, second_dir], poll_interval=0.01)
-    seen: list[str] = []
+    seen_queue: queue.Queue[str] = queue.Queue()
+
+    def _consume_events() -> None:
+        seen_queue.put(next(iterator)["event"])
+        seen_queue.put(next(iterator)["event"])
 
     def _append_events() -> None:
         with first_path.open("a", encoding="utf-8") as file:
@@ -206,11 +211,16 @@ def test_tail_events_yields_new_lines_from_multiple_directories(tmp_path: Path) 
                 + "\n"
             )
 
+    consumer = threading.Thread(target=_consume_events, daemon=True)
+    consumer.start()
+    time.sleep(0.02)
+
     writer = threading.Thread(target=_append_events)
     writer.start()
-    seen.append(next(iterator)["event"])
-    seen.append(next(iterator)["event"])
     writer.join(timeout=1.0)
+    consumer.join(timeout=1.0)
+
+    seen = [seen_queue.get(timeout=1.0), seen_queue.get(timeout=1.0)]
 
     assert seen == ["chat.ws.connected", "spawn.succeeded"]
 

@@ -48,3 +48,38 @@ def _clean_meridian_runtime_env(
 
     if session_home is not None:
         monkeypatch.setenv("MERIDIAN_HOME", session_home)
+
+
+@pytest.fixture(autouse=True)
+def _reset_process_telemetry_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reset process-global telemetry state between tests.
+
+    Several suites exercise lifecycle observers and process-wide telemetry
+    routing in-process. Without an explicit reset, observers, per-spawn
+    sequence counters, and background router threads can leak across tests and
+    make order matter.
+    """
+
+    import meridian.lib.core.telemetry as core_telemetry
+    import meridian.lib.telemetry.observers as telemetry_observers
+    import meridian.lib.telemetry.router as telemetry_router
+
+    existing_router = getattr(telemetry_router, "_global_router", None)
+    if existing_router is not None:
+        existing_router.close()
+        telemetry_router._global_router = None
+
+    monkeypatch.setattr(telemetry_observers, "_GLOBAL_OBSERVERS", [])
+    monkeypatch.setattr(telemetry_observers, "_debug_trace_registered", False)
+    monkeypatch.setattr(
+        core_telemetry,
+        "_GLOBAL_EVENT_COUNTER",
+        core_telemetry.SpawnEventCounter(),
+    )
+
+    yield
+
+    router = getattr(telemetry_router, "_global_router", None)
+    if router is not None:
+        router.close()
+        telemetry_router._global_router = None
